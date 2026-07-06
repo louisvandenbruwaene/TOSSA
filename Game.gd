@@ -1,0 +1,1163 @@
+extends Node2D
+## JUGGLE core mechanic, Prototype 1.1.
+##
+## This rebuilds the throwaway spike into the real v0.2 catch-and-throw model
+## (GDD Sections 2 and 9). The question it must answer: with catch and throw
+## split across four inputs, strict catches, hold-for-height throws, the
+## throw-under-traffic rule, and inward-hand no-crossing choreography, is the
+## deeper input still fun and readable? No meta layer yet (that is Prototype 2+).
+##
+## Inputs (all remappable later): left catch D, left throw F, right catch K,
+## right throw J, trick Space. Both inputs of a hand must be good: a bad catch
+## loses the ball, a throw is only punished when traffic is incoming to that hand.
+##
+## The sim runs entirely on the fixed 120 Hz physics tick so it stays
+## deterministic, which the production build needs for replays and fair boards.
+
+# --- catch timing (ticks; 120 per second) -------------------------------------
+const W_PERFECT := 7      # within ~58 ms of arrival
+const W_GOOD := 10        # ~83 ms (tightened 30% from 15: Good must be earned)
+const W_LATE := 28        # ~233 ms, still a catch but sloppy
+const COMMIT := 52        # a CATCH press with a ball this near but outside the
+                          # allowed window fumbles it (drop). Beyond this = whiff.
+const MISS_GRACE := 20    # an uncaught ball drops this many ticks past arrival
+
+# Off-Perfect catches are a CHANCE, not a hard window. A ball within the Good or
+# Late timing band secures with a probability that rises with Accuracy and falls
+# with throw height; Perfect timing always secures. So low Accuracy still lands
+# plenty of catches, just less reliably, and Accuracy buys reliability.
+const ACC_FULL := 55.0            # Accuracy at which off-Perfect catches are reliable
+const GOOD_BASE := 0.50           # base chance to secure a Good-timed catch
+const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
+const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
+const HEIGHT_CATCH_PENALTY := 0.35 # subtracted from the chance at max throw height
+const MIN_CATCH_P := 0.08         # a wild ball is never quite hopeless
+
+# --- throw height by hold -----------------------------------------------------
+const BASE_AIR := 84      # airtime (ticks) for an instant tap-throw
+const HOLD_MAX := 44      # holding THROW past this adds no more height
+const HOLD_GAIN := 1.9    # airtime ticks added per tick the THROW is held
+const ARC_PER_AIR := 2.15 # arc peak (px) per airtime tick; balls crest above the head
+
+# --- inaccuracy of high throws (the risk half of the risk/reward) -------------
+const DRIFT_MAX := 26.0   # px lateral landing drift at max height
+const JITTER_MAX := 5     # ticks of arrival uncertainty at max height
+const WOBBLE_MAX := 11.0  # px of in-flight arc wobble at max height
+
+# --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
+const SAVE_PATH := "user://juggle_save.cfg"
+const SAVE_PATH_DEBUG := "user://juggle_debug.cfg"  # debug build: separate progress
+const POINTS_PER_LEVEL := 3
+const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
+                              # max-height throw always still demands a real catch
+const STR_HOLD_EFF := 0.015   # per Strength point: more height per tick of hold,
+                              # so a strong juggler reaches a big throw in less time
+const STAM_DRAIN_CATCH := 0.4
+const STAM_DRAIN_THROW := 0.3
+const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
+const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
+
+const LEFT := 0
+const RIGHT := 1
+const CASCADE := 0
+const FOUNTAIN := 1
+const STATE_FLIGHT := 0
+const STATE_HAND := 1
+const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
+const MODE_PERFORM := 1   # on stage: Applause meter, energy cost, and pay
+const MIN_BALLS := 3
+const MAX_BALLS_HARD := 7
+
+# input map (physical keycodes; a real remap layer comes with the options menu)
+const K_LC := KEY_D
+const K_LT := KEY_F
+const K_RC := KEY_K
+const K_RT := KEY_J
+const K_TRICK := KEY_SPACE
+
+# hand animation
+const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
+
+
+class Ball:
+	var state := STATE_FLIGHT
+	var to_hand := LEFT
+	var from_pos := Vector2.ZERO
+	var to_pos := Vector2.ZERO
+	var launch_tick := 0
+	var land_tick := 0
+	var arc := 120.0
+	var wobble := 0.0
+	var height := 0.0         # normalized throw height 0..~1.4; lowers catch odds
+	var color := Color.WHITE
+
+
+var tick := 0
+var pattern := CASCADE
+var num_balls := 3
+var mode := MODE_TRAIN
+var balls: Array[Ball] = []
+
+# per-hand held stacks. A hand carries one ball in normal play; at the start of
+# a 3-ball run one hand holds two (the standard two-in-one-hand opening), so a
+# small stack is the honest representation. Throwing pops one off.
+var _stack_l: Array[Ball] = []
+var _stack_r: Array[Ball] = []
+
+# per-hand THROW charge (height = how long THROW is held)
+var charging := [false, false]
+var charge_start := [0, 0]
+
+# per-hand animation state
+var hpos := [Vector2.ZERO, Vector2.ZERO]  # smoothed current hand position
+var hclose := [0.0, 0.0]                  # 0 open (ready), 1 closed (holding)
+var catch_flash := [-999, -999]
+var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
+var last_drop_tick := -999               # for the juggler's wince expression
+
+var applause := 0.7
+var score := 0
+var streak := 0
+var best_streak := 0
+var dropped := 0
+var caught := 0
+var running := false      # true once the player makes the first throw
+var started := false
+var popups: Array[Dictionary] = []
+var trick_hint := -999
+var rng := RandomNumberGenerator.new()
+
+# progression / stats (persisted to SAVE_PATH)
+var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
+var strength := 6         # quicker high throws; gates ball count and hard tricks
+var endurance := 6        # raises max Stamina; gates heavy props later
+var money := 0            # earned by performing (not training)
+var level := 1
+var xp := 0               # xp accumulated inside the current level
+var points := 0           # unspent stat points
+var stamina := 56.0       # within-run resource; low stamina lowers Accuracy
+var stamina_max := 56.0   # 50 + Endurance
+var run_xp := 0           # xp earned in the current run, for the results screen
+var last_pay := 0         # gold earned from the last finished performance
+var round_scored := false
+var sheet_open := false
+var debug_mode := false   # debug build: free stat editing in the character sheet
+var _prev_running := false
+
+# previous-frame button states, for edge detection
+var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
+
+# dev-only: headless auto-player + one-frame screenshot
+var _demo := false
+var _shot := false
+var _shot_path := ""
+var _shot_tick := 170
+var _shot_frames := 0
+var _demo_next := RIGHT
+const DEMO_BEAT := 28
+
+
+func _ready() -> void:
+	# Dev-only flags. Normal play passes NONE of these: the game then simply waits
+	# for the player's first THROW and never auto-plays or auto-quits.
+	#   --demo         run the headless auto-player (for verifying choreography)
+	#   --shot <path>  capture one frame to <path> then quit
+	var ua := OS.get_cmdline_user_args()
+	if ua.has("--demo"):
+		_demo = true
+	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
+		debug_mode = true
+	var si := ua.find("--shot")
+	if si != -1 and si + 1 < ua.size():
+		_shot = true
+		_shot_path = ua[si + 1]
+	load_progress()
+	start_run(3)
+	if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
+		mode = MODE_PERFORM
+	if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
+		points = maxi(points, 6)
+		sheet_open = true
+
+
+func _physics_process(_delta: float) -> void:
+	if _shot:
+		_shot_frames += 1   # advances even while paused, so we can capture the sheet
+		if _shot_frames >= _shot_tick:
+			_capture_and_quit()
+			return
+	if sheet_open:
+		queue_redraw()   # character sheet pauses the sim; nothing advances
+		return
+	tick += 1
+	if _demo:
+		_demo_step()
+	else:
+		_read_inputs()
+	if running:
+		update_sim()
+	if _prev_running and not running:
+		on_round_end()   # the run just ended: bank the completion XP
+	_prev_running = running
+	update_hands()
+	age_popups()
+	queue_redraw()
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	var kc: int = event.physical_keycode
+	if sheet_open:
+		match kc:
+			KEY_TAB, KEY_ESCAPE:
+				sheet_open = false
+			KEY_1:
+				_sheet_invest("acc")
+			KEY_2:
+				_sheet_invest("str")
+			KEY_3:
+				_sheet_invest("end")
+			KEY_Q:
+				if debug_mode: _adjust("acc", -1)
+			KEY_W:
+				if debug_mode: _adjust("str", -1)
+			KEY_E:
+				if debug_mode: _adjust("end", -1)
+			KEY_M:
+				if debug_mode:
+					money += 50
+					save_progress()
+			KEY_N:
+				if debug_mode:
+					money = maxi(0, money - 50)
+					save_progress()
+		return
+	match kc:
+		KEY_TAB:
+			sheet_open = true
+		KEY_P:
+			toggle_mode()
+		KEY_R:
+			start_run(num_balls)
+		KEY_BRACKETLEFT:
+			start_run(num_balls - 1)
+		KEY_BRACKETRIGHT:
+			start_run(num_balls + 1)
+		KEY_3:
+			start_run(3)
+		KEY_4:
+			start_run(4)
+		KEY_5:
+			start_run(5)
+		KEY_6:
+			start_run(6)
+		KEY_7:
+			start_run(7)
+		KEY_ESCAPE:
+			get_tree().quit()
+
+
+func toggle_mode() -> void:
+	mode = MODE_PERFORM if mode == MODE_TRAIN else MODE_TRAIN
+	start_run(num_balls)   # restart cleanly in the new mode
+
+
+# -----------------------------------------------------------------------------
+# Input: edge-detected presses for the four hand actions plus trick.
+# -----------------------------------------------------------------------------
+
+func _read_inputs() -> void:
+	_edge("lc", Input.is_physical_key_pressed(K_LC), LEFT, true)
+	_edge("lt", Input.is_physical_key_pressed(K_LT), LEFT, false)
+	_edge("rc", Input.is_physical_key_pressed(K_RC), RIGHT, true)
+	_edge("rt", Input.is_physical_key_pressed(K_RT), RIGHT, false)
+	var tk := Input.is_physical_key_pressed(K_TRICK)
+	if tk and not bool(_prev["trick"]):
+		on_trick()
+	_prev["trick"] = tk
+
+
+func _edge(name: String, down: bool, h: int, is_catch: bool) -> void:
+	var was := bool(_prev[name])
+	if is_catch:
+		if down and not was:
+			on_catch(h)
+	else:
+		if down and not was:
+			on_throw_press(h)
+		elif was and not down:
+			on_throw_release(h)
+	_prev[name] = down
+
+
+# -----------------------------------------------------------------------------
+# Geometry: OUTER catch point and INNER throw point per hand. Rising balls leave
+# the inside, falling balls arrive on the outside, so their lanes never overlap.
+# -----------------------------------------------------------------------------
+
+func stack(h: int) -> Array[Ball]:
+	return _stack_l if h == LEFT else _stack_r
+
+
+func other(h: int) -> int:
+	return RIGHT if h == LEFT else LEFT
+
+
+func stage_center() -> Vector2:
+	var s := get_viewport_rect().size
+	return Vector2(s.x * 0.5, s.y * 0.66)
+
+
+func outer_pos(h: int) -> Vector2:
+	var c := stage_center()
+	var dx := 152.0
+	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
+
+
+func inner_pos(h: int) -> Vector2:
+	# just outside the torso silhouette, so a carried ball never sits on the body
+	var c := stage_center()
+	var dx := 72.0
+	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
+
+
+func shoulder_pos(h: int) -> Vector2:
+	var s := get_viewport_rect().size
+	var c := s.x * 0.5
+	var dx := 44.0
+	return Vector2(c - dx, s.y * 0.50) if h == LEFT else Vector2(c + dx, s.y * 0.50)
+
+
+# where hand h wants to be right now: inner while carrying (to throw), else outer
+func hand_target(h: int) -> Vector2:
+	var holding := not stack(h).is_empty()
+	var p := inner_pos(h) if holding else outer_pos(h)
+	# a brief upward kick right after a throw sells the release
+	var k := tick - int(throw_kick[h])
+	if k >= 0 and k < 14:
+		p.y -= 22.0 * (1.0 - float(k) / 14.0)
+	return p
+
+
+func ball_color(i: int) -> Color:
+	var cols := [
+		Color(1.0, 0.82, 0.35),
+		Color(1.0, 0.55, 0.25),
+		Color(0.95, 0.40, 0.42),
+		Color(0.72, 0.86, 0.95),
+	]
+	return cols[i % cols.size()]
+
+
+# -----------------------------------------------------------------------------
+# Start: balls begin held, and the run begins on the player's first throw.
+# -----------------------------------------------------------------------------
+
+func max_balls() -> int:
+	# Strength unlocks more balls, gradually (no big jumps). 3 and 4 from the start.
+	var m := 4
+	if strength >= 12:
+		m = 5
+	if strength >= 20:
+		m = 6
+	if strength >= 30:
+		m = 7
+	return m
+
+
+func next_ball_strength() -> int:
+	# Strength needed for the next ball unlock, or 0 if already at the cap
+	if strength < 12:
+		return 12
+	if strength < 20:
+		return 20
+	if strength < 30:
+		return 30
+	return 0
+
+
+func start_run(n: int) -> void:
+	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, max_balls()))
+	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	balls.clear()
+	_stack_l.clear()
+	_stack_r.clear()
+	popups.clear()
+	charging = [false, false]
+	applause = 0.7
+	score = 0
+	streak = 0
+	best_streak = 0
+	dropped = 0
+	caught = 0
+	running = false
+	started = false
+	stamina_max = 50.0 + float(endurance)
+	stamina = stamina_max          # each run starts rested
+	run_xp = 0
+	last_pay = 0
+	round_scored = false
+	_prev_running = false
+	rng.seed = 20260705
+	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
+	hclose = [0.0, 0.0]
+	catch_flash = [-999, -999]
+	throw_kick = [-999, -999]
+
+	# right hand gets the extra on odd counts (the classic two-in-one-hand start)
+	for i in num_balls:
+		var b := Ball.new()
+		b.state = STATE_HAND
+		b.color = ball_color(i)
+		balls.append(b)
+		if i % 2 == 0:
+			_stack_r.append(b)
+		else:
+			_stack_l.append(b)
+	_demo_next = RIGHT
+
+
+# -----------------------------------------------------------------------------
+# Catch: strict. Window = secure (quality band). Committed-but-mistimed = drop.
+# Nothing near = whiff (small poise wobble, no ball lost).
+# -----------------------------------------------------------------------------
+
+func on_catch(h: int) -> void:
+	if not stack(h).is_empty():
+		return  # hand occupied; you physically cannot catch (this IS the traffic rule)
+	var best: Ball = null
+	var best_d := 1000000
+	for b in balls:
+		if b.state == STATE_FLIGHT and b.to_hand == h:
+			var d := absi(b.land_tick - tick)
+			if d < best_d:
+				best = b
+				best_d = d
+	if best == null or best_d > COMMIT:
+		# reached for empty air: a whiff. Discourage mashing with a small wobble.
+		applause = maxf(0.0, applause - 0.04)
+		catch_flash[h] = tick
+		hclose[h] = 0.0
+		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
+		return
+	if best_d > W_LATE:
+		# way off the arrival: a genuine mistime, the ball drops
+		drop_ball(best, "MISTIME")
+		return
+	# Perfect timing always secures. A Good or Late catch is a chance that rises
+	# with Accuracy and falls with the ball's height; a failed roll is a slip.
+	if best_d > W_PERFECT:
+		var quality := 1 if best_d <= W_GOOD else 2
+		if rng.randf() > catch_chance(quality, best.height):
+			drop_ball(best, "slip")
+			return
+	# secured
+	best.state = STATE_HAND
+	stack(h).append(best)
+	catch_flash[h] = tick
+	caught += 1
+	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult())
+	if best_d <= W_PERFECT:
+		streak += 1
+		best_streak = maxi(best_streak, streak)
+		score += 100 * streak
+		applause = minf(1.0, applause + 0.05)
+		add_xp(3)
+		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
+	elif best_d <= W_GOOD:
+		streak += 1
+		best_streak = maxi(best_streak, streak)
+		score += 50 * streak
+		applause = minf(1.0, applause + 0.025)
+		add_xp(2)
+		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
+	else:
+		streak = 0
+		score += 10
+		applause = maxf(0.0, applause - 0.02)
+		add_xp(1)
+		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
+
+
+# -----------------------------------------------------------------------------
+# Throw: charge on THROW down-edge, launch on release. Longer hold = higher and
+# less accurate. Height buys airtime (thins traffic) at the cost of a harder catch.
+# -----------------------------------------------------------------------------
+
+func on_throw_press(h: int) -> void:
+	if stack(h).is_empty():
+		return
+	charging[h] = true
+	charge_start[h] = tick
+
+
+func on_throw_release(h: int) -> void:
+	if not charging[h]:
+		return
+	charging[h] = false
+	if stack(h).is_empty():
+		return
+	var hold := clampi(tick - int(charge_start[h]), 0, HOLD_MAX)
+	do_throw(h, hold)
+
+
+func do_throw(h: int, hold: int) -> void:
+	if stack(h).is_empty():
+		return
+	var b: Ball = stack(h).pop_front()
+	# Strength makes each tick of hold worth more height, so a strong juggler
+	# reaches a big throw in less time (and can throw a bit higher overall).
+	var gain_mult := 1.0 + float(strength) * STR_HOLD_EFF
+	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
+	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
+	# Accuracy (dampened by low stamina) scales the visible inaccuracy toward a floor
+	var inacc := inacc_factor()
+	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * frac * inacc))
+	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * frac * inacc
+
+	# Height lowers the odds of an off-Perfect catch (see catch_chance in on_catch)
+	b.height = clampf(frac, 0.0, 1.4)
+
+	b.state = STATE_FLIGHT
+	b.launch_tick = tick
+	b.land_tick = tick + air + jitter
+	b.arc = ARC_PER_AIR * float(air)
+	b.wobble = WOBBLE_MAX * frac * inacc
+	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult())
+	b.to_hand = other(h) if pattern == CASCADE else h
+	b.from_pos = inner_pos(h)
+	b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+
+	throw_kick[h] = tick
+	charging[h] = false
+	if not started:
+		started = true
+		running = true
+	# a clean, controlled (low) throw earns a little Applause; wild height does not
+	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)))
+	add_popup(inner_pos(h) + Vector2(0, -8), _throw_label(clampf(frac, 0.0, 1.0)), Color(1.0, 0.8, 0.5, 0.9))
+
+
+func _throw_label(frac: float) -> String:
+	if frac < 0.2:
+		return "flick"
+	elif frac < 0.6:
+		return "throw"
+	elif frac < 0.9:
+		return "high"
+	return "RESET"
+
+
+func on_trick() -> void:
+	# Tricks are the next step. The input is wired now so the plumbing exists; with
+	# zero slots equipped it simply acknowledges "nothing armed".
+	trick_hint = tick
+
+
+# -----------------------------------------------------------------------------
+# Progression: XP from skilled play, levels grant stat points, stats add comfort
+# (never auto-play). Accuracy eases high throws, Endurance raises Stamina,
+# Strength adds a little height control. All effects capped (GDD 4.1 guardrails).
+# -----------------------------------------------------------------------------
+
+func xp_to_next(lv: int) -> int:
+	return int(round(60.0 * pow(float(lv), 1.4))) + 40 * lv
+
+
+func add_xp(amount: int) -> void:
+	if amount <= 0:
+		return
+	xp += amount
+	run_xp += amount
+	var leveled := false
+	while xp >= xp_to_next(level):
+		xp -= xp_to_next(level)
+		level += 1
+		points += POINTS_PER_LEVEL
+		leveled = true
+	if leveled:
+		var s := get_viewport_rect().size
+		add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
+		save_progress()
+
+
+func energy_mult() -> float:
+	# performing costs more energy, and bigger routines cost more still;
+	# training is lighter so you can practice without burning out
+	if mode == MODE_PERFORM:
+		return 1.0 + 0.15 * float(num_balls - MIN_BALLS)
+	return 0.5
+
+
+func on_round_end() -> void:
+	if round_scored:
+		return
+	round_scored = true
+	var clean := 1.0
+	if caught + dropped > 0:
+		clean = float(caught) / float(caught + dropped)
+	# harder routines (more balls) are worth more XP and pay more
+	var diff := 1.0 + 0.25 * float(num_balls - MIN_BALLS)
+	var bonus := int(round((float(best_streak) * 4.0 + float(caught) * 1.5) * clean * diff))
+	add_xp(bonus)
+	if mode == MODE_PERFORM:
+		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff))
+		money += last_pay
+		var s := get_viewport_rect().size
+		add_popup(Vector2(s.x * 0.5, s.y * 0.30), "+%d gold" % last_pay, Color(1.0, 0.86, 0.4))
+	save_progress()
+
+
+func stamina_mult() -> float:
+	# full effect until Stamina drops under STAM_LOW, then ramps down to STAM_MIN_MULT
+	var f := stamina / maxf(1.0, stamina_max)
+	if f >= STAM_LOW:
+		return 1.0
+	return lerpf(STAM_MIN_MULT, 1.0, clampf(f / STAM_LOW, 0.0, 1.0))
+
+
+func eff_accuracy() -> float:
+	return clampf(float(accuracy) * stamina_mult(), 0.0, 100.0)
+
+
+func inacc_factor() -> float:
+	# 1.0 of the base inaccuracy at Accuracy 0, ACC_MIN_FACTOR at Accuracy 100.
+	# Never reaches zero, so a max-height throw always still needs a real catch.
+	return lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
+
+
+func catch_chance(quality: int, height: float) -> float:
+	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures:
+	# higher with Accuracy, lower with throw height. Perfect is handled separately.
+	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
+	var base := GOOD_BASE if quality == 1 else LATE_BASE
+	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
+	return clampf(p, MIN_CATCH_P, 1.0)
+
+
+func invest(which: String) -> void:
+	if points <= 0:
+		return
+	match which:
+		"acc":
+			accuracy = mini(100, accuracy + 1)
+		"str":
+			strength = mini(100, strength + 1)
+		"end":
+			endurance = mini(100, endurance + 1)
+			stamina_max = 50.0 + float(endurance)
+	points -= 1
+	save_progress()
+
+
+func _sheet_invest(which: String) -> void:
+	if debug_mode:
+		_adjust(which, 1)   # debug build: free, no point cost
+	else:
+		invest(which)
+
+
+func _adjust(which: String, delta: int) -> void:
+	match which:
+		"acc":
+			accuracy = clampi(accuracy + delta, 1, 100)
+		"str":
+			strength = clampi(strength + delta, 1, 100)
+		"end":
+			endurance = clampi(endurance + delta, 1, 100)
+			stamina_max = 50.0 + float(endurance)
+			stamina = minf(stamina, stamina_max)
+	save_progress()
+
+
+func save_file() -> String:
+	return SAVE_PATH_DEBUG if debug_mode else SAVE_PATH
+
+
+func load_progress() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(save_file()) == OK:
+		accuracy = int(cf.get_value("stats", "accuracy", 5))
+		strength = int(cf.get_value("stats", "strength", 6))
+		endurance = int(cf.get_value("stats", "endurance", 6))
+		money = int(cf.get_value("stats", "money", 0))
+		level = int(cf.get_value("prog", "level", 1))
+		xp = int(cf.get_value("prog", "xp", 0))
+		points = int(cf.get_value("prog", "points", 0))
+	stamina_max = 50.0 + float(endurance)
+	stamina = stamina_max
+
+
+func save_progress() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("stats", "accuracy", accuracy)
+	cf.set_value("stats", "strength", strength)
+	cf.set_value("stats", "endurance", endurance)
+	cf.set_value("stats", "money", money)
+	cf.set_value("prog", "level", level)
+	cf.set_value("prog", "xp", xp)
+	cf.set_value("prog", "points", points)
+	cf.save(save_file())
+
+
+# -----------------------------------------------------------------------------
+# Per-tick simulation and hand animation.
+# -----------------------------------------------------------------------------
+
+func drop_ball(b: Ball, why: String) -> void:
+	if not balls.has(b):
+		return
+	balls.erase(b)
+	dropped += 1
+	streak = 0
+	last_drop_tick = tick
+	applause = maxf(0.0, applause - 0.26)
+	add_popup(b.to_pos + Vector2(0, -6), why, Color(1.0, 0.32, 0.3))
+	# only a performance ends when the crowd is lost; training just plays on
+	if mode == MODE_PERFORM and applause <= 0.0:
+		running = false
+
+
+func update_sim() -> void:
+	var lost: Array[Ball] = []
+	for b in balls:
+		if b.state == STATE_FLIGHT and tick > b.land_tick + MISS_GRACE:
+			lost.append(b)
+	for b in lost:
+		drop_ball(b, "DROP")
+	if balls.is_empty():
+		running = false
+
+
+func update_hands() -> void:
+	for h in [LEFT, RIGHT]:
+		var cur: Vector2 = hpos[h]
+		hpos[h] = cur.lerp(hand_target(h), HAND_SMOOTH)
+		var want := 1.0 if not stack(h).is_empty() else 0.0
+		hclose[h] = lerpf(hclose[h], want, 0.3)
+
+
+func add_popup(pos: Vector2, text: String, col: Color) -> void:
+	popups.append({"pos": pos + Vector2(0, -40), "text": text, "col": col, "born": tick})
+
+
+func age_popups() -> void:
+	var keep: Array[Dictionary] = []
+	for p in popups:
+		if tick - int(p["born"]) <= 46:
+			keep.append(p)
+	popups = keep
+
+
+func flight_pos(b: Ball) -> Vector2:
+	var span := maxi(1, b.land_tick - b.launch_tick)
+	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
+	var pos := b.from_pos.lerp(b.to_pos, p)
+	pos.y -= 4.0 * b.arc * p * (1.0 - p)                 # parabolic arc
+	pos.x += b.wobble * sin(p * PI) * sin(p * 9.0)       # high-throw arc wobble
+	return pos
+
+
+# -----------------------------------------------------------------------------
+# Rendering: warm-theatrical, code-only. A stylized performer with procedurally
+# posed arms and open/closing hands, so the no-crossing choreography is visible.
+# Draw order keeps balls above the figure and the HUD clear of the stage.
+# -----------------------------------------------------------------------------
+
+func _draw() -> void:
+	var s := get_viewport_rect().size
+	var font := ThemeDB.fallback_font
+	draw_backdrop(s)
+	draw_juggler(s)
+	draw_targets()
+	draw_balls_in_flight()
+	draw_hud(font, s)
+	draw_popups(font)
+	if sheet_open:
+		draw_sheet(font, s)
+
+
+func draw_backdrop(s: Vector2) -> void:
+	# spotlight cone from above centre
+	var top := Vector2(s.x * 0.5, -40.0)
+	var spread := 300.0
+	var cone := PackedVector2Array([
+		top,
+		Vector2(s.x * 0.5 - spread, s.y * 0.82),
+		Vector2(s.x * 0.5 + spread, s.y * 0.82),
+	])
+	draw_colored_polygon(cone, Color(1.0, 0.85, 0.5, 0.05))
+	for i in range(6, 0, -1):
+		var r := 90.0 + float(i) * 66.0
+		var a := 0.045 * (1.0 - float(i) / 7.0)
+		draw_circle(Vector2(s.x * 0.5, s.y * 0.5), r, Color(0.95, 0.55, 0.28, a))
+	# stage floor
+	var fy := s.y * 0.80
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.10, 0.05, 0.06, 1.0))
+	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(0.35, 0.18, 0.12, 0.9), 3.0)
+
+
+func draw_juggler(s: Vector2) -> void:
+	var cx := s.x * 0.5
+	var skin := Color(0.87, 0.64, 0.45)
+	var hair := Color(0.28, 0.16, 0.11)
+	var suit := Color(0.62, 0.16, 0.20)
+	var suit_dk := Color(0.44, 0.10, 0.15)
+	var vest := Color(0.90, 0.73, 0.42)
+	var collar := Color(0.96, 0.90, 0.80)
+	var button := Color(0.34, 0.20, 0.11)
+
+	var head_r := 27.0
+	var head := Vector2(cx, s.y * 0.415)
+	var head_bottom := head.y + head_r
+	var shoulder_y := s.y * 0.50
+	var hip_y := s.y * 0.685
+	var floor_y := s.y * 0.80
+
+	# legs: trousers (tapered quads) with a small pelvis join, then shoes
+	var shoe := Color(0.20, 0.12, 0.09)
+	draw_colored_polygon(PackedVector2Array([   # pelvis
+		Vector2(cx - 30, hip_y - 10), Vector2(cx + 30, hip_y - 10),
+		Vector2(cx + 28, hip_y + 8), Vector2(cx - 28, hip_y + 8),
+	]), suit_dk)
+	draw_colored_polygon(PackedVector2Array([   # left leg
+		Vector2(cx - 27, hip_y), Vector2(cx - 3, hip_y),
+		Vector2(cx - 10, floor_y - 8), Vector2(cx - 25, floor_y - 8),
+	]), suit_dk)
+	draw_colored_polygon(PackedVector2Array([   # right leg
+		Vector2(cx + 3, hip_y), Vector2(cx + 27, hip_y),
+		Vector2(cx + 25, floor_y - 8), Vector2(cx + 10, floor_y - 8),
+	]), suit_dk)
+	fill_ellipse(Vector2(cx - 24, floor_y - 4), 18.0, 8.0, shoe)   # toe points out
+	fill_ellipse(Vector2(cx + 24, floor_y - 4), 18.0, 8.0, shoe)
+
+	# neck: a tapered polygon that closes the head-to-torso gap (no floating stub)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx - 11, head_bottom - 7), Vector2(cx + 11, head_bottom - 7),
+		Vector2(cx + 15, shoulder_y + 6), Vector2(cx - 15, shoulder_y + 6),
+	]), skin)
+
+	# jacket with rounded shoulders (caps sit under where the arms attach)
+	draw_circle(Vector2(cx - 44, shoulder_y), 16.0, suit)
+	draw_circle(Vector2(cx + 44, shoulder_y), 16.0, suit)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx - 48, shoulder_y + 2), Vector2(cx + 48, shoulder_y + 2),
+		Vector2(cx + 34, hip_y), Vector2(cx - 34, hip_y),
+	]), suit)
+
+	# cream collar V over the neck base
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx - 21, shoulder_y - 3), Vector2(cx, shoulder_y + 24), Vector2(cx - 3, shoulder_y - 3),
+	]), collar)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx + 21, shoulder_y - 3), Vector2(cx, shoulder_y + 24), Vector2(cx + 3, shoulder_y - 3),
+	]), collar)
+
+	# gold waistcoat down the front, with buttons
+	var vest_top := shoulder_y + 22.0
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx - 15, vest_top), Vector2(cx + 15, vest_top),
+		Vector2(cx + 21, hip_y - 4), Vector2(cx - 21, hip_y - 4),
+	]), vest)
+	for bi in 3:
+		draw_circle(Vector2(cx, vest_top + 16.0 + float(bi) * 22.0), 2.6, button)
+
+	# head: hair behind, skin face over it, warm rim light
+	draw_circle(head + Vector2(0, -6), head_r + 1.0, hair)
+	draw_circle(head, head_r, skin)
+	draw_circle(head + Vector2(0, -2), head_r, Color(1.0, 0.82, 0.55, 0.10))
+	draw_face(head)
+
+	# arms follow the hands via a 2-bone solve, so the choreography animates
+	draw_arm(shoulder_pos(LEFT), hpos[LEFT], LEFT, skin, suit)
+	draw_arm(shoulder_pos(RIGHT), hpos[RIGHT], RIGHT, skin, suit)
+
+	# hands (and any held balls) on top of the arms
+	draw_hand(LEFT)
+	draw_hand(RIGHT)
+
+
+func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
+	var pts := PackedVector2Array()
+	for i in 20:
+		var a := TAU * float(i) / 20.0
+		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
+	draw_colored_polygon(pts, col)
+
+
+func draw_face(head: Vector2) -> void:
+	var eye := Color(0.16, 0.10, 0.08)
+	draw_circle(head + Vector2(-9, -1), 3.2, eye)
+	draw_circle(head + Vector2(9, -1), 3.2, eye)
+	draw_circle(head + Vector2(-8, -2), 1.1, Color(1, 1, 1, 0.7))
+	draw_circle(head + Vector2(10, -2), 1.1, Color(1, 1, 1, 0.7))
+	# expression: a smile on a streak, a wince just after a drop, else calm
+	var mood := 0
+	if tick - last_drop_tick < 45:
+		mood = -1
+	elif streak >= 3:
+		mood = 1
+	var my := head.y + 11.0
+	var mouth := PackedVector2Array([Vector2(head.x - 7, my + 1), Vector2(head.x + 7, my + 1)])
+	if mood == 1:
+		mouth = PackedVector2Array([Vector2(head.x - 8, my - 2), Vector2(head.x, my + 4), Vector2(head.x + 8, my - 2)])
+	elif mood == -1:
+		mouth = PackedVector2Array([Vector2(head.x - 7, my + 3), Vector2(head.x, my - 2), Vector2(head.x + 7, my + 3)])
+	draw_polyline(mouth, Color(0.45, 0.20, 0.16), 2.5)
+
+
+func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color) -> void:
+	var bend := 1.0 if h == LEFT else -1.0            # elbows bow outward
+	var elbow := solve_elbow(shoulder, hand, 78.0, 86.0, bend)
+	draw_line(shoulder, elbow, sleeve, 14.0)          # upper arm (sleeved)
+	draw_line(elbow, hand, skin, 11.0)                # forearm
+	draw_circle(elbow, 6.5, sleeve)
+
+
+func solve_elbow(a: Vector2, b: Vector2, l1: float, l2: float, bend: float) -> Vector2:
+	var ab := b - a
+	var dist := clampf(ab.length(), 0.001, l1 + l2 - 0.001)
+	var dir := ab / ab.length() if ab.length() > 0.001 else Vector2.DOWN
+	var x := (dist * dist + l1 * l1 - l2 * l2) / (2.0 * dist)
+	var hgt := sqrt(maxf(l1 * l1 - x * x, 0.0))
+	var perp := Vector2(-dir.y, dir.x) * bend
+	return a + dir * x + perp * hgt
+
+
+func draw_hand(h: int) -> void:
+	var pos: Vector2 = hpos[h]
+	var close: float = hclose[h]
+	var inward := 1.0 if h == LEFT else -1.0          # +x points toward centre for L
+
+	# catch glow
+	var g := 0.0
+	var cf := tick - int(catch_flash[h])
+	if cf >= 0 and cf < 14:
+		g = 1.0 - float(cf) / 14.0
+	if g > 0.0:
+		draw_circle(pos, 20.0 + g * 12.0, Color(1.0, 0.82, 0.45, 0.35 * g))
+
+	# palm
+	draw_circle(pos, 12.0, Color(0.86, 0.62, 0.42))
+	# fingers: spread and long when open (ready), curled short when closed
+	var spread := lerpf(0.55, 0.12, close)
+	var flen := lerpf(15.0, 8.0, close)
+	var base_ang := -PI / 2.0                          # point up when open
+	base_ang += close * inward * 0.7                   # curl inward when closed
+	for f in 4:
+		var off := (float(f) - 1.5) * spread
+		var ang := base_ang + off
+		var tip := pos + Vector2(cos(ang), sin(ang)) * flen
+		draw_line(pos, tip, Color(0.84, 0.60, 0.40), 4.5)
+	# thumb toward the inside
+	var tang := -PI / 2.0 + inward * 1.1
+	draw_line(pos, pos + Vector2(cos(tang), sin(tang)) * 11.0, Color(0.84, 0.60, 0.40), 5.0)
+
+	# held ball(s) rest in the palm
+	var st := stack(h)
+	for i in st.size():
+		draw_ball(st[i], pos + Vector2(0, -3 - float(i) * 6.0))
+
+
+func draw_targets() -> void:
+	# a landing ring brightens as a catch nears, so high-throw drift is readable
+	for b in balls:
+		if b.state == STATE_FLIGHT:
+			var dd := b.land_tick - tick
+			if dd >= -MISS_GRACE and dd < 46:
+				var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
+				draw_arc(b.to_pos, 24.0, 0.0, TAU, 40,
+					Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
+
+
+func draw_balls_in_flight() -> void:
+	for b in balls:
+		if b.state == STATE_FLIGHT:
+			draw_ball(b, flight_pos(b))
+
+
+func draw_ball(b: Ball, pos: Vector2) -> void:
+	var halo := b.color
+	halo.a = 0.16
+	draw_circle(pos, 24.0, halo)
+	draw_circle(pos, 11.0, b.color)
+	var hi := b.color.lightened(0.4)
+	hi.a = 0.9
+	draw_circle(pos + Vector2(-3, -3), 3.5, hi)
+
+
+func draw_hud(font: Font, s: Vector2) -> void:
+	var by := 40.0
+	var performing := mode == MODE_PERFORM
+
+	# mode label, top centre; Applause bar only when performing (not training)
+	var mlabel := "PERFORMING" if performing else "TRAINING"
+	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
+	draw_string(font, Vector2(s.x * 0.5 - 160, 26), mlabel, HORIZONTAL_ALIGNMENT_CENTER, 320, 15, mcol)
+	if debug_mode:
+		draw_string(font, Vector2(s.x * 0.5 - 220, 11), "DEBUG BUILD   -   Tab to set your stats freely", HORIZONTAL_ALIGNMENT_CENTER, 440, 13, Color(0.55, 0.9, 1.0))
+	if performing:
+		var bw := 300.0
+		var bx := s.x * 0.5 - bw * 0.5
+		draw_rect(Rect2(bx, by, bw, 15.0), Color(0.2, 0.14, 0.11, 0.7))
+		var pcol := Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.85, 0.42), applause)
+		draw_rect(Rect2(bx, by, bw * applause, 15.0), pcol)
+		draw_string(font, Vector2(bx, by - 4.0), "APPLAUSE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.9, 0.7, 0.8))
+
+	# stamina bar, top right (turns red when fatigue starts biting Accuracy)
+	var sw := 220.0
+	var sx := s.x - 30.0 - sw
+	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
+	draw_rect(Rect2(sx, by, sw, 15.0), Color(0.2, 0.14, 0.11, 0.7))
+	var scol := Color(0.55, 0.80, 0.6)
+	if sfrac < STAM_LOW:
+		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
+	draw_rect(Rect2(sx, by, sw * sfrac, 15.0), scol)
+	draw_string(font, Vector2(sx, by - 4.0), "STAMINA  %d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.9, 0.85, 0.8))
+	draw_string(font, Vector2(sx, by + 30.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
+
+	# score / streak / catches, top left
+	draw_string(font, Vector2(30, 44), "SCORE  %d" % score, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.9, 0.7))
+	draw_string(font, Vector2(30, 72), "STREAK %d   best %d" % [streak, best_streak], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.8, 0.6))
+	var acc := "-"
+	if caught + dropped > 0:
+		acc = "%d%%" % int(round(100.0 * float(caught) / float(caught + dropped)))
+	draw_string(font, Vector2(30, 94), "CAUGHT %d  DROPPED %d  (%s)" % [caught, dropped, acc], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.58))
+
+	# level + xp bar
+	var need := xp_to_next(level)
+	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+	draw_string(font, Vector2(30, 121), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.5))
+	draw_rect(Rect2(72, 110, 180, 10), Color(0.2, 0.14, 0.11, 0.7))
+	draw_rect(Rect2(72, 110, 180.0 * xf, 10), Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(262, 120), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.72, 0.58))
+	if points > 0:
+		draw_string(font, Vector2(30, 143), "+%d stat point%s  -  press Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7))
+
+	if tick - trick_hint < 40:
+		draw_string(font, Vector2(s.x * 0.5 - 90, s.y * 0.30), "no trick armed", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.7, 0.9, 0.8))
+
+	var kind := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
+	draw_string(font, Vector2(30, s.y - 74), "%d-BALL %s" % [num_balls, kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
+	var unlock := ""
+	if next_ball_strength() > 0:
+		unlock = "   ( next ball at Strength %d )" % next_ball_strength()
+	draw_string(font, Vector2(30, s.y - 52), "[ and ] change count%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
+	draw_string(font, Vector2(30, s.y - 30),
+		"catch D/K  throw F/J (hold=higher)  P perform/train  Tab sheet  R restart  Esc quit",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+
+	if not started:
+		var verb := "perform" if performing else "practise"
+		draw_string(font, Vector2(s.x * 0.5 - 220, s.y * 0.23),
+			"press a THROW (F or J) to %s   -   P to %s instead" % [verb, "train" if performing else "perform"],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.55))
+	elif not running:
+		draw_string(font, Vector2(s.x * 0.5 - 150, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1.0, 0.5, 0.4))
+		var tail := "   gold +%d" % last_pay if performing else ""
+		draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d%s   -   press R to go again" % [best_streak, run_xp, tail], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
+
+
+func draw_sheet(font: Font, s: Vector2) -> void:
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82))
+	var pw := 580.0
+	var ph := 388.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+
+	var tx := px + 36.0
+	var innerw := pw - 72.0
+	draw_string(font, Vector2(tx, py + 48.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	if debug_mode:
+		draw_string(font, Vector2(tx + 140.0, py + 48.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.55, 0.9, 1.0))
+	draw_string(font, Vector2(px + pw - 190.0, py + 40.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6))
+	draw_string(font, Vector2(px + pw - 190.0, py + 62.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
+	# xp bar
+	var need := xp_to_next(level)
+	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+	draw_rect(Rect2(tx, py + 62.0, innerw - 120.0, 10.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(tx, py + 62.0, (innerw - 120.0) * xf, 10.0), Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(tx, py + 88.0), "%d / %d xp to next level" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
+
+	var str_note := "faster high throws; %d balls now" % max_balls()
+	if next_ball_strength() > 0:
+		str_note = "faster high throws; %d-ball unlock at Str %d" % [max_balls() + 1, next_ball_strength()]
+	var ry := py + 132.0
+	draw_stat_row(font, tx, ry, innerw, "ACCURACY", accuracy, "higher chance to catch off-Perfect; lands throws closer", "1")
+	ry += 52.0
+	draw_stat_row(font, tx, ry, innerw, "STRENGTH", strength, str_note, "2")
+	ry += 52.0
+	draw_stat_row(font, tx, ry, innerw, "ENDURANCE", endurance, "raises your maximum stamina", "3")
+	ry += 52.0
+	# stamina is a resource, not an investable stat
+	draw_string(font, Vector2(tx, ry), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.8, 0.9, 0.85))
+	draw_rect(Rect2(tx + 130.0, ry - 13.0, innerw - 260.0, 12.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(tx + 130.0, ry - 13.0, (innerw - 260.0) * clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0), 12.0), Color(0.55, 0.80, 0.6))
+	draw_string(font, Vector2(tx + innerw - 120.0, ry), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.85, 0.9, 0.85))
+	draw_string(font, Vector2(tx, ry + 16.0), "drains as you play; low stamina makes throws wild", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+
+	var by := py + ph - 46.0
+	if debug_mode:
+		draw_string(font, Vector2(tx, by), "DEBUG:  1/2/3 up   Q/W/E down   M/N gold", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 1.0))
+	elif points > 0:
+		draw_string(font, Vector2(tx, by), "%d point%s to spend  -  press 1 / 2 / 3" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
+	else:
+		draw_string(font, Vector2(tx, by), "Skill sets your score. Stats only ease the climb.", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.75, 0.7, 0.62))
+	draw_string(font, Vector2(px + pw - 150.0, by), "Tab to resume", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
+
+
+func draw_stat_row(font: Font, x: float, y: float, w: float, name: String, value: int, note: String, keyhint: String) -> void:
+	draw_string(font, Vector2(x, y), name, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.6))
+	var barx := x + 130.0
+	var barw := w - 260.0
+	draw_rect(Rect2(barx, y - 13.0, barw, 12.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(barx, y - 13.0, barw * clampf(float(value) / 100.0, 0.0, 1.0), 12.0), Color(0.85, 0.65, 0.35))
+	draw_string(font, Vector2(x + w - 120.0, y), "%d" % value, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.7))
+	draw_string(font, Vector2(x, y + 16.0), note, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	if (points > 0 or debug_mode) and keyhint != "":
+		draw_string(font, Vector2(x + w - 60.0, y), "[%s]+" % keyhint, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
+
+
+func draw_popups(font: Font) -> void:
+	for p in popups:
+		var age := tick - int(p["born"])
+		var a := clampf(1.0 - float(age) / 46.0, 0.0, 1.0)
+		var pos: Vector2 = p["pos"] + Vector2(0, -float(age) * 0.6)
+		var c: Color = p["col"]
+		c.a = a
+		draw_string(font, pos, p["text"], HORIZONTAL_ALIGNMENT_CENTER, 120, 18, c)
+
+
+# -----------------------------------------------------------------------------
+# Dev-only auto-player. Drives a scripted opening so headless runs and the
+# --shot capture show real juggling (real arcs, real choreography) to verify.
+# -----------------------------------------------------------------------------
+
+func _demo_step() -> void:
+	# auto-catch: secure any ball arriving at an empty hand
+	for h in [LEFT, RIGHT]:
+		if not stack(h).is_empty():
+			continue
+		for b in balls:
+			if b.state == STATE_FLIGHT and b.to_hand == h and absi(b.land_tick - tick) <= 1:
+				on_catch(h)
+				break
+	# metronome: every beat, release one ball from a hand that actually holds one.
+	# This can never desync because it only throws real held balls.
+	if tick >= 24 and tick % DEMO_BEAT == 0:
+		var h := _demo_next
+		if stack(h).is_empty():
+			h = other(h)
+		if not stack(h).is_empty():
+			do_throw(h, 7)
+			_demo_next = other(h)
+
+
+func _capture_and_quit() -> void:
+	var img := get_viewport().get_texture().get_image()
+	if img != null and _shot_path != "":
+		img.save_png(_shot_path)
+	get_tree().quit()
