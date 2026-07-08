@@ -1,1 +1,8 @@
+# Godot 4+ editor and import cache (regenerated automatically, never commit)
+.godot/
+
+# macOS Finder metadata
+.DS_Store
+
+# Aider working files
 .aider*
