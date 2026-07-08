@@ -56,9 +56,17 @@ const DRIFT_MAX := 26.0   # px lateral landing drift at a full tier of deviation
 const JITTER_MAX := 5     # ticks of arrival uncertainty
 const WOBBLE_MAX := 11.0  # px of in-flight arc wobble
 
+# --- game flow: the app boots to a menu, not straight into a run ---------------
+const ST_MENU := 0        # title / main menu
+const ST_SLOTS := 1       # pick a save file
+const ST_SETTINGS := 2    # options
+const ST_CUTSCENE := 3    # an illustrated story beat
+const ST_PLAY := 4        # the juggling itself
+const NUM_SLOTS := 3
+
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
-const SAVE_PATH := "user://juggle_save.cfg"
 const SAVE_PATH_DEBUG := "user://juggle_debug.cfg"  # debug build: separate progress
+const SETTINGS_PATH := "user://juggle_settings.cfg" # global options, shared by slots
 const POINTS_PER_LEVEL := 3
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
                               # max-height throw always still demands a real catch
@@ -183,7 +191,7 @@ var popups: Array[Dictionary] = []
 var trick_hint := -999
 var rng := RandomNumberGenerator.new()
 
-# progression / stats (persisted to SAVE_PATH)
+# progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
 var endurance := 6        # raises max Stamina; gates heavy props later
@@ -207,6 +215,20 @@ var sheet_open := false
 var shop_open := false
 var debug_mode := false   # debug build: free stat editing in the character sheet
 var _prev_running := false
+
+# game-flow state
+var game_state := ST_MENU
+var menu_sel := 0         # cursor index in whichever menu is open
+var save_slot := 0        # which save file is active
+var venue_seen := 0       # highest venue reached, so promotions fire once
+var cutscene_queue: Array[String] = []  # pending story beats to show
+var view_venue := -1      # cutscene/preview override of which venue palette to draw
+var shake := 0.0          # screen-shake magnitude, decays each frame
+
+# global settings (persisted to SETTINGS_PATH)
+var set_shake := true     # screen shake on a drop
+var set_hints := true     # show the control hints along the bottom
+var set_flags := true     # show the TOO LOW / too high throw flags
 
 # previous-frame button states, for edge detection
 var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
@@ -235,15 +257,34 @@ func _ready() -> void:
 	if si != -1 and si + 1 < ua.size():
 		_shot = true
 		_shot_path = ua[si + 1]
-	load_progress()
-	start_run(3)
-	if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
-		mode = MODE_PERFORM
-	if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
-		points = maxi(points, 6)
-		sheet_open = true
-	if ua.has("--shop"):    # dev: open the shop for a screenshot
-		shop_open = true
+	load_settings()
+	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
+
+	# Dev/test flags jump straight into play; a normal launch opens the main menu.
+	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop")
+	if ua.has("--menu"):
+		skip_menu = false
+	if skip_menu:
+		save_slot = 0
+		load_progress()
+		start_run(3)
+		game_state = ST_PLAY
+		if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
+			mode = MODE_PERFORM
+		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
+			points = maxi(points, 6)
+			sheet_open = true
+		if ua.has("--shop"):    # dev: open the shop for a screenshot
+			shop_open = true
+	else:
+		game_state = ST_MENU
+	if ua.has("--settings"):    # dev: screenshot the settings screen
+		game_state = ST_SETTINGS
+	if ua.has("--slots"):       # dev: screenshot the save-slot screen
+		game_state = ST_SLOTS
+	if ua.has("--cutscene"):    # dev: screenshot a cutscene
+		cutscene_queue = ["intro"]
+		game_state = ST_CUTSCENE
 
 
 func _physics_process(_delta: float) -> void:
@@ -252,6 +293,9 @@ func _physics_process(_delta: float) -> void:
 		if _shot_frames >= _shot_tick:
 			_capture_and_quit()
 			return
+	if game_state != ST_PLAY:
+		queue_redraw()   # menus and cutscenes are static; nothing simulates
+		return
 	if sheet_open or shop_open:
 		queue_redraw()   # the sheet and shop pause the sim; nothing advances
 		return
@@ -267,6 +311,12 @@ func _physics_process(_delta: float) -> void:
 	_prev_running = running
 	update_hands()
 	age_popups()
+	# screen shake decays toward rest (uses cosmetic RNG so the sim stays deterministic)
+	if shake > 0.2:
+		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		shake *= 0.82
+	elif position != Vector2.ZERO:
+		position = Vector2.ZERO
 	queue_redraw()
 
 
@@ -274,6 +324,20 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var kc: int = event.physical_keycode
+	match game_state:
+		ST_MENU:
+			menu_input(kc)
+			return
+		ST_SLOTS:
+			slots_input(kc)
+			return
+		ST_SETTINGS:
+			settings_input(kc)
+			return
+		ST_CUTSCENE:
+			advance_cutscene()
+			return
+	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
 		match kc:
 			KEY_TAB, KEY_ESCAPE:
@@ -385,6 +449,182 @@ func try_buy_glasses() -> void:
 	money -= GLASSES_COST
 	has_glasses = true
 	save_progress()
+
+
+# -----------------------------------------------------------------------------
+# Game flow: main menu, save slots, settings, cutscenes.
+# -----------------------------------------------------------------------------
+
+func menu_input(kc: int) -> void:
+	var n := 3   # Play, Settings, Quit
+	match kc:
+		KEY_UP, KEY_W:
+			menu_sel = (menu_sel + n - 1) % n
+		KEY_DOWN, KEY_S:
+			menu_sel = (menu_sel + 1) % n
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			match menu_sel:
+				0:
+					menu_sel = 0
+					game_state = ST_SLOTS
+				1:
+					menu_sel = 0
+					game_state = ST_SETTINGS
+				2:
+					get_tree().quit()
+		KEY_ESCAPE:
+			get_tree().quit()
+
+
+func slots_input(kc: int) -> void:
+	var n := NUM_SLOTS + 1   # the slots, then Back
+	match kc:
+		KEY_UP, KEY_W:
+			menu_sel = (menu_sel + n - 1) % n
+		KEY_DOWN, KEY_S:
+			menu_sel = (menu_sel + 1) % n
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			if menu_sel >= NUM_SLOTS:
+				menu_sel = 0
+				game_state = ST_MENU
+			else:
+				start_slot(menu_sel)
+		KEY_X, KEY_DELETE, KEY_BACKSPACE:
+			if menu_sel < NUM_SLOTS:
+				delete_slot(menu_sel)   # wipe that save file
+		KEY_ESCAPE:
+			menu_sel = 0
+			game_state = ST_MENU
+
+
+func settings_input(kc: int) -> void:
+	var n := 4   # shake, hints, flags, Back
+	match kc:
+		KEY_UP, KEY_W:
+			menu_sel = (menu_sel + n - 1) % n
+		KEY_DOWN, KEY_S:
+			menu_sel = (menu_sel + 1) % n
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_LEFT, KEY_RIGHT:
+			match menu_sel:
+				0:
+					set_shake = not set_shake
+				1:
+					set_hints = not set_hints
+				2:
+					set_flags = not set_flags
+				3:
+					menu_sel = 0
+					game_state = ST_MENU
+			save_settings()
+		KEY_ESCAPE:
+			save_settings()
+			menu_sel = 0
+			game_state = ST_MENU
+
+
+func advance_cutscene() -> void:
+	if cutscene_queue.size() > 0:
+		cutscene_queue.pop_front()
+	if cutscene_queue.is_empty():
+		view_venue = -1
+		game_state = ST_PLAY
+		if not started:
+			start_run(3)   # coming out of the opening cutscene into the first run
+
+
+func start_slot(i: int) -> void:
+	save_slot = i
+	var fresh := not FileAccess.file_exists(slot_path(i))
+	if fresh:
+		reset_new_game()
+		cutscene_queue = ["intro"]
+		game_state = ST_CUTSCENE
+	else:
+		load_progress()
+		game_state = ST_PLAY
+		start_run(3)
+
+
+func reset_new_game() -> void:
+	# a brand new juggler, so a fresh slot never inherits the previous one's stats
+	accuracy = 5
+	strength = 6
+	endurance = 6
+	money = START_GOLD
+	reputation = 0
+	prop_count = [0, 0, 0, 0, 0, 0]
+	prop_type = PROP_BALLS
+	has_glasses = false
+	level = 1
+	xp = 0
+	points = 0
+	venue_seen = 0
+	started = false
+	stamina_max = 50.0 + float(endurance)
+	stamina = stamina_max
+	save_progress()
+
+
+func slot_path(i: int) -> String:
+	return "user://juggle_slot%d.cfg" % i
+
+
+func slot_summary(i: int) -> String:
+	if not FileAccess.file_exists(slot_path(i)):
+		return "empty"
+	var cf := ConfigFile.new()
+	if cf.load(slot_path(i)) != OK:
+		return "empty"
+	var lv := int(cf.get_value("prog", "level", 1))
+	var g := int(cf.get_value("stats", "money", START_GOLD))
+	var rep := int(cf.get_value("stats", "reputation", 0))
+	var vn := String(venue_data(venue_index_of(rep))["name"])
+	return "Level %d   -   %s   -   %d gold" % [lv, vn, g]
+
+
+func delete_slot(i: int) -> void:
+	var dir := DirAccess.open("user://")
+	var fn := "juggle_slot%d.cfg" % i
+	if dir != null and dir.file_exists(fn):
+		dir.remove(fn)
+
+
+func load_settings() -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SETTINGS_PATH) == OK:
+		set_shake = bool(cf.get_value("opt", "shake", true))
+		set_hints = bool(cf.get_value("opt", "hints", true))
+		set_flags = bool(cf.get_value("opt", "flags", true))
+
+
+func save_settings() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("opt", "shake", set_shake)
+	cf.set_value("opt", "hints", set_hints)
+	cf.set_value("opt", "flags", set_flags)
+	cf.save(SETTINGS_PATH)
+
+
+func cutscene_data(id: String) -> Dictionary:
+	match id:
+		"intro":
+			return {"venue": 0, "title": "The Backyard",
+				"text": "Bruna hands you three worn balls. \"Gear gets you to the door,\" she says. \"The crowd is what you earn.\"  Make your first throw."}
+		"v1":
+			return {"venue": 1, "title": "Street Corner",
+				"text": "A hat on the cobbles. The coins only come when the juggling is clean, and never a moment before."}
+		"v2":
+			return {"venue": 2, "title": "Small Theatre",
+				"text": "Indoors and ticketed now. Silvio Grand headlines above you on the bill, gracious in the way that stings."}
+		"v3":
+			return {"venue": 3, "title": "The Circus",
+				"text": "A travelling troupe takes you in. Lanterns, knives, a found family, and the first taste of real spectacle."}
+		"v4":
+			return {"venue": 4, "title": "The Championship",
+				"text": "Scored, not applauded. Silvio wins on paper with the priciest torches. You place second on a cleaner run, and the gap narrows."}
+		_:
+			return {"venue": 5, "title": "The World Arena",
+				"text": "The largest crowd there is, and Silvio watches from the seats now. No gear can carry this. Only your hands can."}
 
 
 # -----------------------------------------------------------------------------
@@ -676,7 +916,7 @@ func do_throw(h: int, hold: int) -> void:
 	# a clean standard throw earns a little Applause; a wrong height does not, and a
 	# clearly bad one flags itself high above the stage so the player learns to fix it
 	applause = minf(1.0, applause + 0.012 * (1.0 - clampf(dev, 0.0, 1.0)))
-	if dev >= 0.8:
+	if set_flags and dev >= 0.8:
 		var lbl := "TOO LOW" if tier < TIER_STD else ("RESET" if tier > 4.3 else "too high")
 		var lc := Color(1.0, 0.5, 0.4, 0.95) if tier < TIER_STD else Color(1.0, 0.82, 0.45, 0.9)
 		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), lbl, lc)
@@ -748,6 +988,13 @@ func on_round_end() -> void:
 		add_popup(Vector2(s.x * 0.5, s.y * 0.30), "+%d gold" % last_pay, Color(1.0, 0.86, 0.4))
 		var rc := Color(0.7, 0.95, 0.7) if rep_delta >= 0 else Color(1.0, 0.55, 0.45)
 		add_popup(Vector2(s.x * 0.5, s.y * 0.345), "%s%d rep" % ["+" if rep_delta >= 0 else "", rep_delta], rc)
+	# crossing into a new venue plays its promotion cutscene, once
+	var vi := venue_index()
+	if vi > venue_seen:
+		for k in range(venue_seen + 1, vi + 1):
+			cutscene_queue.append("v%d" % k)
+		venue_seen = vi
+		game_state = ST_CUTSCENE
 	save_progress()
 
 
@@ -829,18 +1076,27 @@ func rep_tier() -> String:
 
 
 func venue_index() -> int:
+	return venue_index_of(reputation)
+
+
+func venue_index_of(rep: int) -> int:
 	# the stage you play grows as Reputation climbs (the STORY.md venue ladder)
-	if reputation >= 3000:
+	if rep >= 3000:
 		return 5
-	if reputation >= 1500:
+	if rep >= 1500:
 		return 4
-	if reputation >= 700:
+	if rep >= 700:
 		return 3
-	if reputation >= 300:
+	if rep >= 300:
 		return 2
-	if reputation >= 100:
+	if rep >= 100:
 		return 1
 	return 0
+
+
+func cur_venue() -> int:
+	# cutscenes and previews can override which venue palette we render
+	return view_venue if view_venue >= 0 else venue_index()
 
 
 func venue_data(i: int) -> Dictionary:
@@ -955,7 +1211,7 @@ func _adjust(which: String, delta: int) -> void:
 
 
 func save_file() -> String:
-	return SAVE_PATH_DEBUG if debug_mode else SAVE_PATH
+	return SAVE_PATH_DEBUG if debug_mode else slot_path(save_slot)
 
 
 func load_progress() -> void:
@@ -975,6 +1231,7 @@ func load_progress() -> void:
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
+		venue_seen = int(cf.get_value("prog", "venue_seen", venue_index()))
 	stamina_max = 50.0 + float(endurance)
 	stamina = stamina_max
 
@@ -992,6 +1249,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
+	cf.set_value("prog", "venue_seen", venue_seen)
 	cf.save(save_file())
 
 
@@ -1007,6 +1265,8 @@ func drop_ball(b: Ball, why: String) -> void:
 	streak = 0
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
+	if set_shake:
+		shake = 5.0
 	var dtext := why
 	if b.kind == PROP_EGGS:
 		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf)
@@ -1069,6 +1329,19 @@ func flight_pos(b: Ball) -> Vector2:
 func _draw() -> void:
 	var s := get_viewport_rect().size
 	var font := ThemeDB.fallback_font
+	match game_state:
+		ST_MENU:
+			draw_menu(font, s)
+			return
+		ST_SLOTS:
+			draw_slots(font, s)
+			return
+		ST_SETTINGS:
+			draw_settings(font, s)
+			return
+		ST_CUTSCENE:
+			draw_cutscene(font, s)
+			return
 	draw_backdrop(s)
 	draw_juggler(s)
 	draw_targets()
@@ -1082,7 +1355,7 @@ func _draw() -> void:
 
 
 func draw_backdrop(s: Vector2) -> void:
-	var vi := venue_index()
+	var vi := cur_venue()
 	var v := venue_data(vi)
 	var glow: Color = v["glow"]
 	var floor_c: Color = v["floor"]
@@ -1122,7 +1395,7 @@ func draw_backdrop(s: Vector2) -> void:
 
 func draw_juggler(s: Vector2) -> void:
 	var cx := s.x * 0.5
-	var v := venue_data(venue_index())
+	var v := venue_data(cur_venue())
 	var skin := Color(0.87, 0.64, 0.45)
 	var hair := Color(0.28, 0.16, 0.11)
 	var suit: Color = v["suit"]         # costume changes with the venue
@@ -1466,13 +1739,14 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if prop_deficit() > 0.0:
 		draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
 	draw_string(font, Vector2(30, s.y - 74), "%s  -  %d %s  -  %s" % [vname, num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
-	var unlock := ""
-	if next_ball_strength() > 0:
-		unlock = "   ( next ball at Strength %d )" % next_ball_strength()
-	draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
-	draw_string(font, Vector2(30, s.y - 30),
-		"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+	if set_hints:
+		var unlock := ""
+		if next_ball_strength() > 0:
+			unlock = "   ( next ball at Strength %d )" % next_ball_strength()
+		draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
+		draw_string(font, Vector2(30, s.y - 30),
+			"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
 
 	if not started:
 		var verb := "perform" if performing else "practise"
@@ -1505,9 +1779,10 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	# xp bar
 	var need := xp_to_next(level)
 	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_rect(Rect2(tx, py + 62.0, innerw - 120.0, 10.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(tx, py + 62.0, (innerw - 120.0) * xf, 10.0), Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(tx, py + 88.0), "%d / %d xp to next level" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
+	var xbw := 300.0   # kept short so it never runs under the gold/reputation column
+	draw_rect(Rect2(tx, py + 66.0, xbw, 10.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(tx, py + 66.0, xbw * xf, 10.0), Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(tx, py + 92.0), "%d / %d xp to next level" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
 
 	var str_note := "faster high throws; %d balls now" % max_balls()
 	if next_ball_strength() > 0:
@@ -1604,6 +1879,104 @@ func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> 
 		var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
 		draw_string(font, Vector2(x + w - 160.0, y), "%d g" % GLASSES_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 		draw_string(font, Vector2(x + w - 44.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+
+
+# -----------------------------------------------------------------------------
+# Menu, save-slot, settings, and cutscene screens.
+# -----------------------------------------------------------------------------
+
+func draw_menu(font: Font, s: Vector2) -> void:
+	view_venue = 2                      # a warm theatre palette for the title
+	draw_backdrop(s)
+	view_venue = -1
+	# a small arced-balls motif near the top (no figure, so nothing sits on the text)
+	var cx := s.x * 0.5
+	for i in 3:
+		var t := float(i) / 2.0
+		var bx := cx + lerpf(-120.0, 120.0, t)
+		var by := s.y * 0.16 - sin(t * PI) * 44.0
+		draw_ball_shape(Vector2(bx, by), ball_color(i), 1.3)
+
+	draw_string(font, Vector2(0, s.y * 0.36), "JUGGLE", HORIZONTAL_ALIGNMENT_CENTER, s.x, 96, Color(1.0, 0.86, 0.5))
+	draw_string(font, Vector2(0, s.y * 0.36 + 36.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
+	var opts := ["Play", "Settings", "Quit"]
+	var oy := s.y * 0.60
+	for i in opts.size():
+		var sel := i == menu_sel
+		var txt := ("%s" % opts[i]) if not sel else (">    %s    <" % opts[i])
+		var col := Color(1.0, 0.9, 0.55) if sel else Color(0.72, 0.66, 0.6)
+		draw_string(font, Vector2(0, oy + float(i) * 46.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
+	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down to choose    Enter to select", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+
+
+func draw_slots(font: Font, s: Vector2) -> void:
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
+	draw_string(font, Vector2(0, s.y * 0.17), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
+
+	var pw := 660.0
+	var px := s.x * 0.5 - pw * 0.5
+	var oy := s.y * 0.30
+	for i in NUM_SLOTS:
+		var sel := i == menu_sel
+		var ry := oy + float(i) * 74.0
+		var sum := slot_summary(i)
+		draw_rect(Rect2(px, ry, pw, 60.0), Color(0.12, 0.07, 0.08, 0.92))
+		draw_rect(Rect2(px, ry, pw, 60.0), Color(0.9, 0.6, 0.35, 0.55) if sel else Color(0.4, 0.32, 0.26, 0.5), false, 2.0)
+		var tcol := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
+		draw_string(font, Vector2(px + 24.0, ry + 27.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, tcol)
+		draw_string(font, Vector2(px + 24.0, ry + 49.0), sum, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.78, 0.72, 0.62))
+		if sum != "empty":
+			draw_string(font, Vector2(px + pw - 110.0, ry + 37.0), "[X] delete", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.88, 0.55, 0.5))
+
+	var by := oy + float(NUM_SLOTS) * 74.0 + 16.0
+	var bsel := menu_sel == NUM_SLOTS
+	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to play    X to delete    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+
+
+func draw_settings(font: Font, s: Vector2) -> void:
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
+	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
+
+	var rows := [["Screen shake", set_shake], ["Control hints", set_hints], ["Throw flags (TOO LOW / high)", set_flags]]
+	var pw := 560.0
+	var px := s.x * 0.5 - pw * 0.5
+	var oy := s.y * 0.34
+	for i in rows.size():
+		var sel := i == menu_sel
+		var ry := oy + float(i) * 56.0
+		var nm := String(rows[i][0])
+		var on := bool(rows[i][1])
+		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
+		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
+
+	var bsel := menu_sel == 3
+	draw_string(font, Vector2(0, oy + 3.0 * 56.0 + 34.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 66.0), "audio options arrive with the soundtrack", HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(0.62, 0.58, 0.54))
+	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to toggle    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+
+
+func draw_cutscene(font: Font, s: Vector2) -> void:
+	var id := String(cutscene_queue[0]) if cutscene_queue.size() > 0 else "intro"
+	var d := cutscene_data(id)
+	view_venue = int(d["venue"])
+	draw_backdrop(s)
+	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
+	hclose = [0.0, 0.0]
+	draw_juggler(s)
+	view_venue = -1
+
+	draw_string(font, Vector2(0, s.y * 0.16), String(d["title"]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 46, Color(1.0, 0.88, 0.55))
+	var py := s.y * 0.72
+	draw_rect(Rect2(0, py, s.x, s.y - py), Color(0.03, 0.02, 0.03, 0.84))
+	draw_multiline_string(font, Vector2(90.0, py + 40.0), String(d["text"]), HORIZONTAL_ALIGNMENT_LEFT, s.x - 180.0, 22, -1, Color(0.95, 0.9, 0.82))
+	draw_string(font, Vector2(0, s.y - 24.0), "press any key to continue", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.7, 0.62))
 
 
 func draw_stat_row(font: Font, x: float, y: float, w: float, name: String, value: int, note: String, keyhint: String) -> void:
