@@ -874,7 +874,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
 	draw_string(font, Vector2(bx, by + 80.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.8, 0.75, 0.68))
 	# a quiet controls reminder along the bottom (the normal HUD hints are hidden)
-	draw_string(font, Vector2(0, s.y - 30.0), "D / K  catch      F / J  throw  (hold to go higher)      Esc  quit",
+	draw_string(font, Vector2(0, s.y - 30.0), "D / K  catch      F / J  throw  (hold to go higher)      Esc  pause",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.8, 0.72, 0.6, 0.8))
 	if tut_flash != "":
 		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
@@ -2178,14 +2178,22 @@ func draw_backdrop(s: Vector2) -> void:
 		Vector2(s.x * 0.5 + spread, s.y * 0.82),
 	])
 	draw_colored_polygon(cone, Color(glow.r, glow.g, glow.b, spot))
-	for i in range(6, 0, -1):
-		var r := 90.0 + float(i) * 66.0
-		var a := 0.05 * (1.0 - float(i) / 7.0)
-		draw_circle(Vector2(s.x * 0.5, s.y * 0.5), r, Color(glow.r, glow.g, glow.b, a))
 
-	# stage floor
+	# a SMOOTH warm light pool on the performer, built from many faint overlapping
+	# discs (bright centre fading out), so it reads as a soft spotlight instead of
+	# the hard target rings it used to be. A small floor keeps the stage from a void.
+	var pc := Vector2(s.x * 0.5, s.y * 0.50)
+	var pool := 0.045 + spot * 0.9
+	for i in 26:
+		var f := float(i) / 25.0                       # 0 outer .. 1 inner
+		var r := lerpf(410.0, 34.0, f)
+		var a := pool * (0.06 + 0.94 * f) * 0.16
+		draw_circle(pc, r, Color(glow.r, glow.g, glow.b, a))
+
+	# stage floor, with a soft warm lip of light where it meets the light pool
 	var fy := s.y * 0.80
 	draw_rect(Rect2(0, fy, s.x, s.y - fy), floor_c)
+	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
 	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(glow.r, glow.g, glow.b, 0.55), 3.0)
 
 	# crowd: a row of dim heads seated in front, more of them at grander venues, and
@@ -2218,6 +2226,9 @@ func draw_juggler(s: Vector2) -> void:
 	var shoulder_y := s.y * 0.50
 	var hip_y := s.y * 0.685
 	var floor_y := s.y * 0.80
+
+	# a soft ground shadow so the figure stands ON the stage instead of floating
+	draw_shadow(Vector2(cx, floor_y + 2.0), 96.0)
 
 	# legs: trousers (tapered quads) with a small pelvis join, then shoes
 	var shoe := Color(0.20, 0.12, 0.09)
@@ -2332,12 +2343,34 @@ func draw_face(head: Vector2) -> void:
 	draw_polyline(mouth, Color(0.45, 0.20, 0.16), 2.5)
 
 
+func draw_capsule(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> void:
+	# a tapered limb: a quad from half-width wa at a to wb at b, with rounded caps.
+	# This reads as a real arm instead of a flat stick line.
+	var d := b - a
+	var L := d.length()
+	var ra := wa * 0.5
+	var rb := wb * 0.5
+	if L < 0.001:
+		draw_circle(a, maxf(ra, rb), col)
+		return
+	var n := Vector2(-d.y, d.x) / L
+	draw_colored_polygon(PackedVector2Array([a + n * ra, b + n * rb, b - n * rb, a - n * ra]), col)
+	draw_circle(a, ra, col)
+	draw_circle(b, rb, col)
+
+
 func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color) -> void:
 	var bend := 1.0 if h == LEFT else -1.0            # elbows bow outward
-	var elbow := solve_elbow(shoulder, hand, 78.0, 86.0, bend)
-	draw_line(shoulder, elbow, sleeve, 14.0)          # upper arm (sleeved)
-	draw_line(elbow, hand, skin, 11.0)                # forearm
-	draw_circle(elbow, 6.5, sleeve)
+	# bones scale to the reach (a touch over half each), so the elbow keeps the SAME
+	# gentle bend whether the hand is out catching or tucked in holding a ball. Fixed
+	# bones over-folded the close pose into a chicken wing.
+	var reach := (hand - shoulder).length()
+	var bone := maxf(46.0, reach * 0.56)
+	var elbow := solve_elbow(shoulder, hand, bone, bone, bend)
+	var wrist := hand + (elbow - hand).normalized() * 7.0   # forearm stops just short of the palm
+	draw_capsule(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm (sleeved), tapering to the elbow
+	draw_capsule(elbow, wrist, 13.0, 10.0, skin)       # forearm (skin), tapering to the wrist
+	draw_circle(elbow, 7.0, sleeve)                    # elbow joint
 
 
 func solve_elbow(a: Vector2, b: Vector2, l1: float, l2: float, bend: float) -> Vector2:
@@ -2363,21 +2396,23 @@ func draw_hand(h: int) -> void:
 	if g > 0.0:
 		draw_circle(pos, 20.0 + g * 12.0, Color(1.0, 0.82, 0.45, 0.35 * g))
 
-	# palm
-	draw_circle(pos, 12.0, Color(0.86, 0.62, 0.42))
-	# fingers: spread and long when open (ready), curled short when closed
-	var spread := lerpf(0.55, 0.12, close)
-	var flen := lerpf(15.0, 8.0, close)
-	var base_ang := -PI / 2.0                          # point up when open
-	base_ang += close * inward * 0.7                   # curl inward when closed
-	for f in 4:
-		var off := (float(f) - 1.5) * spread
-		var ang := base_ang + off
-		var tip := pos + Vector2(cos(ang), sin(ang)) * flen
-		draw_line(pos, tip, Color(0.84, 0.60, 0.40), 4.5)
-	# thumb toward the inside
-	var tang := -PI / 2.0 + inward * 1.1
-	draw_line(pos, pos + Vector2(cos(tang), sin(tang)) * 11.0, Color(0.84, 0.60, 0.40), 5.0)
+	# a clean mitt: a palm, a rounded finger group that extends to receive when open
+	# and curls to a fist when closed, and a thumb toward the inside. Reads as a hand
+	# catching, not a splayed claw.
+	var sk := Color(0.87, 0.63, 0.43)
+	var dk := Color(0.80, 0.56, 0.38)
+	var openf := 1.0 - close
+	# fingers point up and a touch inward, reaching further when open to catch
+	var fdir := Vector2(inward * 0.22, -1.0).normalized()
+	var reach := lerpf(7.0, 15.0, openf)
+	var ftip := pos + fdir * reach
+	draw_capsule(pos, ftip, 17.0, 13.0, sk)            # the four fingers, held together
+	# thumb, a shorter capsule toward the centre line
+	var tdir := Vector2(inward, -0.2).normalized()
+	draw_capsule(pos, pos + tdir * lerpf(8.0, 11.0, openf), 8.0, 6.0, dk)
+	# palm over the wrist join, drawn last so the hand reads as one solid shape
+	draw_circle(pos, 11.5, sk)
+	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
 
 	# held ball(s) rest in the palm
 	var st := stack(h)
