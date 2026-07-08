@@ -57,6 +57,20 @@ const STAM_DRAIN_THROW := 0.3
 const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
 const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
 
+# --- reputation: the career-climb currency (GDD 4.4). Scales PAY, never score
+# or catching, so it stays on the comfort axis and never touches the skill floor.
+const REP_PAY_DIV := 400.0    # pay multiplier = 1 + reputation / REP_PAY_DIV
+const REP_SWING := 60         # reputation gained by a great set, lost by a poor one
+const START_GOLD := 100       # a fresh juggler starts with a small purse (ideas.rtf)
+
+# --- Focus: Accuracy trained past 100 (GDD "Focus"). The overflow eases the
+# grind without touching the timing floor: stage 1 lowers stamina cost, and once
+# that bottoms out, stage 2 widens the Perfect window a little. Both are capped.
+const ACC_CAP := 250              # Accuracy trains to 250, so Focus reaches 150
+const FOCUS_STAM_FLOOR := 0.25    # stamina-cost multiplier once Focus hits 100
+const FOCUS_WINDOW_PER := 10.0    # +1 Perfect tick per this much Focus above 100
+const FOCUS_WINDOW_MAX := 6       # hard cap on the widening (skill-first guardrail)
+
 const LEFT := 0
 const RIGHT := 1
 const CASCADE := 0
@@ -116,6 +130,7 @@ var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
 var last_drop_tick := -999               # for the juggler's wince expression
 
 var applause := 0.7
+var peak_applause := 0.7  # the crowd's high point this run, for the reputation swing
 var score := 0
 var streak := 0
 var best_streak := 0
@@ -131,7 +146,8 @@ var rng := RandomNumberGenerator.new()
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
 var endurance := 6        # raises max Stamina; gates heavy props later
-var money := 0            # earned by performing (not training)
+var money := START_GOLD   # earned by performing (not training)
+var reputation := 0       # rises with great sets, falls with poor ones; scales pay
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
@@ -386,6 +402,7 @@ func start_run(n: int) -> void:
 	popups.clear()
 	charging = [false, false]
 	applause = 0.7
+	peak_applause = 0.7
 	score = 0
 	streak = 0
 	best_streak = 0
@@ -447,7 +464,9 @@ func on_catch(h: int) -> void:
 		return
 	# Perfect timing always secures. A Good or Late catch is a chance that rises
 	# with Accuracy and falls with the ball's height; a failed roll is a slip.
-	if best_d > W_PERFECT:
+	# Focus (stage 2) can widen the Perfect band a little.
+	var wperf := perfect_window()
+	if best_d > wperf:
 		var quality := 1 if best_d <= W_GOOD else 2
 		if rng.randf() > catch_chance(quality, best.height):
 			drop_ball(best, "slip")
@@ -458,7 +477,7 @@ func on_catch(h: int) -> void:
 	catch_flash[h] = tick
 	caught += 1
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult())
-	if best_d <= W_PERFECT:
+	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		score += 100 * streak
@@ -584,10 +603,12 @@ func add_xp(amount: int) -> void:
 
 func energy_mult() -> float:
 	# performing costs more energy, and bigger routines cost more still;
-	# training is lighter so you can practice without burning out
+	# training is lighter so you can practice without burning out. Focus (trained
+	# Accuracy past 100) discounts every action's stamina cost (stage 1).
+	var base := 0.5
 	if mode == MODE_PERFORM:
-		return 1.0 + 0.15 * float(num_balls - MIN_BALLS)
-	return 0.5
+		base = 1.0 + 0.15 * float(num_balls - MIN_BALLS)
+	return base * focus_stam_mult()
 
 
 func on_round_end() -> void:
@@ -602,10 +623,17 @@ func on_round_end() -> void:
 	var bonus := int(round((float(best_streak) * 4.0 + float(caught) * 1.5) * clean * diff))
 	add_xp(bonus)
 	if mode == MODE_PERFORM:
-		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff))
+		# reputation swings on the show's quality: clean play carries it, the
+		# crowd's high point tops it up. A sloppy set drags it down.
+		var quality := clampf(0.7 * clean + 0.3 * peak_applause, 0.0, 1.0)
+		var rep_delta := int(round((quality - 0.5) * float(REP_SWING)))
+		reputation = maxi(0, reputation + rep_delta)
+		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult()))
 		money += last_pay
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.30), "+%d gold" % last_pay, Color(1.0, 0.86, 0.4))
+		var rc := Color(0.7, 0.95, 0.7) if rep_delta >= 0 else Color(1.0, 0.55, 0.45)
+		add_popup(Vector2(s.x * 0.5, s.y * 0.345), "%s%d rep" % ["+" if rep_delta >= 0 else "", rep_delta], rc)
 	save_progress()
 
 
@@ -636,12 +664,56 @@ func catch_chance(quality: int, height: float) -> float:
 	return clampf(p, MIN_CATCH_P, 1.0)
 
 
+func focus() -> float:
+	# Accuracy trained beyond 100 becomes Focus. Catch maths still cap at 100
+	# (see eff_accuracy), so Focus never makes catching easier, only cheaper and,
+	# very late, a touch more forgiving on the Perfect window.
+	return maxf(0.0, float(accuracy) - 100.0)
+
+
+func focus_stam_mult() -> float:
+	# Stage 1: Focus 0..100 lowers every action's stamina cost toward a floor.
+	return lerpf(1.0, FOCUS_STAM_FLOOR, clampf(focus() / 100.0, 0.0, 1.0))
+
+
+func perfect_window() -> int:
+	# Stage 2: once stage 1 has bottomed out (Focus > 100), each FOCUS_WINDOW_PER
+	# of further Focus widens the Perfect band by a tick, capped so timing still
+	# rules. Never grows past the Good band, so a tier of Good always remains.
+	var extra := focus() - 100.0
+	var bonus := 0
+	if extra > 0.0:
+		bonus = mini(FOCUS_WINDOW_MAX, int(extra / FOCUS_WINDOW_PER))
+	return mini(W_GOOD, W_PERFECT + bonus)
+
+
+func pay_mult() -> float:
+	# Reputation lifts earnings only. Score and catching are untouched (GDD 4.1).
+	return 1.0 + float(reputation) / REP_PAY_DIV
+
+
+func rep_tier() -> String:
+	if reputation >= 6000:
+		return "Legend"
+	if reputation >= 3000:
+		return "Renowned"
+	if reputation >= 1500:
+		return "Headliner"
+	if reputation >= 700:
+		return "Known Act"
+	if reputation >= 300:
+		return "Rising Talent"
+	if reputation >= 100:
+		return "Street Name"
+	return "Unknown"
+
+
 func invest(which: String) -> void:
 	if points <= 0:
 		return
 	match which:
 		"acc":
-			accuracy = mini(100, accuracy + 1)
+			accuracy = mini(ACC_CAP, accuracy + 1)   # past 100 becomes Focus
 		"str":
 			strength = mini(100, strength + 1)
 		"end":
@@ -661,7 +733,7 @@ func _sheet_invest(which: String) -> void:
 func _adjust(which: String, delta: int) -> void:
 	match which:
 		"acc":
-			accuracy = clampi(accuracy + delta, 1, 100)
+			accuracy = clampi(accuracy + delta, 1, ACC_CAP)
 		"str":
 			strength = clampi(strength + delta, 1, 100)
 		"end":
@@ -681,7 +753,8 @@ func load_progress() -> void:
 		accuracy = int(cf.get_value("stats", "accuracy", 5))
 		strength = int(cf.get_value("stats", "strength", 6))
 		endurance = int(cf.get_value("stats", "endurance", 6))
-		money = int(cf.get_value("stats", "money", 0))
+		money = int(cf.get_value("stats", "money", START_GOLD))
+		reputation = int(cf.get_value("stats", "reputation", 0))
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
@@ -695,6 +768,7 @@ func save_progress() -> void:
 	cf.set_value("stats", "strength", strength)
 	cf.set_value("stats", "endurance", endurance)
 	cf.set_value("stats", "money", money)
+	cf.set_value("stats", "reputation", reputation)
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
@@ -726,6 +800,7 @@ func update_sim() -> void:
 			lost.append(b)
 	for b in lost:
 		drop_ball(b, "DROP")
+	peak_applause = maxf(peak_applause, applause)
 	if balls.is_empty():
 		running = false
 
@@ -1016,6 +1091,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(sx, by, sw * sfrac, 15.0), scol)
 	draw_string(font, Vector2(sx, by - 4.0), "STAMINA  %d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.9, 0.85, 0.8))
 	draw_string(font, Vector2(sx, by + 30.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(sx, by + 50.0), "Rep %d  %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
 
 	# score / streak / catches, top left
 	draw_string(font, Vector2(30, 44), "SCORE  %d" % score, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.9, 0.7))
@@ -1075,6 +1151,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(tx + 140.0, py + 48.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.55, 0.9, 1.0))
 	draw_string(font, Vector2(px + pw - 190.0, py + 40.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6))
 	draw_string(font, Vector2(px + pw - 190.0, py + 62.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(px + pw - 190.0, py + 82.0), "Rep %d  %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
 	# xp bar
 	var need := xp_to_next(level)
 	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
@@ -1085,8 +1162,14 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	var str_note := "faster high throws; %d balls now" % max_balls()
 	if next_ball_strength() > 0:
 		str_note = "faster high throws; %d-ball unlock at Str %d" % [max_balls() + 1, next_ball_strength()]
+	var acc_note := "higher chance to catch off-Perfect; lands throws closer"
+	if accuracy > 100:
+		if focus() <= 100.0:
+			acc_note = "Focus %d  -  cheaper stamina every action" % int(focus())
+		else:
+			acc_note = "Focus %d  -  min stamina cost, +%d Perfect ticks" % [int(focus()), perfect_window() - W_PERFECT]
 	var ry := py + 132.0
-	draw_stat_row(font, tx, ry, innerw, "ACCURACY", accuracy, "higher chance to catch off-Perfect; lands throws closer", "1")
+	draw_stat_row(font, tx, ry, innerw, "ACCURACY", accuracy, acc_note, "1")
 	ry += 52.0
 	draw_stat_row(font, tx, ry, innerw, "STRENGTH", strength, str_note, "2")
 	ry += 52.0
