@@ -298,6 +298,14 @@ func _input(event: InputEvent) -> void:
 				if debug_mode:
 					money = maxi(0, money - 50)
 					save_progress()
+			KEY_PERIOD:
+				if debug_mode:   # raise reputation to preview later venues/costumes
+					reputation += 250
+					save_progress()
+			KEY_COMMA:
+				if debug_mode:
+					reputation = maxi(0, reputation - 250)
+					save_progress()
 		return
 	if shop_open:
 		match kc:
@@ -1526,7 +1534,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 
 	var by := py + ph - 46.0
 	if debug_mode:
-		draw_string(font, Vector2(tx, by), "DEBUG:  1/2/3 up   Q/W/E down   M/N gold", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 1.0))
+		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3 up  Q/W/E dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 1.0))
 	elif points > 0:
 		draw_string(font, Vector2(tx, by), "%d point%s to spend  -  press 1 / 2 / 3" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
 	else:
