@@ -60,8 +60,10 @@ const WOBBLE_MAX := 11.0  # px of in-flight arc wobble
 const ST_MENU := 0        # title / main menu
 const ST_SLOTS := 1       # pick a save file
 const ST_SETTINGS := 2    # options
-const ST_CUTSCENE := 3    # an illustrated story beat
+const ST_CUTSCENE := 3    # an illustrated story beat (now an animated mini-film)
 const ST_PLAY := 4        # the juggling itself
+const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before a set
+const ST_TUTORIAL := 6    # explained, animated lessons (1 ball, 2 balls, new props)
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
@@ -225,6 +227,20 @@ var cutscene_queue: Array[String] = []  # pending story beats to show
 var view_venue := -1      # cutscene/preview override of which venue palette to draw
 var shake := 0.0          # screen-shake magnitude, decays each frame
 
+# --- cinematic layer: animated cutscenes, establishing cards, tutorials -------
+var cine_tick := 0        # cosmetic clock for cutscenes/establish/tutorial motion
+var cs_shot := 0          # index of the shot within the current beat's script
+var cs_shot_start := 0    # cine_tick at which the current shot began (for fades)
+var cs_freeze := false    # dev: pin the current shot (for stable screenshots)
+var establish_venue := 0  # which venue's exterior the establishing card shows
+var establish_after := 3  # ball count to start the performance with once dismissed
+var tut_queue: Array[String] = []  # pending tutorial lessons to present
+var tut_return := ST_MENU # where to go when the tutorial flow finishes
+var seen_tuts: Array[String] = []  # lesson ids already shown, so they fire once
+# egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
+var shards: Array[Dictionary] = []
+var splats: Array[Dictionary] = []
+
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
 var set_hints := true     # show the control hints along the bottom
@@ -235,6 +251,7 @@ var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false
 
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
+var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 var _shot := false
 var _shot_path := ""
 var _shot_tick := 170
@@ -257,6 +274,9 @@ func _ready() -> void:
 	if si != -1 and si + 1 < ua.size():
 		_shot = true
 		_shot_path = ua[si + 1]
+	var sa := ua.find("--shotat")   # dev: capture at frame N (to test late transitions)
+	if sa != -1 and sa + 1 < ua.size():
+		_shot_tick = int(ua[sa + 1])
 	load_settings()
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
@@ -282,9 +302,27 @@ func _ready() -> void:
 		game_state = ST_SETTINGS
 	if ua.has("--slots"):       # dev: screenshot the save-slot screen
 		game_state = ST_SLOTS
-	if ua.has("--cutscene"):    # dev: screenshot a cutscene
-		cutscene_queue = ["intro"]
-		game_state = ST_CUTSCENE
+	var ci := ua.find("--cutscene")   # dev: screenshot a story beat, e.g. --cutscene v2
+	if ci != -1:
+		var id := ua[ci + 1] if ci + 1 < ua.size() and not ua[ci + 1].begins_with("--") else "intro"
+		begin_cutscene([id])
+	var ti := ua.find("--tutorial")   # dev: screenshot a lesson, e.g. --tutorial two
+	if ti != -1:
+		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "one"
+		begin_tutorials([id], ST_MENU)
+	var ei := ua.find("--establish")  # dev: screenshot a venue exterior card, e.g. --establish 3
+	if ei != -1:
+		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2
+		game_state = ST_ESTABLISH
+		cine_tick = 0
+	var ni := ua.find("--csn")        # dev: pin a specific shot index for a stable capture
+	if ni != -1 and ni + 1 < ua.size():
+		cs_shot = int(ua[ni + 1])
+		cs_freeze = true
+	if ua.has("--eggbreak"):          # dev: exercise the egg-break effect on the stage
+		_eggdemo = true
+		prop_type = PROP_EGGS
+		game_state = ST_PLAY
 
 
 func _physics_process(_delta: float) -> void:
@@ -294,12 +332,19 @@ func _physics_process(_delta: float) -> void:
 			_capture_and_quit()
 			return
 	if game_state != ST_PLAY:
-		queue_redraw()   # menus and cutscenes are static; nothing simulates
+		cine_tick += 1           # drives cutscene / establish / menu motion
+		if game_state == ST_CUTSCENE or game_state == ST_TUTORIAL:
+			cutscene_autoadvance()   # shots play themselves, movie-like, until skipped
+		queue_redraw()
 		return
 	if sheet_open or shop_open:
 		queue_redraw()   # the sheet and shop pause the sim; nothing advances
 		return
 	tick += 1
+	step_effects()   # age the egg-break shards and yolk splats
+	if _eggdemo and tick % 42 == 0:
+		var vp := get_viewport_rect().size
+		spawn_egg_break(Vector2(vp.x * 0.5 + randf_range(-140, 140), vp.y * 0.42))
 	if _demo:
 		_demo_step()
 	else:
@@ -334,8 +379,11 @@ func _input(event: InputEvent) -> void:
 		ST_SETTINGS:
 			settings_input(kc)
 			return
-		ST_CUTSCENE:
-			advance_cutscene()
+		ST_CUTSCENE, ST_TUTORIAL:
+			cutscene_key(kc)
+			return
+		ST_ESTABLISH:
+			establish_key()
 			return
 	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
@@ -418,8 +466,26 @@ func _input(event: InputEvent) -> void:
 
 
 func toggle_mode() -> void:
-	mode = MODE_PERFORM if mode == MODE_TRAIN else MODE_TRAIN
-	start_run(num_balls)   # restart cleanly in the new mode
+	if mode == MODE_TRAIN:
+		begin_performance(num_balls)   # show the venue exterior, then go on stage
+	else:
+		mode = MODE_TRAIN
+		start_run(num_balls)           # dropping back to practice is instant
+
+
+func begin_performance(n: int) -> void:
+	# a performance opens on an establishing shot of WHERE you are about to play,
+	# the way a film cuts to the outside of the building before the scene inside
+	mode = MODE_PERFORM
+	establish_after = n
+	establish_venue = venue_index()
+	game_state = ST_ESTABLISH
+	cine_tick = 0
+
+
+func establish_key() -> void:
+	game_state = ST_PLAY
+	start_run(establish_after)   # the card dismissed: walk out and begin the set
 
 
 func cycle_prop(dir: int) -> void:
@@ -438,9 +504,22 @@ func try_buy(kind: int) -> void:
 	# buy one more of a prop; you can stock as many as you can afford
 	var cost := int(PROPS[kind]["cost"])
 	if money >= cost:
+		var was := available(kind)
 		money -= cost
 		prop_count[kind] += 1
 		save_progress()
+		if not was and available(kind):
+			offer_prop_tutorial(kind)   # first time you can juggle these: explain them
+
+
+func offer_prop_tutorial(kind: int) -> void:
+	# the first time a new prop becomes juggle-able, play its explained lesson once
+	var id := "prop_%d" % kind
+	if seen_tuts.has(id):
+		return
+	seen_tuts.append(id)
+	shop_open = false            # clear the shop overlay for a clean lesson handoff
+	begin_tutorials([id], ST_PLAY)
 
 
 func try_buy_glasses() -> void:
@@ -456,7 +535,7 @@ func try_buy_glasses() -> void:
 # -----------------------------------------------------------------------------
 
 func menu_input(kc: int) -> void:
-	var n := 3   # Play, Settings, Quit
+	var n := 4   # Play, Tutorials, Settings, Quit
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -468,9 +547,11 @@ func menu_input(kc: int) -> void:
 					menu_sel = 0
 					game_state = ST_SLOTS
 				1:
+					begin_tutorials(["one", "two", "cascade"], ST_MENU)
+				2:
 					menu_sel = 0
 					game_state = ST_SETTINGS
-				2:
+				3:
 					get_tree().quit()
 		KEY_ESCAPE:
 			get_tree().quit()
@@ -522,14 +603,87 @@ func settings_input(kc: int) -> void:
 			game_state = ST_MENU
 
 
-func advance_cutscene() -> void:
-	if cutscene_queue.size() > 0:
-		cutscene_queue.pop_front()
-	if cutscene_queue.is_empty():
-		view_venue = -1
-		game_state = ST_PLAY
-		if not started:
-			start_run(3)   # coming out of the opening cutscene into the first run
+# --- cinematic beat engine (shared by story cutscenes and tutorials) ----------
+# A "beat" (a story milestone, or one lesson) is a list of SHOTS. Each shot draws
+# an animated tableau and holds for a while, then cuts to the next with a fade,
+# so a beat plays like a short film. A key press skips forward. cine_tick drives
+# all the motion; cs_shot / cs_shot_start track the cut and the fade.
+
+func begin_cutscene(beats: Array) -> void:
+	cutscene_queue.assign(beats)
+	game_state = ST_CUTSCENE
+	cine_tick = 0
+	start_beat()
+
+
+func begin_tutorials(lessons: Array, ret: int) -> void:
+	tut_queue.assign(lessons)
+	tut_return = ret
+	game_state = ST_TUTORIAL
+	cine_tick = 0
+	start_beat()
+
+
+func cur_queue() -> Array:
+	return tut_queue if game_state == ST_TUTORIAL else cutscene_queue
+
+
+func cur_beat_id() -> String:
+	var q := cur_queue()
+	return String(q[0]) if q.size() > 0 else ""
+
+
+func cur_script() -> Array:
+	var id := cur_beat_id()
+	return tutorial_script(id) if game_state == ST_TUTORIAL else cutscene_script(id)
+
+
+func start_beat() -> void:
+	cs_shot = 0
+	cs_shot_start = cine_tick
+
+
+func cutscene_key(_kc: int) -> void:
+	next_shot()   # any key cuts forward to the next shot
+
+
+func cutscene_autoadvance() -> void:
+	if cs_freeze:
+		return
+	var script := cur_script()
+	if script.is_empty():
+		finish_beats()
+		return
+	var shot: Dictionary = script[mini(cs_shot, script.size() - 1)]
+	if cine_tick - cs_shot_start >= int(shot.get("hold", 300)):
+		next_shot()
+
+
+func next_shot() -> void:
+	var script := cur_script()
+	if cs_shot + 1 < script.size():
+		cs_shot += 1
+		cs_shot_start = cine_tick
+		return
+	var q := cur_queue()
+	if q.size() > 0:
+		q.pop_front()
+	if q.is_empty():
+		finish_beats()
+	else:
+		start_beat()
+
+
+func finish_beats() -> void:
+	view_venue = -1
+	if game_state == ST_TUTORIAL:
+		game_state = tut_return
+		if tut_return == ST_PLAY and not started:
+			start_run(num_balls)
+		return
+	game_state = ST_PLAY
+	if not started:
+		start_run(3)   # coming out of the opening cutscene into the first run
 
 
 func start_slot(i: int) -> void:
@@ -537,8 +691,7 @@ func start_slot(i: int) -> void:
 	var fresh := not FileAccess.file_exists(slot_path(i))
 	if fresh:
 		reset_new_game()
-		cutscene_queue = ["intro"]
-		game_state = ST_CUTSCENE
+		begin_cutscene(["intro"])
 	else:
 		load_progress()
 		game_state = ST_PLAY
@@ -605,26 +758,160 @@ func save_settings() -> void:
 	cf.save(SETTINGS_PATH)
 
 
-func cutscene_data(id: String) -> Dictionary:
+func cutscene_script(id: String) -> Array:
+	# Each story beat is a short film: a list of animated SHOTS. "scene" picks the
+	# tableau, "stage" the moment inside it, "who" names a speaker (gold), "cap" is
+	# the line, "hold" is how long it plays before it auto-cuts. Prose stays warm
+	# and spare (STORY.md), and free of dashes and semicolons.
 	match id:
 		"intro":
-			return {"venue": 0, "title": "The Backyard",
-				"text": "Bruna hands you three worn balls. \"Gear gets you to the door,\" she says. \"The crowd is what you earn.\"  Make your first throw."}
+			return [
+				{"scene": "backyard", "stage": 0, "who": "", "hold": 340,
+					"cap": "A backyard at dusk. An old street juggler named Bruna presses three worn balls into your hands and steps back."},
+				{"scene": "backyard", "stage": 1, "who": "Bruna", "hold": 360,
+					"cap": "\"Three balls. Two hands. Everything else in this trade is just noise on top of that.\""},
+				{"scene": "backyard", "stage": 2, "who": "Bruna", "hold": 380,
+					"cap": "\"Gear gets you to the door. The crowd is the thing you earn once you are inside. Now throw.\""},
+				{"scene": "backyard", "stage": 3, "who": "", "hold": 360,
+					"cap": "So it begins, with nothing to your name but a pair of quick hands and something to prove."},
+			]
 		"v1":
-			return {"venue": 1, "title": "Street Corner",
-				"text": "A hat on the cobbles. The coins only come when the juggling is clean, and never a moment before."}
+			return [
+				{"scene": "street", "stage": 0, "who": "", "hold": 340,
+					"cap": "A cold corner and a warm lamp. A hat on the cobbles. The city does not slow down for anyone who has not earned it."},
+				{"scene": "street", "stage": 1, "who": "", "hold": 340,
+					"cap": "You find the pulse of it. One stranger slows to watch. Then another stops beside them."},
+				{"scene": "street", "stage": 2, "who": "", "hold": 380,
+					"cap": "The first coin rings in the hat. It only ever comes when the hands are clean, and never a moment before."},
+			]
 		"v2":
-			return {"venue": 2, "title": "Small Theatre",
-				"text": "Indoors and ticketed now. Silvio Grand headlines above you on the bill, gracious in the way that stings."}
+			return [
+				{"scene": "theatre", "stage": 0, "who": "", "hold": 340,
+					"cap": "Indoors now, and ticketed. Your name is printed on the bill, close to the bottom."},
+				{"scene": "theatre", "stage": 1, "who": "Silvio", "hold": 400,
+					"cap": "\"Real hands, kid. Genuine talent. A pity real hands are so slow to pay the rent.\""},
+				{"scene": "theatre", "stage": 2, "who": "", "hold": 380,
+					"cap": "Silvio Grand headlines above you, gracious in the way that stings. You watch from the wings, and you learn."},
+			]
 		"v3":
-			return {"venue": 3, "title": "The Circus",
-				"text": "A travelling troupe takes you in. Lanterns, knives, a found family, and the first taste of real spectacle."}
+			return [
+				{"scene": "circus", "stage": 0, "who": "", "hold": 340,
+					"cap": "A travelling troupe pitches its tent at the edge of town and waves you inside."},
+				{"scene": "circus", "stage": 1, "who": "", "hold": 380,
+					"cap": "Lantern light and sawdust and a found family. Here the spectacle is real, and so is the fall."},
+				{"scene": "circus", "stage": 2, "who": "", "hold": 380,
+					"cap": "They teach you the weight of a blade and the cost of dropping one. You decide not to drop one."},
+			]
 		"v4":
-			return {"venue": 4, "title": "The Championship",
-				"text": "Scored, not applauded. Silvio wins on paper with the priciest torches. You place second on a cleaner run, and the gap narrows."}
+			return [
+				{"scene": "champ", "stage": 0, "who": "", "hold": 340,
+					"cap": "No hat this time. A scoreboard. The best in the country, measured down to the single catch."},
+				{"scene": "champ", "stage": 1, "who": "Silvio", "hold": 400,
+					"cap": "\"Second place. Close, though. Buy yourself better torches and maybe next year is yours.\""},
+				{"scene": "champ", "stage": 2, "who": "", "hold": 420,
+					"cap": "He wins on paper with the priciest gear money can buy. You place second on a cleaner run. The gap is narrowing, and it is narrowing from your side."},
+			]
 		_:
-			return {"venue": 5, "title": "The World Arena",
-				"text": "The largest crowd there is, and Silvio watches from the seats now. No gear can carry this. Only your hands can."}
+			return [
+				{"scene": "arena", "stage": 0, "who": "", "hold": 360,
+					"cap": "The largest crowd there is, a field of small warm lights in one great dark bowl."},
+				{"scene": "arena", "stage": 1, "who": "", "hold": 400,
+					"cap": "Silvio watches from the seats now. No gear on earth can carry this stage. Only your hands can."},
+				{"scene": "arena", "stage": 2, "who": "", "hold": 420,
+					"cap": "So you throw, the way she taught you in a backyard a lifetime ago. Clean catch. Clean throw. The whole world holds its breath."},
+			]
+
+
+func tutorial_script(id: String) -> Array:
+	# Lessons reuse the same film engine, but the tableau is a live demonstration:
+	# a figure juggling the exact pattern being explained, with the keys spelled out.
+	match id:
+		"one":
+			return [
+				{"scene": "lesson", "demo": 1, "hold": 380,
+					"cap": "Start with one ball. Toss it in a gentle arc from one hand to the other, about eye height."},
+				{"scene": "lesson", "demo": 1, "hold": 440,
+					"cap": "Catch with D (left hand) and K (right). Throw with F and J. Hold a throw key to send the ball higher."},
+				{"scene": "lesson", "demo": 1, "hold": 380,
+					"cap": "The whole game lives inside this one arc. Make it smooth and everything above it follows."},
+			]
+		"two":
+			return [
+				{"scene": "lesson", "demo": 2, "hold": 420,
+					"cap": "Now two, one ball resting in each hand. Throw the first, and as it reaches its peak, throw the second up under it."},
+				{"scene": "lesson", "demo": 2, "hold": 440,
+					"cap": "Two throws, two catches, always in that order. Never throw into a hand that is about to catch."},
+				{"scene": "lesson", "demo": 2, "hold": 400,
+					"cap": "This exchange is the heartbeat of every pattern above it. Own it before you reach for a third."},
+			]
+		"cascade":
+			return [
+				{"scene": "lesson", "demo": 3, "hold": 440,
+					"cap": "Three balls make a cascade. Each throw crosses to the far hand, one after another, in a steady weave."},
+				{"scene": "lesson", "demo": 3, "hold": 440,
+					"cap": "Keep the height matched and the rhythm even. It is rushed throws that break a run, almost never slow ones."},
+				{"scene": "lesson", "demo": 3, "hold": 420,
+					"cap": "Odd counts cascade across, even counts fountain in two columns. The rest is just more of the same nerve."},
+			]
+		"prop_1":
+			return [
+				{"scene": "lessonprop", "kind": PROP_EGGS, "hold": 400,
+					"cap": "Eggs. As light as balls and just as easy to throw. It is the catch that punishes you."},
+				{"scene": "lessonprop", "kind": PROP_EGGS, "hold": 440,
+					"cap": "Drop one and it is gone for good, a yolk on the boards and one fewer in your basket. Soft hands only."},
+			]
+		"prop_2":
+			return [
+				{"scene": "lessonprop", "kind": PROP_RINGS, "hold": 400,
+					"cap": "Rings. Bigger and heavier than balls, so they hang a touch longer and land closer to where you aim."},
+				{"scene": "lessonprop", "kind": PROP_RINGS, "hold": 440,
+					"cap": "Catch them by the rim as they fall flat toward you. They reward Accuracy, so train it before you flash them."},
+			]
+		"prop_3":
+			return [
+				{"scene": "lessonprop", "kind": PROP_CLUBS, "hold": 420,
+					"cap": "Clubs. These tumble in the air, so you catch the handle, not the spin. Read the rotation, not just the fall."},
+				{"scene": "lessonprop", "kind": PROP_CLUBS, "hold": 440,
+					"cap": "They are heavy. Below their Required Strength a club sags low and wild, so build Strength or it will fight you."},
+			]
+		"prop_4":
+			return [
+				{"scene": "lessonprop", "kind": PROP_KNIVES, "hold": 420,
+					"cap": "Knives. A club with a temper. They spin fast and glint hard, and the crowd leans in for exactly that reason."},
+				{"scene": "lessonprop", "kind": PROP_KNIVES, "hold": 440,
+					"cap": "Endurance keeps your hands honest over a long set. Tired hands and sharp steel do not mix, so stay rested."},
+			]
+		"prop_5":
+			return [
+				{"scene": "lessonprop", "kind": PROP_TORCHES, "hold": 440,
+					"cap": "Torches. The top of the ladder, lit and roaring. The heaviest throw and the most spectacle in the game."},
+				{"scene": "lessonprop", "kind": PROP_TORCHES, "hold": 460,
+					"cap": "They demand real Strength and a steady nerve. Master these and there is nothing left you cannot hold."},
+			]
+		_:
+			return [
+				{"scene": "lesson", "demo": 3, "hold": 360,
+					"cap": "Keep your throws even and your catches soft. Everything in this game grows from that."},
+			]
+
+
+func beat_title(id: String) -> String:
+	match id:
+		"intro": return "The Backyard"
+		"v1": return "Street Corner"
+		"v2": return "The Small Theatre"
+		"v3": return "The Circus"
+		"v4": return "The Championship"
+		"v5", "v6", "v7", "v8", "v9": return "The World Arena"
+		"one": return "Lesson  -  One Ball"
+		"two": return "Lesson  -  Two Balls"
+		"cascade": return "Lesson  -  The Cascade"
+		"prop_1": return "New Prop  -  Eggs"
+		"prop_2": return "New Prop  -  Rings"
+		"prop_3": return "New Prop  -  Clubs"
+		"prop_4": return "New Prop  -  Knives"
+		"prop_5": return "New Prop  -  Torches"
+		_: return ""
 
 
 # -----------------------------------------------------------------------------
@@ -991,10 +1278,11 @@ func on_round_end() -> void:
 	# crossing into a new venue plays its promotion cutscene, once
 	var vi := venue_index()
 	if vi > venue_seen:
+		var beats: Array[String] = []
 		for k in range(venue_seen + 1, vi + 1):
-			cutscene_queue.append("v%d" % k)
+			beats.append("v%d" % k)
 		venue_seen = vi
-		game_state = ST_CUTSCENE
+		begin_cutscene(beats)
 	save_progress()
 
 
@@ -1273,6 +1561,7 @@ func drop_ball(b: Ball, why: String) -> void:
 		prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
 		save_progress()
 		dtext = "SPLAT"
+		spawn_egg_break(flight_pos(b))   # shell shards fly, a yolk splats on the floor
 	add_popup(b.to_pos + Vector2(0, -6), dtext, Color(1.0, 0.32, 0.3))
 	# only a performance ends when the crowd is lost; training just plays on
 	if mode == MODE_PERFORM and applause <= 0.0:
@@ -1339,13 +1628,19 @@ func _draw() -> void:
 		ST_SETTINGS:
 			draw_settings(font, s)
 			return
-		ST_CUTSCENE:
+		ST_CUTSCENE, ST_TUTORIAL:
 			draw_cutscene(font, s)
 			return
+		ST_ESTABLISH:
+			draw_establish(font, s)
+			return
 	draw_backdrop(s)
+	draw_egg_splats()      # yolk on the floor sits behind the performer
 	draw_juggler(s)
 	draw_targets()
 	draw_balls_in_flight()
+	draw_egg_shards()      # flying shell pieces read above the stage
+	draw_vignette(s, 0.5)  # frame the lit stage so it reads photographed, not flat
 	draw_hud(font, s)
 	draw_popups(font)
 	if sheet_open:
@@ -1360,6 +1655,12 @@ func draw_backdrop(s: Vector2) -> void:
 	var glow: Color = v["glow"]
 	var floor_c: Color = v["floor"]
 	var spot: float = v["spot"]
+
+	# a warm vertical gradient behind everything gives the stage depth instead of a
+	# flat black void (the biggest single "cheap look" fix on the play screen)
+	var sky_top := Color(floor_c.r * 0.7, floor_c.g * 0.7, floor_c.b * 0.9)
+	var sky_bot := Color(glow.r * 0.10 + 0.02, glow.g * 0.09 + 0.02, glow.b * 0.10 + 0.03)
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
 
 	# spotlight cone from above centre
 	var top := Vector2(s.x * 0.5, -40.0)
@@ -1886,27 +2187,37 @@ func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> 
 # -----------------------------------------------------------------------------
 
 func draw_menu(font: Font, s: Vector2) -> void:
-	view_venue = 2                      # a warm theatre palette for the title
-	draw_backdrop(s)
-	view_venue = -1
-	# a small arced-balls motif near the top (no figure, so nothing sits on the text)
 	var cx := s.x * 0.5
-	for i in 3:
-		var t := float(i) / 2.0
-		var bx := cx + lerpf(-120.0, 120.0, t)
-		var by := s.y * 0.16 - sin(t * PI) * 44.0
-		draw_ball_shape(Vector2(bx, by), ball_color(i), 1.3)
+	# a deep theatre backdrop: warm gradient, one spotlight, a row of footlights
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.05, 0.07), Color(0.03, 0.02, 0.03), 22)
+	draw_spotlight_cone(s, cx, 0.10)
+	for i in 16:
+		var lx := s.x * (float(i) + 0.5) / 16.0
+		var fl := 0.6 + 0.4 * sin(float(cine_tick) * 0.06 + float(i))
+		draw_circle(Vector2(lx, s.y - 28.0), 14.0, Color(1.0, 0.7, 0.3, 0.08 * fl))
+		draw_circle(Vector2(lx, s.y - 28.0), 5.0, Color(1.0, 0.72, 0.32, 0.6 * fl))
+	draw_dust(s, 22, Color(1.0, 0.85, 0.55))
 
-	draw_string(font, Vector2(0, s.y * 0.36), "JUGGLE", HORIZONTAL_ALIGNMENT_CENTER, s.x, 96, Color(1.0, 0.86, 0.5))
-	draw_string(font, Vector2(0, s.y * 0.36 + 36.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
-	var opts := ["Play", "Settings", "Quit"]
-	var oy := s.y * 0.60
+	# a live juggling cascade above the title (real motion, not a frozen motif)
+	var dj := demo_juggle(Vector2(cx, s.y * 0.15), 1.0, 3)
+	for b in dj["balls"]:
+		draw_ball_shape(b["pos"], b["col"], 1.25)
+
+	draw_title_glow(font, s.y * 0.32, "JUGGLE", 92, Color(1.0, 0.88, 0.5), s)
+	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, s.y * 0.32 + 160.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
+
+	var opts := ["Play", "Tutorials", "Settings", "Quit"]
+	var oy := s.y * 0.62
 	for i in opts.size():
 		var sel := i == menu_sel
 		var txt := ("%s" % opts[i]) if not sel else (">    %s    <" % opts[i])
 		var col := Color(1.0, 0.9, 0.55) if sel else Color(0.72, 0.66, 0.6)
-		draw_string(font, Vector2(0, oy + float(i) * 46.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
-	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down to choose    Enter to select", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+		draw_string(font, Vector2(0, oy + float(i) * 44.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
+	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down to choose    Enter to select", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_slots(font: Font, s: Vector2) -> void:
@@ -1935,6 +2246,8 @@ func draw_slots(font: Font, s: Vector2) -> void:
 	var bsel := menu_sel == NUM_SLOTS
 	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to play    X to delete    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_settings(font: Font, s: Vector2) -> void:
@@ -1960,23 +2273,411 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(0, oy + 3.0 * 56.0 + 34.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	draw_string(font, Vector2(0, s.y - 66.0), "audio options arrive with the soundtrack", HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(0.62, 0.58, 0.54))
 	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to toggle    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
+
+# =============================================================================
+# Cinematic layer. Everything below is procedural (the code-only art rule,
+# ART_AND_MUSIC.md): the film-style cutscenes, the establishing cards, the
+# tutorial demos, and the shared "royal" polish (gradients, vignette, letterbox,
+# gold frames, drifting dust). cine_tick drives all the motion.
+# =============================================================================
 
 func draw_cutscene(font: Font, s: Vector2) -> void:
-	var id := String(cutscene_queue[0]) if cutscene_queue.size() > 0 else "intro"
-	var d := cutscene_data(id)
-	view_venue = int(d["venue"])
-	draw_backdrop(s)
-	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
-	hclose = [0.0, 0.0]
-	draw_juggler(s)
-	view_venue = -1
+	var script := cur_script()
+	if script.is_empty():
+		return
+	var shot: Dictionary = script[clampi(cs_shot, 0, script.size() - 1)]
+	draw_shot(shot, s)
 
-	draw_string(font, Vector2(0, s.y * 0.16), String(d["title"]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 46, Color(1.0, 0.88, 0.55))
-	var py := s.y * 0.72
-	draw_rect(Rect2(0, py, s.x, s.y - py), Color(0.03, 0.02, 0.03, 0.84))
-	draw_multiline_string(font, Vector2(90.0, py + 40.0), String(d["text"]), HORIZONTAL_ALIGNMENT_LEFT, s.x - 180.0, 22, -1, Color(0.95, 0.9, 0.82))
-	draw_string(font, Vector2(0, s.y - 24.0), "press any key to continue", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.7, 0.62))
+	# each cut dissolves in from black, so the shots read as a film, not a slideshow
+	var age := cine_tick - cs_shot_start
+	var fin := clampf(float(age) / 22.0, 0.0, 1.0)
+	if fin < 1.0:
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
+	draw_vignette(s, 0.62)
+
+	var topbar := 70.0
+	var botbar := 122.0
+	draw_letterbox(s, topbar, botbar)
+
+	# title, centred in the top bar, with a gold ornament rule under it
+	var title := beat_title(cur_beat_id())
+	draw_title_glow(font, 30.0, title, 30, Color(1.0, 0.88, 0.55), s)
+	draw_ornament(s.x * 0.5, 58.0, 150.0, Color(0.82, 0.62, 0.34, 0.85))
+
+	# caption in the lower bar, fading in just after the picture
+	var capA := clampf(float(age - 8) / 20.0, 0.0, 1.0)
+	var who := String(shot.get("who", ""))
+	var cap := String(shot.get("cap", ""))
+	var mx := 96.0
+	var cy := s.y - botbar + 32.0
+	if who != "":
+		draw_string(font, Vector2(mx, cy), who, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(1.0, 0.82, 0.42, capA))
+		cy += 27.0
+	draw_multiline_string(font, Vector2(mx, cy), cap, HORIZONTAL_ALIGNMENT_LEFT, s.x - 2.0 * mx, 20, -1, Color(0.95, 0.9, 0.82, capA))
+
+	draw_shot_dots(script.size(), cs_shot, s.x * 0.5, s.y - 20.0)
+	draw_string(font, Vector2(s.x - 220.0, s.y - 14.0), "any key:  next", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.72, 0.67, 0.6))
+
+
+func draw_shot(shot: Dictionary, s: Vector2) -> void:
+	match String(shot.get("scene", "")):
+		"backyard": scene_backyard(s, int(shot.get("stage", 0)))
+		"street": scene_street(s, int(shot.get("stage", 0)))
+		"theatre": scene_theatre(s, int(shot.get("stage", 0)))
+		"circus": scene_circus(s, int(shot.get("stage", 0)))
+		"champ": scene_champ(s, int(shot.get("stage", 0)))
+		"arena": scene_arena(s, int(shot.get("stage", 0)))
+		"lesson": scene_lesson(s, int(shot.get("demo", 3)))
+		"lessonprop": scene_lessonprop(s, int(shot.get("kind", PROP_RINGS)))
+		_: draw_venue_exterior(s, 0)
+
+
+# --- the establishing card: WHERE you are about to perform --------------------
+
+func draw_establish(font: Font, s: Vector2) -> void:
+	draw_venue_exterior(s, establish_venue)
+	var fin := clampf(float(cine_tick) / 26.0, 0.0, 1.0)
+	if fin < 1.0:
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
+	draw_vignette(s, 0.6)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
+
+	# a small tag up top, then the venue name and a warm prompt, all in the light
+	var tagA := clampf(float(cine_tick - 10) / 20.0, 0.0, 1.0)
+	draw_string(font, Vector2(0, s.y * 0.12), "TONIGHT  YOU  PERFORM  AT", HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.78, 0.55, 0.85 * tagA))
+	var vn := String(venue_data(establish_venue)["name"]).to_upper()
+	draw_title_glow(font, s.y * 0.14 + 12.0, vn, 56, Color(1.0, 0.9, 0.55), s)
+	draw_ornament(s.x * 0.5, s.y * 0.14 + 78.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
+
+	var py := s.y - 70.0
+	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
+	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
+	draw_string(font, Vector2(0, s.y - 34.0), "press any key to step on stage", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
+
+
+# --- shared premium-look helpers ---------------------------------------------
+
+func draw_gradient_v(r: Rect2, top: Color, bot: Color, steps: int = 22) -> void:
+	# a vertical gradient, drawn as stacked strips (no shaders, per the art rule)
+	var n := maxi(1, steps)
+	for i in n:
+		var f := float(i) / float(n)
+		var y := r.position.y + r.size.y * f
+		draw_rect(Rect2(r.position.x, y, r.size.x, r.size.y / float(n) + 1.0), top.lerp(bot, f))
+
+
+func draw_gradient_h(r: Rect2, left: Color, right: Color, steps: int = 22) -> void:
+	var n := maxi(1, steps)
+	for i in n:
+		var f := float(i) / float(n)
+		var x := r.position.x + r.size.x * f
+		draw_rect(Rect2(x, r.position.y, r.size.x / float(n) + 1.0, r.size.y), left.lerp(right, f))
+
+
+func draw_vignette(s: Vector2, strength: float = 0.55) -> void:
+	# darken the four edges so the eye is pulled to the lit centre. This one cheap
+	# trick is most of what makes a flat scene read as photographed and rich.
+	var band := 170.0
+	var dk := Color(0.02, 0.008, 0.02, strength)
+	var clear := Color(0.02, 0.008, 0.02, 0.0)
+	draw_gradient_v(Rect2(0, 0, s.x, band), dk, clear, 18)
+	draw_gradient_v(Rect2(0, s.y - band, s.x, band), clear, dk, 18)
+	draw_gradient_h(Rect2(0, 0, band, s.y), dk, clear, 18)
+	draw_gradient_h(Rect2(s.x - band, 0, band, s.y), clear, dk, 18)
+
+
+func draw_letterbox(s: Vector2, top: float, bot: float) -> void:
+	draw_rect(Rect2(0, 0, s.x, top), Color(0.02, 0.01, 0.02, 1.0))
+	draw_rect(Rect2(0, s.y - bot, s.x, bot), Color(0.02, 0.01, 0.02, 1.0))
+	draw_line(Vector2(0, top), Vector2(s.x, top), Color(0.8, 0.6, 0.32, 0.5), 1.5)
+	draw_line(Vector2(0, s.y - bot), Vector2(s.x, s.y - bot), Color(0.8, 0.6, 0.32, 0.5), 1.5)
+
+
+func draw_frame(s: Vector2, inset: float, col: Color) -> void:
+	# a royal double gold border with small corner ticks
+	var r := Rect2(inset, inset, s.x - 2.0 * inset, s.y - 2.0 * inset)
+	draw_rect(r, col, false, 2.0)
+	var r2 := r.grow(-6.0)
+	draw_rect(r2, Color(col.r, col.g, col.b, col.a * 0.5), false, 1.0)
+	var t := 16.0
+	for c in [r.position, Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), r.end]:
+		var sx := 1.0 if c.x < s.x * 0.5 else -1.0
+		var sy := 1.0 if c.y < s.y * 0.5 else -1.0
+		draw_line(c, c + Vector2(sx * t, 0), col, 3.0)
+		draw_line(c, c + Vector2(0, sy * t), col, 3.0)
+
+
+func draw_ornament(cx: float, y: float, half_w: float, col: Color) -> void:
+	# a thin rule with a centre diamond and end dots, a classic decorative flourish
+	draw_line(Vector2(cx - half_w, y), Vector2(cx - 10.0, y), col, 2.0)
+	draw_line(Vector2(cx + 10.0, y), Vector2(cx + half_w, y), col, 2.0)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx, y - 5.0), Vector2(cx + 6.0, y), Vector2(cx, y + 5.0), Vector2(cx - 6.0, y)]), col)
+	draw_circle(Vector2(cx - half_w, y), 2.5, col)
+	draw_circle(Vector2(cx + half_w, y), 2.5, col)
+
+
+func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, s: Vector2) -> void:
+	draw_string(font, Vector2(2, y + 2.0 + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, Color(0, 0, 0, 0.55))
+	draw_string(font, Vector2(0, y + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, col)
+
+
+func draw_dust(s: Vector2, n: int, glow: Color) -> void:
+	# warm motes drifting up through the light, a subtle atmosphere layer
+	for i in n:
+		var seed := float(i) * 41.3
+		var bx := fposmod(sin(seed) * 43758.5, 1.0)
+		var speed := 0.15 + fposmod(cos(seed) * 12.9, 1.0) * 0.25
+		var by := fposmod(0.9 - float(cine_tick) * 0.0008 * speed - float(i) * 0.13, 1.0)
+		var px := bx * s.x + sin(float(cine_tick) * 0.01 + seed) * 12.0
+		var py := by * s.y
+		var a := 0.10 + 0.10 * sin(float(cine_tick) * 0.03 + seed)
+		draw_circle(Vector2(px, py), 1.4, Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
+
+
+func draw_shot_dots(n: int, cur: int, cx: float, y: float) -> void:
+	var gap := 14.0
+	var x0 := cx - gap * float(n - 1) * 0.5
+	for i in n:
+		var on := i <= cur
+		draw_circle(Vector2(x0 + gap * float(i), y), 3.5 if on else 2.5,
+			Color(1.0, 0.85, 0.5, 0.95) if on else Color(0.6, 0.55, 0.5, 0.6))
+
+
+# --- procedural characters (Milo, Bruna, Silvio, the troupe) ------------------
+
+func milo_pal(vi: int) -> Dictionary:
+	var v := venue_data(vi)
+	return {"skin": Color(0.87, 0.64, 0.45), "coat": v["suit"], "coat_dk": v["suit_dk"],
+		"trouser": v["suit_dk"], "accent": v["vest"], "hair": Color(0.28, 0.16, 0.11), "hat": "none"}
+
+
+func bruna_pal() -> Dictionary:
+	return {"skin": Color(0.82, 0.62, 0.46), "coat": Color(0.46, 0.30, 0.34), "coat_dk": Color(0.32, 0.21, 0.24),
+		"trouser": Color(0.30, 0.24, 0.24), "accent": Color(0.80, 0.55, 0.45), "hair": Color(0.82, 0.80, 0.76), "shawl": true, "hat": "none"}
+
+
+func silvio_pal() -> Dictionary:
+	return {"skin": Color(0.90, 0.70, 0.55), "coat": Color(0.16, 0.15, 0.22), "coat_dk": Color(0.09, 0.08, 0.13),
+		"trouser": Color(0.10, 0.09, 0.13), "accent": Color(0.95, 0.82, 0.40), "hair": Color(0.14, 0.11, 0.09), "hat": "top"}
+
+
+func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, sleeve: Color, l1: float, l2: float, w: float) -> void:
+	var elbow := solve_elbow(shoulder, hand, l1, l2, bend)
+	draw_line(shoulder, elbow, sleeve, w * 2.0)
+	draw_line(elbow, hand, skin, w * 1.5)
+	draw_circle(elbow, w * 0.9, sleeve)
+	draw_circle(hand, w * 1.15, skin)
+
+
+func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand = null, mood: int = 0) -> void:
+	# a repositionable, rescalable version of the stage figure, so scenes can stage
+	# two or three people at once. pos is the FEET, the figure grows upward from it.
+	var breathe := sin(float(cine_tick) * 0.05 + pos.x * 0.02) * 1.4 * sc
+	var skin: Color = pal.get("skin", Color(0.87, 0.64, 0.45))
+	var coat: Color = pal["coat"]
+	var coat_dk: Color = pal["coat_dk"]
+	var trouser: Color = pal.get("trouser", coat_dk)
+	var hair: Color = pal.get("hair", Color(0.25, 0.15, 0.1))
+
+	var hipY := pos.y - 58.0 * sc
+	var shY := pos.y - 112.0 * sc + breathe
+	var headC := Vector2(pos.x, pos.y - 146.0 * sc + breathe)
+	var hr := 17.0 * sc
+
+	var lh: Vector2 = lhand if lhand != null else Vector2(pos.x - 34.0 * sc, hipY - 4.0 * sc)
+	var rh: Vector2 = rhand if rhand != null else Vector2(pos.x + 34.0 * sc, hipY - 4.0 * sc)
+
+	# legs
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(pos.x - 20.0 * sc, hipY), Vector2(pos.x - 3.0 * sc, hipY),
+		Vector2(pos.x - 6.0 * sc, pos.y), Vector2(pos.x - 19.0 * sc, pos.y)]), trouser)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(pos.x + 3.0 * sc, hipY), Vector2(pos.x + 20.0 * sc, hipY),
+		Vector2(pos.x + 19.0 * sc, pos.y), Vector2(pos.x + 6.0 * sc, pos.y)]), trouser)
+	fill_ellipse(Vector2(pos.x - 15.0 * sc, pos.y), 12.0 * sc, 5.0 * sc, Color(0.18, 0.11, 0.08))
+	fill_ellipse(Vector2(pos.x + 15.0 * sc, pos.y), 12.0 * sc, 5.0 * sc, Color(0.18, 0.11, 0.08))
+
+	# torso / coat
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(pos.x - 24.0 * sc, shY), Vector2(pos.x + 24.0 * sc, shY),
+		Vector2(pos.x + 20.0 * sc, hipY + 4.0 * sc), Vector2(pos.x - 20.0 * sc, hipY + 4.0 * sc)]), coat)
+	draw_circle(Vector2(pos.x - 24.0 * sc, shY), 10.0 * sc, coat)
+	draw_circle(Vector2(pos.x + 24.0 * sc, shY), 10.0 * sc, coat)
+	# a warm accent placket down the front
+	var accent: Color = pal.get("accent", coat_dk)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(pos.x - 6.0 * sc, shY + 6.0 * sc), Vector2(pos.x + 6.0 * sc, shY + 6.0 * sc),
+		Vector2(pos.x + 8.0 * sc, hipY), Vector2(pos.x - 8.0 * sc, hipY)]), accent)
+
+	# arms reach to the hands
+	draw_arm_s(Vector2(pos.x - 22.0 * sc, shY), lh, 1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
+	draw_arm_s(Vector2(pos.x + 22.0 * sc, shY), rh, -1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
+
+	# neck, head, hair, face
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(pos.x - 7.0 * sc, headC.y + hr - 3.0), Vector2(pos.x + 7.0 * sc, headC.y + hr - 3.0),
+		Vector2(pos.x + 9.0 * sc, shY + 4.0), Vector2(pos.x - 9.0 * sc, shY + 4.0)]), skin)
+	draw_circle(headC, hr, skin)
+	if pal.get("shawl", false):
+		# an old street juggler's shawl and hood
+		draw_circle(headC + Vector2(0, -2.0 * sc), hr + 3.0 * sc, hair)
+		draw_circle(headC, hr, skin)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(pos.x - 30.0 * sc, shY + 4.0), Vector2(pos.x + 30.0 * sc, shY + 4.0),
+			Vector2(pos.x + 22.0 * sc, shY + 30.0 * sc), Vector2(pos.x - 22.0 * sc, shY + 30.0 * sc)]), pal["coat_dk"])
+	else:
+		draw_circle(headC + Vector2(0, -hr * 0.5), hr, hair)   # hair cap
+		draw_circle(headC + Vector2(0, hr * 0.35), hr, skin)   # face lower half back over
+	if String(pal.get("hat", "none")) == "top":
+		draw_rect(Rect2(headC.x - hr - 3.0 * sc, headC.y - hr - 22.0 * sc, (hr + 3.0 * sc) * 2.0, 6.0 * sc), Color(0.08, 0.07, 0.1))
+		draw_rect(Rect2(headC.x - hr * 0.8, headC.y - hr - 22.0 * sc, hr * 1.6, 22.0 * sc), Color(0.10, 0.09, 0.12))
+		draw_rect(Rect2(headC.x - hr * 0.8, headC.y - hr - 8.0 * sc, hr * 1.6, 3.0 * sc), accent)
+	draw_person_face(headC, hr, mood)
+
+
+func draw_person_face(headC: Vector2, hr: float, mood: int) -> void:
+	var eye := Color(0.16, 0.10, 0.08)
+	draw_circle(headC + Vector2(-hr * 0.35, -hr * 0.05), hr * 0.15, eye)
+	draw_circle(headC + Vector2(hr * 0.35, -hr * 0.05), hr * 0.15, eye)
+	var my := headC.y + hr * 0.45
+	var w := hr * 0.4
+	var mouth := PackedVector2Array([Vector2(headC.x - w, my), Vector2(headC.x + w, my)])
+	if mood == 1:
+		mouth = PackedVector2Array([Vector2(headC.x - w, my - 1.5), Vector2(headC.x, my + 3.0), Vector2(headC.x + w, my - 1.5)])
+	elif mood == -1:
+		mouth = PackedVector2Array([Vector2(headC.x - w, my + 2.0), Vector2(headC.x, my - 2.0), Vector2(headC.x + w, my + 2.0)])
+	draw_polyline(mouth, Color(0.45, 0.20, 0.16), 2.0)
+
+
+func draw_simple_hand(pos: Vector2, close: float, inward: float, sc: float) -> void:
+	draw_circle(pos, 10.0 * sc, Color(0.86, 0.62, 0.42))
+	var spread := lerpf(0.5, 0.12, close)
+	var flen := lerpf(13.0, 7.0, close) * sc
+	var base_ang := -PI / 2.0 + close * inward * 0.6
+	for f in 4:
+		var ang := base_ang + (float(f) - 1.5) * spread
+		draw_line(pos, pos + Vector2(cos(ang), sin(ang)) * flen, Color(0.84, 0.60, 0.40), 3.8 * sc)
+
+
+# --- juggle demonstration (tutorials, and juggling story figures) -------------
+
+func demo_juggle(center: Vector2, sc: float, count: int) -> Dictionary:
+	# a small closed-form cascade: each ball rides a crossing arc, staggered in
+	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade
+	var hl := center + Vector2(-56.0 * sc, 42.0 * sc)
+	var hr := center + Vector2(56.0 * sc, 42.0 * sc)
+	var T := 52.0
+	var peak := 104.0 * sc
+	var t := float(cine_tick)
+	var out: Array = []
+	for i in count:
+		var phase := fposmod(t + float(i) * (T * 2.0 / float(maxi(1, count))), T * 2.0)
+		var seg := 0 if phase < T else 1
+		var u := (phase - float(seg) * T) / T
+		var frm := hl if seg == 0 else hr
+		var to := hr if seg == 0 else hl
+		var p := frm.lerp(to, u)
+		p.y -= peak * 4.0 * u * (1.0 - u)
+		out.append({"pos": p, "col": ball_color(i)})
+	return {"balls": out, "hl": hl, "hr": hr, "peak": peak}
+
+
+func draw_arc_guide(frm: Vector2, to: Vector2, peak: float, col: Color) -> void:
+	var pts := PackedVector2Array()
+	for k in 21:
+		var u := float(k) / 20.0
+		var p := frm.lerp(to, u)
+		p.y -= peak * 4.0 * u * (1.0 - u)
+		pts.append(p)
+	draw_polyline(pts, col, 1.5)
+
+
+func draw_prop_at(kind: int, pos: Vector2, sc: float, ang: float) -> void:
+	var col := prop_color(kind)
+	var halo := col
+	halo.a = 0.16
+	draw_circle(pos, 18.0 * sc, halo)
+	match kind:
+		PROP_EGGS: draw_egg(pos, col, sc)
+		PROP_RINGS: draw_ring_prop(pos, col, sc)
+		PROP_CLUBS: draw_club(pos, ang, sc)
+		PROP_KNIVES: draw_knife(pos, ang, sc)
+		PROP_TORCHES: draw_torch(pos, ang, sc)
+		_: draw_ball_shape(pos, col, sc)
+
+
+# --- the egg-break effect (shell shards fly, a yolk splats and spreads) --------
+
+func spawn_egg_break(at: Vector2) -> void:
+	var floor_y := get_viewport_rect().size.y * 0.80
+	for i in 8:
+		var ang := randf_range(-PI, 0.0)   # shell flies upward and out
+		var spd := randf_range(2.2, 5.2)
+		shards.append({
+			"pos": at + Vector2(randf_range(-4, 4), randf_range(-4, 4)),
+			"vel": Vector2(cos(ang), sin(ang)) * spd,
+			"ang": randf_range(0.0, TAU), "spin": randf_range(-0.4, 0.4),
+			"born": tick, "floor": floor_y + randf_range(-4, 6)})
+	splats.append({"pos": Vector2(at.x + randf_range(-8, 8), floor_y + randf_range(-2, 4)),
+		"r": 3.0, "born": tick})
+
+
+func step_effects() -> void:
+	var keep_sh: Array[Dictionary] = []
+	for d in shards:
+		var v: Vector2 = d["vel"]
+		v.y += 0.28   # gravity
+		v *= 0.995
+		var p: Vector2 = d["pos"] + v
+		if p.y >= float(d["floor"]):
+			p.y = float(d["floor"])
+			v = Vector2(v.x * 0.4, -v.y * 0.25)   # a small bounce, then settle
+			if absf(v.y) < 0.6:
+				v.y = 0.0
+		d["pos"] = p
+		d["vel"] = v
+		d["ang"] = float(d["ang"]) + float(d["spin"])
+		if tick - int(d["born"]) < 150:
+			keep_sh.append(d)
+	shards = keep_sh
+	var keep_sp: Array[Dictionary] = []
+	for d in splats:
+		d["r"] = minf(float(d["r"]) + 0.9, 16.0)   # the yolk spreads then holds
+		if tick - int(d["born"]) < 260:
+			keep_sp.append(d)
+	splats = keep_sp
+
+
+func draw_egg_splats() -> void:
+	for d in splats:
+		var age := tick - int(d["born"])
+		var a := clampf(1.0 - float(age) / 260.0, 0.0, 1.0)
+		var p: Vector2 = d["pos"]
+		var r: float = d["r"]
+		fill_ellipse(p, r, r * 0.4, Color(0.95, 0.82, 0.35, 0.5 * a))       # spread yolk
+		draw_circle(p, r * 0.45, Color(1.0, 0.7, 0.2, 0.8 * a))             # bright centre
+		fill_ellipse(p + Vector2(r * 0.8, 1.0), r * 0.3, r * 0.16, Color(0.97, 0.9, 0.7, 0.4 * a))
+
+
+func draw_egg_shards() -> void:
+	var shell := Color(0.97, 0.93, 0.84)
+	var shell_dk := Color(0.85, 0.80, 0.70)
+	for d in shards:
+		var age := tick - int(d["born"])
+		var a := clampf(1.0 - float(age) / 150.0, 0.0, 1.0)
+		var p: Vector2 = d["pos"]
+		var ang: float = d["ang"]
+		# a little curved shell fragment
+		draw_set_transform(p, ang, Vector2.ONE)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-4, 1), Vector2(0, -4), Vector2(4, 1), Vector2(0, 3)]),
+			Color(shell.r, shell.g, shell.b, a))
+		draw_line(Vector2(-4, 1), Vector2(4, 1), Color(shell_dk.r, shell_dk.g, shell_dk.b, a), 1.0)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func draw_stat_row(font: Font, x: float, y: float, w: float, name: String, value: int, note: String, keyhint: String) -> void:
@@ -1999,6 +2700,541 @@ func draw_popups(font: Font) -> void:
 		var c: Color = p["col"]
 		c.a = a
 		draw_string(font, pos, p["text"], HORIZONTAL_ALIGNMENT_CENTER, 120, 18, c)
+
+
+# --- venue exteriors: the "where", shared by establishing cards and wide shots -
+
+func draw_venue_exterior(s: Vector2, vi: int) -> void:
+	match vi:
+		0: ext_backyard(s)
+		1: ext_street(s)
+		2: ext_theatre(s)
+		3: ext_circus(s)
+		4: ext_champ(s)
+		_: ext_arena(s)
+
+
+func ext_backyard(s: Vector2) -> void:
+	var gy := s.y * 0.66
+	draw_gradient_v(Rect2(0, 0, s.x, gy), Color(0.13, 0.15, 0.28), Color(0.72, 0.46, 0.32), 26)
+	draw_circle(Vector2(s.x * 0.70, gy - 26.0), 62.0, Color(1.0, 0.72, 0.4, 0.22))
+	draw_circle(Vector2(s.x * 0.70, gy - 26.0), 34.0, Color(1.0, 0.84, 0.52, 0.45))
+	draw_stars(s, 22, 0.3)
+	draw_gradient_v(Rect2(0, gy, s.x, s.y - gy), Color(0.22, 0.28, 0.16), Color(0.07, 0.10, 0.06), 18)
+	draw_tree(Vector2(s.x * 0.18, gy), 1.05)
+	draw_house(Vector2(s.x * 0.74, gy), 158.0, 128.0)
+	draw_fence(s, gy - 4.0, s.x * 0.30, s.x * 0.64)
+	draw_grass(s, gy)
+	draw_dust(s, 18, Color(1.0, 0.85, 0.55))
+
+
+func ext_street(s: Vector2) -> void:
+	var gy := s.y * 0.72
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.04, 0.05, 0.12), Color(0.13, 0.10, 0.15), 26)
+	draw_moon(Vector2(s.x * 0.82, s.y * 0.18), 24.0)
+	draw_stars(s, 30, 0.42)
+	draw_city_row(s, gy)
+	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.09, 0.08, 0.10))
+	draw_streetlamp(Vector2(s.x * 0.32, gy), gy)
+	draw_hat_prop(Vector2(s.x * 0.32 + 46.0, gy - 2.0))
+	draw_dust(s, 16, Color(1.0, 0.8, 0.5))
+
+
+func ext_theatre(s: Vector2) -> void:
+	var gy := s.y * 0.80
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.06, 0.13), Color(0.32, 0.13, 0.15), 26)
+	draw_stars(s, 16, 0.28)
+	var fw := s.x * 0.64
+	var fh := s.y * 0.52
+	var fx := s.x * 0.5
+	draw_rect(Rect2(fx - fw * 0.5, gy - fh, fw, fh), Color(0.15, 0.10, 0.11))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(fx - fw * 0.52, gy - fh), Vector2(fx + fw * 0.52, gy - fh), Vector2(fx, gy - fh - 58.0)]), Color(0.17, 0.11, 0.12))
+	for k in 5:
+		var cx := fx - fw * 0.5 + fw * (0.12 + 0.19 * float(k))
+		draw_rect(Rect2(cx - 6.0, gy - fh + 30.0, 12.0, fh - 30.0), Color(0.21, 0.15, 0.14))
+	var dw := fw * 0.24
+	draw_rect(Rect2(fx - dw * 0.5, gy - fh * 0.46, dw, fh * 0.46), Color(1.0, 0.78, 0.4, 0.55))
+	draw_circle(Vector2(fx, gy - fh * 0.46), dw * 0.5, Color(1.0, 0.78, 0.4, 0.55))
+	draw_marquee(Vector2(fx, gy - fh * 0.66), fw * 0.5)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(fx - dw * 0.5, gy), Vector2(fx + dw * 0.5, gy), Vector2(fx + dw * 0.9, s.y), Vector2(fx - dw * 0.9, s.y)]), Color(0.5, 0.10, 0.12))
+	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.10, 0.06, 0.07))
+	draw_dust(s, 14, Color(1.0, 0.8, 0.5))
+
+
+func ext_circus(s: Vector2) -> void:
+	var gy := s.y * 0.76
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.05, 0.05, 0.13), Color(0.15, 0.07, 0.10), 26)
+	draw_moon(Vector2(s.x * 0.16, s.y * 0.18), 22.0)
+	draw_stars(s, 28, 0.42)
+	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.10, 0.08, 0.07))
+	draw_bigtop(Vector2(s.x * 0.5, gy), s.x * 0.52, s.y * 0.46)
+	draw_lantern_string(Vector2(s.x * 0.08, s.y * 0.30), Vector2(s.x * 0.92, s.y * 0.34))
+	draw_dust(s, 16, Color(1.0, 0.8, 0.5))
+
+
+func ext_champ(s: Vector2) -> void:
+	var gy := s.y * 0.78
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.05, 0.07, 0.15), Color(0.10, 0.13, 0.21), 26)
+	draw_stars(s, 20, 0.34)
+	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.08, 0.09, 0.12))
+	draw_arena_bowl(Vector2(s.x * 0.5, gy), s.x * 0.72, s.y * 0.42, Color(0.16, 0.18, 0.24), Color(0.6, 0.8, 1.0))
+	for bx in [s.x * 0.20, s.x * 0.36, s.x * 0.64, s.x * 0.80]:
+		draw_banner(Vector2(bx, gy - s.y * 0.30), Color(0.3, 0.5, 0.9))
+	draw_rect(Rect2(s.x * 0.5 - 42.0, gy - 92.0, 84.0, 92.0), Color(0.7, 0.85, 1.0, 0.4))
+	for fx in [s.x * 0.30, s.x * 0.70]:
+		draw_circle(Vector2(fx, s.y * 0.20), 42.0, Color(0.8, 0.9, 1.0, 0.12))
+	draw_dust(s, 12, Color(0.8, 0.9, 1.0))
+
+
+func ext_arena(s: Vector2) -> void:
+	var gy := s.y * 0.80
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.07, 0.05, 0.12), 26)
+	draw_stars(s, 46, 0.55)
+	for k in 3:
+		var ang := -PI * 0.5 + sin(float(cine_tick) * 0.01 + float(k) * 2.1) * 0.5
+		var src := Vector2(s.x * (0.2 + 0.3 * float(k)), gy - s.y * 0.18)
+		var dir := Vector2(cos(ang), sin(ang))
+		var perp := Vector2(-dir.y, dir.x) * 28.0
+		draw_colored_polygon(PackedVector2Array([src, src + dir * 620.0 + perp, src + dir * 620.0 - perp]), Color(0.9, 0.85, 0.7, 0.05))
+	draw_arena_bowl(Vector2(s.x * 0.5, gy), s.x * 0.96, s.y * 0.5, Color(0.10, 0.09, 0.16), Color(1.0, 0.85, 0.5))
+	for i in 120:
+		var seed := float(i) * 17.7
+		var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.7
+		var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.26 - 12.0
+		var a := 0.3 + 0.4 * sin(float(cine_tick) * 0.05 + seed)
+		draw_circle(Vector2(x, y), 1.5, Color(1.0, 0.8, 0.5, clampf(a, 0.1, 0.7)))
+	draw_dust(s, 20, Color(1.0, 0.85, 0.55))
+
+
+# --- exterior building / prop primitives -------------------------------------
+
+func draw_stars(s: Vector2, n: int, topfrac: float) -> void:
+	for i in n:
+		var seed := float(i) * 23.13
+		var x := fposmod(sin(seed) * 43758.5, 1.0) * s.x
+		var y := fposmod(cos(seed) * 24137.0, 1.0) * s.y * topfrac
+		var a := 0.3 + 0.5 * sin(float(cine_tick) * 0.04 + seed)
+		draw_circle(Vector2(x, y), 1.3, Color(1, 1, 1, clampf(a, 0.05, 0.7)))
+
+
+func draw_moon(pos: Vector2, r: float) -> void:
+	draw_circle(pos, r * 1.8, Color(0.9, 0.9, 0.8, 0.08))
+	draw_circle(pos, r, Color(0.96, 0.95, 0.86, 0.9))
+	draw_circle(pos + Vector2(r * 0.4, -r * 0.2), r * 0.85, Color(0.9, 0.88, 0.78, 0.2))
+
+
+func draw_house(base: Vector2, w: float, h: float) -> void:
+	draw_rect(Rect2(base.x - w * 0.5, base.y - h, w, h), Color(0.10, 0.09, 0.11))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(base.x - w * 0.6, base.y - h), Vector2(base.x + w * 0.6, base.y - h), Vector2(base.x, base.y - h - h * 0.5)]), Color(0.07, 0.06, 0.08))
+	var flick := 0.7 + 0.3 * sin(float(cine_tick) * 0.05)
+	var wx := base.x - w * 0.20
+	var wy := base.y - h * 0.66
+	draw_circle(Vector2(wx + w * 0.11, wy + h * 0.14), w * 0.3, Color(1.0, 0.7, 0.3, 0.12 * flick))
+	draw_rect(Rect2(wx, wy, w * 0.22, h * 0.30), Color(1.0, 0.78, 0.4, 0.92 * flick))
+	draw_rect(Rect2(wx, wy, w * 0.22, h * 0.30), Color(0.2, 0.12, 0.06), false, 2.0)
+	draw_line(Vector2(wx + w * 0.11, wy), Vector2(wx + w * 0.11, wy + h * 0.30), Color(0.2, 0.12, 0.06), 1.5)
+
+
+func draw_tree(base: Vector2, sc: float) -> void:
+	draw_rect(Rect2(base.x - 6.0 * sc, base.y - 70.0 * sc, 12.0 * sc, 70.0 * sc), Color(0.10, 0.08, 0.07))
+	var c := Color(0.09, 0.15, 0.09)
+	for o in [Vector2(0, -82), Vector2(-22, -66), Vector2(22, -68), Vector2(-10, -98), Vector2(12, -94)]:
+		draw_circle(base + o * sc, 27.0 * sc, c)
+
+
+func draw_fence(s: Vector2, y: float, x0: float, x1: float) -> void:
+	var col := Color(0.14, 0.11, 0.09)
+	draw_rect(Rect2(x0, y - 2.0, x1 - x0, 4.0), col)
+	var x := x0
+	while x <= x1:
+		draw_rect(Rect2(x, y - 22.0, 5.0, 22.0), col)
+		draw_colored_polygon(PackedVector2Array([Vector2(x, y - 22.0), Vector2(x + 5.0, y - 22.0), Vector2(x + 2.5, y - 28.0)]), col)
+		x += 18.0
+
+
+func draw_grass(s: Vector2, y: float) -> void:
+	var col := Color(0.13, 0.20, 0.10)
+	var x := 0.0
+	while x < s.x:
+		var hgt := 6.0 + fposmod(sin(x) * 20.0, 1.0) * 8.0
+		draw_line(Vector2(x, y + 6.0), Vector2(x + sin(float(cine_tick) * 0.02 + x) * 2.0, y + 6.0 - hgt), col, 2.0)
+		x += 14.0
+
+
+func draw_city_row(s: Vector2, gy: float) -> void:
+	var xs := [0.0, s.x * 0.14, s.x * 0.30, s.x * 0.50, s.x * 0.66, s.x * 0.82]
+	var hs := [0.34, 0.50, 0.42, 0.56, 0.38, 0.48]
+	for i in xs.size():
+		var bw := s.x * 0.17
+		var bh: float = s.y * float(hs[i])
+		var bx: float = float(xs[i])
+		draw_rect(Rect2(bx, gy - bh, bw, bh), Color(0.07, 0.07, 0.10))
+		var wy := gy - bh + 12.0
+		while wy < gy - 14.0:
+			var wx := bx + 8.0
+			while wx < bx + bw - 12.0:
+				var lit := fposmod(sin(wx * 3.1 + wy * 1.7 + float(i)) * 99.0, 1.0) > 0.62
+				draw_rect(Rect2(wx, wy, 7.0, 9.0), Color(1.0, 0.8, 0.4, 0.8) if lit else Color(0.13, 0.13, 0.17, 0.9))
+				wx += 14.0
+			wy += 18.0
+
+
+func draw_streetlamp(base: Vector2, gy: float) -> void:
+	for k in range(6, 0, -1):
+		draw_circle(Vector2(base.x, gy + 6.0), 20.0 + float(k) * 22.0, Color(1.0, 0.72, 0.36, 0.05 * (1.0 - float(k) / 7.0)))
+	fill_ellipse(Vector2(base.x, gy + 4.0), 92.0, 20.0, Color(1.0, 0.7, 0.35, 0.12))
+	draw_rect(Rect2(base.x - 3.0, base.y - 152.0, 6.0, 152.0), Color(0.06, 0.06, 0.08))
+	draw_rect(Rect2(base.x - 3.0, base.y - 152.0, 30.0, 5.0), Color(0.06, 0.06, 0.08))
+	var head := Vector2(base.x + 26.0, base.y - 150.0)
+	draw_circle(head, 30.0, Color(1.0, 0.75, 0.4, 0.20))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(head.x - 8.0, head.y), Vector2(head.x + 8.0, head.y), Vector2(head.x + 5.0, head.y + 12.0), Vector2(head.x - 5.0, head.y + 12.0)]), Color(1.0, 0.85, 0.5))
+
+
+func draw_hat_prop(pos: Vector2) -> void:
+	fill_ellipse(pos, 26.0, 8.0, Color(0.10, 0.08, 0.09))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(pos.x - 14.0, pos.y), Vector2(pos.x + 14.0, pos.y), Vector2(pos.x + 10.0, pos.y - 18.0), Vector2(pos.x - 10.0, pos.y - 18.0)]), Color(0.13, 0.10, 0.11))
+	draw_rect(Rect2(pos.x - 10.0, pos.y - 6.0, 20.0, 4.0), Color(0.7, 0.5, 0.3))
+
+
+func draw_marquee(center: Vector2, w: float) -> void:
+	var h := 34.0
+	draw_rect(Rect2(center.x - w * 0.5, center.y - h * 0.5, w, h), Color(0.10, 0.07, 0.08))
+	draw_rect(Rect2(center.x - w * 0.5, center.y - h * 0.5, w, h), Color(0.9, 0.7, 0.35), false, 2.0)
+	var n := int(w / 16.0)
+	for i in n:
+		var on := ((i + int(cine_tick / 12)) % 2) == 0
+		var bx := center.x - w * 0.5 + w * (float(i) + 0.5) / float(n)
+		var col := Color(1.0, 0.85, 0.4) if on else Color(0.4, 0.3, 0.2)
+		draw_circle(Vector2(bx, center.y - h * 0.5 - 4.0), 2.5, col)
+		draw_circle(Vector2(bx, center.y + h * 0.5 + 4.0), 2.5, col)
+	draw_string(ThemeDB.fallback_font, Vector2(center.x - w * 0.5, center.y + 6.0), "TONIGHT", HORIZONTAL_ALIGNMENT_CENTER, w, 18, Color(1.0, 0.85, 0.45))
+
+
+func draw_bigtop(base: Vector2, w: float, h: float) -> void:
+	var top := Vector2(base.x, base.y - h)
+	var n := 10
+	for i in n:
+		var a0 := lerpf(-w * 0.5, w * 0.5, float(i) / float(n))
+		var a1 := lerpf(-w * 0.5, w * 0.5, float(i + 1) / float(n))
+		var col := Color(0.78, 0.20, 0.22) if i % 2 == 0 else Color(0.94, 0.90, 0.82)
+		draw_colored_polygon(PackedVector2Array([top, Vector2(base.x + a0, base.y), Vector2(base.x + a1, base.y)]), col)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(base.x - 24.0, base.y), Vector2(base.x + 24.0, base.y), Vector2(base.x + 16.0, base.y - 70.0), Vector2(base.x - 16.0, base.y - 70.0)]), Color(0.08, 0.06, 0.06))
+	draw_circle(Vector2(base.x, base.y - 70.0), 16.0, Color(0.08, 0.06, 0.06))
+	draw_rect(Rect2(base.x - 30.0, base.y - 8.0, 60.0, 8.0), Color(0.6, 0.15, 0.15))
+	draw_rect(Rect2(top.x - 2.0, top.y - 40.0, 4.0, 40.0), Color(0.3, 0.2, 0.14))
+	var fl := sin(float(cine_tick) * 0.1) * 6.0
+	draw_colored_polygon(PackedVector2Array([Vector2(top.x + 2.0, top.y - 40.0), Vector2(top.x + 30.0, top.y - 34.0 + fl), Vector2(top.x + 2.0, top.y - 28.0)]), Color(0.95, 0.75, 0.3))
+
+
+func draw_lantern_string(a: Vector2, b: Vector2) -> void:
+	var n := 12
+	for i in n + 1:
+		var t := float(i) / float(n)
+		var p := a.lerp(b, t)
+		p.y += sin(t * PI) * 26.0   # a gentle sag
+		if i < n:
+			var t2 := float(i + 1) / float(n)
+			var p2 := a.lerp(b, t2)
+			p2.y += sin(t2 * PI) * 26.0
+			draw_line(p, p2, Color(0.3, 0.2, 0.15), 1.5)
+		var fl := 0.7 + 0.3 * sin(float(cine_tick) * 0.08 + float(i))
+		draw_circle(p, 7.0, Color(1.0, 0.72, 0.35, 0.18 * fl))
+		draw_circle(p, 4.0, Color(1.0, 0.8, 0.4, fl))
+
+
+func draw_arena_bowl(base: Vector2, w: float, h: float, body: Color, rim: Color) -> void:
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(base.x - w * 0.5, base.y), Vector2(base.x + w * 0.5, base.y),
+		Vector2(base.x + w * 0.4, base.y - h), Vector2(base.x - w * 0.4, base.y - h)]), body)
+	fill_ellipse(Vector2(base.x, base.y - h), w * 0.4, h * 0.16, body)
+	draw_arc(Vector2(base.x, base.y - h), w * 0.4, PI, TAU, 44, Color(rim.r, rim.g, rim.b, 0.5), 3.0)
+	draw_circle(Vector2(base.x, base.y - h), w * 0.30, Color(rim.r, rim.g, rim.b, 0.06))
+
+
+func draw_banner(top: Vector2, col: Color) -> void:
+	draw_rect(Rect2(top.x - 2.0, top.y, 4.0, 210.0), Color(0.1, 0.1, 0.12))
+	var fl := sin(float(cine_tick) * 0.12 + top.x) * 5.0
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(top.x + 2.0, top.y), Vector2(top.x + 40.0, top.y + 6.0 + fl), Vector2(top.x + 40.0, top.y + 30.0 + fl), Vector2(top.x + 2.0, top.y + 30.0)]), col)
+
+
+func draw_spotlight_cone(s: Vector2, cx: float, strength: float) -> void:
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx, -30.0), Vector2(cx - 300.0, s.y * 0.86), Vector2(cx + 300.0, s.y * 0.86)]), Color(1.0, 0.85, 0.55, strength))
+
+
+func draw_shadow(feet: Vector2, w: float) -> void:
+	fill_ellipse(feet, w * 0.5, w * 0.16, Color(0, 0, 0, 0.3))
+
+
+func draw_silhouette(feet: Vector2, sc: float, col: Color) -> void:
+	var shY := feet.y - 108.0 * sc
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(feet.x - 16.0 * sc, shY), Vector2(feet.x + 16.0 * sc, shY),
+		Vector2(feet.x + 12.0 * sc, feet.y), Vector2(feet.x - 12.0 * sc, feet.y)]), col)
+	draw_circle(Vector2(feet.x, shY - 16.0 * sc), 12.0 * sc, col)
+
+
+func draw_curtain(s: Vector2) -> void:
+	draw_gradient_v(Rect2(0, 0, s.x, s.y * 0.64), Color(0.16, 0.03, 0.05), Color(0.07, 0.01, 0.02), 18)
+	var n := 14
+	for i in n:
+		var x := s.x * float(i) / float(n)
+		var shade := 0.15 + 0.06 * sin(float(i) * 1.7)
+		draw_rect(Rect2(x, 0, s.x / float(n) * 0.6, s.y * 0.62), Color(shade + 0.06, 0.03, 0.05))
+		draw_rect(Rect2(x + s.x / float(n) * 0.6, 0, s.x / float(n) * 0.4, s.y * 0.62), Color(shade, 0.02, 0.04))
+	draw_rect(Rect2(0, 0, s.x, 40.0), Color(0.30, 0.06, 0.08))
+	draw_line(Vector2(0, 40.0), Vector2(s.x, 40.0), Color(0.85, 0.65, 0.3), 2.0)
+
+
+func draw_scoreboard(s: Vector2) -> void:
+	var bw := s.x * 0.42
+	var bx := s.x * 0.5 - bw * 0.5
+	var by := s.y * 0.14
+	draw_rect(Rect2(bx, by, bw, 70.0), Color(0.05, 0.06, 0.10))
+	draw_rect(Rect2(bx, by, bw, 70.0), Color(0.5, 0.7, 1.0, 0.5), false, 2.0)
+	var f := ThemeDB.fallback_font
+	draw_string(f, Vector2(bx + 20.0, by + 30.0), "SILVIO   98.4", HORIZONTAL_ALIGNMENT_LEFT, bw - 40.0, 20, Color(0.7, 0.85, 1.0))
+	draw_string(f, Vector2(bx + 20.0, by + 56.0), "MILO     97.9", HORIZONTAL_ALIGNMENT_LEFT, bw - 40.0, 20, Color(1.0, 0.88, 0.55))
+
+
+func draw_ring_interior(s: Vector2) -> void:
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.14, 0.07, 0.05), Color(0.05, 0.03, 0.03), 20)
+	var gy := s.y * 0.80
+	fill_ellipse(Vector2(s.x * 0.5, gy), s.x * 0.42, 46.0, Color(0.55, 0.34, 0.18, 0.5))
+	fill_ellipse(Vector2(s.x * 0.5, gy), s.x * 0.30, 32.0, Color(0.8, 0.55, 0.28, 0.4))
+	draw_lantern_string(Vector2(s.x * 0.06, s.y * 0.22), Vector2(s.x * 0.94, s.y * 0.24))
+
+
+func draw_key_hint(pos: Vector2, keys: String, label: String) -> void:
+	# pos is the anchor; the keys sit on it and the caption just below it
+	var f := ThemeDB.fallback_font
+	draw_string(f, Vector2(pos.x - 90.0, pos.y), keys, HORIZONTAL_ALIGNMENT_CENTER, 180, 20, Color(1.0, 0.9, 0.6))
+	draw_string(f, Vector2(pos.x - 90.0, pos.y + 20.0), label, HORIZONTAL_ALIGNMENT_CENTER, 180, 13, Color(0.82, 0.76, 0.68))
+
+
+# --- story scene tableaux -----------------------------------------------------
+
+func scene_backyard(s: Vector2, stage: int) -> void:
+	draw_venue_exterior(s, 0)
+	var fy := s.y * 0.80
+	match stage:
+		0:
+			draw_shadow(Vector2(s.x * 0.36, fy), 70.0)
+			draw_shadow(Vector2(s.x * 0.64, fy), 66.0)
+			var bhand := Vector2(s.x * 0.5 - 26.0, fy - 150.0 + sin(float(cine_tick) * 0.06) * 3.0)
+			draw_person(Vector2(s.x * 0.36, fy), 1.0, bruna_pal(), null, bhand, 1)
+			draw_person(Vector2(s.x * 0.64, fy), 0.95, milo_pal(0), null, null, 0)
+			for i in 3:
+				draw_ball_shape(bhand + Vector2(-6.0 + float(i) * 6.0, -8.0 - float(i) * 5.0), ball_color(i), 0.95)
+		1:
+			draw_shadow(Vector2(s.x * 0.34, fy), 76.0)
+			draw_shadow(Vector2(s.x * 0.66, fy), 76.0)
+			var mhand := Vector2(s.x * 0.5 + 8.0, fy - 150.0)
+			draw_person(Vector2(s.x * 0.34, fy), 1.15, bruna_pal(), null, Vector2(s.x * 0.5 - 20.0, fy - 150.0), 1)
+			draw_person(Vector2(s.x * 0.66, fy), 1.15, milo_pal(0), mhand, Vector2(s.x * 0.66 + 30.0, fy - 120.0), 0)
+			for i in 3:
+				draw_ball_shape(mhand + Vector2(float(i) * 5.0, -6.0 - float(i) * 5.0), ball_color(i), 1.0)
+		2:
+			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
+			var u := fposmod(float(cine_tick) / 70.0, 1.0)
+			var frm := Vector2(s.x * 0.5 + 40.0, fy - 120.0)
+			var to := Vector2(s.x * 0.5 - 40.0, fy - 120.0)
+			var bp := frm.lerp(to, u)
+			bp.y -= 150.0 * 4.0 * u * (1.0 - u)
+			draw_person(Vector2(s.x * 0.5, fy), 1.2, milo_pal(0), Vector2(s.x * 0.5 - 46.0, fy - 118.0), Vector2(s.x * 0.5 + 46.0, fy - 140.0), 0)
+			draw_ball_shape(bp, ball_color(0), 1.1)
+			draw_silhouette(Vector2(s.x * 0.14, fy), 0.8, Color(0.06, 0.05, 0.06))
+		_:
+			draw_shadow(Vector2(s.x * 0.52, fy), 80.0)
+			var dj := demo_juggle(Vector2(s.x * 0.52, s.y * 0.5), 1.2, 3)
+			draw_person(Vector2(s.x * 0.52, fy), 1.2, milo_pal(0), dj["hl"], dj["hr"], 1)
+			for b in dj["balls"]:
+				draw_ball_shape(b["pos"], b["col"], 1.15)
+			draw_person(Vector2(s.x * 0.16, fy), 0.9, bruna_pal(), null, null, 1)
+
+
+func scene_street(s: Vector2, stage: int) -> void:
+	draw_venue_exterior(s, 1)
+	var fy := s.y * 0.80
+	match stage:
+		0:
+			draw_silhouette(Vector2(s.x * 0.78, fy), 0.9, Color(0.06, 0.05, 0.07))
+		1:
+			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
+			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.1, 3)
+			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(1), dj["hl"], dj["hr"], 0)
+			for b in dj["balls"]:
+				draw_ball_shape(b["pos"], b["col"], 1.1)
+			draw_silhouette(Vector2(s.x * 0.74, fy), 0.9, Color(0.06, 0.05, 0.07))
+		_:
+			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
+			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.1, 3)
+			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(1), dj["hl"], dj["hr"], 1)
+			for b in dj["balls"]:
+				draw_ball_shape(b["pos"], b["col"], 1.1)
+			draw_silhouette(Vector2(s.x * 0.72, fy), 0.9, Color(0.06, 0.05, 0.07))
+			# a coin arcs down into the hat by the lamp
+			var u := fposmod(float(cine_tick) / 90.0, 1.0)
+			var frm := Vector2(s.x * 0.72, fy - 120.0)
+			var to := Vector2(s.x * 0.32 + 46.0, fy - 2.0)
+			var cp := frm.lerp(to, u)
+			cp.y -= 120.0 * 4.0 * u * (1.0 - u)
+			fill_ellipse(cp, 6.0, 6.0, Color(1.0, 0.84, 0.4))
+			draw_circle(cp + Vector2(-2, -2), 2.0, Color(1.0, 0.95, 0.7))
+
+
+func scene_theatre(s: Vector2, stage: int) -> void:
+	match stage:
+		0:
+			draw_venue_exterior(s, 2)
+		1:
+			draw_curtain(s)
+			var fy := s.y * 0.82
+			draw_rect(Rect2(0, s.y * 0.62, s.x, s.y - s.y * 0.62), Color(0.14, 0.08, 0.06))
+			draw_spotlight_cone(s, s.x * 0.55, 0.14)
+			draw_shadow(Vector2(s.x * 0.55, fy), 80.0)
+			draw_person(Vector2(s.x * 0.55, fy), 1.15, silvio_pal(), Vector2(s.x * 0.55 - 20.0, fy - 90.0), Vector2(s.x * 0.55 + 78.0, fy - 60.0), 1)
+			draw_silhouette(Vector2(s.x * 0.08, fy - 6.0), 0.85, Color(0.04, 0.03, 0.04))
+			draw_rect(Rect2(0, 0, s.x * 0.10, s.y), Color(0.10, 0.02, 0.03))
+		_:
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.04, 0.05), Color(0.02, 0.01, 0.02), 18)
+			var fy := s.y * 0.82
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(s.x * 0.72, 0), Vector2(s.x, 0), Vector2(s.x, s.y), Vector2(s.x * 0.80, s.y)]), Color(1.0, 0.82, 0.45, 0.10))
+			draw_shadow(Vector2(s.x * 0.4, fy), 78.0)
+			draw_person(Vector2(s.x * 0.4, fy), 1.2, milo_pal(2), null, null, 0)
+
+
+func scene_circus(s: Vector2, stage: int) -> void:
+	match stage:
+		0:
+			draw_venue_exterior(s, 3)
+		1:
+			draw_ring_interior(s)
+			var fy := s.y * 0.82
+			for k in 5:
+				draw_silhouette(Vector2(s.x * (0.16 + 0.17 * float(k)), fy + 6.0), 0.7, Color(0.05, 0.04, 0.04))
+			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
+			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(3), null, null, 1)
+			var gl := 0.6 + 0.4 * sin(float(cine_tick) * 0.2)
+			draw_knife(Vector2(s.x * 0.5, s.y * 0.34), float(cine_tick) * 0.1, 1.6)
+			draw_circle(Vector2(s.x * 0.5, s.y * 0.34), 10.0, Color(1.0, 1.0, 1.0, 0.3 * gl))
+		_:
+			draw_ring_interior(s)
+			var fy := s.y * 0.82
+			for k in 5:
+				draw_silhouette(Vector2(s.x * (0.14 + 0.18 * float(k)), fy + 8.0), 0.66, Color(0.05, 0.04, 0.04))
+			draw_shadow(Vector2(s.x * 0.5, fy), 76.0)
+			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.15, 3)
+			draw_person(Vector2(s.x * 0.5, fy), 1.15, milo_pal(3), dj["hl"], dj["hr"], 1)
+			for b in dj["balls"]:
+				draw_knife(b["pos"], float(cine_tick) * 0.12, 1.4)
+
+
+func scene_champ(s: Vector2, stage: int) -> void:
+	match stage:
+		0:
+			draw_venue_exterior(s, 4)
+		1:
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
+			draw_scoreboard(s)
+			var fy := s.y * 0.84
+			draw_shadow(Vector2(s.x * 0.56, fy), 80.0)
+			# Silvio hoists the trophy
+			draw_person(Vector2(s.x * 0.56, fy), 1.15, silvio_pal(), Vector2(s.x * 0.56 - 40.0, fy - 168.0), Vector2(s.x * 0.56 + 40.0, fy - 168.0), 1)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(s.x * 0.56 - 12.0, fy - 176.0), Vector2(s.x * 0.56 + 12.0, fy - 176.0),
+				Vector2(s.x * 0.56 + 6.0, fy - 196.0), Vector2(s.x * 0.56 - 6.0, fy - 196.0)]), Color(1.0, 0.85, 0.4))
+			draw_rect(Rect2(s.x * 0.56 - 4.0, fy - 176.0, 8.0, 10.0), Color(1.0, 0.85, 0.4))
+			draw_shadow(Vector2(s.x * 0.3, fy), 66.0)
+			draw_person(Vector2(s.x * 0.3, fy), 0.95, milo_pal(4), null, null, 0)
+		_:
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
+			draw_scoreboard(s)
+			var fy := s.y * 0.84
+			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
+			draw_person(Vector2(s.x * 0.5, fy), 1.2, milo_pal(4), null, null, 0)
+
+
+func scene_arena(s: Vector2, stage: int) -> void:
+	match stage:
+		0:
+			draw_venue_exterior(s, 5)
+		_:
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.06, 0.04, 0.10), 18)
+			var gy := s.y * 0.84
+			for i in 90:
+				var seed := float(i) * 13.7
+				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.9
+				var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.30 - 20.0
+				var a := 0.3 + 0.4 * sin(float(cine_tick) * 0.05 + seed)
+				draw_circle(Vector2(x, y), 1.6, Color(1.0, 0.8, 0.5, clampf(a, 0.1, 0.7)))
+			draw_spotlight_cone(s, s.x * 0.5, 0.12 + (0.05 if stage == 2 else 0.0))
+			draw_shadow(Vector2(s.x * 0.5, gy), 84.0)
+			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.48), 1.25, 5)
+			draw_person(Vector2(s.x * 0.5, gy), 1.25, milo_pal(5), dj["hl"], dj["hr"], 1)
+			for b in dj["balls"]:
+				draw_ball_shape(b["pos"], b["col"], 1.2)
+			if stage == 2:
+				draw_circle(Vector2(s.x * 0.5, s.y * 0.48), 200.0, Color(1.0, 0.9, 0.6, 0.05))
+
+
+# --- tutorial tableaux --------------------------------------------------------
+
+func scene_lesson(s: Vector2, demo: int) -> void:
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.09, 0.10), Color(0.05, 0.04, 0.05), 20)
+	draw_spotlight_cone(s, s.x * 0.5, 0.10)
+	var fy := s.y * 0.82
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.11, 0.08, 0.06))
+	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(0.8, 0.5, 0.3, 0.3), 2.0)
+	var center := Vector2(s.x * 0.5, s.y * 0.44)
+	var dj := demo_juggle(center, 1.2, demo)
+	draw_arc_guide(dj["hl"], dj["hr"], dj["peak"], Color(1.0, 0.85, 0.5, 0.16))
+	draw_arc_guide(dj["hr"], dj["hl"], dj["peak"], Color(1.0, 0.85, 0.5, 0.16))
+	draw_shadow(Vector2(center.x, fy), 64.0)
+	draw_person(Vector2(center.x, fy), 1.2, milo_pal(0), dj["hl"], dj["hr"], 0)
+	for b in dj["balls"]:
+		draw_ball_shape(b["pos"], b["col"], 1.15)
+	# controls, set to the sides beside the torso so nothing sits over the figure
+	draw_key_hint(Vector2(center.x - 168.0, fy - 96.0), "D    F", "left:  catch  throw")
+	draw_key_hint(Vector2(center.x + 168.0, fy - 96.0), "K    J", "right:  catch  throw")
+	draw_dust(s, 14, Color(1.0, 0.85, 0.55))
+
+
+func scene_lessonprop(s: Vector2, kind: int) -> void:
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.09, 0.10), Color(0.05, 0.04, 0.05), 20)
+	draw_spotlight_cone(s, s.x * 0.44, 0.10)
+	var fy := s.y * 0.82
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.11, 0.08, 0.06))
+	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(0.8, 0.5, 0.3, 0.3), 2.0)
+	var center := Vector2(s.x * 0.42, s.y * 0.44)
+	var hl := center + Vector2(-56.0 * 1.2, 42.0 * 1.2)
+	var hr := center + Vector2(56.0 * 1.2, 42.0 * 1.2)
+	var peak := 120.0
+	var phase := fposmod(float(cine_tick), 120.0)
+	var seg := 0 if phase < 60.0 else 1
+	var u := (phase - float(seg) * 60.0) / 60.0
+	var frm := hl if seg == 0 else hr
+	var to := hr if seg == 0 else hl
+	var p := frm.lerp(to, u)
+	p.y -= peak * 4.0 * u * (1.0 - u)
+	var spins := bool(PROPS[kind]["spins"])
+	var ang := float(cine_tick) * 0.14 if spins else 0.0
+	draw_arc_guide(hl, hr, peak, Color(1.0, 0.85, 0.5, 0.14))
+	draw_arc_guide(hr, hl, peak, Color(1.0, 0.85, 0.5, 0.14))
+	draw_shadow(Vector2(center.x, fy), 64.0)
+	draw_person(Vector2(center.x, fy), 1.2, milo_pal(clampi(venue_index(), 0, 5)), hl, hr, 0)
+	draw_prop_at(kind, p, prop_scale(kind) * 1.2, ang)
+	# a large showcase of the new prop, with its name, off to the side
+	draw_prop_at(kind, Vector2(s.x * 0.80, s.y * 0.40), prop_scale(kind) * 2.4, ang * 0.5)
+	draw_string(ThemeDB.fallback_font, Vector2(s.x * 0.66, s.y * 0.58), String(PROPS[kind]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, s.x * 0.28, 24, Color(1.0, 0.9, 0.6))
 
 
 # -----------------------------------------------------------------------------
