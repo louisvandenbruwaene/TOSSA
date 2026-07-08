@@ -151,7 +151,7 @@ const TRICKS := [
 	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",  "lvl": 4, "min_air": 0,
 	 "desc": "Arm a showy behind-the-back throw. Style the crowd loves, if you land it."},
 	{"id": "spin", "name": "Spin",             "kind": "live", "lvl": 7, "min_air": 2,
-	 "desc": "Spin on the spot with everything airborne. Catches score double, but you juggle blind."},
+	 "desc": "Spin while everything is airborne. Catches score double, you catch blind."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
 const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
@@ -248,6 +248,8 @@ var tricks_landed := 0    # tricks landed cleanly this run, for the results scre
 var trick_score := 0      # score earned from tricks this run
 var trick_msg := ""       # brief on-stage feedback ("High Toss armed", "SPIN")
 var trick_msg_tick := -999
+var trick_unlock := -1    # a newly unlocked trick to announce with a banner, or -1
+var trick_unlock_tick := -999
 var sheet_open := false
 var shop_open := false
 var debug_mode := false   # debug build: free stat editing in the character sheet
@@ -363,6 +365,9 @@ func _ready() -> void:
 			level = 9
 			var unl := unlocked_tricks()
 			trick_primed = int(unl[0]) if not unl.is_empty() else 0
+			if ua.has("--unlock"):   # dev: also show the new-trick banner
+				trick_unlock = TR_SPIN
+				trick_unlock_tick = 0
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -1597,6 +1602,7 @@ func xp_to_next(lv: int) -> int:
 func add_xp(amount: int) -> void:
 	if amount <= 0:
 		return
+	var prev_level := level
 	xp += amount
 	run_xp += amount
 	var leveled := false
@@ -1608,7 +1614,20 @@ func add_xp(amount: int) -> void:
 	if leveled:
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
+		announce_new_tricks(prev_level)   # a level that crosses a trick's gate teaches it
 		save_progress()
+
+
+func announce_new_tricks(prev_level: int) -> void:
+	# a trick whose unlock level we just crossed gets a banner and is primed ready,
+	# so the very next TRICK press does the thing the banner just explained
+	for i in TRICKS.size():
+		var lv := int(TRICKS[i]["lvl"])
+		if lv > prev_level and lv <= level:
+			trick_unlock = i
+			trick_unlock_tick = tick
+			trick_primed = i
+			play_sfx("streak", -5.0)
 
 
 func energy_mult() -> float:
@@ -2489,6 +2508,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if points > 0:
 		draw_string(font, Vector2(30, 143), "+%d stat point%s  -  press Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7))
 
+	# a freshly unlocked trick announces itself, non-blocking so a live run is never frozen
+	if not tut_active and trick_unlock >= 0 and tick - trick_unlock_tick < 600:
+		draw_trick_unlock_banner(font, s)
 	# trick feedback line, centred (works even before any trick is unlocked)
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
 		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
@@ -2580,6 +2602,25 @@ func draw_results(font: Font, s: Vector2) -> void:
 	if points > 0:
 		foot = "R  go again      Tab  +%d point%s      S  shop      Esc  menu" % [points, "" if points == 1 else "s"]
 	draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64))
+
+
+func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
+	var age := tick - trick_unlock_tick
+	var a := 1.0
+	if age < 18:
+		a = float(age) / 18.0
+	elif age > 540:
+		a = clampf(float(600 - age) / 60.0, 0.0, 1.0)
+	var t: Dictionary = TRICKS[trick_unlock]
+	var bw := 620.0
+	var bx := s.x * 0.5 - bw * 0.5
+	var cy := s.y * 0.19
+	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(0.10, 0.06, 0.08, 0.9 * a))
+	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(1.0, 0.82, 0.45, 0.55 * a), false, 2.0)
+	draw_string(font, Vector2(bx, cy - 4.0), "NEW TRICK   -   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 21, Color(1.0, 0.88, 0.5, a))
+	var how := "press C to select it, then Space to spin" if String(t["kind"]) == "live" else "press Space to arm it, then throw"
+	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
+	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
 
 
 func draw_trick_hud(font: Font, s: Vector2) -> void:
