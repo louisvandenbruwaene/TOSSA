@@ -3488,12 +3488,37 @@ func silvio_pal() -> Dictionary:
 		"trouser": Color(0.10, 0.09, 0.13), "accent": Color(0.95, 0.82, 0.40), "hair": Color(0.14, 0.11, 0.09), "hat": "top"}
 
 
+func arm_reach(shoulder: Vector2, hand: Vector2, l1: float, l2: float) -> Vector2:
+	# the actual hand position after clamping the target to the arm's length, so a
+	# scene can place a held prop exactly where the clamped hand ends up (no drift)
+	var to := hand - shoulder
+	var d := to.length()
+	var maxr := (l1 + l2) * 0.97
+	return shoulder + to / d * maxr if d > maxr else hand
+
+
 func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, sleeve: Color, l1: float, l2: float, w: float) -> void:
-	var elbow := solve_elbow(shoulder, hand, l1, l2, bend)
-	draw_line(shoulder, elbow, sleeve, w * 2.0)
-	draw_line(elbow, hand, skin, w * 1.5)
-	draw_circle(elbow, w * 0.9, sleeve)
-	draw_circle(hand, w * 1.15, skin)
+	# clamp the target within reach so the arm never stretches into a noodle, then
+	# bend with bones scaled to the reach (matching the play figure's natural elbow)
+	var h2 := arm_reach(shoulder, hand, l1, l2)
+	var reach := (h2 - shoulder).length()
+	var bone := maxf(l1 * 0.62, reach * 0.56)
+	var elbow := solve_elbow(shoulder, h2, bone, bone, bend)
+	var wrist := h2 + (elbow - h2).normalized() * w * 0.6
+	draw_capsule(shoulder, elbow, w * 2.6, w * 2.0, sleeve)
+	draw_capsule(elbow, wrist, w * 1.9, w * 1.4, skin)
+	draw_circle(elbow, w * 1.0, sleeve)
+	draw_circle(h2, w * 1.2, skin)
+
+
+func reach_hand(feet: Vector2, sc: float, side: float, off: Vector2) -> Vector2:
+	# a hand position guaranteed within a draw_person figure's arm reach, so a held
+	# prop placed at the same point stays in the hand (side +1 right, -1 left)
+	var sh := Vector2(feet.x + side * 22.0 * sc, feet.y - 112.0 * sc)
+	var maxr := 80.0 * sc
+	if off.length() > maxr:
+		off = off.normalized() * maxr
+	return sh + off
 
 
 func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand = null, mood: int = 0) -> void:
@@ -4018,21 +4043,29 @@ func scene_backyard(s: Vector2, stage: int) -> void:
 	var fy := s.y * 0.80
 	match stage:
 		0:
-			draw_shadow(Vector2(s.x * 0.36, fy), 70.0)
-			draw_shadow(Vector2(s.x * 0.64, fy), 66.0)
-			var bhand := Vector2(s.x * 0.5 - 26.0, fy - 150.0 + sin(float(cine_tick) * 0.06) * 3.0)
-			draw_person(Vector2(s.x * 0.36, fy), 1.0, bruna_pal(), null, bhand, 1)
-			draw_person(Vector2(s.x * 0.64, fy), 0.95, milo_pal(0), null, null, 0)
+			# Bruna offers the three balls in her outstretched right hand; Milo stands
+			# close, ready. The balls sit IN her hand (reach_hand keeps the arm honest).
+			var bfeet := Vector2(s.x * 0.42, fy)
+			var mfeet := Vector2(s.x * 0.60, fy)
+			draw_shadow(bfeet, 70.0)
+			draw_shadow(mfeet, 66.0)
+			var bob := sin(float(cine_tick) * 0.06) * 3.0
+			var bhand := reach_hand(bfeet, 1.05, 1.0, Vector2(66.0, -8.0 + bob))
+			draw_person(bfeet, 1.05, bruna_pal(), null, bhand, 1)
+			draw_person(mfeet, 1.0, milo_pal(0), reach_hand(mfeet, 1.0, -1.0, Vector2(-40.0, 6.0)), null, 0)
 			for i in 3:
-				draw_ball_shape(bhand + Vector2(-6.0 + float(i) * 6.0, -8.0 - float(i) * 5.0), ball_color(i), 0.95)
+				draw_ball_shape(bhand + Vector2(-6.0 + float(i) * 6.0, -7.0 - float(i) * 5.0), ball_color(i), 0.95)
 		1:
-			draw_shadow(Vector2(s.x * 0.34, fy), 76.0)
-			draw_shadow(Vector2(s.x * 0.66, fy), 76.0)
-			var mhand := Vector2(s.x * 0.5 + 8.0, fy - 150.0)
-			draw_person(Vector2(s.x * 0.34, fy), 1.15, bruna_pal(), null, Vector2(s.x * 0.5 - 20.0, fy - 150.0), 1)
-			draw_person(Vector2(s.x * 0.66, fy), 1.15, milo_pal(0), mhand, Vector2(s.x * 0.66 + 30.0, fy - 120.0), 0)
+			# now the balls are in Milo's hand, Bruna beside him with a nod
+			var bfeet := Vector2(s.x * 0.40, fy)
+			var mfeet := Vector2(s.x * 0.58, fy)
+			draw_shadow(bfeet, 76.0)
+			draw_shadow(mfeet, 76.0)
+			var mhand := reach_hand(mfeet, 1.15, -1.0, Vector2(-58.0, -14.0))
+			draw_person(bfeet, 1.1, bruna_pal(), null, reach_hand(bfeet, 1.1, 1.0, Vector2(58.0, -6.0)), 1)
+			draw_person(mfeet, 1.15, milo_pal(0), mhand, null, 0)
 			for i in 3:
-				draw_ball_shape(mhand + Vector2(float(i) * 5.0, -6.0 - float(i) * 5.0), ball_color(i), 1.0)
+				draw_ball_shape(mhand + Vector2(float(i) * 5.0 - 5.0, -6.0 - float(i) * 5.0), ball_color(i), 1.0)
 		2:
 			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
 			var u := fposmod(float(cine_tick) / 70.0, 1.0)
