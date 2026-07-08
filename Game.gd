@@ -107,6 +107,10 @@ const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina co
 const DEFICIT_INACC := 1.1   # a full Strength deficit roughly doubles inaccuracy
 const DEFICIT_HEIGHT := 0.5  # a full Strength deficit halves reachable height
 
+# --- shop: spend gold on props and gear (ideas.rtf shop) ----------------------
+const GLASSES_COST := 5000
+const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
+
 # input map (physical keycodes; a real remap layer comes with the options menu)
 const K_LC := KEY_D
 const K_LT := KEY_F
@@ -177,6 +181,7 @@ var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
 var prop_type := PROP_BALLS  # the object being juggled this run
 var owned_mask := 1       # bitfield of owned props; bit 0 (balls) always set
+var has_glasses := false  # bought gear: raises the catch chance
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
@@ -186,6 +191,7 @@ var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
 var round_scored := false
 var sheet_open := false
+var shop_open := false
 var debug_mode := false   # debug build: free stat editing in the character sheet
 var _prev_running := false
 
@@ -223,6 +229,8 @@ func _ready() -> void:
 	if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 		points = maxi(points, 6)
 		sheet_open = true
+	if ua.has("--shop"):    # dev: open the shop for a screenshot
+		shop_open = true
 
 
 func _physics_process(_delta: float) -> void:
@@ -231,8 +239,8 @@ func _physics_process(_delta: float) -> void:
 		if _shot_frames >= _shot_tick:
 			_capture_and_quit()
 			return
-	if sheet_open:
-		queue_redraw()   # character sheet pauses the sim; nothing advances
+	if sheet_open or shop_open:
+		queue_redraw()   # the sheet and shop pause the sim; nothing advances
 		return
 	tick += 1
 	if _demo:
@@ -278,9 +286,28 @@ func _input(event: InputEvent) -> void:
 					money = maxi(0, money - 50)
 					save_progress()
 		return
+	if shop_open:
+		match kc:
+			KEY_TAB, KEY_ESCAPE, KEY_S:
+				shop_open = false
+			KEY_1:
+				try_buy(PROP_EGGS)
+			KEY_2:
+				try_buy(PROP_RINGS)
+			KEY_3:
+				try_buy(PROP_CLUBS)
+			KEY_4:
+				try_buy(PROP_KNIVES)
+			KEY_5:
+				try_buy(PROP_TORCHES)
+			KEY_6:
+				try_buy_glasses()
+		return
 	match kc:
 		KEY_TAB:
 			sheet_open = true
+		KEY_S:
+			shop_open = true
 		KEY_P:
 			toggle_mode()
 		KEY_R:
@@ -320,6 +347,24 @@ func cycle_prop(dir: int) -> void:
 			prop_type = k
 			break
 	start_run(num_balls)
+
+
+func try_buy(kind: int) -> void:
+	if owns(kind):
+		return
+	var cost := int(PROPS[kind]["cost"])
+	if money >= cost:
+		money -= cost
+		owned_mask |= (1 << kind)
+		save_progress()
+
+
+func try_buy_glasses() -> void:
+	if has_glasses or money < GLASSES_COST:
+		return
+	money -= GLASSES_COST
+	has_glasses = true
+	save_progress()
 
 
 # -----------------------------------------------------------------------------
@@ -712,6 +757,8 @@ func catch_chance(quality: int, height: float) -> float:
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
+	if has_glasses:
+		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	return clampf(p, MIN_CATCH_P, 1.0)
 
 
@@ -842,6 +889,7 @@ func load_progress() -> void:
 		reputation = int(cf.get_value("stats", "reputation", 0))
 		owned_mask = int(cf.get_value("stats", "owned_mask", 1)) | 1  # balls always owned
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
+		has_glasses = bool(cf.get_value("stats", "glasses", false))
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
@@ -858,6 +906,7 @@ func save_progress() -> void:
 	cf.set_value("stats", "reputation", reputation)
 	cf.set_value("stats", "owned_mask", owned_mask)
 	cf.set_value("stats", "prop_type", prop_type)
+	cf.set_value("stats", "glasses", has_glasses)
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
@@ -940,6 +989,8 @@ func _draw() -> void:
 	draw_popups(font)
 	if sheet_open:
 		draw_sheet(font, s)
+	if shop_open:
+		draw_shop(font, s)
 
 
 func draw_backdrop(s: Vector2) -> void:
@@ -1229,6 +1280,24 @@ func draw_torch(pos: Vector2, ang: float) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+func draw_prop_icon(kind: int, pos: Vector2) -> void:
+	# a small, still version of the prop shape, for menus
+	var col := prop_color(kind)
+	match kind:
+		PROP_EGGS:
+			draw_egg(pos, col)
+		PROP_RINGS:
+			draw_ring_prop(pos, col)
+		PROP_CLUBS:
+			draw_club(pos, 0.0)
+		PROP_KNIVES:
+			draw_knife(pos, 0.0)
+		PROP_TORCHES:
+			draw_torch(pos, 0.0)
+		_:
+			draw_ball_shape(pos, col)
+
+
 func draw_hud(font: Font, s: Vector2) -> void:
 	var by := 40.0
 	var performing := mode == MODE_PERFORM
@@ -1289,7 +1358,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	var unlock := ""
 	if next_ball_strength() > 0:
 		unlock = "   ( next ball at Strength %d )" % next_ball_strength()
-	draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
+	draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
 	draw_string(font, Vector2(30, s.y - 30),
 		"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
@@ -1360,6 +1429,68 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	else:
 		draw_string(font, Vector2(tx, by), "Skill sets your score. Stats only ease the climb.", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.75, 0.7, 0.62))
 	draw_string(font, Vector2(px + pw - 150.0, by), "Tab to resume", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
+
+
+func draw_shop(font: Font, s: Vector2) -> void:
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.85))
+	var pw := 640.0
+	var ph := 452.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+
+	var tx := px + 40.0
+	var innerw := pw - 80.0
+	draw_string(font, Vector2(tx, py + 48.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(px + pw - 170.0, py + 44.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.45))
+
+	var ry := py + 100.0
+	var keynum := 1
+	for kind in range(1, PROPS.size()):   # skip balls (index 0, always owned)
+		draw_shop_row(font, tx, ry, innerw, kind, keynum)
+		ry += 50.0
+		keynum += 1
+	draw_glasses_row(font, tx, ry, innerw, keynum)
+
+	draw_string(font, Vector2(tx, py + ph - 30.0), "press a number to buy   -   heavier props need Strength to throw clean", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(px + pw - 150.0, py + ph - 30.0), "Tab / S to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
+
+
+func draw_shop_row(font: Font, x: float, y: float, w: float, kind: int, keynum: int) -> void:
+	draw_prop_icon(kind, Vector2(x + 12.0, y - 4.0))
+	var nm := String(PROPS[kind]["name"])
+	var wt := int(PROPS[kind]["weight"])
+	var req := int(PROPS[kind]["req"])
+	var cost := int(PROPS[kind]["cost"])
+	draw_string(font, Vector2(x + 44.0, y), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
+	var sub := "weight %d   clean throws at Strength %d" % [wt, req]
+	if req == 0:
+		sub = "weight %d   easy to throw" % wt
+	draw_string(font, Vector2(x + 44.0, y + 16.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	if owns(kind):
+		draw_string(font, Vector2(x + w - 130.0, y), "OWNED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.6, 0.9, 0.6))
+	else:
+		var afford := money >= cost
+		var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
+		draw_string(font, Vector2(x + w - 160.0, y), "%d g" % cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+		draw_string(font, Vector2(x + w - 44.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+
+
+func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> void:
+	var gc := Color(0.72, 0.86, 0.96)
+	draw_arc(Vector2(x + 8.0, y - 5.0), 6.0, 0.0, TAU, 16, gc, 2.0, true)   # spectacles
+	draw_arc(Vector2(x + 22.0, y - 5.0), 6.0, 0.0, TAU, 16, gc, 2.0, true)
+	draw_line(Vector2(x + 14.0, y - 5.0), Vector2(x + 16.0, y - 5.0), gc, 2.0)
+	draw_string(font, Vector2(x + 44.0, y), "Glasses", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
+	draw_string(font, Vector2(x + 44.0, y + 16.0), "sharper sight: a better chance on off-Perfect catches", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	if has_glasses:
+		draw_string(font, Vector2(x + w - 130.0, y), "OWNED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.6, 0.9, 0.6))
+	else:
+		var afford := money >= GLASSES_COST
+		var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
+		draw_string(font, Vector2(x + w - 160.0, y), "%d g" % GLASSES_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+		draw_string(font, Vector2(x + w - 44.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 
 
 func draw_stat_row(font: Font, x: float, y: float, w: float, name: String, value: int, note: String, keyhint: String) -> void:
