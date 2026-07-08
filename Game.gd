@@ -231,6 +231,11 @@ var stamina := 56.0       # within-run resource; low stamina lowers Accuracy
 var stamina_max := 56.0   # 50 + Endurance
 var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
+var last_rep_delta := 0   # reputation change from the last performance, for the results screen
+var run_venue := 0        # which venue this run was performed at (records key off this)
+var best_scores: Array[int] = [0, 0, 0, 0, 0, 0]  # best performance score per venue tier
+var results_open := false # the end-of-performance results panel is showing
+var results_record := false  # this performance beat the venue's record
 var round_scored := false
 # --- tricks: which trick the TRICK key is primed to (cycled with C), a trick
 # armed onto the next throw, the live-Spin timer, and the run's trick tally.
@@ -343,7 +348,7 @@ func _ready() -> void:
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
-	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop")
+	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results")
 	if ua.has("--menu"):
 		skip_menu = false
 	if skip_menu:
@@ -363,6 +368,13 @@ func _ready() -> void:
 			sheet_open = true
 		if ua.has("--shop"):    # dev: open the shop for a screenshot
 			shop_open = true
+		if ua.has("--results"):   # dev: fabricate a finished performance to screenshot the card
+			mode = MODE_PERFORM
+			run_venue = 2
+			caught = 78; dropped = 4; best_streak = 33; score = 14820
+			peak_applause = 0.94; tricks_landed = 5; trick_score = 1350
+			last_pay = 240; last_rep_delta = 22; run_xp = 190; points = 3
+			started = true; running = false; results_open = true; results_record = true
 	else:
 		game_state = ST_MENU
 	if ua.has("--settings"):    # dev: screenshot the settings screen
@@ -460,6 +472,21 @@ func _input(event: InputEvent) -> void:
 	if tut_active:
 		if kc == KEY_ESCAPE:
 			get_tree().quit()
+		return
+	# the end-of-performance results panel: go again, spend/shop, or leave to the
+	# menu. It stays open behind the sheet and shop, so you can invest then continue.
+	if results_open and not sheet_open and not shop_open:
+		match kc:
+			KEY_R, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+				results_open = false
+				start_run(num_balls)
+			KEY_TAB:
+				sheet_open = true
+			KEY_S:
+				shop_open = true
+			KEY_ESCAPE:
+				results_open = false
+				game_state = ST_MENU
 		return
 	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
@@ -1251,6 +1278,10 @@ func start_run(n: int) -> void:
 	stamina = stamina_max          # each run starts rested
 	run_xp = 0
 	last_pay = 0
+	last_rep_delta = 0
+	run_venue = venue_index()   # records and the results card key off where you performed
+	results_open = false
+	results_record = false
 	round_scored = false
 	_prev_running = false
 	# reset the trick state, and prime the key to the lowest trick this level owns
@@ -1607,14 +1638,18 @@ func on_round_end() -> void:
 		var quality := clampf(0.7 * clean + 0.3 * peak_applause, 0.0, 1.0)
 		var rep_delta := int(round((quality - 0.5) * float(REP_SWING)))
 		reputation = maxi(0, reputation + rep_delta)
+		last_rep_delta = rep_delta
 		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult()))
 		money += last_pay
 		if last_pay > 0:
 			play_sfx("coin", -8.0)   # the pay chime at the end of a performance
-		var s := get_viewport_rect().size
-		add_popup(Vector2(s.x * 0.5, s.y * 0.30), "+%d gold" % last_pay, Color(1.0, 0.86, 0.4))
-		var rc := Color(0.7, 0.95, 0.7) if rep_delta >= 0 else Color(1.0, 0.55, 0.45)
-		add_popup(Vector2(s.x * 0.5, s.y * 0.345), "%s%d rep" % ["+" if rep_delta >= 0 else "", rep_delta], rc)
+		# a new personal best at this venue is the meta hook: a target to chase
+		results_record = false
+		if run_venue >= 0 and run_venue < best_scores.size() and score > best_scores[run_venue]:
+			best_scores[run_venue] = score
+			results_record = true
+		# the results panel takes over the end-of-run screen for performances
+		results_open = true
 	# crossing into a new venue plays its promotion cutscene, once
 	var vi := venue_index()
 	if vi > venue_seen:
@@ -1684,6 +1719,36 @@ func perfect_window() -> int:
 func pay_mult() -> float:
 	# Reputation lifts earnings only. Score and catching are untouched (GDD 4.1).
 	return 1.0 + float(reputation) / REP_PAY_DIV
+
+
+func run_clean() -> float:
+	if caught + dropped <= 0:
+		return 1.0
+	return float(caught) / float(caught + dropped)
+
+
+func run_grade() -> String:
+	# a single letter that reads the whole set: cleanliness carries it, the crowd's
+	# high point and a long streak lift it. Skill first, so clean play dominates.
+	var q := 0.55 * run_clean() + 0.28 * peak_applause + 0.17 * clampf(float(best_streak) / 25.0, 0.0, 1.0)
+	if q >= 0.90:
+		return "S"
+	if q >= 0.78:
+		return "A"
+	if q >= 0.62:
+		return "B"
+	if q >= 0.42:
+		return "C"
+	return "D"
+
+
+func grade_color(g: String) -> Color:
+	match g:
+		"S": return Color(1.0, 0.86, 0.42)
+		"A": return Color(0.7, 0.95, 0.62)
+		"B": return Color(0.62, 0.86, 0.98)
+		"C": return Color(0.9, 0.8, 0.6)
+		_: return Color(0.95, 0.55, 0.45)
 
 
 func rep_tier() -> String:
@@ -1872,6 +1937,10 @@ func load_progress() -> void:
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
 		venue_seen = int(cf.get_value("prog", "venue_seen", venue_index()))
+		var bs: Variant = cf.get_value("prog", "best_scores", [])
+		if bs is Array:
+			for i in mini((bs as Array).size(), best_scores.size()):
+				best_scores[i] = int((bs as Array)[i])
 	stamina_max = 50.0 + float(endurance)
 	stamina = stamina_max
 
@@ -1890,6 +1959,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
 	cf.set_value("prog", "venue_seen", venue_seen)
+	cf.set_value("prog", "best_scores", best_scores)
 	cf.save(save_file())
 
 
@@ -2003,6 +2073,8 @@ func _draw() -> void:
 	else:
 		draw_hud(font, s)
 	draw_popups(font)
+	if results_open and not tut_active:
+		draw_results(font, s)   # the end-of-performance card, over the frozen stage
 	if sheet_open:
 		draw_sheet(font, s)
 	if shop_open:
@@ -2422,12 +2494,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
 		draw_string(font, Vector2(s.x * 0.5 - 170, s.y * 0.30), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 340, 18, Color(1.0, 0.88, 0.55, ta))
 	# the primed-trick readout sits just above the control hints, once a trick exists
-	if not tut_active and not unlocked_tricks().is_empty():
+	if not tut_active and not results_open and not unlocked_tricks().is_empty():
 		draw_trick_hud(font, s)
 
 	# the round chrome (venue line, control hints, ROUND OVER, start prompt) is
-	# hidden during a lesson, where the guided banner is the only instruction
-	if not tut_active:
+	# hidden during a lesson, and behind the results card, to keep those clean
+	if not tut_active and not results_open:
 		var patt := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
 		var propname := String(cur_prop()["name"]).to_upper()
 		var vname := String(venue_data(venue_index())["name"]).to_upper()
@@ -2448,10 +2520,66 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(s.x * 0.5 - 220, s.y * 0.23),
 				"press a THROW (F or J) to %s   -   P to %s instead" % [verb, "train" if performing else "perform"],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.55))
-		elif not running:
+		elif not running and not results_open:
+			# training (or a performance with no panel) keeps the plain end-of-run line
 			draw_string(font, Vector2(s.x * 0.5 - 150, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1.0, 0.5, 0.4))
-			var tail := "   gold +%d" % last_pay if performing else ""
-			draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d%s   -   press R to go again" % [best_streak, run_xp, tail], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
+			draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d   -   press R to go again" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
+
+
+func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color) -> void:
+	draw_string(font, Vector2(lx, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.78, 0.72, 0.66))
+	draw_string(font, Vector2(rx - 300.0, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 18, vc)
+
+
+func draw_results(font: Font, s: Vector2) -> void:
+	# the end-of-performance card: the grade, the numbers, the pay and rep swing, and
+	# the venue record to chase. This is the meta payoff screen for a whole set.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82))
+	var pw := 580.0
+	var ph := 460.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	var lx := px + 34.0
+	var rx := px + pw - 34.0
+
+	# header: the run's venue, and a grade badge to the right
+	draw_string(font, Vector2(lx, py + 40.0), "PERFORMANCE", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.72, 0.55))
+	draw_string(font, Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
+	var g := run_grade()
+	var gc := grade_color(g)
+	var bc := Vector2(rx - 42.0, py + 56.0)
+	draw_circle(bc, 42.0, Color(gc.r, gc.g, gc.b, 0.14))
+	draw_arc(bc, 42.0, 0.0, TAU, 40, gc, 3.0, true)
+	draw_string(font, Vector2(bc.x - 42.0, bc.y + 21.0), g, HORIZONTAL_ALIGNMENT_CENTER, 84.0, 58, gc)
+	draw_line(Vector2(lx, py + 104.0), Vector2(rx, py + 104.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
+
+	# stat rows
+	var y := py + 140.0
+	var rowh := 40.0
+	_result_row(font, lx, rx, y, "Score", str(score), Color(1.0, 0.92, 0.72))
+	var rec := "NEW VENUE RECORD" if results_record else "best here   %d" % best_scores[run_venue]
+	var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
+	draw_string(font, Vector2(rx - 300.0, y + 15.0), rec, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 13, recc)
+	y += rowh + 8.0
+	var pct := int(round(100.0 * run_clean()))
+	_result_row(font, lx, rx, y, "Caught  /  Dropped", "%d  /  %d    (%d%%)" % [caught, dropped, pct], Color(0.86, 0.9, 0.82)); y += rowh
+	_result_row(font, lx, rx, y, "Best streak", str(best_streak), Color(0.9, 0.82, 0.6)); y += rowh
+	var tval := "%d   (+%d)" % [tricks_landed, trick_score] if trick_score > 0 else str(tricks_landed)
+	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99)); y += rowh
+	draw_line(Vector2(lx, y - 6.0), Vector2(rx, y - 6.0), Color(0.9, 0.6, 0.35, 0.2), 1.0)
+	_result_row(font, lx, rx, y + 20.0, "Pay", "+%d gold" % last_pay, Color(1.0, 0.86, 0.45)); y += rowh
+	var rsign := "+" if last_rep_delta >= 0 else ""
+	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
+	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%d" % run_xp, Color(0.82, 0.9, 0.7)); y += rowh
+
+	# footer: how to continue
+	var foot := "R  go again      S  shop      Esc  menu"
+	if points > 0:
+		foot = "R  go again      Tab  +%d point%s      S  shop      Esc  menu" % [points, "" if points == 1 else "s"]
+	draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64))
 
 
 func draw_trick_hud(font: Font, s: Vector2) -> void:
@@ -3090,6 +3218,10 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	var vn := String(venue_data(establish_venue)["name"]).to_upper()
 	draw_title_glow(font, s.y * 0.14 + 12.0, vn, 56, Color(1.0, 0.9, 0.55), s)
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 78.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
+
+	# the standing record here, so the player walks on with a number to beat
+	if establish_venue >= 0 and establish_venue < best_scores.size() and best_scores[establish_venue] > 0:
+		draw_string(font, Vector2(0, s.y * 0.14 + 112.0), "your record here   %d" % best_scores[establish_venue], HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
 
 	var py := s.y - 70.0
 	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
