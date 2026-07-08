@@ -32,29 +32,25 @@ const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
 const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
 const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
 
-# --- throw height as a TIER (ideas.rtf heights 1..5) --------------------------
-# A tap throws the STANDARD height (tier 3), the one catch timing is built around.
-# Holding lifts it toward 5 (a risky reset); being too weak for the prop drags it
-# DOWN toward 1. Both directions away from 3 are harder to catch, so a wrong-height
-# throw is a mistake, which is exactly what makes height control matter.
-const TIER_STD := 3.0      # the standard, catchable throw (a plain tap)
-const TIER_MIN := 1.0
-const TIER_MAX := 5.0
-const HOLD_MAX := 44       # holding THROW this long reaches the top of the range
-const AIR_BASE := 40.0     # airtime = AIR_BASE + AIR_PER_TIER * tier
-const AIR_PER_TIER := 27.0 # tier3 ~= 121 ticks (1s), tier1 ~= 67, tier5 ~= 175
-const ARC_PER_AIR := 1.7   # arc peak (px) per airtime tick
+# --- throw height by hold (variable 0..1.4) -----------------------------------
+# A tap throws the LOWEST, snappiest height (BASE_AIR airtime); holding THROW lifts
+# it continuously toward the top. Height is a normalized 0..1.4 factor: higher buys
+# airtime (thins traffic) but is harder to catch. This is the quick, responsive feel
+# Louis preferred. The tier-based model is preserved on branch `tier-throw-model`.
+const BASE_AIR := 84       # airtime (ticks) for an instant tap-throw (snappy)
+const HOLD_MAX := 44       # holding THROW past this adds no more height
+const HOLD_GAIN := 1.9     # airtime ticks added per tick the THROW is held
+const ARC_PER_AIR := 2.15  # arc peak (px) per airtime tick; balls crest above the head
 
-# how hard a wrong height is to catch, per tier of deviation from the standard
-const DEV_UP_PENALTY := 0.28    # too HIGH (tier>3): hard, but Accuracy can recover it
-const DEV_DN_PENALTY := 0.55    # too LOW (tier<3, a weak sagging throw): brutal
-const DEV_PERFECT_SHRINK := 1.6 # Perfect window loses this many ticks per tier off
-const DEV_INACC := 0.6          # extra landing drift/wobble per tier off standard
+# how much height hurts a catch, and the under-Strength penalties (ideas.rtf rule)
+const HEIGHT_CATCH_PENALTY := 0.35  # subtracted from the off-Perfect chance at max height
+const DEFICIT_HEIGHT := 0.5         # a full Strength deficit halves reachable height
+const DEFICIT_INACC := 1.1          # a full Strength deficit roughly doubles inaccuracy
 
 # --- inaccuracy scale (the risk half of the risk/reward) ----------------------
-const DRIFT_MAX := 26.0   # px lateral landing drift at a full tier of deviation
-const JITTER_MAX := 5     # ticks of arrival uncertainty
-const WOBBLE_MAX := 11.0  # px of in-flight arc wobble
+const DRIFT_MAX := 26.0   # px lateral landing drift at max height
+const JITTER_MAX := 5     # ticks of arrival uncertainty at max height
+const WOBBLE_MAX := 11.0  # px of in-flight arc wobble at max height
 
 # --- game flow: the app boots to a menu, not straight into a run ---------------
 const ST_MENU := 0        # title / main menu
@@ -63,7 +59,6 @@ const ST_SETTINGS := 2    # options
 const ST_CUTSCENE := 3    # an illustrated story beat (now an animated mini-film)
 const ST_PLAY := 4        # the juggling itself
 const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before a set
-const ST_TUTORIAL := 6    # explained, animated lessons (1 ball, 2 balls, new props)
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
@@ -151,7 +146,7 @@ class Ball:
 	var land_tick := 0
 	var arc := 120.0
 	var wobble := 0.0
-	var tier := TIER_STD      # throw height tier 1..5; 3 is standard, off-3 is harder to catch
+	var height := 0.0         # normalized throw height 0..~1.4; higher lowers catch odds
 	var color := Color.WHITE
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
@@ -234,9 +229,17 @@ var cs_shot_start := 0    # cine_tick at which the current shot began (for fades
 var cs_freeze := false    # dev: pin the current shot (for stable screenshots)
 var establish_venue := 0  # which venue's exterior the establishing card shows
 var establish_after := 3  # ball count to start the performance with once dismissed
-var tut_queue: Array[String] = []  # pending tutorial lessons to present
-var tut_return := ST_MENU # where to go when the tutorial flow finishes
 var seen_tuts: Array[String] = []  # lesson ids already shown, so they fire once
+
+# --- interactive tutorial (runs on the REAL sim, guided step by step) ---------
+var tut_active := false   # a hands-on lesson is running inside ST_PLAY
+var tut_id := ""          # "balls" (the 1->2->3 progression) or "prop_<n>"
+var tut_step := 0         # index into tut_lesson(tut_id)
+var tut_count := 0        # catches (or throws) banked in the current step
+var tut_threw_l := false  # a left-hand throw happened this step
+var tut_threw_r := false  # a right-hand throw happened this step
+var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw lands)
+var tut_flash := ""       # brief "Nice!" feedback between steps
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
@@ -306,10 +309,10 @@ func _ready() -> void:
 	if ci != -1:
 		var id := ua[ci + 1] if ci + 1 < ua.size() and not ua[ci + 1].begins_with("--") else "intro"
 		begin_cutscene([id])
-	var ti := ua.find("--tutorial")   # dev: screenshot a lesson, e.g. --tutorial two
+	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls
 	if ti != -1:
-		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "one"
-		begin_tutorials([id], ST_MENU)
+		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
+		begin_tutorial(id)
 	var ei := ua.find("--establish")  # dev: screenshot a venue exterior card, e.g. --establish 3
 	if ei != -1:
 		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2
@@ -333,7 +336,7 @@ func _physics_process(_delta: float) -> void:
 			return
 	if game_state != ST_PLAY:
 		cine_tick += 1           # drives cutscene / establish / menu motion
-		if game_state == ST_CUTSCENE or game_state == ST_TUTORIAL:
+		if game_state == ST_CUTSCENE:
 			cutscene_autoadvance()   # shots play themselves, movie-like, until skipped
 		queue_redraw()
 		return
@@ -351,9 +354,11 @@ func _physics_process(_delta: float) -> void:
 		_read_inputs()
 	if running:
 		update_sim()
-	if _prev_running and not running:
-		on_round_end()   # the run just ended: bank the completion XP
+	if _prev_running and not running and not tut_active:
+		on_round_end()   # the run just ended: bank the completion XP (never mid-lesson)
 	_prev_running = running
+	if tut_active:
+		tut_maintain()   # advance the lesson and keep the hands stocked
 	update_hands()
 	age_popups()
 	# screen shake decays toward rest (uses cosmetic RNG so the sim stays deterministic)
@@ -379,12 +384,18 @@ func _input(event: InputEvent) -> void:
 		ST_SETTINGS:
 			settings_input(kc)
 			return
-		ST_CUTSCENE, ST_TUTORIAL:
+		ST_CUTSCENE:
 			cutscene_key(kc)
 			return
 		ST_ESTABLISH:
 			establish_key()
 			return
+	# during a hands-on lesson the command keys are locked; catch/throw are polled
+	# separately, so only Escape does anything here
+	if tut_active:
+		if kc == KEY_ESCAPE:
+			get_tree().quit()
+		return
 	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
 		match kc:
@@ -461,6 +472,18 @@ func _input(event: InputEvent) -> void:
 			start_run(7)
 		KEY_O:
 			cycle_prop(1)   # cycle to the next owned prop
+		KEY_F1:
+			if debug_mode: debug_jump_venue(0)   # debug story jump: F1..F6 = venues 1..6
+		KEY_F2:
+			if debug_mode: debug_jump_venue(1)
+		KEY_F3:
+			if debug_mode: debug_jump_venue(2)
+		KEY_F4:
+			if debug_mode: debug_jump_venue(3)
+		KEY_F5:
+			if debug_mode: debug_jump_venue(4)
+		KEY_F6:
+			if debug_mode: debug_jump_venue(5)
 		KEY_ESCAPE:
 			get_tree().quit()
 
@@ -513,13 +536,194 @@ func try_buy(kind: int) -> void:
 
 
 func offer_prop_tutorial(kind: int) -> void:
-	# the first time a new prop becomes juggle-able, play its explained lesson once
+	# the first time a new prop becomes juggle-able, run its hands-on lesson once
 	var id := "prop_%d" % kind
 	if seen_tuts.has(id):
 		return
 	seen_tuts.append(id)
 	shop_open = false            # clear the shop overlay for a clean lesson handoff
-	begin_tutorials([id], ST_PLAY)
+	begin_tutorial(id)
+
+
+# =============================================================================
+# Interactive tutorials. Unlike a cutscene, a lesson runs on the REAL sim: the
+# player throws and catches actual balls, guided one step at a time, and each
+# step advances only once its goal is met. Fired when something unlocks: a fresh
+# save teaches the 1-ball basics (then 2, then 3), and buying a new prop teaches
+# that prop. There is no menu entry; lessons arrive when they are relevant.
+# =============================================================================
+
+func tut_lesson(id: String) -> Array:
+	if id.begins_with("prop_"):
+		var k := int(id.substr(5))
+		var quirks := {
+			PROP_EGGS: "They throw like balls, but a drop breaks for good, so keep your hands soft.",
+			PROP_RINGS: "Heavier than balls, so they hang a touch longer. Catch them by the rim.",
+			PROP_CLUBS: "These tumble in the air. Catch the handle, not the spin, so read the rotation.",
+			PROP_KNIVES: "Fast and sharp, with less room for error. Endurance keeps your hands honest.",
+			PROP_TORCHES: "The heaviest, lit and roaring. They ask for real Strength and a steady nerve.",
+		}
+		var quirk := String(quirks.get(k, "A new prop. Feel out its weight and timing."))
+		var need := 6 if k == PROP_TORCHES else 5
+		return [{"prop": k, "balls": 3, "hand": RIGHT, "goal": "catch", "need": need,
+			"text": "New prop: %s" % String(PROPS[k]["name"]), "sub": "%s Land %d clean catches." % [quirk, need]}]
+	# the core progression: one ball, then two, then the three-ball cascade
+	return [
+		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "throw_r", "need": 1,
+			"text": "Throw the ball from your RIGHT hand", "sub": "Tap J. Just let it fall this time, no need to catch it yet."},
+		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "throw_l", "need": 1,
+			"text": "Now throw from your LEFT hand", "sub": "Tap F, and let it fall again. Feel that each hand has its own throw."},
+		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 1,
+			"text": "This time, catch it", "sub": "Throw with J, then catch it in your LEFT hand with D as it comes down."},
+		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "catch", "need": 1,
+			"text": "And the other way", "sub": "Throw with F, then catch it in your RIGHT hand with K."},
+		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
+			"text": "Keep one ball going, back and forth", "sub": "Throw, catch, throw from that hand, catch. Land four in a row."},
+		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
+			"text": "Two balls now, one in each hand", "sub": "Throw the first, and as it peaks throw the second up under it. Land four catches."},
+		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 6,
+			"text": "Three balls. The cascade", "sub": "Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for six."},
+	]
+
+
+func begin_tutorial(id: String) -> void:
+	tut_id = id
+	tut_step = 0
+	tut_active = true
+	game_state = ST_PLAY
+	started = true            # a lesson is its own thing, not the opening "first run"
+	tut_setup_step()
+
+
+func tut_setup_step() -> void:
+	var steps := tut_lesson(tut_id)
+	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+	prop_type = int(step["prop"])
+	num_balls = int(step["balls"])
+	mode = MODE_TRAIN
+	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	balls.clear()
+	_stack_l.clear()
+	_stack_r.clear()
+	popups.clear()
+	charging = [false, false]
+	applause = 0.7
+	streak = 0
+	caught = 0
+	dropped = 0
+	running = false
+	stamina_max = 50.0 + float(endurance)
+	stamina = stamina_max
+	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
+	hclose = [0.0, 0.0]
+	catch_flash = [-999, -999]
+	throw_kick = [-999, -999]
+	rng.seed = 20260705
+	# deal the balls; a single-ball step starts in the exact hand it is teaching
+	var start_hand := int(step.get("hand", RIGHT))
+	for i in num_balls:
+		var b := Ball.new()
+		b.state = STATE_HAND
+		b.kind = prop_type
+		b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
+		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
+		balls.append(b)
+		var to_left := (i % 2 == 1) if num_balls > 1 else (start_hand == LEFT)
+		if to_left:
+			_stack_l.append(b)
+		else:
+			_stack_r.append(b)
+	tut_count = 0
+	tut_threw_l = false
+	tut_threw_r = false
+	tut_advance_at = -1
+
+
+func tut_on_throw(h: int) -> void:
+	if h == LEFT:
+		tut_threw_l = true
+	else:
+		tut_threw_r = true
+	tut_check()
+
+
+func tut_on_catch() -> void:
+	tut_count += 1
+	tut_check()
+
+
+func tut_check() -> void:
+	if tut_advance_at >= 0:
+		return   # already cleared this step, just waiting for the throw to land
+	var steps := tut_lesson(tut_id)
+	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+	var done := false
+	match String(step["goal"]):
+		"throw_r": done = tut_threw_r
+		"throw_l": done = tut_threw_l
+		_: done = tut_count >= int(step["need"])
+	if done:
+		tut_flash = "Nice!"
+		tut_advance_at = tick + 72   # let the last throw finish its arc before cutting on
+
+
+func tut_maintain() -> void:
+	# advance when the post-goal beat elapses, and keep the step playable by topping
+	# the hands back up shortly after a ball is lost, so a fumble never stalls a lesson
+	if tut_advance_at >= 0 and tick >= tut_advance_at:
+		tut_flash = ""
+		tut_step += 1
+		if tut_step >= tut_lesson(tut_id).size():
+			tut_finish()
+		else:
+			tut_setup_step()
+		return
+	if balls.size() < num_balls and tick - last_drop_tick > 34:
+		for _i in (num_balls - balls.size()):
+			var b := Ball.new()
+			b.state = STATE_HAND
+			b.kind = prop_type
+			b.color = ball_color(balls.size()) if prop_type == PROP_BALLS else prop_color(prop_type)
+			b.spin_dir = 1.0
+			balls.append(b)
+			if stack(RIGHT).size() <= stack(LEFT).size():
+				_stack_r.append(b)
+			else:
+				_stack_l.append(b)
+
+
+func tut_finish() -> void:
+	var was_prop := tut_id.begins_with("prop_")
+	tut_active = false
+	tut_id = ""
+	tut_flash = ""
+	mode = MODE_TRAIN
+	if not was_prop:
+		prop_type = PROP_BALLS   # after the basics, drop back to plain balls
+	var s := get_viewport_rect().size
+	add_popup(Vector2(s.x * 0.5, s.y * 0.40), "lesson complete", Color(1.0, 0.86, 0.42))
+	start_run(3)
+
+
+func draw_tutorial_banner(font: Font, s: Vector2) -> void:
+	var steps := tut_lesson(tut_id)
+	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+	var bw := s.x * 0.66
+	var bx := s.x * 0.5 - bw * 0.5
+	var by := 40.0
+	draw_rect(Rect2(bx, by, bw, 92.0), Color(0.05, 0.03, 0.05, 0.86))
+	draw_rect(Rect2(bx, by, bw, 92.0), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
+	draw_string(font, Vector2(bx, by + 30.0), "LESSON  -  " + String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 23, Color(1.0, 0.9, 0.6))
+	draw_string(font, Vector2(bx + 20.0, by + 55.0), String(step["sub"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 40.0, 15, Color(0.9, 0.85, 0.78))
+	var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
+	if String(step["goal"]).begins_with("catch") and int(step["need"]) > 1:
+		prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
+	draw_string(font, Vector2(bx, by + 80.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.8, 0.75, 0.68))
+	# a quiet controls reminder along the bottom (the normal HUD hints are hidden)
+	draw_string(font, Vector2(0, s.y - 30.0), "D / K  catch      F / J  throw  (hold to go higher)      Esc  quit",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.8, 0.72, 0.6, 0.8))
+	if tut_flash != "":
+		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
 
 
 func try_buy_glasses() -> void:
@@ -535,7 +739,7 @@ func try_buy_glasses() -> void:
 # -----------------------------------------------------------------------------
 
 func menu_input(kc: int) -> void:
-	var n := 4   # Play, Tutorials, Settings, Quit
+	var n := 3   # Play, Settings, Quit (lessons arrive on unlock, not from a menu)
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -547,11 +751,9 @@ func menu_input(kc: int) -> void:
 					menu_sel = 0
 					game_state = ST_SLOTS
 				1:
-					begin_tutorials(["one", "two", "cascade"], ST_MENU)
-				2:
 					menu_sel = 0
 					game_state = ST_SETTINGS
-				3:
+				2:
 					get_tree().quit()
 		KEY_ESCAPE:
 			get_tree().quit()
@@ -616,26 +818,12 @@ func begin_cutscene(beats: Array) -> void:
 	start_beat()
 
 
-func begin_tutorials(lessons: Array, ret: int) -> void:
-	tut_queue.assign(lessons)
-	tut_return = ret
-	game_state = ST_TUTORIAL
-	cine_tick = 0
-	start_beat()
-
-
-func cur_queue() -> Array:
-	return tut_queue if game_state == ST_TUTORIAL else cutscene_queue
-
-
 func cur_beat_id() -> String:
-	var q := cur_queue()
-	return String(q[0]) if q.size() > 0 else ""
+	return String(cutscene_queue[0]) if cutscene_queue.size() > 0 else ""
 
 
 func cur_script() -> Array:
-	var id := cur_beat_id()
-	return tutorial_script(id) if game_state == ST_TUTORIAL else cutscene_script(id)
+	return cutscene_script(cur_beat_id())
 
 
 func start_beat() -> void:
@@ -665,10 +853,9 @@ func next_shot() -> void:
 		cs_shot += 1
 		cs_shot_start = cine_tick
 		return
-	var q := cur_queue()
-	if q.size() > 0:
-		q.pop_front()
-	if q.is_empty():
+	if cutscene_queue.size() > 0:
+		cutscene_queue.pop_front()
+	if cutscene_queue.is_empty():
 		finish_beats()
 	else:
 		start_beat()
@@ -676,14 +863,15 @@ func next_shot() -> void:
 
 func finish_beats() -> void:
 	view_venue = -1
-	if game_state == ST_TUTORIAL:
-		game_state = tut_return
-		if tut_return == ST_PLAY and not started:
-			start_run(num_balls)
-		return
 	game_state = ST_PLAY
 	if not started:
-		start_run(3)   # coming out of the opening cutscene into the first run
+		# a fresh game: after the opening story, teach the basics hands-on before the
+		# first real run (one ball, then two, then the cascade)
+		if not seen_tuts.has("balls"):
+			seen_tuts.append("balls")
+			begin_tutorial("balls")
+		else:
+			start_run(3)
 
 
 func start_slot(i: int) -> void:
@@ -819,79 +1007,6 @@ func cutscene_script(id: String) -> Array:
 					"cap": "Silvio watches from the seats now. No gear on earth can carry this stage. Only your hands can."},
 				{"scene": "arena", "stage": 2, "who": "", "hold": 420,
 					"cap": "So you throw, the way she taught you in a backyard a lifetime ago. Clean catch. Clean throw. The whole world holds its breath."},
-			]
-
-
-func tutorial_script(id: String) -> Array:
-	# Lessons reuse the same film engine, but the tableau is a live demonstration:
-	# a figure juggling the exact pattern being explained, with the keys spelled out.
-	match id:
-		"one":
-			return [
-				{"scene": "lesson", "demo": 1, "hold": 380,
-					"cap": "Start with one ball. Toss it in a gentle arc from one hand to the other, about eye height."},
-				{"scene": "lesson", "demo": 1, "hold": 440,
-					"cap": "Catch with D (left hand) and K (right). Throw with F and J. Hold a throw key to send the ball higher."},
-				{"scene": "lesson", "demo": 1, "hold": 380,
-					"cap": "The whole game lives inside this one arc. Make it smooth and everything above it follows."},
-			]
-		"two":
-			return [
-				{"scene": "lesson", "demo": 2, "hold": 420,
-					"cap": "Now two, one ball resting in each hand. Throw the first, and as it reaches its peak, throw the second up under it."},
-				{"scene": "lesson", "demo": 2, "hold": 440,
-					"cap": "Two throws, two catches, always in that order. Never throw into a hand that is about to catch."},
-				{"scene": "lesson", "demo": 2, "hold": 400,
-					"cap": "This exchange is the heartbeat of every pattern above it. Own it before you reach for a third."},
-			]
-		"cascade":
-			return [
-				{"scene": "lesson", "demo": 3, "hold": 440,
-					"cap": "Three balls make a cascade. Each throw crosses to the far hand, one after another, in a steady weave."},
-				{"scene": "lesson", "demo": 3, "hold": 440,
-					"cap": "Keep the height matched and the rhythm even. It is rushed throws that break a run, almost never slow ones."},
-				{"scene": "lesson", "demo": 3, "hold": 420,
-					"cap": "Odd counts cascade across, even counts fountain in two columns. The rest is just more of the same nerve."},
-			]
-		"prop_1":
-			return [
-				{"scene": "lessonprop", "kind": PROP_EGGS, "hold": 400,
-					"cap": "Eggs. As light as balls and just as easy to throw. It is the catch that punishes you."},
-				{"scene": "lessonprop", "kind": PROP_EGGS, "hold": 440,
-					"cap": "Drop one and it is gone for good, a yolk on the boards and one fewer in your basket. Soft hands only."},
-			]
-		"prop_2":
-			return [
-				{"scene": "lessonprop", "kind": PROP_RINGS, "hold": 400,
-					"cap": "Rings. Bigger and heavier than balls, so they hang a touch longer and land closer to where you aim."},
-				{"scene": "lessonprop", "kind": PROP_RINGS, "hold": 440,
-					"cap": "Catch them by the rim as they fall flat toward you. They reward Accuracy, so train it before you flash them."},
-			]
-		"prop_3":
-			return [
-				{"scene": "lessonprop", "kind": PROP_CLUBS, "hold": 420,
-					"cap": "Clubs. These tumble in the air, so you catch the handle, not the spin. Read the rotation, not just the fall."},
-				{"scene": "lessonprop", "kind": PROP_CLUBS, "hold": 440,
-					"cap": "They are heavy. Below their Required Strength a club sags low and wild, so build Strength or it will fight you."},
-			]
-		"prop_4":
-			return [
-				{"scene": "lessonprop", "kind": PROP_KNIVES, "hold": 420,
-					"cap": "Knives. A club with a temper. They spin fast and glint hard, and the crowd leans in for exactly that reason."},
-				{"scene": "lessonprop", "kind": PROP_KNIVES, "hold": 440,
-					"cap": "Endurance keeps your hands honest over a long set. Tired hands and sharp steel do not mix, so stay rested."},
-			]
-		"prop_5":
-			return [
-				{"scene": "lessonprop", "kind": PROP_TORCHES, "hold": 440,
-					"cap": "Torches. The top of the ladder, lit and roaring. The heaviest throw and the most spectacle in the game."},
-				{"scene": "lessonprop", "kind": PROP_TORCHES, "hold": 460,
-					"cap": "They demand real Strength and a steady nerve. Master these and there is nothing left you cannot hold."},
-			]
-		_:
-			return [
-				{"scene": "lesson", "demo": 3, "hold": 360,
-					"cap": "Keep your throws even and your catches soft. Everything in this game grows from that."},
 			]
 
 
@@ -1107,10 +1222,10 @@ func on_catch(h: int) -> void:
 	# with Accuracy and falls with how far off the standard height the throw was.
 	# The Perfect window itself shrinks for off-standard throws (Focus widens it),
 	# so a wrong-height throw is hard to catch cleanly and easy to lose.
-	var wperf := maxi(2, perfect_window() - int(round(absf(best.tier - TIER_STD) * DEV_PERFECT_SHRINK)))
+	var wperf := perfect_window()
 	if best_d > wperf:
 		var quality := 1 if best_d <= W_GOOD else 2
-		if rng.randf() > catch_chance(quality, best.tier):
+		if rng.randf() > catch_chance(quality, best.height):
 			drop_ball(best, "slip")
 			return
 	# secured
@@ -1118,6 +1233,8 @@ func on_catch(h: int) -> void:
 	stack(h).append(best)
 	catch_flash[h] = tick
 	caught += 1
+	if tut_active:
+		tut_on_catch()   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	if best_d <= wperf:
 		streak += 1
@@ -1168,28 +1285,27 @@ func do_throw(h: int, hold: int) -> void:
 		return
 	var b: Ball = stack(h).pop_front()
 	var weight := prop_weight()
-	var deficit := prop_deficit()   # >0 when too weak for this prop
-	# A tap is the standard tier 3; holding lifts toward tier 5, and Strength lets you
-	# reach the top of the range with less hold. Being too weak for the prop drags the
-	# ACTUAL height down toward tier 1 (the ideas.rtf sagging-throw rule).
-	var hold_frac := clampf(float(hold) / float(HOLD_MAX), 0.0, 1.0)
-	var reach := clampf(hold_frac * (1.0 + float(strength) * STR_HOLD_EFF), 0.0, 1.0)
-	var intended := TIER_STD + (TIER_MAX - TIER_STD) * reach
-	var tier := clampf(lerpf(intended, TIER_MIN, deficit), TIER_MIN, TIER_MAX)
-	var dev := absf(tier - TIER_STD)   # 0 standard .. 2 worst, in either direction
-	b.tier = tier
+	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
+	# A tap is the LOWEST, snappiest throw (BASE_AIR); each tick of hold adds airtime.
+	# Strength makes each tick worth more height, so a strong juggler reaches a big
+	# throw in less time. Being under a prop's Required Strength cuts the reachable
+	# height (the ideas.rtf sagging-throw rule).
+	var gain_mult := (1.0 + float(strength) * STR_HOLD_EFF) * (1.0 - DEFICIT_HEIGHT * deficit)
+	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
+	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
+	b.height = frac
 
-	# any deviation from the standard, plus a heavy prop, widens the inaccuracy
-	var inacc := inacc_factor() * (0.35 + DEV_INACC * dev) * (1.0 + WEIGHT_INACC * float(weight - 1))
-	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * inacc))
-	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * inacc
-	var air := int(round(AIR_BASE + AIR_PER_TIER * tier))   # higher tier = more airtime
+	# Accuracy (dampened by low stamina) sets the base inaccuracy; a heavy prop and an
+	# under-strength throw both widen it, and it all scales with the throw's height.
+	var inacc := inacc_factor() * (1.0 + WEIGHT_INACC * float(weight - 1) + DEFICIT_INACC * deficit)
+	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * frac * inacc))
+	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * frac * inacc
 
 	b.state = STATE_FLIGHT
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
-	b.wobble = WOBBLE_MAX * dev * inacc_factor()
+	b.wobble = WOBBLE_MAX * frac * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	b.to_hand = other(h) if pattern == CASCADE else h
 	b.from_pos = inner_pos(h)
@@ -1200,13 +1316,13 @@ func do_throw(h: int, hold: int) -> void:
 	if not started:
 		started = true
 		running = true
-	# a clean standard throw earns a little Applause; a wrong height does not, and a
-	# clearly bad one flags itself high above the stage so the player learns to fix it
-	applause = minf(1.0, applause + 0.012 * (1.0 - clampf(dev, 0.0, 1.0)))
-	if set_flags and dev >= 0.8:
-		var lbl := "TOO LOW" if tier < TIER_STD else ("RESET" if tier > 4.3 else "too high")
-		var lc := Color(1.0, 0.5, 0.4, 0.95) if tier < TIER_STD else Color(1.0, 0.82, 0.45, 0.9)
-		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), lbl, lc)
+	# a clean, controlled (low) throw earns a little Applause; a very high one does not
+	# and flags itself above the stage so the player learns height control
+	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)))
+	if set_flags and frac >= 1.0:
+		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
+	if tut_active:
+		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
 
 
 func on_trick() -> void:
@@ -1304,16 +1420,13 @@ func inacc_factor() -> float:
 	return lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
 
 
-func catch_chance(quality: int, tier: float) -> float:
+func catch_chance(quality: int, height: float) -> float:
 	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures.
-	# Rises with Accuracy and falls hard the further the throw is from the standard
-	# height (tier 3), with a low sagging throw punished more than a high one.
-	# Perfect timing is handled separately in on_catch.
+	# Rises with Accuracy and falls with the throw's height. Perfect timing is
+	# handled separately in on_catch.
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
-	var dev_up := maxf(0.0, tier - TIER_STD)
-	var dev_dn := maxf(0.0, TIER_STD - tier)
-	var p := base + acc_norm * ACC_CATCH_BONUS - DEV_UP_PENALTY * dev_up - DEV_DN_PENALTY * dev_dn
+	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
 	if has_glasses:
 		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	return clampf(p, MIN_CATCH_P, 1.0)
@@ -1361,6 +1474,19 @@ func rep_tier() -> String:
 	if reputation >= 100:
 		return "Street Name"
 	return "Unknown"
+
+
+const VENUE_REP := [0, 100, 300, 700, 1500, 3000]   # reputation at each venue's door
+
+
+func debug_jump_venue(i: int) -> void:
+	# debug: leap anywhere in the story. Sets Reputation to that venue's threshold,
+	# marks it seen (so promotions do not re-fire), plays its beat, and lands there.
+	i = clampi(i, 0, 5)
+	reputation = VENUE_REP[i]
+	venue_seen = i
+	save_progress()
+	begin_cutscene(["intro" if i == 0 else "v%d" % i])
 
 
 func venue_index() -> int:
@@ -1557,9 +1683,11 @@ func drop_ball(b: Ball, why: String) -> void:
 		shake = 5.0
 	var dtext := why
 	if b.kind == PROP_EGGS:
-		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf)
-		prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
-		save_progress()
+		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf). A lesson
+		# is practice, so a broken egg there is free (but still shows the mess).
+		if not tut_active:
+			prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
+			save_progress()
 		dtext = "SPLAT"
 		spawn_egg_break(flight_pos(b))   # shell shards fly, a yolk splats on the floor
 	add_popup(b.to_pos + Vector2(0, -6), dtext, Color(1.0, 0.32, 0.3))
@@ -1628,7 +1756,7 @@ func _draw() -> void:
 		ST_SETTINGS:
 			draw_settings(font, s)
 			return
-		ST_CUTSCENE, ST_TUTORIAL:
+		ST_CUTSCENE:
 			draw_cutscene(font, s)
 			return
 		ST_ESTABLISH:
@@ -1641,7 +1769,10 @@ func _draw() -> void:
 	draw_balls_in_flight()
 	draw_egg_shards()      # flying shell pieces read above the stage
 	draw_vignette(s, 0.5)  # frame the lit stage so it reads photographed, not flat
-	draw_hud(font, s)
+	if tut_active:
+		draw_tutorial_banner(font, s)   # a lesson shows only the guided banner, no HUD
+	else:
+		draw_hud(font, s)
 	draw_popups(font)
 	if sheet_open:
 		draw_sheet(font, s)
@@ -2034,30 +2165,33 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if tick - trick_hint < 40:
 		draw_string(font, Vector2(s.x * 0.5 - 90, s.y * 0.30), "no trick armed", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.7, 0.9, 0.8))
 
-	var patt := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
-	var propname := String(cur_prop()["name"]).to_upper()
-	var vname := String(venue_data(venue_index())["name"]).to_upper()
-	if prop_deficit() > 0.0:
-		draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
-	draw_string(font, Vector2(30, s.y - 74), "%s  -  %d %s  -  %s" % [vname, num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
-	if set_hints:
-		var unlock := ""
-		if next_ball_strength() > 0:
-			unlock = "   ( next ball at Strength %d )" % next_ball_strength()
-		draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
-		draw_string(font, Vector2(30, s.y - 30),
-			"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+	# the round chrome (venue line, control hints, ROUND OVER, start prompt) is
+	# hidden during a lesson, where the guided banner is the only instruction
+	if not tut_active:
+		var patt := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
+		var propname := String(cur_prop()["name"]).to_upper()
+		var vname := String(venue_data(venue_index())["name"]).to_upper()
+		if prop_deficit() > 0.0:
+			draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
+		draw_string(font, Vector2(30, s.y - 74), "%s  -  %d %s  -  %s" % [vname, num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
+		if set_hints:
+			var unlock := ""
+			if next_ball_strength() > 0:
+				unlock = "   ( next ball at Strength %d )" % next_ball_strength()
+			draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
+			draw_string(font, Vector2(30, s.y - 30),
+				"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
 
-	if not started:
-		var verb := "perform" if performing else "practise"
-		draw_string(font, Vector2(s.x * 0.5 - 220, s.y * 0.23),
-			"press a THROW (F or J) to %s   -   P to %s instead" % [verb, "train" if performing else "perform"],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.55))
-	elif not running:
-		draw_string(font, Vector2(s.x * 0.5 - 150, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1.0, 0.5, 0.4))
-		var tail := "   gold +%d" % last_pay if performing else ""
-		draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d%s   -   press R to go again" % [best_streak, run_xp, tail], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
+		if not started:
+			var verb := "perform" if performing else "practise"
+			draw_string(font, Vector2(s.x * 0.5 - 220, s.y * 0.23),
+				"press a THROW (F or J) to %s   -   P to %s instead" % [verb, "train" if performing else "perform"],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.55))
+		elif not running:
+			draw_string(font, Vector2(s.x * 0.5 - 150, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1.0, 0.5, 0.4))
+			var tail := "   gold +%d" % last_pay if performing else ""
+			draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d%s   -   press R to go again" % [best_streak, run_xp, tail], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -2207,7 +2341,7 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.32 + 160.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
 
-	var opts := ["Play", "Tutorials", "Settings", "Quit"]
+	var opts := ["Play", "Settings", "Quit"]
 	var oy := s.y * 0.62
 	for i in opts.size():
 		var sel := i == menu_sel
@@ -2330,8 +2464,6 @@ func draw_shot(shot: Dictionary, s: Vector2) -> void:
 		"circus": scene_circus(s, int(shot.get("stage", 0)))
 		"champ": scene_champ(s, int(shot.get("stage", 0)))
 		"arena": scene_arena(s, int(shot.get("stage", 0)))
-		"lesson": scene_lesson(s, int(shot.get("demo", 3)))
-		"lessonprop": scene_lessonprop(s, int(shot.get("kind", PROP_RINGS)))
 		_: draw_venue_exterior(s, 0)
 
 
@@ -2584,30 +2716,6 @@ func demo_juggle(center: Vector2, sc: float, count: int) -> Dictionary:
 		p.y -= peak * 4.0 * u * (1.0 - u)
 		out.append({"pos": p, "col": ball_color(i)})
 	return {"balls": out, "hl": hl, "hr": hr, "peak": peak}
-
-
-func draw_arc_guide(frm: Vector2, to: Vector2, peak: float, col: Color) -> void:
-	var pts := PackedVector2Array()
-	for k in 21:
-		var u := float(k) / 20.0
-		var p := frm.lerp(to, u)
-		p.y -= peak * 4.0 * u * (1.0 - u)
-		pts.append(p)
-	draw_polyline(pts, col, 1.5)
-
-
-func draw_prop_at(kind: int, pos: Vector2, sc: float, ang: float) -> void:
-	var col := prop_color(kind)
-	var halo := col
-	halo.a = 0.16
-	draw_circle(pos, 18.0 * sc, halo)
-	match kind:
-		PROP_EGGS: draw_egg(pos, col, sc)
-		PROP_RINGS: draw_ring_prop(pos, col, sc)
-		PROP_CLUBS: draw_club(pos, ang, sc)
-		PROP_KNIVES: draw_knife(pos, ang, sc)
-		PROP_TORCHES: draw_torch(pos, ang, sc)
-		_: draw_ball_shape(pos, col, sc)
 
 
 # --- the egg-break effect (shell shards fly, a yolk splats and spreads) --------
@@ -3012,13 +3120,6 @@ func draw_ring_interior(s: Vector2) -> void:
 	draw_lantern_string(Vector2(s.x * 0.06, s.y * 0.22), Vector2(s.x * 0.94, s.y * 0.24))
 
 
-func draw_key_hint(pos: Vector2, keys: String, label: String) -> void:
-	# pos is the anchor; the keys sit on it and the caption just below it
-	var f := ThemeDB.fallback_font
-	draw_string(f, Vector2(pos.x - 90.0, pos.y), keys, HORIZONTAL_ALIGNMENT_CENTER, 180, 20, Color(1.0, 0.9, 0.6))
-	draw_string(f, Vector2(pos.x - 90.0, pos.y + 20.0), label, HORIZONTAL_ALIGNMENT_CENTER, 180, 13, Color(0.82, 0.76, 0.68))
-
-
 # --- story scene tableaux -----------------------------------------------------
 
 func scene_backyard(s: Vector2, stage: int) -> void:
@@ -3184,57 +3285,6 @@ func scene_arena(s: Vector2, stage: int) -> void:
 				draw_ball_shape(b["pos"], b["col"], 1.2)
 			if stage == 2:
 				draw_circle(Vector2(s.x * 0.5, s.y * 0.48), 200.0, Color(1.0, 0.9, 0.6, 0.05))
-
-
-# --- tutorial tableaux --------------------------------------------------------
-
-func scene_lesson(s: Vector2, demo: int) -> void:
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.09, 0.10), Color(0.05, 0.04, 0.05), 20)
-	draw_spotlight_cone(s, s.x * 0.5, 0.10)
-	var fy := s.y * 0.82
-	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.11, 0.08, 0.06))
-	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(0.8, 0.5, 0.3, 0.3), 2.0)
-	var center := Vector2(s.x * 0.5, s.y * 0.44)
-	var dj := demo_juggle(center, 1.2, demo)
-	draw_arc_guide(dj["hl"], dj["hr"], dj["peak"], Color(1.0, 0.85, 0.5, 0.16))
-	draw_arc_guide(dj["hr"], dj["hl"], dj["peak"], Color(1.0, 0.85, 0.5, 0.16))
-	draw_shadow(Vector2(center.x, fy), 64.0)
-	draw_person(Vector2(center.x, fy), 1.2, milo_pal(0), dj["hl"], dj["hr"], 0)
-	for b in dj["balls"]:
-		draw_ball_shape(b["pos"], b["col"], 1.15)
-	# controls, set to the sides beside the torso so nothing sits over the figure
-	draw_key_hint(Vector2(center.x - 168.0, fy - 96.0), "D    F", "left:  catch  throw")
-	draw_key_hint(Vector2(center.x + 168.0, fy - 96.0), "K    J", "right:  catch  throw")
-	draw_dust(s, 14, Color(1.0, 0.85, 0.55))
-
-
-func scene_lessonprop(s: Vector2, kind: int) -> void:
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.09, 0.10), Color(0.05, 0.04, 0.05), 20)
-	draw_spotlight_cone(s, s.x * 0.44, 0.10)
-	var fy := s.y * 0.82
-	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.11, 0.08, 0.06))
-	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(0.8, 0.5, 0.3, 0.3), 2.0)
-	var center := Vector2(s.x * 0.42, s.y * 0.44)
-	var hl := center + Vector2(-56.0 * 1.2, 42.0 * 1.2)
-	var hr := center + Vector2(56.0 * 1.2, 42.0 * 1.2)
-	var peak := 120.0
-	var phase := fposmod(float(cine_tick), 120.0)
-	var seg := 0 if phase < 60.0 else 1
-	var u := (phase - float(seg) * 60.0) / 60.0
-	var frm := hl if seg == 0 else hr
-	var to := hr if seg == 0 else hl
-	var p := frm.lerp(to, u)
-	p.y -= peak * 4.0 * u * (1.0 - u)
-	var spins := bool(PROPS[kind]["spins"])
-	var ang := float(cine_tick) * 0.14 if spins else 0.0
-	draw_arc_guide(hl, hr, peak, Color(1.0, 0.85, 0.5, 0.14))
-	draw_arc_guide(hr, hl, peak, Color(1.0, 0.85, 0.5, 0.14))
-	draw_shadow(Vector2(center.x, fy), 64.0)
-	draw_person(Vector2(center.x, fy), 1.2, milo_pal(clampi(venue_index(), 0, 5)), hl, hr, 0)
-	draw_prop_at(kind, p, prop_scale(kind) * 1.2, ang)
-	# a large showcase of the new prop, with its name, off to the side
-	draw_prop_at(kind, Vector2(s.x * 0.80, s.y * 0.40), prop_scale(kind) * 2.4, ang * 0.5)
-	draw_string(ThemeDB.fallback_font, Vector2(s.x * 0.66, s.y * 0.58), String(PROPS[kind]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, s.x * 0.28, 24, Color(1.0, 0.9, 0.6))
 
 
 # -----------------------------------------------------------------------------
