@@ -30,19 +30,31 @@ const ACC_FULL := 55.0            # Accuracy at which off-Perfect catches are re
 const GOOD_BASE := 0.50           # base chance to secure a Good-timed catch
 const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
 const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
-const HEIGHT_CATCH_PENALTY := 0.35 # subtracted from the chance at max throw height
-const MIN_CATCH_P := 0.08         # a wild ball is never quite hopeless
+const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
 
-# --- throw height by hold -----------------------------------------------------
-const BASE_AIR := 84      # airtime (ticks) for an instant tap-throw
-const HOLD_MAX := 44      # holding THROW past this adds no more height
-const HOLD_GAIN := 1.9    # airtime ticks added per tick the THROW is held
-const ARC_PER_AIR := 2.15 # arc peak (px) per airtime tick; balls crest above the head
+# --- throw height as a TIER (ideas.rtf heights 1..5) --------------------------
+# A tap throws the STANDARD height (tier 3), the one catch timing is built around.
+# Holding lifts it toward 5 (a risky reset); being too weak for the prop drags it
+# DOWN toward 1. Both directions away from 3 are harder to catch, so a wrong-height
+# throw is a mistake, which is exactly what makes height control matter.
+const TIER_STD := 3.0      # the standard, catchable throw (a plain tap)
+const TIER_MIN := 1.0
+const TIER_MAX := 5.0
+const HOLD_MAX := 44       # holding THROW this long reaches the top of the range
+const AIR_BASE := 40.0     # airtime = AIR_BASE + AIR_PER_TIER * tier
+const AIR_PER_TIER := 27.0 # tier3 ~= 121 ticks (1s), tier1 ~= 67, tier5 ~= 175
+const ARC_PER_AIR := 1.7   # arc peak (px) per airtime tick
 
-# --- inaccuracy of high throws (the risk half of the risk/reward) -------------
-const DRIFT_MAX := 26.0   # px lateral landing drift at max height
-const JITTER_MAX := 5     # ticks of arrival uncertainty at max height
-const WOBBLE_MAX := 11.0  # px of in-flight arc wobble at max height
+# how hard a wrong height is to catch, per tier of deviation from the standard
+const DEV_UP_PENALTY := 0.28    # too HIGH (tier>3): hard, but Accuracy can recover it
+const DEV_DN_PENALTY := 0.55    # too LOW (tier<3, a weak sagging throw): brutal
+const DEV_PERFECT_SHRINK := 1.6 # Perfect window loses this many ticks per tier off
+const DEV_INACC := 0.6          # extra landing drift/wobble per tier off standard
+
+# --- inaccuracy scale (the risk half of the risk/reward) ----------------------
+const DRIFT_MAX := 26.0   # px lateral landing drift at a full tier of deviation
+const JITTER_MAX := 5     # ticks of arrival uncertainty
+const WOBBLE_MAX := 11.0  # px of in-flight arc wobble
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
 const SAVE_PATH := "user://juggle_save.cfg"
@@ -104,8 +116,6 @@ const PROPS := [
 ]
 const WEIGHT_INACC := 0.12   # each weight step over balls adds this much inaccuracy
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
-const DEFICIT_INACC := 1.1   # a full Strength deficit roughly doubles inaccuracy
-const DEFICIT_HEIGHT := 0.5  # a full Strength deficit halves reachable height
 
 # --- shop: spend gold on props and gear (ideas.rtf shop) ----------------------
 const GLASSES_COST := 5000
@@ -131,7 +141,7 @@ class Ball:
 	var land_tick := 0
 	var arc := 120.0
 	var wobble := 0.0
-	var height := 0.0         # normalized throw height 0..~1.4; lowers catch odds
+	var tier := TIER_STD      # throw height tier 1..5; 3 is standard, off-3 is harder to catch
 	var color := Color.WHITE
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
@@ -180,7 +190,10 @@ var endurance := 6        # raises max Stamina; gates heavy props later
 var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
 var prop_type := PROP_BALLS  # the object being juggled this run
-var owned_mask := 1       # bitfield of owned props; bit 0 (balls) always set
+# how many of each prop you own (balls are free and unlimited, see have()). You buy
+# props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
+# consumed permanently when dropped; durable props are not.
+var prop_count: Array[int] = [0, 0, 0, 0, 0, 0]
 var has_glasses := false  # bought gear: raises the catch chance
 var level := 1
 var xp := 0               # xp accumulated inside the current level
@@ -338,24 +351,23 @@ func toggle_mode() -> void:
 
 
 func cycle_prop(dir: int) -> void:
-	# step to the next OWNED prop and restart with it (prop is a per-run setting)
+	# step to the next prop you own enough of, and restart with it (per-run setting)
 	var n := PROPS.size()
 	var k := prop_type
 	for _i in n:
 		k = (k + dir + n) % n
-		if owns(k):
+		if available(k):
 			prop_type = k
 			break
 	start_run(num_balls)
 
 
 func try_buy(kind: int) -> void:
-	if owns(kind):
-		return
+	# buy one more of a prop; you can stock as many as you can afford
 	var cost := int(PROPS[kind]["cost"])
 	if money >= cost:
 		money -= cost
-		owned_mask |= (1 << kind)
+		prop_count[kind] += 1
 		save_progress()
 
 
@@ -482,9 +494,11 @@ func next_ball_strength() -> int:
 
 
 func start_run(n: int) -> void:
-	if not owns(prop_type):
-		prop_type = PROP_BALLS   # never start a run holding a prop you do not own
-	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, max_balls()))
+	if not available(prop_type):
+		prop_type = PROP_BALLS   # not enough of that prop owned: fall back to balls
+	# you cannot juggle more of a prop than you own (balls are unlimited)
+	var cap := mini(max_balls(), have(prop_type))
+	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, cap))
 	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
 	balls.clear()
 	_stack_l.clear()
@@ -555,12 +569,13 @@ func on_catch(h: int) -> void:
 		drop_ball(best, "MISTIME")
 		return
 	# Perfect timing always secures. A Good or Late catch is a chance that rises
-	# with Accuracy and falls with the ball's height; a failed roll is a slip.
-	# Focus (stage 2) can widen the Perfect band a little.
-	var wperf := perfect_window()
+	# with Accuracy and falls with how far off the standard height the throw was.
+	# The Perfect window itself shrinks for off-standard throws (Focus widens it),
+	# so a wrong-height throw is hard to catch cleanly and easy to lose.
+	var wperf := maxi(2, perfect_window() - int(round(absf(best.tier - TIER_STD) * DEV_PERFECT_SHRINK)))
 	if best_d > wperf:
 		var quality := 1 if best_d <= W_GOOD else 2
-		if rng.randf() > catch_chance(quality, best.height):
+		if rng.randf() > catch_chance(quality, best.tier):
 			drop_ball(best, "slip")
 			return
 	# secured
@@ -618,27 +633,28 @@ func do_throw(h: int, hold: int) -> void:
 		return
 	var b: Ball = stack(h).pop_front()
 	var weight := prop_weight()
-	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
-	# Strength makes each tick of hold worth more height, so a strong juggler
-	# reaches a big throw in less time. Being under a prop's Required Strength cuts
-	# the height you can reach (the ideas.rtf "throws become lower" rule).
-	var gain_mult := (1.0 + float(strength) * STR_HOLD_EFF) * (1.0 - DEFICIT_HEIGHT * deficit)
-	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
-	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
-	# Accuracy (dampened by low stamina) sets the base inaccuracy; a heavy prop and
-	# an under-strength throw both widen it further.
-	var inacc := inacc_factor() * (1.0 + WEIGHT_INACC * float(weight - 1) + DEFICIT_INACC * deficit)
-	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * frac * inacc))
-	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * frac * inacc
+	var deficit := prop_deficit()   # >0 when too weak for this prop
+	# A tap is the standard tier 3; holding lifts toward tier 5, and Strength lets you
+	# reach the top of the range with less hold. Being too weak for the prop drags the
+	# ACTUAL height down toward tier 1 (the ideas.rtf sagging-throw rule).
+	var hold_frac := clampf(float(hold) / float(HOLD_MAX), 0.0, 1.0)
+	var reach := clampf(hold_frac * (1.0 + float(strength) * STR_HOLD_EFF), 0.0, 1.0)
+	var intended := TIER_STD + (TIER_MAX - TIER_STD) * reach
+	var tier := clampf(lerpf(intended, TIER_MIN, deficit), TIER_MIN, TIER_MAX)
+	var dev := absf(tier - TIER_STD)   # 0 standard .. 2 worst, in either direction
+	b.tier = tier
 
-	# Height lowers the odds of an off-Perfect catch (see catch_chance in on_catch)
-	b.height = clampf(frac, 0.0, 1.4)
+	# any deviation from the standard, plus a heavy prop, widens the inaccuracy
+	var inacc := inacc_factor() * (0.35 + DEV_INACC * dev) * (1.0 + WEIGHT_INACC * float(weight - 1))
+	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * inacc))
+	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * inacc
+	var air := int(round(AIR_BASE + AIR_PER_TIER * tier))   # higher tier = more airtime
 
 	b.state = STATE_FLIGHT
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
-	b.wobble = WOBBLE_MAX * frac * inacc
+	b.wobble = WOBBLE_MAX * dev * inacc_factor()
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	b.to_hand = other(h) if pattern == CASCADE else h
 	b.from_pos = inner_pos(h)
@@ -649,19 +665,13 @@ func do_throw(h: int, hold: int) -> void:
 	if not started:
 		started = true
 		running = true
-	# a clean, controlled (low) throw earns a little Applause; wild height does not
-	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)))
-	add_popup(inner_pos(h) + Vector2(0, -8), _throw_label(clampf(frac, 0.0, 1.0)), Color(1.0, 0.8, 0.5, 0.9))
-
-
-func _throw_label(frac: float) -> String:
-	if frac < 0.2:
-		return "flick"
-	elif frac < 0.6:
-		return "throw"
-	elif frac < 0.9:
-		return "high"
-	return "RESET"
+	# a clean standard throw earns a little Applause; a wrong height does not, and a
+	# clearly bad one flags itself high above the stage so the player learns to fix it
+	applause = minf(1.0, applause + 0.012 * (1.0 - clampf(dev, 0.0, 1.0)))
+	if dev >= 0.8:
+		var lbl := "TOO LOW" if tier < TIER_STD else ("RESET" if tier > 4.3 else "too high")
+		var lc := Color(1.0, 0.5, 0.4, 0.95) if tier < TIER_STD else Color(1.0, 0.82, 0.45, 0.9)
+		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), lbl, lc)
 
 
 func on_trick() -> void:
@@ -751,12 +761,16 @@ func inacc_factor() -> float:
 	return lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
 
 
-func catch_chance(quality: int, height: float) -> float:
-	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures:
-	# higher with Accuracy, lower with throw height. Perfect is handled separately.
+func catch_chance(quality: int, tier: float) -> float:
+	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures.
+	# Rises with Accuracy and falls hard the further the throw is from the standard
+	# height (tier 3), with a low sagging throw punished more than a high one.
+	# Perfect timing is handled separately in on_catch.
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
-	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
+	var dev_up := maxf(0.0, tier - TIER_STD)
+	var dev_dn := maxf(0.0, TIER_STD - tier)
+	var p := base + acc_norm * ACC_CATCH_BONUS - DEV_UP_PENALTY * dev_up - DEV_DN_PENALTY * dev_dn
 	if has_glasses:
 		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	return clampf(p, MIN_CATCH_P, 1.0)
@@ -806,6 +820,46 @@ func rep_tier() -> String:
 	return "Unknown"
 
 
+func venue_index() -> int:
+	# the stage you play grows as Reputation climbs (the STORY.md venue ladder)
+	if reputation >= 3000:
+		return 5
+	if reputation >= 1500:
+		return 4
+	if reputation >= 700:
+		return 3
+	if reputation >= 300:
+		return 2
+	if reputation >= 100:
+		return 1
+	return 0
+
+
+func venue_data(i: int) -> Dictionary:
+	# per-venue palette: backdrop glow / floor / spotlight strength, and the
+	# juggler's costume, so each rung of the career looks distinct while sharing
+	# the warm theatrical base (ART_AND_MUSIC.md).
+	match i:
+		0:
+			return {"name": "Backyard", "glow": Color(0.55, 0.62, 0.45), "floor": Color(0.09, 0.10, 0.07), "spot": 0.03,
+				"suit": Color(0.42, 0.36, 0.28), "suit_dk": Color(0.30, 0.25, 0.19), "vest": Color(0.66, 0.58, 0.40), "collar": Color(0.85, 0.82, 0.72)}
+		1:
+			return {"name": "Street Corner", "glow": Color(0.95, 0.66, 0.34), "floor": Color(0.07, 0.07, 0.10), "spot": 0.05,
+				"suit": Color(0.34, 0.36, 0.46), "suit_dk": Color(0.22, 0.24, 0.33), "vest": Color(0.70, 0.62, 0.42), "collar": Color(0.88, 0.86, 0.78)}
+		2:
+			return {"name": "Small Theatre", "glow": Color(0.95, 0.55, 0.28), "floor": Color(0.10, 0.05, 0.06), "spot": 0.05,
+				"suit": Color(0.62, 0.16, 0.20), "suit_dk": Color(0.44, 0.10, 0.15), "vest": Color(0.90, 0.73, 0.42), "collar": Color(0.96, 0.90, 0.80)}
+		3:
+			return {"name": "The Circus", "glow": Color(0.98, 0.48, 0.35), "floor": Color(0.12, 0.06, 0.05), "spot": 0.06,
+				"suit": Color(0.80, 0.22, 0.24), "suit_dk": Color(0.55, 0.14, 0.16), "vest": Color(0.96, 0.80, 0.40), "collar": Color(0.98, 0.93, 0.82)}
+		4:
+			return {"name": "Championship", "glow": Color(0.55, 0.68, 0.95), "floor": Color(0.06, 0.07, 0.11), "spot": 0.07,
+				"suit": Color(0.20, 0.28, 0.52), "suit_dk": Color(0.13, 0.19, 0.38), "vest": Color(0.80, 0.84, 0.92), "collar": Color(0.90, 0.93, 0.98)}
+		_:
+			return {"name": "World Arena", "glow": Color(0.78, 0.52, 0.96), "floor": Color(0.09, 0.06, 0.12), "spot": 0.08,
+				"suit": Color(0.42, 0.20, 0.55), "suit_dk": Color(0.28, 0.12, 0.40), "vest": Color(0.96, 0.82, 0.45), "collar": Color(0.98, 0.94, 0.86)}
+
+
 func cur_prop() -> Dictionary:
 	return PROPS[prop_type]
 
@@ -826,8 +880,14 @@ func prop_deficit() -> float:
 	return clampf(float(req - strength) / float(req), 0.0, 1.0)
 
 
-func owns(kind: int) -> bool:
-	return (owned_mask >> kind) & 1 == 1
+func have(kind: int) -> int:
+	# balls are free and effectively unlimited; other props you own by quantity
+	return 999 if kind == PROP_BALLS else prop_count[kind]
+
+
+func available(kind: int) -> bool:
+	# selectable only if you own enough to juggle the minimum count
+	return have(kind) >= MIN_BALLS
 
 
 func prop_color(kind: int) -> Color:
@@ -838,6 +898,17 @@ func prop_color(kind: int) -> Color:
 		PROP_KNIVES:  return Color(0.82, 0.86, 0.92)
 		PROP_TORCHES: return Color(1.0, 0.62, 0.24)
 		_:            return Color(1.0, 0.82, 0.35)
+
+
+func prop_scale(kind: int) -> float:
+	# heavier and longer props are physically bigger than balls, so they read larger
+	match kind:
+		PROP_RINGS:   return 1.7
+		PROP_CLUBS:   return 1.6
+		PROP_KNIVES:  return 1.5
+		PROP_TORCHES: return 1.75
+		PROP_EGGS:    return 1.1
+		_:            return 1.0
 
 
 func invest(which: String) -> void:
@@ -887,7 +958,10 @@ func load_progress() -> void:
 		endurance = int(cf.get_value("stats", "endurance", 6))
 		money = int(cf.get_value("stats", "money", START_GOLD))
 		reputation = int(cf.get_value("stats", "reputation", 0))
-		owned_mask = int(cf.get_value("stats", "owned_mask", 1)) | 1  # balls always owned
+		var pc: Variant = cf.get_value("stats", "prop_count", [])
+		if pc is Array:
+			for i in mini((pc as Array).size(), prop_count.size()):
+				prop_count[i] = int((pc as Array)[i])
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
 		has_glasses = bool(cf.get_value("stats", "glasses", false))
 		level = int(cf.get_value("prog", "level", 1))
@@ -904,7 +978,7 @@ func save_progress() -> void:
 	cf.set_value("stats", "endurance", endurance)
 	cf.set_value("stats", "money", money)
 	cf.set_value("stats", "reputation", reputation)
-	cf.set_value("stats", "owned_mask", owned_mask)
+	cf.set_value("stats", "prop_count", prop_count)
 	cf.set_value("stats", "prop_type", prop_type)
 	cf.set_value("stats", "glasses", has_glasses)
 	cf.set_value("prog", "level", level)
@@ -925,7 +999,13 @@ func drop_ball(b: Ball, why: String) -> void:
 	streak = 0
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
-	add_popup(b.to_pos + Vector2(0, -6), why, Color(1.0, 0.32, 0.3))
+	var dtext := why
+	if b.kind == PROP_EGGS:
+		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf)
+		prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
+		save_progress()
+		dtext = "SPLAT"
+	add_popup(b.to_pos + Vector2(0, -6), dtext, Color(1.0, 0.32, 0.3))
 	# only a performance ends when the crowd is lost; training just plays on
 	if mode == MODE_PERFORM and applause <= 0.0:
 		running = false
@@ -994,6 +1074,12 @@ func _draw() -> void:
 
 
 func draw_backdrop(s: Vector2) -> void:
+	var vi := venue_index()
+	var v := venue_data(vi)
+	var glow: Color = v["glow"]
+	var floor_c: Color = v["floor"]
+	var spot: float = v["spot"]
+
 	# spotlight cone from above centre
 	var top := Vector2(s.x * 0.5, -40.0)
 	var spread := 300.0
@@ -1002,25 +1088,39 @@ func draw_backdrop(s: Vector2) -> void:
 		Vector2(s.x * 0.5 - spread, s.y * 0.82),
 		Vector2(s.x * 0.5 + spread, s.y * 0.82),
 	])
-	draw_colored_polygon(cone, Color(1.0, 0.85, 0.5, 0.05))
+	draw_colored_polygon(cone, Color(glow.r, glow.g, glow.b, spot))
 	for i in range(6, 0, -1):
 		var r := 90.0 + float(i) * 66.0
-		var a := 0.045 * (1.0 - float(i) / 7.0)
-		draw_circle(Vector2(s.x * 0.5, s.y * 0.5), r, Color(0.95, 0.55, 0.28, a))
+		var a := 0.05 * (1.0 - float(i) / 7.0)
+		draw_circle(Vector2(s.x * 0.5, s.y * 0.5), r, Color(glow.r, glow.g, glow.b, a))
+
 	# stage floor
 	var fy := s.y * 0.80
-	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.10, 0.05, 0.06, 1.0))
-	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(0.35, 0.18, 0.12, 0.9), 3.0)
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), floor_c)
+	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(glow.r, glow.g, glow.b, 0.55), 3.0)
+
+	# crowd: a row of dim heads seated in front, more of them at grander venues, and
+	# brighter while the crowd is pleased. Suggestion, not detail (ART_AND_MUSIC.md).
+	var heads := 10 + vi * 7
+	var lit := 0.07
+	if mode == MODE_PERFORM:
+		lit = 0.08 + 0.13 * applause
+	for i in heads:
+		var hx := s.x * (float(i) + 0.5) / float(heads)
+		var hy := fy + 14.0 + fmod(float(i) * 1.7, 5.0)
+		var hr := 6.0 + fmod(float(i) * 2.3, 3.0)
+		draw_circle(Vector2(hx, hy), hr, Color(glow.r, glow.g, glow.b, lit))
 
 
 func draw_juggler(s: Vector2) -> void:
 	var cx := s.x * 0.5
+	var v := venue_data(venue_index())
 	var skin := Color(0.87, 0.64, 0.45)
 	var hair := Color(0.28, 0.16, 0.11)
-	var suit := Color(0.62, 0.16, 0.20)
-	var suit_dk := Color(0.44, 0.10, 0.15)
-	var vest := Color(0.90, 0.73, 0.42)
-	var collar := Color(0.96, 0.90, 0.80)
+	var suit: Color = v["suit"]         # costume changes with the venue
+	var suit_dk: Color = v["suit_dk"]
+	var vest: Color = v["vest"]
+	var collar: Color = v["collar"]
 	var button := Color(0.34, 0.20, 0.11)
 
 	var head_r := 27.0
@@ -1182,7 +1282,7 @@ func draw_targets() -> void:
 			var dd := b.land_tick - tick
 			if dd >= -MISS_GRACE and dd < 46:
 				var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
-				draw_arc(b.to_pos, 24.0, 0.0, TAU, 40,
+				draw_arc(b.to_pos, 22.0 * prop_scale(b.kind), 0.0, TAU, 40,
 					Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
 
 
@@ -1193,10 +1293,11 @@ func draw_balls_in_flight() -> void:
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
+	var sc := prop_scale(b.kind)
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
-	draw_circle(pos, 24.0, halo)
+	draw_circle(pos, 20.0 * sc, halo)
 	var ang := 0.0
 	if bool(PROPS[b.kind]["spins"]) and b.state == STATE_FLIGHT:
 		var span := maxi(1, b.land_tick - b.launch_tick)
@@ -1204,42 +1305,42 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		ang = b.spin_dir * p * TAU * 2.0   # two tumbles across the flight
 	match b.kind:
 		PROP_EGGS:
-			draw_egg(pos, b.color)
+			draw_egg(pos, b.color, sc)
 		PROP_RINGS:
-			draw_ring_prop(pos, b.color)
+			draw_ring_prop(pos, b.color, sc)
 		PROP_CLUBS:
-			draw_club(pos, ang)
+			draw_club(pos, ang, sc)
 		PROP_KNIVES:
-			draw_knife(pos, ang)
+			draw_knife(pos, ang, sc)
 		PROP_TORCHES:
-			draw_torch(pos, ang)
+			draw_torch(pos, ang, sc)
 		_:
-			draw_ball_shape(pos, b.color)
+			draw_ball_shape(pos, b.color, sc)
 
 
-func draw_ball_shape(pos: Vector2, col: Color) -> void:
-	draw_circle(pos, 11.0, col)
+func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
+	draw_circle(pos, 11.0 * sc, col)
 	var hi := col.lightened(0.4)
 	hi.a = 0.9
-	draw_circle(pos + Vector2(-3, -3), 3.5, hi)
+	draw_circle(pos + Vector2(-3, -3) * sc, 3.5 * sc, hi)
 
 
-func draw_egg(pos: Vector2, col: Color) -> void:
-	fill_ellipse(pos, 9.0, 12.0, col)
+func draw_egg(pos: Vector2, col: Color, sc: float) -> void:
+	fill_ellipse(pos, 9.0 * sc, 12.0 * sc, col)
 	var hi := col.lightened(0.25)
 	hi.a = 0.9
-	draw_circle(pos + Vector2(-3, -4), 2.6, hi)
+	draw_circle(pos + Vector2(-3, -4) * sc, 2.6 * sc, hi)
 
 
-func draw_ring_prop(pos: Vector2, col: Color) -> void:
-	draw_arc(pos, 12.0, 0.0, TAU, 28, col, 5.0, true)
+func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
+	draw_arc(pos, 12.0 * sc, 0.0, TAU, 28, col, 5.0 * sc, true)
 	var hi := col.lightened(0.3)
 	hi.a = 0.7
-	draw_arc(pos, 12.0, -2.4, -1.0, 8, hi, 3.0, true)
+	draw_arc(pos, 12.0 * sc, -2.4, -1.0, 8, hi, 3.0 * sc, true)
 
 
-func draw_club(pos: Vector2, ang: float) -> void:
-	draw_set_transform(pos, ang, Vector2.ONE)
+func draw_club(pos: Vector2, ang: float, sc: float) -> void:
+	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var body := Color(0.90, 0.35, 0.38)
 	var band := Color(0.96, 0.92, 0.85)
 	draw_line(Vector2(0, 12), Vector2(0, -2), band, 4.0)   # handle
@@ -1252,8 +1353,8 @@ func draw_club(pos: Vector2, ang: float) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-func draw_knife(pos: Vector2, ang: float) -> void:
-	draw_set_transform(pos, ang, Vector2.ONE)
+func draw_knife(pos: Vector2, ang: float, sc: float) -> void:
+	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var steel := Color(0.82, 0.86, 0.92)
 	var edge := Color(1.0, 1.0, 1.0, 0.9)
 	var handle := Color(0.30, 0.20, 0.14)
@@ -1266,8 +1367,8 @@ func draw_knife(pos: Vector2, ang: float) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-func draw_torch(pos: Vector2, ang: float) -> void:
-	draw_set_transform(pos, ang, Vector2.ONE)
+func draw_torch(pos: Vector2, ang: float, sc: float) -> void:
+	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var handle := Color(0.24, 0.16, 0.12)
 	draw_line(Vector2(0, 14), Vector2(0, -2), handle, 4.0)
 	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)           # flicker
@@ -1283,19 +1384,20 @@ func draw_torch(pos: Vector2, ang: float) -> void:
 func draw_prop_icon(kind: int, pos: Vector2) -> void:
 	# a small, still version of the prop shape, for menus
 	var col := prop_color(kind)
+	var sc := minf(prop_scale(kind), 1.3)
 	match kind:
 		PROP_EGGS:
-			draw_egg(pos, col)
+			draw_egg(pos, col, sc)
 		PROP_RINGS:
-			draw_ring_prop(pos, col)
+			draw_ring_prop(pos, col, sc)
 		PROP_CLUBS:
-			draw_club(pos, 0.0)
+			draw_club(pos, 0.0, sc)
 		PROP_KNIVES:
-			draw_knife(pos, 0.0)
+			draw_knife(pos, 0.0, sc)
 		PROP_TORCHES:
-			draw_torch(pos, 0.0)
+			draw_torch(pos, 0.0, sc)
 		_:
-			draw_ball_shape(pos, col)
+			draw_ball_shape(pos, col, sc)
 
 
 func draw_hud(font: Font, s: Vector2) -> void:
@@ -1304,10 +1406,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 
 	# mode label, top centre; Applause bar only when performing (not training)
 	var mlabel := "PERFORMING" if performing else "TRAINING"
-	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
-	draw_string(font, Vector2(s.x * 0.5 - 160, 26), mlabel, HORIZONTAL_ALIGNMENT_CENTER, 320, 15, mcol)
 	if debug_mode:
-		draw_string(font, Vector2(s.x * 0.5 - 220, 11), "DEBUG BUILD   -   Tab to set your stats freely", HORIZONTAL_ALIGNMENT_CENTER, 440, 13, Color(0.55, 0.9, 1.0))
+		mlabel += "   -   DEBUG"
+	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
+	draw_string(font, Vector2(s.x * 0.5 - 200, 22), mlabel, HORIZONTAL_ALIGNMENT_CENTER, 400, 15, mcol)
 	if performing:
 		var bw := 300.0
 		var bx := s.x * 0.5 - bw * 0.5
@@ -1352,9 +1454,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 
 	var patt := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
 	var propname := String(cur_prop()["name"]).to_upper()
+	var vname := String(venue_data(venue_index())["name"]).to_upper()
 	if prop_deficit() > 0.0:
-		draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws run low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
-	draw_string(font, Vector2(30, s.y - 74), "%d %s  -  %s" % [num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
+		draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
+	draw_string(font, Vector2(30, s.y - 74), "%s  -  %d %s  -  %s" % [vname, num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
 	var unlock := ""
 	if next_ball_strength() > 0:
 		unlock = "   ( next ball at Strength %d )" % next_ball_strength()
@@ -1453,28 +1556,30 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		keynum += 1
 	draw_glasses_row(font, tx, ry, innerw, keynum)
 
-	draw_string(font, Vector2(tx, py + ph - 30.0), "press a number to buy   -   heavier props need Strength to throw clean", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(tx, py + ph - 30.0), "press a number to buy one   -   to juggle N of a prop you must own N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
 	draw_string(font, Vector2(px + pw - 150.0, py + ph - 30.0), "Tab / S to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
 
 
 func draw_shop_row(font: Font, x: float, y: float, w: float, kind: int, keynum: int) -> void:
-	draw_prop_icon(kind, Vector2(x + 12.0, y - 4.0))
+	draw_prop_icon(kind, Vector2(x + 16.0, y - 4.0))
 	var nm := String(PROPS[kind]["name"])
 	var wt := int(PROPS[kind]["weight"])
 	var req := int(PROPS[kind]["req"])
 	var cost := int(PROPS[kind]["cost"])
-	draw_string(font, Vector2(x + 44.0, y), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
-	var sub := "weight %d   clean throws at Strength %d" % [wt, req]
+	draw_string(font, Vector2(x + 48.0, y), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
+	var sub := "weight %d   throws clean at Strength %d" % [wt, req]
 	if req == 0:
 		sub = "weight %d   easy to throw" % wt
-	draw_string(font, Vector2(x + 44.0, y + 16.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	if owns(kind):
-		draw_string(font, Vector2(x + w - 130.0, y), "OWNED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.6, 0.9, 0.6))
-	else:
-		var afford := money >= cost
-		var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
-		draw_string(font, Vector2(x + w - 160.0, y), "%d g" % cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
-		draw_string(font, Vector2(x + w - 44.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+	if kind == PROP_EGGS:
+		sub += "   (breaks on drop)"
+	draw_string(font, Vector2(x + 48.0, y + 16.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	# how many you own, then a per-unit price and the buy key (buy as many as you like)
+	var hc := Color(0.72, 0.88, 0.72) if available(kind) else Color(0.72, 0.66, 0.58)
+	draw_string(font, Vector2(x + w - 262.0, y), "own %d" % prop_count[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, hc)
+	var afford := money >= cost
+	var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
+	draw_string(font, Vector2(x + w - 168.0, y), "%d g" % cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+	draw_string(font, Vector2(x + w - 48.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 
 
 func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> void:
