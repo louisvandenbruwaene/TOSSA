@@ -9,6 +9,10 @@ catch-and-throw model, and it adds a juggler life-and-career meta layer (stats, 
 reputation, eat and sleep). The meta layer meaningfully expands the project. We still prove the
 core loop first (see Section 9, Sequencing) before building the meta.
 
+Companion documents: STORY.md works out the light story and the ten-venue climb
+in detail, and ART_AND_MUSIC.md sets the visual and audio direction. Both defer
+to this GDD for mechanics.
+
 ---
 
 ## 1. Locked vision recap
