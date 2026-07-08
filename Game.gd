@@ -248,6 +248,23 @@ var splats: Array[Dictionary] = []
 var set_shake := true     # screen shake on a drop
 var set_hints := true     # show the control hints along the bottom
 var set_flags := true     # show the TOO LOW / too high throw flags
+var set_music := true     # the procedural adaptive soundtrack
+var set_sfx := true       # catch/throw/drop sound effects and the crowd bed
+
+# --- procedural audio (code-only, ART_AND_MUSIC.md): pre-rendered PCM buffers,
+# adaptive music by volume-automating looping layers. See setup_audio().
+const AUDIO_SR := 22050
+var _audio_ready := false
+var sfx: Dictionary = {}            # name -> AudioStreamWAV one-shot
+var sfx_pool: Array = []            # AudioStreamPlayer round-robin for one-shots
+var _sfx_next := 0
+var mus_pad: AudioStreamPlayer      # looping music layers, volume-automated
+var mus_bass: AudioStreamPlayer
+var mus_arp: AudioStreamPlayer
+var crowd_ply: AudioStreamPlayer    # looping crowd murmur, tracks Applause
+var music_theme := -99              # venue index whose layers are loaded (-99 = none)
+var _vol := {"pad": -80.0, "bass": -80.0, "arp": -80.0, "crowd": -80.0}
+var _duck := 0.0                    # transient music dip on a drop, decays
 
 # previous-frame button states, for edge detection
 var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
@@ -281,6 +298,12 @@ func _ready() -> void:
 	if sa != -1 and sa + 1 < ua.size():
 		_shot_tick = int(ua[sa + 1])
 	load_settings()
+	setup_audio()                                # synthesise all sound at startup
+	var da := ua.find("--dumpaudio")             # dev: write every sound to <dir>, then quit
+	if da != -1 and da + 1 < ua.size():
+		dump_audio(ua[da + 1])
+		get_tree().quit()
+		return
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
@@ -329,6 +352,7 @@ func _ready() -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	audio_update()   # pick the music theme and glide the layer volumes, every state
 	if _shot:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
 		if _shot_frames >= _shot_tick:
@@ -676,6 +700,7 @@ func tut_maintain() -> void:
 		if tut_step >= tut_lesson(tut_id).size():
 			tut_finish()
 		else:
+			play_sfx("streak", -8.0)   # a little rising "nice, next" between steps
 			tut_setup_step()
 		return
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
@@ -702,6 +727,7 @@ func tut_finish() -> void:
 		prop_type = PROP_BALLS   # after the basics, drop back to plain balls
 	var s := get_viewport_rect().size
 	add_popup(Vector2(s.x * 0.5, s.y * 0.40), "lesson complete", Color(1.0, 0.86, 0.42))
+	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
 	start_run(3)
 
 
@@ -743,9 +769,12 @@ func menu_input(kc: int) -> void:
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
+			play_sfx("ui", -14.0)
 		KEY_DOWN, KEY_S:
 			menu_sel = (menu_sel + 1) % n
+			play_sfx("ui", -14.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			play_sfx("ui2", -11.0)
 			match menu_sel:
 				0:
 					menu_sel = 0
@@ -781,23 +810,30 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 4   # shake, hints, flags, Back
+	var n := 6   # music, sound, shake, hints, flags, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
+			play_sfx("ui", -14.0)
 		KEY_DOWN, KEY_S:
 			menu_sel = (menu_sel + 1) % n
+			play_sfx("ui", -14.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_LEFT, KEY_RIGHT:
 			match menu_sel:
 				0:
-					set_shake = not set_shake
+					set_music = not set_music
 				1:
-					set_hints = not set_hints
+					set_sfx = not set_sfx
 				2:
-					set_flags = not set_flags
+					set_shake = not set_shake
 				3:
+					set_hints = not set_hints
+				4:
+					set_flags = not set_flags
+				5:
 					menu_sel = 0
 					game_state = ST_MENU
+			play_sfx("ui2", -12.0)
 			save_settings()
 		KEY_ESCAPE:
 			save_settings()
@@ -936,6 +972,8 @@ func load_settings() -> void:
 		set_shake = bool(cf.get_value("opt", "shake", true))
 		set_hints = bool(cf.get_value("opt", "hints", true))
 		set_flags = bool(cf.get_value("opt", "flags", true))
+		set_music = bool(cf.get_value("opt", "music", true))
+		set_sfx = bool(cf.get_value("opt", "sfx", true))
 
 
 func save_settings() -> void:
@@ -943,6 +981,8 @@ func save_settings() -> void:
 	cf.set_value("opt", "shake", set_shake)
 	cf.set_value("opt", "hints", set_hints)
 	cf.set_value("opt", "flags", set_flags)
+	cf.set_value("opt", "music", set_music)
+	cf.set_value("opt", "sfx", set_sfx)
 	cf.save(SETTINGS_PATH)
 
 
@@ -1213,6 +1253,7 @@ func on_catch(h: int) -> void:
 		catch_flash[h] = tick
 		hclose[h] = 0.0
 		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
+		play_sfx("whiff", -14.0)
 		return
 	if best_d > W_LATE:
 		# way off the arrival: a genuine mistime, the ball drops
@@ -1236,6 +1277,7 @@ func on_catch(h: int) -> void:
 	if tut_active:
 		tut_on_catch()   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
+	play_sfx(_catch_sound(best.kind), -8.0)   # the prop's own catch timbre, every catch
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -1243,6 +1285,9 @@ func on_catch(h: int) -> void:
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
+		play_sfx("perfect", -9.0)
+		if streak % 5 == 0:
+			play_sfx("streak", -7.0)   # a rising flourish at every fifth in a row
 	elif best_d <= W_GOOD:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -1250,12 +1295,16 @@ func on_catch(h: int) -> void:
 		applause = minf(1.0, applause + 0.025)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
+		play_sfx("good", -11.0)
+		if streak % 5 == 0:
+			play_sfx("streak", -8.0)
 	else:
 		streak = 0
 		score += 10
 		applause = maxf(0.0, applause - 0.02)
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
+		play_sfx("late", -11.0)
 
 
 # -----------------------------------------------------------------------------
@@ -1321,6 +1370,7 @@ func do_throw(h: int, hold: int) -> void:
 	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)))
 	if set_flags and frac >= 1.0:
 		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
+	play_sfx("throw", -16.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whoosh, lower for heavy/high
 	if tut_active:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
 
@@ -1387,6 +1437,8 @@ func on_round_end() -> void:
 		reputation = maxi(0, reputation + rep_delta)
 		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult()))
 		money += last_pay
+		if last_pay > 0:
+			play_sfx("coin", -8.0)   # the pay chime at the end of a performance
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.30), "+%d gold" % last_pay, Color(1.0, 0.86, 0.4))
 		var rc := Color(0.7, 0.95, 0.7) if rep_delta >= 0 else Color(1.0, 0.55, 0.45)
@@ -1690,6 +1742,9 @@ func drop_ball(b: Ball, why: String) -> void:
 			save_progress()
 		dtext = "SPLAT"
 		spawn_egg_break(flight_pos(b))   # shell shards fly, a yolk splats on the floor
+		play_sfx("splat", -8.0)
+	play_sfx("drop", -7.0)
+	_duck = 1.0   # a drop briefly ducks the music, so the silence lands
 	add_popup(b.to_pos + Vector2(0, -6), dtext, Color(1.0, 0.32, 0.3))
 	# only a performance ends when the crowd is lost; training just plays on
 	if mode == MODE_PERFORM and applause <= 0.0:
@@ -2391,24 +2446,348 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
-	var rows := [["Screen shake", set_shake], ["Control hints", set_hints], ["Throw flags (TOO LOW / high)", set_flags]]
+	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Control hints", set_hints], ["Throw flags (TOO LOW / high)", set_flags]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
-	var oy := s.y * 0.34
+	var oy := s.y * 0.30
 	for i in rows.size():
 		var sel := i == menu_sel
-		var ry := oy + float(i) * 56.0
+		var ry := oy + float(i) * 52.0
 		var nm := String(rows[i][0])
 		var on := bool(rows[i][1])
 		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
 		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
 
-	var bsel := menu_sel == 3
-	draw_string(font, Vector2(0, oy + 3.0 * 56.0 + 34.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
-	draw_string(font, Vector2(0, s.y - 66.0), "audio options arrive with the soundtrack", HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(0.62, 0.58, 0.54))
+	var bsel := menu_sel == rows.size()
+	draw_string(font, Vector2(0, oy + float(rows.size()) * 52.0 + 30.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to toggle    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+# =============================================================================
+# Procedural audio (ART_AND_MUSIC.md, code-only rule). Every sound is synthesised
+# in code into an AudioStreamWAV at startup, then just played, so there is no
+# per-frame synthesis cost. Music is "adaptive" by volume-automating three
+# looping layers (a static pad drone, a bass that enters when you juggle, and an
+# arpeggio that swells with Applause) plus a crowd murmur bed.
+# =============================================================================
+
+func setup_audio() -> void:
+	gen_sfx()
+	for _i in 8:                       # a round-robin pool for overlapping one-shots
+		var p := AudioStreamPlayer.new()
+		add_child(p)
+		sfx_pool.append(p)
+	mus_pad = AudioStreamPlayer.new(); add_child(mus_pad); mus_pad.volume_db = -80.0
+	mus_bass = AudioStreamPlayer.new(); add_child(mus_bass); mus_bass.volume_db = -80.0
+	mus_arp = AudioStreamPlayer.new(); add_child(mus_arp); mus_arp.volume_db = -80.0
+	crowd_ply = AudioStreamPlayer.new(); add_child(crowd_ply); crowd_ply.volume_db = -80.0
+	crowd_ply.stream = gen_crowd()
+	crowd_ply.play()
+	_audio_ready = true
+
+
+func play_sfx(name: String, vol_db: float = 0.0, pitch: float = 1.0) -> void:
+	if not set_sfx or not _audio_ready or not sfx.has(name):
+		return
+	var p: AudioStreamPlayer = sfx_pool[_sfx_next]
+	_sfx_next = (_sfx_next + 1) % sfx_pool.size()
+	p.stream = sfx[name]
+	p.volume_db = vol_db
+	p.pitch_scale = clampf(pitch, 0.3, 3.0)
+	p.play()
+
+
+func _catch_sound(kind: int) -> String:
+	match kind:
+		PROP_EGGS: return "c_egg"
+		PROP_RINGS: return "c_ring"
+		PROP_CLUBS: return "c_club"
+		PROP_KNIVES: return "c_knife"
+		PROP_TORCHES: return "c_torch"
+		_: return "c_ball"
+
+
+func audio_update() -> void:
+	# runs every frame in every state: pick the theme and glide the layer volumes
+	if not _audio_ready:
+		return
+	var want := clampi(cur_venue(), 0, 5) if (game_state == ST_PLAY or game_state == ST_ESTABLISH) else 2
+	if want != music_theme:
+		load_music_theme(want)
+	var in_play := game_state == ST_PLAY
+	var perf := in_play and mode == MODE_PERFORM and not tut_active
+	var active := in_play and running
+	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
+	var pad_t := -13.0
+	var bass_t := -11.0 if active else -50.0
+	var arp_t := lerpf(-32.0, -9.0, energy) if in_play else -18.0
+	var crowd_t := lerpf(-27.0, -5.0, applause) if perf else -60.0
+	if game_state == ST_MENU or game_state == ST_CUTSCENE:
+		pad_t = -11.0
+		bass_t = -50.0
+		arp_t = -17.0
+	if not set_music:
+		pad_t = -80.0
+		bass_t = -80.0
+		arp_t = -80.0
+	if not set_music or not set_sfx:
+		crowd_t = -80.0
+	var duck := _duck * 9.0
+	_vol["pad"] = lerpf(_vol["pad"], pad_t - duck, 0.06)
+	_vol["bass"] = lerpf(_vol["bass"], bass_t - duck, 0.08)
+	_vol["arp"] = lerpf(_vol["arp"], arp_t - duck, 0.08)
+	_vol["crowd"] = lerpf(_vol["crowd"], crowd_t, 0.05)
+	mus_pad.volume_db = _vol["pad"]
+	mus_bass.volume_db = _vol["bass"]
+	mus_arp.volume_db = _vol["arp"]
+	crowd_ply.volume_db = _vol["crowd"]
+	_duck = maxf(0.0, _duck - 0.03)
+
+
+var _theme_cache: Dictionary = {}
+
+func load_music_theme(vi: int) -> void:
+	if not _theme_cache.has(vi):
+		_theme_cache[vi] = gen_music_layers(vi)
+	var L: Dictionary = _theme_cache[vi]
+	mus_pad.stream = L["pad"]
+	mus_bass.stream = L["bass"]
+	mus_arp.stream = L["arp"]
+	mus_pad.play()
+	mus_bass.play()
+	mus_arp.play()
+	music_theme = vi
+
+
+# --- synthesis primitives -----------------------------------------------------
+
+func _wav(data: PackedFloat32Array, loop: bool) -> AudioStreamWAV:
+	var n := data.size()
+	var bytes := PackedByteArray()
+	bytes.resize(n * 2)
+	for i in n:
+		bytes.encode_s16(i * 2, int(clampf(data[i], -1.0, 1.0) * 32767.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = AUDIO_SR
+	w.stereo = false
+	w.data = bytes
+	if loop:
+		w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		w.loop_begin = 0
+		w.loop_end = n
+	return w
+
+
+func _wsamp(phase: float, wave: int) -> float:
+	var ph := fposmod(phase, TAU)
+	match wave:
+		1:
+			return 4.0 * absf(ph / TAU - 0.5) - 1.0   # triangle
+		2:
+			return ph / PI - 1.0                       # saw
+		3:
+			return 1.0 if ph < PI else -1.0            # square
+		_:
+			return sin(ph)
+
+
+func _tone(freqs: Array, amps: Array, dur: float, wave: int, atk: float, decay: float, vol: float, noise: float) -> PackedFloat32Array:
+	# additive partials with a fast-attack exponential-decay (plucked) envelope
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var phs := PackedFloat32Array()
+	phs.resize(freqs.size())
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		var e := (t / maxf(atk, 0.0001)) if t < atk else exp(-(t - atk) / maxf(decay, 0.0001))
+		var s := 0.0
+		var asum := 0.0
+		for j in freqs.size():
+			phs[j] += TAU * float(freqs[j]) / AUDIO_SR
+			s += _wsamp(phs[j], wave) * float(amps[j])
+			asum += float(amps[j])
+		s /= maxf(asum, 0.0001)
+		if noise > 0.0:
+			s = lerpf(s, randf() * 2.0 - 1.0, noise)
+		out[i] = s * e * vol
+	return out
+
+
+func _seq_bells(freqs: Array, gap: float, vol: float) -> PackedFloat32Array:
+	# a little run of bell notes, for coins and streak flourishes
+	var note := 0.18
+	var n := int(AUDIO_SR * (gap * float(freqs.size()) + note))
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for j in freqs.size():
+		var start := int(AUDIO_SR * gap * float(j))
+		var ph := 0.0
+		for i in int(AUDIO_SR * note):
+			var idx := start + i
+			if idx >= n:
+				break
+			ph += TAU * float(freqs[j]) / AUDIO_SR
+			out[idx] = clampf(out[idx] + sin(ph) * exp(-float(i) / AUDIO_SR / 0.08) * vol, -1.0, 1.0)
+	return out
+
+
+func _drop_sound() -> PackedFloat32Array:
+	var dur := 0.34
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		ph += TAU * lerpf(120.0, 55.0, clampf(t / 0.2, 0.0, 1.0)) / AUDIO_SR
+		var body := sin(ph) * exp(-t / 0.12)
+		var click := (randf() * 2.0 - 1.0) * exp(-t / 0.02) * 0.5
+		out[i] = clampf((body * 0.8 + click) * 0.6, -1.0, 1.0)
+	return out
+
+
+func _splat_sound() -> PackedFloat32Array:
+	var dur := 0.22
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		ph += TAU * 150.0 / AUDIO_SR
+		out[i] = clampf(((randf() * 2.0 - 1.0) * 0.6 + sin(ph) * 0.4) * exp(-t / 0.05) * 0.6, -1.0, 1.0)
+	return out
+
+
+func gen_sfx() -> void:
+	sfx["perfect"] = _wav(_tone([1046.5, 1568.0], [1.0, 0.6], 0.30, 0, 0.002, 0.10, 0.5, 0.0), false)
+	sfx["good"] = _wav(_tone([784.0, 1176.0], [1.0, 0.4], 0.22, 0, 0.002, 0.08, 0.42, 0.0), false)
+	sfx["late"] = _wav(_tone([330.0], [1.0], 0.16, 1, 0.004, 0.06, 0.4, 0.05), false)
+	sfx["whiff"] = _wav(_tone([600.0], [1.0], 0.12, 0, 0.001, 0.05, 0.3, 0.85), false)
+	sfx["drop"] = _wav(_drop_sound(), false)
+	sfx["splat"] = _wav(_splat_sound(), false)
+	sfx["coin"] = _wav(_seq_bells([987.8, 1318.5], 0.09, 0.5), false)
+	sfx["streak"] = _wav(_seq_bells([784.0, 987.8, 1318.5], 0.08, 0.5), false)
+	sfx["ui"] = _wav(_tone([880.0], [1.0], 0.05, 0, 0.001, 0.02, 0.3, 0.0), false)
+	sfx["ui2"] = _wav(_tone([1174.7, 1568.0], [1.0, 0.5], 0.10, 0, 0.001, 0.05, 0.35, 0.0), false)
+	sfx["c_ball"] = _wav(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.15), false)
+	sfx["c_egg"] = _wav(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.2), false)
+	sfx["c_ring"] = _wav(_tone([300.0, 452.0], [1.0, 0.5], 0.34, 0, 0.004, 0.22, 0.4, 0.0), false)
+	sfx["c_club"] = _wav(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.25), false)
+	sfx["c_knife"] = _wav(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0), false)
+	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
+	sfx["throw"] = _wav(_tone([300.0], [1.0], 0.14, 0, 0.005, 0.07, 0.28, 0.8), false)
+
+
+func gen_crowd() -> AudioStreamWAV:
+	var dur := 3.0
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var lp := 0.0
+	for i in n:
+		lp = lp * 0.96 + (randf() * 2.0 - 1.0) * 0.04   # lowpass white noise -> murmur
+		var lfo := 0.7 + 0.3 * sin(TAU * float(i) / AUDIO_SR * 0.7)
+		out[i] = clampf(lp * 3.0 * lfo, -1.0, 1.0)
+	_fade_ends(out, 40)
+	return _wav(out, true)
+
+
+func _fade_ends(buf: PackedFloat32Array, ms: float) -> void:
+	# ramp the first and last few ms to zero, so a looped buffer never clicks
+	var f := mini(int(AUDIO_SR * ms / 1000.0), buf.size() / 2)
+	for i in f:
+		var g := float(i) / float(f)
+		buf[i] *= g
+		buf[buf.size() - 1 - i] *= g
+
+
+# --- adaptive music: a static drone plus a bass and an arpeggio ---------------
+
+func venue_music(vi: int) -> Dictionary:
+	vi = clampi(vi, 0, 5)
+	var roots := [196.0, 220.0, 174.61, 233.08, 261.63, 196.0]   # a colour per venue tier
+	var tempos := [88.0, 96.0, 100.0, 108.0, 112.0, 100.0]
+	var brights := [0.45, 0.6, 0.7, 0.8, 0.9, 0.95]
+	return {"root": float(roots[vi]), "tempo": float(tempos[vi]), "bright": float(brights[vi]), "chords": [0, 8]}
+
+
+func _align(freq: float, dur: float) -> float:
+	# quantise to a whole number of cycles over dur, so a sustained tone loops clean
+	return maxf(1.0, round(freq * dur)) / dur
+
+
+func _pluck_into(buf: PackedFloat32Array, start: int, freq: float, decay: float, vol: float, wave: int) -> void:
+	var n := buf.size()
+	var ph := 0.0
+	for i in int(AUDIO_SR * decay * 3.0):
+		var idx := start + i
+		if idx >= n:
+			break
+		ph += TAU * freq / AUDIO_SR
+		buf[idx] = clampf(buf[idx] + _wsamp(ph, wave) * exp(-float(i) / AUDIO_SR / maxf(decay, 0.0001)) * vol, -1.0, 1.0)
+
+
+func gen_music_floats(vi: int) -> Dictionary:
+	var p := venue_music(vi)
+	var root: float = p["root"]
+	var beat := 60.0 / float(p["tempo"])
+	var chords: Array = p["chords"]
+	var bars := chords.size()
+	var dur := float(bars * 4) * beat
+	var n := int(AUDIO_SR * dur)
+	var pad := PackedFloat32Array(); pad.resize(n)
+	var bass := PackedFloat32Array(); bass.resize(n)
+	var arp := PackedFloat32Array(); arp.resize(n)
+
+	# pad: a static power-chord drone (root, fifth, octave), aligned so it loops seamlessly
+	var pf := [_align(root, dur), _align(root * 1.5, dur), _align(root * 2.0, dur)]
+	var pph := PackedFloat32Array(); pph.resize(3)
+	for i in n:
+		var s := 0.0
+		for j in 3:
+			pph[j] += TAU * float(pf[j]) / AUDIO_SR
+			s += sin(pph[j])
+		pad[i] = (s / 3.0) * 0.5 * (0.85 + 0.15 * sin(TAU * float(i) / AUDIO_SR * 0.15))
+
+	var arp_pat := [0, 3, 7, 10, 12, 10, 7, 3]   # a minor riff, consonant under the drone
+	for bar in bars:
+		var croot := root * pow(2.0, float(chords[bar]) / 12.0)
+		for bt in 4:
+			_pluck_into(bass, int(AUDIO_SR * float(bar * 4 + bt) * beat), croot * 0.5, minf(beat * 0.9, 0.35), 0.5, 1)
+		for e in 8:
+			var f := croot * pow(2.0, float(arp_pat[e]) / 12.0) * 2.0
+			_pluck_into(arp, int(AUDIO_SR * (float(bar * 4) + float(e) * 0.5) * beat), f, 0.16, 0.32 * float(p["bright"]), 0)
+	_fade_ends(bass, 12)
+	_fade_ends(arp, 12)
+	return {"pad": pad, "bass": bass, "arp": arp}
+
+
+func gen_music_layers(vi: int) -> Dictionary:
+	var f := gen_music_floats(vi)
+	return {"pad": _wav(f["pad"], true), "bass": _wav(f["bass"], true), "arp": _wav(f["arp"], true)}
+
+
+func dump_audio(dir: String) -> void:
+	# dev: write every sound to <dir> as .wav, for verification and preview
+	for name in sfx:
+		(sfx[name] as AudioStreamWAV).save_to_wav("%s/sfx_%s.wav" % [dir, name])
+	(crowd_ply.stream as AudioStreamWAV).save_to_wav("%s/crowd.wav" % dir)
+	for vi in [0, 2, 4]:
+		var f := gen_music_floats(vi)
+		var pad: PackedFloat32Array = f["pad"]
+		var bass: PackedFloat32Array = f["bass"]
+		var arp: PackedFloat32Array = f["arp"]
+		var mix := PackedFloat32Array()
+		mix.resize(pad.size() * 2)
+		for rep in 2:
+			for i in pad.size():
+				mix[rep * pad.size() + i] = clampf(pad[i] * 0.5 + bass[i] * 0.9 + arp[i] * 0.8, -1.0, 1.0)
+		_wav(mix, false).save_to_wav("%s/music%d_mix.wav" % [dir, vi])
 
 
 # =============================================================================
