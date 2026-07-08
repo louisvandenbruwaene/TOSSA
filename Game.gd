@@ -136,6 +136,30 @@ const K_TRICK := KEY_SPACE
 # hand animation
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
 
+# --- tricks (GDD Section 3): flourishes performed with the TRICK key (Space). A
+# trick is either ARMED onto the next throw (High Toss, Behind the Back) and paid
+# off when you land its catch, or LIVE, acting on the balls already in the air
+# (Spin). Each lands for a scoring and Applause bonus and each carries real risk,
+# so a trick is a skill choice, never a free bonus. Tricks unlock by level, so the
+# flourishes arrive as the meta deepens. C cycles which trick the key is primed to.
+const TR_HIGH := 0
+const TR_BTB := 1
+const TR_SPIN := 2
+const TRICKS := [
+	{"id": "high", "name": "High Toss",        "kind": "arm",  "lvl": 2, "min_air": 0,
+	 "desc": "Arm the next throw sky high. Land the catch for a burst of applause."},
+	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",  "lvl": 4, "min_air": 0,
+	 "desc": "Arm a showy behind-the-back throw. Style the crowd loves, if you land it."},
+	{"id": "spin", "name": "Spin",             "kind": "live", "lvl": 7, "min_air": 2,
+	 "desc": "Spin on the spot with everything airborne. Catches score double, but you juggle blind."},
+]
+const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
+const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
+const HIGH_BONUS := 260            # score for landing a High Toss cleanly
+const BTB_BONUS := 150             # score for landing a Behind the Back cleanly
+const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
+const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
+
 
 class Ball:
 	var state := STATE_FLIGHT
@@ -150,6 +174,7 @@ class Ball:
 	var color := Color.WHITE
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
+	var trick := -1           # which trick shaped this throw (TR_HIGH/TR_BTB), or -1 for a plain throw
 
 
 var tick := 0
@@ -185,7 +210,6 @@ var caught := 0
 var running := false      # true once the player makes the first throw
 var started := false
 var popups: Array[Dictionary] = []
-var trick_hint := -999
 var rng := RandomNumberGenerator.new()
 
 # progression / stats (persisted per save slot, see save_file())
@@ -208,6 +232,17 @@ var stamina_max := 56.0   # 50 + Endurance
 var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
 var round_scored := false
+# --- tricks: which trick the TRICK key is primed to (cycled with C), a trick
+# armed onto the next throw, the live-Spin timer, and the run's trick tally.
+var trick_primed := 0     # index into TRICKS the TRICK key will fire
+var trick_armed := -1     # a trick armed onto the next throw (TR_HIGH/TR_BTB), or -1
+var trick_ready := -999   # tick a LIVE trick may fire again (cooldown)
+var spin_until := -999    # tick the current Spin ends; catches until then score double
+var spin_scored := false  # this Spin has already been credited as landed
+var tricks_landed := 0    # tricks landed cleanly this run, for the results screen
+var trick_score := 0      # score earned from tricks this run
+var trick_msg := ""       # brief on-stage feedback ("High Toss armed", "SPIN")
+var trick_msg_tick := -999
 var sheet_open := false
 var shop_open := false
 var debug_mode := false   # debug build: free stat editing in the character sheet
@@ -271,6 +306,7 @@ var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false
 
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
+var _demo_trick := false  # dev: the auto-player also performs tricks, to screenshot them
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 var _shot := false
 var _shot_path := ""
@@ -317,6 +353,11 @@ func _ready() -> void:
 		game_state = ST_PLAY
 		if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
 			mode = MODE_PERFORM
+		if ua.has("--trick"):   # dev: unlock every trick and let the auto-player show them off
+			_demo_trick = true
+			level = 9
+			var unl := unlocked_tricks()
+			trick_primed = int(unl[0]) if not unl.is_empty() else 0
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -496,6 +537,8 @@ func _input(event: InputEvent) -> void:
 			start_run(7)
 		KEY_O:
 			cycle_prop(1)   # cycle to the next owned prop
+		KEY_C:
+			cycle_trick()   # rotate which trick the TRICK key (Space) is primed to
 		KEY_F1:
 			if debug_mode: debug_jump_venue(0)   # debug story jump: F1..F6 = venues 1..6
 		KEY_F2:
@@ -1210,6 +1253,17 @@ func start_run(n: int) -> void:
 	last_pay = 0
 	round_scored = false
 	_prev_running = false
+	# reset the trick state, and prime the key to the lowest trick this level owns
+	trick_armed = -1
+	trick_ready = -999
+	spin_until = -999
+	spin_scored = false
+	tricks_landed = 0
+	trick_score = 0
+	trick_msg = ""
+	trick_msg_tick = -999
+	var unl := unlocked_tricks()
+	trick_primed = int(unl[0]) if not unl.is_empty() else 0
 	rng.seed = 20260705
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
 	hclose = [0.0, 0.0]
@@ -1278,6 +1332,7 @@ func on_catch(h: int) -> void:
 		tut_on_catch()   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	play_sfx(_catch_sound(best.kind), -8.0)   # the prop's own catch timbre, every catch
+	var sc_before := score
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -1305,6 +1360,21 @@ func on_catch(h: int) -> void:
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
+
+	# a live Spin doubles whatever this catch scored, and credits the trick once
+	if spinning():
+		var extra := score - sc_before
+		score += int(round(float(extra) * (SPIN_CATCH_MULT - 1.0)))
+		trick_score += int(round(float(extra) * (SPIN_CATCH_MULT - 1.0)))
+		applause = minf(1.0, applause + 0.02)
+		add_popup(outer_pos(h) + Vector2(0, -20), "x2", Color(0.72, 0.9, 1.0))
+		if not spin_scored:
+			spin_scored = true
+			tricks_landed += 1
+			add_xp(3)
+	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
+	if best.trick >= 0 and best_d <= W_GOOD:
+		reward_trick(best.trick, outer_pos(h))
 
 
 # -----------------------------------------------------------------------------
@@ -1342,7 +1412,20 @@ func do_throw(h: int, hold: int) -> void:
 	var gain_mult := (1.0 + float(strength) * STR_HOLD_EFF) * (1.0 - DEFICIT_HEIGHT * deficit)
 	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
 	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
+
+	# a trick armed by the TRICK key reshapes this throw before we roll its accuracy,
+	# so a High Toss genuinely flies (and is genuinely harder to catch)
+	var this_trick := -1
+	if trick_armed >= 0:
+		this_trick = trick_armed
+		trick_armed = -1
+		if this_trick == TR_HIGH:
+			frac = 1.35
+		elif this_trick == TR_BTB:
+			frac = clampf(frac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
+		air = BASE_AIR + int(round(frac * HOLD_GAIN * float(HOLD_MAX)))
 	b.height = frac
+	b.trick = this_trick
 
 	# Accuracy (dampened by low stamina) sets the base inaccuracy; a heavy prop and an
 	# under-strength throw both widen it, and it all scales with the throw's height.
@@ -1358,6 +1441,10 @@ func do_throw(h: int, hold: int) -> void:
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	b.to_hand = other(h) if pattern == CASCADE else h
 	b.from_pos = inner_pos(h)
+	if this_trick == TR_BTB:
+		# launch from across the body so the throw reads as a behind-the-back flourish
+		b.from_pos = inner_pos(other(h)) + Vector2(0, 12)
+		b.wobble += 5.0
 	b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
 
 	throw_kick[h] = tick
@@ -1375,10 +1462,95 @@ func do_throw(h: int, hold: int) -> void:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
 
 
+func trick_unlocked(i: int) -> bool:
+	return level >= int(TRICKS[i]["lvl"])
+
+
+func unlocked_tricks() -> Array:
+	var out: Array = []
+	for i in TRICKS.size():
+		if trick_unlocked(i):
+			out.append(i)
+	return out
+
+
+func balls_airborne() -> int:
+	var n := 0
+	for b in balls:
+		if b.state == STATE_FLIGHT:
+			n += 1
+	return n
+
+
+func spinning() -> bool:
+	return tick <= spin_until
+
+
+func set_trick_msg(m: String) -> void:
+	trick_msg = m
+	trick_msg_tick = tick
+
+
 func on_trick() -> void:
-	# Tricks are the next step. The input is wired now so the plumbing exists; with
-	# zero slots equipped it simply acknowledges "nothing armed".
-	trick_hint = tick
+	# The TRICK key (Space) fires whichever trick is primed. An "arm" trick loads
+	# onto the next throw; a "live" trick (Spin) acts on the balls already up.
+	var unl := unlocked_tricks()
+	if unl.is_empty():
+		set_trick_msg("no trick yet  -  keep leveling up")
+		return
+	if not unl.has(trick_primed):
+		trick_primed = int(unl[0])
+	var t: Dictionary = TRICKS[trick_primed]
+	if int(t["min_air"]) > 0 and balls_airborne() < int(t["min_air"]):
+		set_trick_msg("%s needs %d in the air" % [String(t["name"]), int(t["min_air"])])
+		return
+	if String(t["kind"]) == "arm":
+		trick_armed = trick_primed
+		set_trick_msg("%s armed  -  throw it" % String(t["name"]))
+		play_sfx("ui2", -12.0)
+	else:
+		if tick < trick_ready:
+			return   # still cooling down; ignore the mash
+		spin_until = tick + SPIN_TICKS
+		spin_scored = false
+		trick_ready = tick + TRICK_COOLDOWN
+		set_trick_msg("SPIN")
+		play_sfx("streak", -7.0)
+
+
+func cycle_trick() -> void:
+	# C rotates the primed trick through the ones the current level has unlocked.
+	var unl := unlocked_tricks()
+	if unl.is_empty():
+		set_trick_msg("no trick yet  -  keep leveling up")
+		return
+	var idx := unl.find(trick_primed)
+	idx = (idx + 1) % unl.size() if idx >= 0 else 0
+	trick_primed = int(unl[idx])
+	set_trick_msg("%s ready" % String(TRICKS[trick_primed]["name"]))
+	play_sfx("ui", -14.0)
+
+
+func reward_trick(t: int, at: Vector2) -> void:
+	# a landed ARM trick pays a flourish bonus on a clean (Perfect or Good) catch
+	var bonus := 0
+	var label := ""
+	match t:
+		TR_HIGH:
+			bonus = HIGH_BONUS
+			label = "HIGH TOSS!"
+		TR_BTB:
+			bonus = BTB_BONUS
+			label = "BEHIND THE BACK!"
+		_:
+			return
+	score += bonus
+	trick_score += bonus
+	tricks_landed += 1
+	applause = minf(1.0, applause + 0.09)
+	add_xp(4)
+	add_popup(at + Vector2(0, -34), label, Color(1.0, 0.85, 0.45))
+	play_sfx("streak", -6.0)
 
 
 # -----------------------------------------------------------------------------
@@ -1481,6 +1653,8 @@ func catch_chance(quality: int, height: float) -> float:
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
 	if has_glasses:
 		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
+	if spinning():
+		p -= SPIN_ACC_PENALTY      # a Spin means catching blind, so off-Perfect gets riskier
 	return clampf(p, MIN_CATCH_P, 1.0)
 
 
@@ -1960,6 +2134,27 @@ func draw_juggler(s: Vector2) -> void:
 	draw_hand(LEFT)
 	draw_hand(RIGHT)
 
+	# a live Spin: sweeping motion streaks, and the juggler turns their back mid-spin
+	if spinning():
+		draw_spin_effect(Vector2(cx, (shoulder_y + hip_y) * 0.5), head, head_r, hair)
+
+
+func draw_spin_effect(center: Vector2, head: Vector2, head_r: float, hair: Color) -> void:
+	var prog := 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)   # 0 at start, 1 at end
+	# curved motion streaks sweeping around the body, flattened to read as a turn
+	var base_a := prog * TAU * 2.0
+	for k in 3:
+		var a0 := base_a + float(k) * (TAU / 3.0)
+		var pts := PackedVector2Array()
+		for j in 9:
+			var a := a0 + float(j) * 0.10
+			var rr := 66.0 - float(k) * 7.0
+			pts.append(center + Vector2(cos(a) * rr, sin(a) * rr * 0.55))
+		draw_polyline(pts, Color(1.0, 0.85, 0.5, 0.34 - 0.07 * float(k)), 3.0)
+	# mid-spin the performer faces away, so hair covers the face for a beat
+	if prog > 0.3 and prog < 0.7:
+		draw_circle(head + Vector2(0, -4), head_r + 1.0, hair)
+
 
 func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
 	var pts := PackedVector2Array()
@@ -2066,6 +2261,11 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	var halo := b.color
 	halo.a = 0.16
 	draw_circle(pos, 20.0 * sc, halo)
+	if b.trick >= 0:
+		# a trick throw carries a warm glowing ring so the crowd (and player) reads it as special
+		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
+		draw_arc(pos, (23.0 + 3.0 * pulse) * sc, 0.0, TAU, 26, Color(1.0, 0.86, 0.5, 0.5), 2.5, true)
+		draw_circle(pos, 15.0 * sc, Color(1.0, 0.85, 0.5, 0.14))
 	var ang := 0.0
 	if bool(PROPS[b.kind]["spins"]) and b.state == STATE_FLIGHT:
 		var span := maxi(1, b.land_tick - b.launch_tick)
@@ -2217,8 +2417,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if points > 0:
 		draw_string(font, Vector2(30, 143), "+%d stat point%s  -  press Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7))
 
-	if tick - trick_hint < 40:
-		draw_string(font, Vector2(s.x * 0.5 - 90, s.y * 0.30), "no trick armed", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.7, 0.9, 0.8))
+	# trick feedback line, centred (works even before any trick is unlocked)
+	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
+		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
+		draw_string(font, Vector2(s.x * 0.5 - 170, s.y * 0.30), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 340, 18, Color(1.0, 0.88, 0.55, ta))
+	# the primed-trick readout sits just above the control hints, once a trick exists
+	if not tut_active and not unlocked_tricks().is_empty():
+		draw_trick_hud(font, s)
 
 	# the round chrome (venue line, control hints, ROUND OVER, start prompt) is
 	# hidden during a lesson, where the guided banner is the only instruction
@@ -2247,6 +2452,29 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(s.x * 0.5 - 150, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1.0, 0.5, 0.4))
 			var tail := "   gold +%d" % last_pay if performing else ""
 			draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d%s   -   press R to go again" % [best_streak, run_xp, tail], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
+
+
+func draw_trick_hud(font: Font, s: Vector2) -> void:
+	var unl := unlocked_tricks()
+	if not unl.has(trick_primed):
+		trick_primed = int(unl[0])
+	var t: Dictionary = TRICKS[trick_primed]
+	var x := s.x * 0.5 - 150.0
+	var y := s.y - 132.0
+	draw_string(font, Vector2(x, y), "TRICK  -  %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 300, 16, Color(0.93, 0.8, 0.99))
+	var status := "Space to perform"
+	var scol := Color(0.82, 0.74, 0.92, 0.9)
+	if trick_armed == trick_primed:
+		status = "ARMED  -  throw it"
+		scol = Color(1.0, 0.86, 0.5)
+	elif String(t["kind"]) == "live" and tick < trick_ready:
+		status = "cooldown %.1fs" % (float(trick_ready - tick) / 120.0)
+		scol = Color(0.72, 0.62, 0.64, 0.85)
+	elif String(t["kind"]) == "live":
+		status = "Space to spin"
+	if unl.size() > 1:
+		status += "     C to switch"
+	draw_string(font, Vector2(x, y + 20.0), status, HORIZONTAL_ALIGNMENT_CENTER, 300, 13, scol)
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -3680,6 +3908,11 @@ func _demo_step() -> void:
 			if b.state == STATE_FLIGHT and b.to_hand == h and absi(b.land_tick - tick) <= 1:
 				on_catch(h)
 				break
+	# dev trick preview: kick off a Spin whenever the pattern is full and cooled down
+	if _demo_trick and balls_airborne() >= 2 and tick >= trick_ready and tick >= 40:
+		spin_until = tick + SPIN_TICKS
+		spin_scored = false
+		trick_ready = tick + TRICK_COOLDOWN
 	# metronome: every beat, release one ball from a hand that actually holds one.
 	# This can never desync because it only throws real held balls.
 	if tick >= 24 and tick % DEMO_BEAT == 0:
@@ -3687,6 +3920,8 @@ func _demo_step() -> void:
 		if stack(h).is_empty():
 			h = other(h)
 		if not stack(h).is_empty():
+			if _demo_trick:
+				trick_armed = TR_HIGH if (tick / DEMO_BEAT) % 2 == 0 else TR_BTB
 			do_throw(h, 7)
 			_demo_next = other(h)
 
