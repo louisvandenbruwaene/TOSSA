@@ -236,6 +236,8 @@ var run_venue := 0        # which venue this run was performed at (records key o
 var best_scores: Array[int] = [0, 0, 0, 0, 0, 0]  # best performance score per venue tier
 var results_open := false # the end-of-performance results panel is showing
 var results_record := false  # this performance beat the venue's record
+var paused := false       # the in-play pause menu is up (freezes the sim)
+var pause_sel := 0        # cursor in the pause menu
 var round_scored := false
 # --- tricks: which trick the TRICK key is primed to (cycled with C), a trick
 # armed onto the next throw, the live-Spin timer, and the run's trick tally.
@@ -350,7 +352,7 @@ func _ready() -> void:
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
-	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results")
+	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause")
 	if ua.has("--menu"):
 		skip_menu = false
 	if skip_menu:
@@ -380,6 +382,8 @@ func _ready() -> void:
 			peak_applause = 0.94; tricks_landed = 5; trick_score = 1350
 			last_pay = 240; last_rep_delta = 22; run_xp = 190; points = 3
 			started = true; running = false; results_open = true; results_record = true
+		if ua.has("--pause"):   # dev: open the pause menu for a screenshot
+			open_pause()
 	else:
 		game_state = ST_MENU
 	if ua.has("--settings"):    # dev: screenshot the settings screen
@@ -422,8 +426,8 @@ func _physics_process(_delta: float) -> void:
 			cutscene_autoadvance()   # shots play themselves, movie-like, until skipped
 		queue_redraw()
 		return
-	if sheet_open or shop_open:
-		queue_redraw()   # the sheet and shop pause the sim; nothing advances
+	if sheet_open or shop_open or paused:
+		queue_redraw()   # the sheet, shop, and pause menu all halt the sim; nothing advances
 		return
 	tick += 1
 	step_effects()   # age the egg-break shards and yolk splats
@@ -472,11 +476,15 @@ func _input(event: InputEvent) -> void:
 		ST_ESTABLISH:
 			establish_key()
 			return
+	# the in-play pause menu owns all input while it is up
+	if paused:
+		pause_input(kc)
+		return
 	# during a hands-on lesson the command keys are locked; catch/throw are polled
-	# separately, so only Escape does anything here
+	# separately, so only Escape does anything here (it opens the pause menu)
 	if tut_active:
 		if kc == KEY_ESCAPE:
-			get_tree().quit()
+			open_pause()
 		return
 	# the end-of-performance results panel: go again, spend/shop, or leave to the
 	# menu. It stays open behind the sheet and shop, so you can invest then continue.
@@ -584,6 +592,51 @@ func _input(event: InputEvent) -> void:
 		KEY_F6:
 			if debug_mode: debug_jump_venue(5)
 		KEY_ESCAPE:
+			open_pause()
+
+
+func open_pause() -> void:
+	paused = true
+	pause_sel = 0
+	play_sfx("ui", -12.0)
+
+
+func pause_input(kc: int) -> void:
+	match kc:
+		KEY_UP:
+			pause_sel = (pause_sel + 2) % 3
+			play_sfx("ui", -16.0)
+		KEY_DOWN:
+			pause_sel = (pause_sel + 1) % 3
+			play_sfx("ui", -16.0)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			pause_activate()
+		KEY_1:
+			pause_sel = 0; pause_activate()
+		KEY_2:
+			pause_sel = 1; pause_activate()
+		KEY_3:
+			pause_sel = 2; pause_activate()
+		KEY_ESCAPE, KEY_P:
+			paused = false
+			play_sfx("ui2", -14.0)
+
+
+func pause_activate() -> void:
+	match pause_sel:
+		0:   # resume the run right where it froze
+			paused = false
+			play_sfx("ui2", -14.0)
+		1:   # step back to the main menu (clearing any lesson or panels)
+			paused = false
+			tut_active = false
+			results_open = false
+			sheet_open = false
+			shop_open = false
+			game_state = ST_MENU
+			menu_sel = 0
+			play_sfx("ui", -12.0)
+		2:   # leave the game
 			get_tree().quit()
 
 
@@ -1287,6 +1340,7 @@ func start_run(n: int) -> void:
 	run_venue = venue_index()   # records and the results card key off where you performed
 	results_open = false
 	results_record = false
+	paused = false
 	round_scored = false
 	_prev_running = false
 	# reset the trick state, and prime the key to the lowest trick this level owns
@@ -2098,6 +2152,8 @@ func _draw() -> void:
 		draw_sheet(font, s)
 	if shop_open:
 		draw_shop(font, s)
+	if paused:
+		draw_pause(font, s)     # the pause menu sits over everything
 
 
 func draw_backdrop(s: Vector2) -> void:
@@ -2534,7 +2590,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				unlock = "   ( next ball at Strength %d )" % next_ball_strength()
 			draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
 			draw_string(font, Vector2(30, s.y - 30),
-				"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
+				"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc pause",
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
 
 		if not started:
@@ -2602,6 +2658,26 @@ func draw_results(font: Font, s: Vector2) -> void:
 	if points > 0:
 		foot = "R  go again      Tab  +%d point%s      S  shop      Esc  menu" % [points, "" if points == 1 else "s"]
 	draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64))
+
+
+func draw_pause(font: Font, s: Vector2) -> void:
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.72))
+	var pw := 360.0
+	var ph := 268.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	draw_string(font, Vector2(px, py + 52.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 30, Color(1.0, 0.86, 0.5))
+	draw_ornament(px + pw * 0.5, py + 70.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
+	var opts: Array[String] = ["Resume", "Main Menu", "Quit Game"]
+	var oy := py + 116.0
+	for i in opts.size():
+		var sel := i == pause_sel
+		var col := Color(1.0, 0.9, 0.6) if sel else Color(0.74, 0.68, 0.62)
+		var label := ("> %s <" % opts[i]) if sel else opts[i]
+		draw_string(font, Vector2(px, oy + float(i) * 40.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw, 22, col)
+	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter  -  Esc resumes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
 func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
