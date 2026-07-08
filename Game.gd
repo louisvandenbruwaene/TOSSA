@@ -82,6 +82,31 @@ const MODE_PERFORM := 1   # on stage: Applause meter, energy cost, and pay
 const MIN_BALLS := 3
 const MAX_BALLS_HARD := 7
 
+# --- props / objects (GDD 2.7, 4.6; ideas.rtf object table) -------------------
+# Each prop has a weight (heavier = more stamina and more inaccuracy) and a
+# Required Strength for clean throws. Under that strength, throws land lower and
+# wilder (the ideas.rtf rule). Required Strength is the ideas.rtf table shifted
+# down 10 so balls stay comfortable at the game's starting Strength. Cost is what
+# the shop charges. "spins" props tumble in flight for spectacle.
+const PROP_BALLS := 0
+const PROP_EGGS := 1
+const PROP_RINGS := 2
+const PROP_CLUBS := 3
+const PROP_KNIVES := 4
+const PROP_TORCHES := 5
+const PROPS := [
+	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 0,    "spins": false},
+	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "spins": false},
+	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "spins": false},
+	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "spins": true},
+	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "spins": true},
+	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "spins": true},
+]
+const WEIGHT_INACC := 0.12   # each weight step over balls adds this much inaccuracy
+const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
+const DEFICIT_INACC := 1.1   # a full Strength deficit roughly doubles inaccuracy
+const DEFICIT_HEIGHT := 0.5  # a full Strength deficit halves reachable height
+
 # input map (physical keycodes; a real remap layer comes with the options menu)
 const K_LC := KEY_D
 const K_LT := KEY_F
@@ -104,6 +129,8 @@ class Ball:
 	var wobble := 0.0
 	var height := 0.0         # normalized throw height 0..~1.4; lowers catch odds
 	var color := Color.WHITE
+	var kind := 0             # which prop (index into PROPS); sets look and weight
+	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
 
 
 var tick := 0
@@ -148,6 +175,8 @@ var strength := 6         # quicker high throws; gates ball count and hard trick
 var endurance := 6        # raises max Stamina; gates heavy props later
 var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
+var prop_type := PROP_BALLS  # the object being juggled this run
+var owned_mask := 1       # bitfield of owned props; bit 0 (balls) always set
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
@@ -270,6 +299,8 @@ func _input(event: InputEvent) -> void:
 			start_run(6)
 		KEY_7:
 			start_run(7)
+		KEY_O:
+			cycle_prop(1)   # cycle to the next owned prop
 		KEY_ESCAPE:
 			get_tree().quit()
 
@@ -277,6 +308,18 @@ func _input(event: InputEvent) -> void:
 func toggle_mode() -> void:
 	mode = MODE_PERFORM if mode == MODE_TRAIN else MODE_TRAIN
 	start_run(num_balls)   # restart cleanly in the new mode
+
+
+func cycle_prop(dir: int) -> void:
+	# step to the next OWNED prop and restart with it (prop is a per-run setting)
+	var n := PROPS.size()
+	var k := prop_type
+	for _i in n:
+		k = (k + dir + n) % n
+		if owns(k):
+			prop_type = k
+			break
+	start_run(num_balls)
 
 
 # -----------------------------------------------------------------------------
@@ -394,6 +437,8 @@ func next_ball_strength() -> int:
 
 
 func start_run(n: int) -> void:
+	if not owns(prop_type):
+		prop_type = PROP_BALLS   # never start a run holding a prop you do not own
 	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, max_balls()))
 	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
 	balls.clear()
@@ -426,7 +471,9 @@ func start_run(n: int) -> void:
 	for i in num_balls:
 		var b := Ball.new()
 		b.state = STATE_HAND
-		b.color = ball_color(i)
+		b.kind = prop_type
+		b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
+		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
 		balls.append(b)
 		if i % 2 == 0:
 			_stack_r.append(b)
@@ -476,7 +523,7 @@ func on_catch(h: int) -> void:
 	stack(h).append(best)
 	catch_flash[h] = tick
 	caught += 1
-	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult())
+	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -525,13 +572,17 @@ func do_throw(h: int, hold: int) -> void:
 	if stack(h).is_empty():
 		return
 	var b: Ball = stack(h).pop_front()
+	var weight := prop_weight()
+	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
 	# Strength makes each tick of hold worth more height, so a strong juggler
-	# reaches a big throw in less time (and can throw a bit higher overall).
-	var gain_mult := 1.0 + float(strength) * STR_HOLD_EFF
+	# reaches a big throw in less time. Being under a prop's Required Strength cuts
+	# the height you can reach (the ideas.rtf "throws become lower" rule).
+	var gain_mult := (1.0 + float(strength) * STR_HOLD_EFF) * (1.0 - DEFICIT_HEIGHT * deficit)
 	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
 	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
-	# Accuracy (dampened by low stamina) scales the visible inaccuracy toward a floor
-	var inacc := inacc_factor()
+	# Accuracy (dampened by low stamina) sets the base inaccuracy; a heavy prop and
+	# an under-strength throw both widen it further.
+	var inacc := inacc_factor() * (1.0 + WEIGHT_INACC * float(weight - 1) + DEFICIT_INACC * deficit)
 	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * frac * inacc))
 	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * frac * inacc
 
@@ -543,7 +594,7 @@ func do_throw(h: int, hold: int) -> void:
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
 	b.wobble = WOBBLE_MAX * frac * inacc
-	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult())
+	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	b.to_hand = other(h) if pattern == CASCADE else h
 	b.from_pos = inner_pos(h)
 	b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
@@ -708,6 +759,40 @@ func rep_tier() -> String:
 	return "Unknown"
 
 
+func cur_prop() -> Dictionary:
+	return PROPS[prop_type]
+
+
+func prop_req(kind: int = -1) -> int:
+	return int(PROPS[prop_type if kind < 0 else kind]["req"])
+
+
+func prop_weight(kind: int = -1) -> int:
+	return int(PROPS[prop_type if kind < 0 else kind]["weight"])
+
+
+func prop_deficit() -> float:
+	# how far below the prop's Required Strength we are, 0 (fine) to 1 (hopeless)
+	var req := prop_req()
+	if req <= 0 or strength >= req:
+		return 0.0
+	return clampf(float(req - strength) / float(req), 0.0, 1.0)
+
+
+func owns(kind: int) -> bool:
+	return (owned_mask >> kind) & 1 == 1
+
+
+func prop_color(kind: int) -> Color:
+	match kind:
+		PROP_EGGS:    return Color(0.96, 0.92, 0.82)
+		PROP_RINGS:   return Color(0.45, 0.80, 0.95)
+		PROP_CLUBS:   return Color(0.90, 0.35, 0.38)
+		PROP_KNIVES:  return Color(0.82, 0.86, 0.92)
+		PROP_TORCHES: return Color(1.0, 0.62, 0.24)
+		_:            return Color(1.0, 0.82, 0.35)
+
+
 func invest(which: String) -> void:
 	if points <= 0:
 		return
@@ -755,6 +840,8 @@ func load_progress() -> void:
 		endurance = int(cf.get_value("stats", "endurance", 6))
 		money = int(cf.get_value("stats", "money", START_GOLD))
 		reputation = int(cf.get_value("stats", "reputation", 0))
+		owned_mask = int(cf.get_value("stats", "owned_mask", 1)) | 1  # balls always owned
+		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
@@ -769,6 +856,8 @@ func save_progress() -> void:
 	cf.set_value("stats", "endurance", endurance)
 	cf.set_value("stats", "money", money)
 	cf.set_value("stats", "reputation", reputation)
+	cf.set_value("stats", "owned_mask", owned_mask)
+	cf.set_value("stats", "prop_type", prop_type)
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
@@ -1032,7 +1121,7 @@ func draw_hand(h: int) -> void:
 	# held ball(s) rest in the palm
 	var st := stack(h)
 	for i in st.size():
-		draw_ball(st[i], pos + Vector2(0, -3 - float(i) * 6.0))
+		draw_prop(st[i], pos + Vector2(0, -3 - float(i) * 6.0))
 
 
 func draw_targets() -> void:
@@ -1049,17 +1138,95 @@ func draw_targets() -> void:
 func draw_balls_in_flight() -> void:
 	for b in balls:
 		if b.state == STATE_FLIGHT:
-			draw_ball(b, flight_pos(b))
+			draw_prop(b, flight_pos(b))
 
 
-func draw_ball(b: Ball, pos: Vector2) -> void:
+func draw_prop(b: Ball, pos: Vector2) -> void:
+	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
 	draw_circle(pos, 24.0, halo)
-	draw_circle(pos, 11.0, b.color)
-	var hi := b.color.lightened(0.4)
+	var ang := 0.0
+	if bool(PROPS[b.kind]["spins"]) and b.state == STATE_FLIGHT:
+		var span := maxi(1, b.land_tick - b.launch_tick)
+		var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
+		ang = b.spin_dir * p * TAU * 2.0   # two tumbles across the flight
+	match b.kind:
+		PROP_EGGS:
+			draw_egg(pos, b.color)
+		PROP_RINGS:
+			draw_ring_prop(pos, b.color)
+		PROP_CLUBS:
+			draw_club(pos, ang)
+		PROP_KNIVES:
+			draw_knife(pos, ang)
+		PROP_TORCHES:
+			draw_torch(pos, ang)
+		_:
+			draw_ball_shape(pos, b.color)
+
+
+func draw_ball_shape(pos: Vector2, col: Color) -> void:
+	draw_circle(pos, 11.0, col)
+	var hi := col.lightened(0.4)
 	hi.a = 0.9
 	draw_circle(pos + Vector2(-3, -3), 3.5, hi)
+
+
+func draw_egg(pos: Vector2, col: Color) -> void:
+	fill_ellipse(pos, 9.0, 12.0, col)
+	var hi := col.lightened(0.25)
+	hi.a = 0.9
+	draw_circle(pos + Vector2(-3, -4), 2.6, hi)
+
+
+func draw_ring_prop(pos: Vector2, col: Color) -> void:
+	draw_arc(pos, 12.0, 0.0, TAU, 28, col, 5.0, true)
+	var hi := col.lightened(0.3)
+	hi.a = 0.7
+	draw_arc(pos, 12.0, -2.4, -1.0, 8, hi, 3.0, true)
+
+
+func draw_club(pos: Vector2, ang: float) -> void:
+	draw_set_transform(pos, ang, Vector2.ONE)
+	var body := Color(0.90, 0.35, 0.38)
+	var band := Color(0.96, 0.92, 0.85)
+	draw_line(Vector2(0, 12), Vector2(0, -2), band, 4.0)   # handle
+	draw_circle(Vector2(0, 13), 2.6, band)                 # knob
+	draw_colored_polygon(PackedVector2Array([              # tapered body
+		Vector2(-3, 0), Vector2(3, 0), Vector2(7, -14), Vector2(-7, -14),
+	]), body)
+	draw_circle(Vector2(0, -14), 7.0, body)                # rounded head
+	draw_arc(Vector2(0, -14), 7.0, -2.5, -1.2, 6, band, 2.0, true)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func draw_knife(pos: Vector2, ang: float) -> void:
+	draw_set_transform(pos, ang, Vector2.ONE)
+	var steel := Color(0.82, 0.86, 0.92)
+	var edge := Color(1.0, 1.0, 1.0, 0.9)
+	var handle := Color(0.30, 0.20, 0.14)
+	draw_colored_polygon(PackedVector2Array([              # blade
+		Vector2(0, -15), Vector2(-4, 3), Vector2(4, 3),
+	]), steel)
+	draw_line(Vector2(0, -15), Vector2(-4, 3), edge, 1.5)  # bright edge
+	draw_line(Vector2(-3, 4), Vector2(3, 4), handle, 3.0)  # guard
+	draw_line(Vector2(0, 4), Vector2(0, 12), handle, 4.0)  # grip
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func draw_torch(pos: Vector2, ang: float) -> void:
+	draw_set_transform(pos, ang, Vector2.ONE)
+	var handle := Color(0.24, 0.16, 0.12)
+	draw_line(Vector2(0, 14), Vector2(0, -2), handle, 4.0)
+	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)           # flicker
+	draw_colored_polygon(PackedVector2Array([              # outer flame
+		Vector2(-6, -4), Vector2(6, -4), Vector2(0, -18.0 * fl),
+	]), Color(1.0, 0.5, 0.15, 0.95))
+	draw_colored_polygon(PackedVector2Array([              # inner flame
+		Vector2(-3, -5), Vector2(3, -5), Vector2(0, -13.0 * fl),
+	]), Color(1.0, 0.85, 0.4, 0.95))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func draw_hud(font: Font, s: Vector2) -> void:
@@ -1114,14 +1281,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if tick - trick_hint < 40:
 		draw_string(font, Vector2(s.x * 0.5 - 90, s.y * 0.30), "no trick armed", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.8, 0.7, 0.9, 0.8))
 
-	var kind := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
-	draw_string(font, Vector2(30, s.y - 74), "%d-BALL %s" % [num_balls, kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
+	var patt := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
+	var propname := String(cur_prop()["name"]).to_upper()
+	if prop_deficit() > 0.0:
+		draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws run low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
+	draw_string(font, Vector2(30, s.y - 74), "%d %s  -  %s" % [num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
 	var unlock := ""
 	if next_ball_strength() > 0:
 		unlock = "   ( next ball at Strength %d )" % next_ball_strength()
-	draw_string(font, Vector2(30, s.y - 52), "[ and ] change count%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
+	draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
 	draw_string(font, Vector2(30, s.y - 30),
-		"catch D/K  throw F/J (hold=higher)  P perform/train  Tab sheet  R restart  Esc quit",
+		"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc quit",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
 
 	if not started:
