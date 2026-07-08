@@ -262,6 +262,7 @@ var game_state := ST_MENU
 var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
 var venue_seen := 0       # highest venue reached, so promotions fire once
+var story_seen := 0       # how many endgame story milestones have played (see STORY_REP)
 var cutscene_queue: Array[String] = []  # pending story beats to show
 var view_venue := -1      # cutscene/preview override of which venue palette to draw
 var shake := 0.0          # screen-shake magnitude, decays each frame
@@ -591,6 +592,12 @@ func _input(event: InputEvent) -> void:
 			if debug_mode: debug_jump_venue(4)
 		KEY_F6:
 			if debug_mode: debug_jump_venue(5)
+		KEY_F7:
+			if debug_mode: debug_jump_story(0)   # F7..F9 = the endgame beats rival/record/finale
+		KEY_F8:
+			if debug_mode: debug_jump_story(1)
+		KEY_F9:
+			if debug_mode: debug_jump_story(2)
 		KEY_ESCAPE:
 			open_pause()
 
@@ -1064,6 +1071,8 @@ func reset_new_game() -> void:
 	xp = 0
 	points = 0
 	venue_seen = 0
+	story_seen = 0
+	best_scores = [0, 0, 0, 0, 0, 0]
 	started = false
 	stamina_max = 50.0 + float(endurance)
 	stamina = stamina_max
@@ -1167,6 +1176,35 @@ func cutscene_script(id: String) -> Array:
 				{"scene": "champ", "stage": 2, "who": "", "hold": 420,
 					"cap": "He wins on paper with the priciest gear money can buy. You place second on a cleaner run. The gap is narrowing, and it is narrowing from your side."},
 			]
+		"rival":
+			return [
+				{"scene": "champ", "stage": 0, "who": "", "hold": 340,
+					"cap": "The international stage. The finest hands alive, and the first room no amount of money can buy your way through."},
+				{"scene": "champ", "stage": 3, "who": "", "hold": 400,
+					"cap": "Silvio lunges for a torch his gear has thrown a hand's width wrong. It falls. The room does not gasp. It simply goes quiet."},
+				{"scene": "champ", "stage": 2, "who": "", "hold": 420,
+					"cap": "You keep it clean, and you keep it up, long past where nerve alone can carry a set. The rivalry turns here, and it turns quietly."},
+			]
+		"record":
+			return [
+				{"scene": "arena", "stage": 0, "who": "", "hold": 340,
+					"cap": "Not a show tonight. An ordeal. One routine, impossibly long, and a single drop ends all of it."},
+				{"scene": "arena", "stage": 1, "who": "", "hold": 400,
+					"cap": "The music thins to almost nothing. There is only the count, your breath, and the weight moving through your hands."},
+				{"scene": "arena", "stage": 2, "who": "", "hold": 440,
+					"cap": "You hold, and hold, past the point where most hands give out, and the number climbs into places nobody has written down before."},
+			]
+		"finale":
+			return [
+				{"scene": "arena", "stage": 3, "who": "", "hold": 380,
+					"cap": "Five torches. The largest crowd there is. A set that asks for everything at once and gives back nothing but the room's held breath."},
+				{"scene": "arena", "stage": 3, "who": "", "hold": 400,
+					"cap": "Silvio watches from the seats now, where the shortcut always ends. He is not bitter. He simply never learned to do this."},
+				{"scene": "arena", "stage": 3, "who": "", "hold": 380,
+					"cap": "Clean catch. Clean throw. The same two things she taught you, under all the pressure the world can bring. You land it."},
+				{"scene": "backyard", "stage": 3, "who": "Bruna", "hold": 480,
+					"cap": "\"There it is. Talent was always the cheap part, kid. This you earned.\" The same backyard. The same two hands. The circle closes."},
+			]
 		_:
 			return [
 				{"scene": "arena", "stage": 0, "who": "", "hold": 360,
@@ -1186,6 +1224,9 @@ func beat_title(id: String) -> String:
 		"v3": return "The Circus"
 		"v4": return "The Championship"
 		"v5", "v6", "v7", "v8", "v9": return "The World Arena"
+		"rival": return "The Turn"
+		"record": return "The World Record"
+		"finale": return "The World's Greatest Juggler"
 		"one": return "Lesson  -  One Ball"
 		"two": return "Lesson  -  Two Balls"
 		"cascade": return "Lesson  -  The Cascade"
@@ -1723,15 +1764,22 @@ func on_round_end() -> void:
 			results_record = true
 		# the results panel takes over the end-of-run screen for performances
 		results_open = true
-	# crossing into a new venue plays its promotion cutscene, once
+	# story beats fire on reputation milestones, once each: first the venue
+	# promotions (tiers 1..5), then the endgame chapters past the arena (the
+	# rivalry turning, the record ordeal, the finale). Both accumulate into one
+	# cutscene so a big set can play its whole run of beats in order.
+	var beats: Array[String] = []
 	var vi := venue_index()
 	if vi > venue_seen:
-		var beats: Array[String] = []
 		for k in range(venue_seen + 1, vi + 1):
 			beats.append("v%d" % k)
 		venue_seen = vi
-		begin_cutscene(beats)
+	while story_seen < STORY_REP.size() and reputation >= int(STORY_REP[story_seen]["rep"]):
+		beats.append(String(STORY_REP[story_seen]["id"]))
+		story_seen += 1
 	save_progress()
+	if not beats.is_empty():
+		begin_cutscene(beats)
 
 
 func stamina_mult() -> float:
@@ -1842,6 +1890,15 @@ func rep_tier() -> String:
 
 const VENUE_REP := [0, 100, 300, 700, 1500, 3000]   # reputation at each venue's door
 
+# endgame story chapters, past the arena, keyed to reputation. These are the
+# climax beats STORY.md builds toward: the rivalry finally turning, the record
+# ordeal, and the finale where only your hands can win. They play once each.
+const STORY_REP := [
+	{"rep": 4000, "id": "rival"},
+	{"rep": 5200, "id": "record"},
+	{"rep": 6500, "id": "finale"},
+]
+
 
 func debug_jump_venue(i: int) -> void:
 	# debug: leap anywhere in the story. Sets Reputation to that venue's threshold,
@@ -1851,6 +1908,17 @@ func debug_jump_venue(i: int) -> void:
 	venue_seen = i
 	save_progress()
 	begin_cutscene(["intro" if i == 0 else "v%d" % i])
+
+
+func debug_jump_story(i: int) -> void:
+	# debug: preview the endgame story beats (rival/record/finale) without grinding
+	# to their reputation gates. Marks them seen so they do not re-fire in play.
+	i = clampi(i, 0, STORY_REP.size() - 1)
+	reputation = maxi(reputation, int(STORY_REP[i]["rep"]))
+	venue_seen = maxi(venue_seen, 5)
+	story_seen = maxi(story_seen, i + 1)
+	save_progress()
+	begin_cutscene([String(STORY_REP[i]["id"])])
 
 
 func venue_index() -> int:
@@ -2010,6 +2078,7 @@ func load_progress() -> void:
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
 		venue_seen = int(cf.get_value("prog", "venue_seen", venue_index()))
+		story_seen = int(cf.get_value("prog", "story_seen", 0))
 		var bs: Variant = cf.get_value("prog", "best_scores", [])
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
@@ -2032,6 +2101,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
 	cf.set_value("prog", "venue_seen", venue_seen)
+	cf.set_value("prog", "story_seen", story_seen)
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.save(save_file())
 
@@ -4180,6 +4250,17 @@ func scene_champ(s: Vector2, stage: int) -> void:
 			draw_rect(Rect2(s.x * 0.56 - 4.0, fy - 176.0, 8.0, 10.0), Color(1.0, 0.85, 0.4))
 			draw_shadow(Vector2(s.x * 0.3, fy), 66.0)
 			draw_person(Vector2(s.x * 0.3, fy), 0.95, milo_pal(4), null, null, 0)
+		3:
+			# Silvio's fall: he lunges after a torch his gear threw wrong, and misses
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
+			draw_scoreboard(s)
+			var fy := s.y * 0.84
+			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
+			var rh := reach_hand(Vector2(s.x * 0.5, fy), 1.2, 1.0, Vector2(66.0, -78.0))
+			draw_person(Vector2(s.x * 0.5, fy), 1.2, silvio_pal(), null, rh, -1)
+			var u := fposmod(float(cine_tick) / 66.0, 1.0)
+			var fp := Vector2(s.x * 0.5 + 120.0, s.y * 0.26 + u * u * 320.0)
+			draw_torch(fp, float(cine_tick) * 0.22, 1.5)
 		_:
 			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
 			draw_scoreboard(s)
@@ -4192,6 +4273,24 @@ func scene_arena(s: Vector2, stage: int) -> void:
 	match stage:
 		0:
 			draw_venue_exterior(s, 5)
+		3:
+			# the finale: five torches, the biggest crowd, Silvio seated in the stands
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.06, 0.04, 0.10), 18)
+			var gy := s.y * 0.84
+			for i in 130:
+				var seed := float(i) * 13.7
+				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.94
+				var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.34 - 18.0
+				var a := 0.35 + 0.45 * sin(float(cine_tick) * 0.05 + seed)
+				draw_circle(Vector2(x, y), 1.7, Color(1.0, 0.82, 0.52, clampf(a, 0.12, 0.8)))
+			draw_silhouette(Vector2(s.x * 0.13, gy - 4.0), 0.6, Color(0.05, 0.04, 0.05))   # Silvio, watching
+			draw_spotlight_cone(s, s.x * 0.5, 0.17)
+			draw_shadow(Vector2(s.x * 0.5, gy), 90.0)
+			var djf := demo_juggle(Vector2(s.x * 0.5, s.y * 0.46), 1.3, 5)
+			draw_person(Vector2(s.x * 0.5, gy), 1.3, milo_pal(5), djf["hl"], djf["hr"], 1)
+			for b in djf["balls"]:
+				draw_torch(b["pos"], float(cine_tick) * 0.16, 1.4)
+			draw_circle(Vector2(s.x * 0.5, s.y * 0.46), 240.0, Color(1.0, 0.9, 0.6, 0.07))
 		_:
 			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.06, 0.04, 0.10), 18)
 			var gy := s.y * 0.84
