@@ -1438,7 +1438,7 @@ func on_catch(h: int) -> void:
 		catch_flash[h] = tick
 		hclose[h] = 0.0
 		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
-		play_sfx("whiff", -14.0)
+		play_sfx("whiff", -12.0)
 		return
 	if best_d > W_LATE:
 		# way off the arrival: a genuine mistime, the ball drops
@@ -1462,7 +1462,7 @@ func on_catch(h: int) -> void:
 	if tut_active:
 		tut_on_catch()   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
-	play_sfx(_catch_sound(best.kind), -8.0)   # the prop's own catch timbre, every catch
+	play_sfx(_catch_sound(best.kind), -20.0)   # the prop's own timbre, now just a faint texture
 	var sc_before := score
 	if best_d <= wperf:
 		streak += 1
@@ -1471,7 +1471,7 @@ func on_catch(h: int) -> void:
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
-		play_sfx("perfect", -9.0)
+		play_sfx("perfect", -5.0)
 		if streak % 5 == 0:
 			play_sfx("streak", -7.0)   # a rising flourish at every fifth in a row
 	elif best_d <= W_GOOD:
@@ -1481,7 +1481,7 @@ func on_catch(h: int) -> void:
 		applause = minf(1.0, applause + 0.025)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
-		play_sfx("good", -11.0)
+		play_sfx("good", -8.0)
 		if streak % 5 == 0:
 			play_sfx("streak", -8.0)
 	else:
@@ -1588,7 +1588,7 @@ func do_throw(h: int, hold: int) -> void:
 	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)))
 	if set_flags and frac >= 1.0:
 		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
-	play_sfx("throw", -16.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whoosh, lower for heavy/high
+	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
 	if tut_active:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
 
@@ -3101,7 +3101,7 @@ func audio_update() -> void:
 	var pad_t := -13.0
 	var bass_t := -11.0 if active else -50.0
 	var arp_t := lerpf(-32.0, -9.0, energy) if in_play else -18.0
-	var crowd_t := lerpf(-27.0, -5.0, applause) if perf else -60.0
+	var crowd_t := lerpf(-30.0, -9.0, applause) if perf else -60.0
 	if game_state == ST_MENU or game_state == ST_CUTSCENE:
 		pad_t = -11.0
 		bass_t = -50.0
@@ -3228,6 +3228,46 @@ func _drop_sound() -> PackedFloat32Array:
 	return out
 
 
+func _throw_sound() -> PackedFloat32Array:
+	# a soft downward "whup": a quick falling pitch with a little air, not a noise burst
+	var dur := 0.16
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		var f := lerpf(540.0, 240.0, clampf(t / dur, 0.0, 1.0))   # falling whup
+		ph += TAU * f / AUDIO_SR
+		var air := (randf() * 2.0 - 1.0) * 0.22
+		var e := exp(-t / 0.06)
+		out[i] = clampf((sin(ph) * 0.75 + air * 0.5) * e * 0.32, -1.0, 1.0)
+	return out
+
+
+func _catch_perfect() -> PackedFloat32Array:
+	# the satisfying one: a soft round body plus a bright major-third sparkle on top
+	var dur := 0.34
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var body := 0.0
+	var s1 := 0.0
+	var s2 := 0.0
+	var s3 := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		body += TAU * 300.0 / AUDIO_SR      # warm pock body
+		s1 += TAU * 1046.5 / AUDIO_SR       # C6
+		s2 += TAU * 1318.5 / AUDIO_SR       # E6
+		s3 += TAU * 1568.0 / AUDIO_SR       # G6
+		var eb := exp(-t / 0.05)
+		var eb2 := exp(-t / 0.16)
+		var v := sin(body) * 0.5 * eb + (sin(s1) + 0.7 * sin(s2) + 0.5 * sin(s3)) / 2.2 * 0.55 * eb2
+		out[i] = clampf(v * 0.6, -1.0, 1.0)
+	return out
+
+
 func _splat_sound() -> PackedFloat32Array:
 	var dur := 0.22
 	var n := int(AUDIO_SR * dur)
@@ -3242,10 +3282,13 @@ func _splat_sound() -> PackedFloat32Array:
 
 
 func gen_sfx() -> void:
-	sfx["perfect"] = _wav(_tone([1046.5, 1568.0], [1.0, 0.6], 0.30, 0, 0.002, 0.10, 0.5, 0.0), false)
-	sfx["good"] = _wav(_tone([784.0, 1176.0], [1.0, 0.4], 0.22, 0, 0.002, 0.08, 0.42, 0.0), false)
-	sfx["late"] = _wav(_tone([330.0], [1.0], 0.16, 1, 0.004, 0.06, 0.4, 0.05), false)
-	sfx["whiff"] = _wav(_tone([600.0], [1.0], 0.12, 0, 0.001, 0.05, 0.3, 0.85), false)
+	# catch feedback, by quality: perfect is satisfying, good is a warm nod, late is a
+	# dull "meh", whiff is a soft airy miss. These are the load-bearing sounds.
+	sfx["perfect"] = _wav(_catch_perfect(), false)
+	sfx["good"] = _wav(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0), false)
+	sfx["late"] = _wav(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03), false)
+	sfx["whiff"] = _wav(_tone([520.0], [1.0], 0.10, 0, 0.001, 0.045, 0.20, 0.4), false)
+	sfx["throw"] = _wav(_throw_sound(), false)
 	sfx["drop"] = _wav(_drop_sound(), false)
 	sfx["splat"] = _wav(_splat_sound(), false)
 	sfx["coin"] = _wav(_seq_bells([987.8, 1318.5], 0.09, 0.5), false)
@@ -3258,20 +3301,30 @@ func gen_sfx() -> void:
 	sfx["c_club"] = _wav(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.25), false)
 	sfx["c_knife"] = _wav(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0), false)
 	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
-	sfx["throw"] = _wav(_tone([300.0], [1.0], 0.14, 0, 0.005, 0.07, 0.28, 0.8), false)
 
 
 func gen_crowd() -> AudioStreamWAV:
-	var dur := 3.0
+	# a soft, warm murmur, not a hiss. The old single-pole lowpass at high gain read
+	# as harsh static (nearly clipping); this uses two heavy poles for a low, round
+	# rumble and then normalises to a gentle, controlled level.
+	var dur := 4.0
 	var n := int(AUDIO_SR * dur)
 	var out := PackedFloat32Array()
 	out.resize(n)
 	var lp := 0.0
+	var lp2 := 0.0
 	for i in n:
-		lp = lp * 0.96 + (randf() * 2.0 - 1.0) * 0.04   # lowpass white noise -> murmur
-		var lfo := 0.7 + 0.3 * sin(TAU * float(i) / AUDIO_SR * 0.7)
-		out[i] = clampf(lp * 3.0 * lfo, -1.0, 1.0)
-	_fade_ends(out, 40)
+		lp = lp * 0.988 + (randf() * 2.0 - 1.0) * 0.012   # heavy lowpass -> low murmur
+		lp2 = lp2 * 0.9 + lp * 0.1                         # a second pole, smoother still
+		var lfo := 0.78 + 0.22 * sin(TAU * float(i) / AUDIO_SR * 0.55)   # a slow swell
+		out[i] = lp2 * lfo
+	var pk := 0.0001
+	for i in n:
+		pk = maxf(pk, absf(out[i]))
+	var g := 0.4 / pk                                      # normalise: soft, never clipping
+	for i in n:
+		out[i] *= g
+	_fade_ends(out, 60)
 	return _wav(out, true)
 
 
@@ -3325,12 +3378,13 @@ func gen_music_floats(vi: int) -> Dictionary:
 	# pad: a static power-chord drone (root, fifth, octave), aligned so it loops seamlessly
 	var pf := [_align(root, dur), _align(root * 1.5, dur), _align(root * 2.0, dur)]
 	var pph := PackedFloat32Array(); pph.resize(3)
+	var lfo_cyc := maxf(1.0, round(0.15 * dur))   # whole cycles over the loop, so the tremolo never jumps
 	for i in n:
 		var s := 0.0
 		for j in 3:
 			pph[j] += TAU * float(pf[j]) / AUDIO_SR
 			s += sin(pph[j])
-		pad[i] = (s / 3.0) * 0.5 * (0.85 + 0.15 * sin(TAU * float(i) / AUDIO_SR * 0.15))
+		pad[i] = (s / 3.0) * 0.5 * (0.85 + 0.15 * sin(TAU * float(i) / float(n) * lfo_cyc))
 
 	var arp_pat := [0, 3, 7, 10, 12, 10, 7, 3]   # a minor riff, consonant under the drone
 	for bar in bars:
