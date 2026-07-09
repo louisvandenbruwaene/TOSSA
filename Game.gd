@@ -31,6 +31,8 @@ const GOOD_BASE := 0.50           # base chance to secure a Good-timed catch
 const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
 const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
 const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
+const STRENGTH_CATCH := 0.05      # per weight-step, how much Strength eases (or, when
+                                  # under-strength, hurts) the catch of a HEAVY prop
 
 # --- throw height by hold (variable 0..1.4) -----------------------------------
 # A tap throws the LOWEST, snappiest height (BASE_AIR airtime); holding THROW lifts
@@ -71,8 +73,6 @@ const SETTINGS_PATH := "user://juggle_settings.cfg" # global options, shared by 
 const POINTS_PER_LEVEL := 3
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
                               # max-height throw always still demands a real catch
-const STR_HOLD_EFF := 0.015   # per Strength point: more height per tick of hold,
-                              # so a strong juggler reaches a big throw in less time
 const STAM_DRAIN_CATCH := 0.4
 const STAM_DRAIN_THROW := 0.3
 const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
@@ -123,7 +123,6 @@ const PROPS := [
 	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "spins": true},
 	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "spins": true},
 ]
-const WEIGHT_INACC := 0.12   # each weight step over balls adds this much inaccuracy
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
 
 # --- shop: spend gold on props and gear (ideas.rtf shop) ----------------------
@@ -258,6 +257,10 @@ var trick_unlock_tick := -999
 var sheet_open := false
 var shop_open := false
 var debug_mode := false   # debug build: free stat editing in the character sheet
+const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
+const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
+var _repeat_key := 0      # the debug stat-adjust key currently held for auto-repeat, 0 = none
+var _repeat_t := 0.0      # time accumulator for the held-key repeat
 var _prev_running := false
 
 # game-flow state
@@ -415,7 +418,7 @@ func _ready() -> void:
 		game_state = ST_PLAY
 
 
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
 	audio_update()   # pick the music theme and glide the layer volumes, every state
 	if _shot:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
@@ -429,6 +432,8 @@ func _physics_process(_delta: float) -> void:
 		queue_redraw()
 		return
 	if sheet_open or shop_open or paused:
+		if sheet_open and debug_mode:
+			sheet_repeat(delta)   # debug build only: holding a stat key keeps stepping it
 		queue_redraw()   # the sheet, shop, and pause menu all halt the sim; nothing advances
 		return
 	tick += 1
@@ -1573,14 +1578,14 @@ func do_throw(h: int, hold: int) -> void:
 	var b: Ball = stack(h).pop_front()
 	var weight := prop_weight()
 	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
-	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Strength makes
-	# each tick worth more height, so a strong juggler reaches a big throw in less time.
-	# Being under a prop's Required Strength drags the WHOLE throw down (the ideas.rtf
-	# sagging-throw rule): a lower tap floor (DEFICIT_BASE) AND a lower reachable ceiling
-	# (DEFICIT_HEIGHT), so a too-heavy prop never gets up to a clean height no matter how
-	# long you hold it.
+	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Height is set by
+	# how long you hold, NOT by Strength: raw muscle must never loft a throw higher (a higher
+	# throw is a wilder throw, so tying Strength to height wrongly punished the strong).
+	# Strength ONLY matters when you are UNDER a prop's Required Strength: then the whole
+	# throw sags (the ideas.rtf rule) with a lower tap floor (DEFICIT_BASE) AND a lower
+	# ceiling (DEFICIT_HEIGHT), so a too-heavy prop never gets up to a clean height.
 	var base_air := float(BASE_AIR) * (1.0 - DEFICIT_BASE * deficit)
-	var gain_mult := (1.0 + float(strength) * STR_HOLD_EFF) * (1.0 - DEFICIT_HEIGHT * deficit)
+	var gain_mult := 1.0 - DEFICIT_HEIGHT * deficit
 	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
 	# the active arm trick reshapes this throw before we roll its accuracy, so a High Toss
@@ -1604,13 +1609,14 @@ func do_throw(h: int, hold: int) -> void:
 	b.height = frac
 	b.trick = this_trick
 
-	# Accuracy (dampened by low stamina) sets the base inaccuracy; a heavy prop and an
-	# under-strength throw both widen it. Inaccuracy normally scales with the throw's
-	# HEIGHT, so a low throw is placed cleanly. But being under a prop's Required Strength
-	# makes the RELEASE ITSELF unsteady, so a "spread floor" keyed to the deficit keeps
-	# even a low under-strength throw drifting and wobbling. Without it, a weak juggler
-	# could just tap heavy rings low and place them perfectly, which felt wrong.
-	var inacc := inacc_factor() * (1.0 + WEIGHT_INACC * float(weight - 1) + DEFICIT_INACC * deficit)
+	# Accuracy (dampened by low stamina) sets the base inaccuracy; being UNDER a prop's
+	# Required Strength widens it. Weight alone does NOT: a heavy prop you are strong enough
+	# for throws just as cleanly as a ball (only low Strength makes a heavy prop wild).
+	# Inaccuracy normally scales with the throw's HEIGHT, so a low throw is placed cleanly.
+	# But an under-strength RELEASE is itself unsteady, so a "spread floor" keyed to the
+	# deficit keeps even a low under-strength throw drifting and wobbling, otherwise a weak
+	# juggler could just tap heavy rings low and place them perfectly, which felt wrong.
+	var inacc := inacc_factor() * (1.0 + DEFICIT_INACC * deficit)
 	var spread := maxf(frac, deficit * DEFICIT_FLOOR)
 	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * spread * inacc))
 	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * spread * inacc
@@ -1872,11 +1878,27 @@ func catch_chance(quality: int, height: float) -> float:
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
+	p += strength_catch_mod()      # raw muscle steadies a heavy prop in the hand (and only a
+	                               # too-weak grip on a heavy prop makes the catch itself shaky)
 	if has_glasses:
 		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	if spinning():
 		p -= SPIN_ACC_PENALTY      # a Spin means catching blind, so off-Perfect gets riskier
 	return clampf(p, MIN_CATCH_P, 1.0)
+
+
+func strength_catch_mod() -> float:
+	# How Strength changes the catch of the CURRENT prop. Light props (balls, eggs) are
+	# unaffected. For a heavy prop, being well OVER its Required Strength steadies it and
+	# eases the catch; being UNDER it makes even the catch shaky. Scales with the prop's
+	# weight, so the top props gain the most from raw muscle, and it is never a height or
+	# timing change, only a small nudge to the off-Perfect odds.
+	var w := prop_weight() - 1                 # 0 for balls/eggs, up to 4 for torches
+	var req := prop_req()
+	if w <= 0 or req <= 0:
+		return 0.0
+	var ratio := clampf(float(strength) / float(req) - 1.0, -1.0, 1.0)   # -1 hopeless, 0 just enough, +1 double
+	return ratio * float(w) * STRENGTH_CATCH
 
 
 func focus() -> float:
@@ -2106,6 +2128,39 @@ func _sheet_invest(which: String) -> void:
 		_adjust(which, 1)   # debug build: free, no point cost
 	else:
 		invest(which)
+
+
+func sheet_repeat(dt: float) -> void:
+	# debug build only: while the character sheet is open, HOLDING a stat-adjust key keeps
+	# stepping the stat instead of one press per point. The first press was already applied
+	# by _input, so a freshly held key waits SHEET_REPEAT_DELAY before it starts repeating.
+	# Normal (non-debug) play never calls this, so there it stays one point per press.
+	var key := 0
+	var which := ""
+	var delta := 0
+	if Input.is_physical_key_pressed(KEY_1):
+		key = KEY_1; which = "acc"; delta = 1
+	elif Input.is_physical_key_pressed(KEY_2):
+		key = KEY_2; which = "str"; delta = 1
+	elif Input.is_physical_key_pressed(KEY_3):
+		key = KEY_3; which = "end"; delta = 1
+	elif Input.is_physical_key_pressed(KEY_Q):
+		key = KEY_Q; which = "acc"; delta = -1
+	elif Input.is_physical_key_pressed(KEY_W):
+		key = KEY_W; which = "str"; delta = -1
+	elif Input.is_physical_key_pressed(KEY_E):
+		key = KEY_E; which = "end"; delta = -1
+	if key == 0:
+		_repeat_key = 0
+		return
+	if key != _repeat_key:
+		_repeat_key = key       # newly held: hold off until the initial delay elapses
+		_repeat_t = -SHEET_REPEAT_DELAY
+		return
+	_repeat_t += dt
+	while _repeat_t >= SHEET_REPEAT_RATE:
+		_repeat_t -= SHEET_REPEAT_RATE
+		_adjust(which, delta)
 
 
 func _adjust(which: String, delta: int) -> void:
@@ -2385,10 +2440,11 @@ func draw_juggler(s: Vector2) -> void:
 	# swaps the face for the back of the head. In sequence this reads as a real turn.
 	var facing_back := false
 	var spin_on := spinning()
+	var sx := 1.0                                 # body width scale: 1 front, ~0 profile, -1 back
 	if spin_on:
 		var sp := 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)
 		var ang := sp * TAU                       # exactly one full turn across the spin
-		var sx := cos(ang)
+		sx = cos(ang)
 		facing_back = sx < 0.0
 		if absf(sx) < 0.14:                        # never collapse fully to a line at the profile
 			sx = 0.14 if sx >= 0.0 else -0.14
@@ -2446,7 +2502,11 @@ func draw_juggler(s: Vector2) -> void:
 
 	# head: a full head of hair framing the crown and temples. Facing the crowd, the skin
 	# face sits over it; facing away mid-spin, the back of the head is all hair with a
-	# little skin at the nape, which is what sells the turn.
+	# little skin at the nape, which is what sells the turn. The head keeps its full ROUND
+	# size all through a turn (a head reads round from every angle), so it is drawn OUTSIDE
+	# the body's width-scale, otherwise it would squash to a thin oval at the profile.
+	if spin_on:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)   # hair mass, up and a touch larger
 	if facing_back:
 		draw_circle(head, head_r, hair)                                   # back of the head, all hair
@@ -2455,6 +2515,8 @@ func draw_juggler(s: Vector2) -> void:
 		draw_circle(head, head_r, skin)                                   # face over the hair
 		draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
 		draw_face(head, head_r)
+	if spin_on:                                                            # back to the body width-scale for the arms
+		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
 	draw_arm(shoulder_pos(LEFT), hpos[LEFT], LEFT, skin, suit)
@@ -2966,9 +3028,9 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(tx, py + 66.0, xbw * xf, 10.0), Color(0.9, 0.7, 0.35))
 	draw_string(font, Vector2(tx, py + 92.0), "%d / %d xp to next level" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
 
-	var str_note := "faster high throws; %d balls now" % max_balls()
+	var str_note := "heavy props steadier and easier to catch  -  %d balls now" % max_balls()
 	if next_ball_strength() > 0:
-		str_note = "faster high throws; %d-ball unlock at Str %d" % [max_balls() + 1, next_ball_strength()]
+		str_note = "heavy props steadier and easier to catch  -  %d-ball unlock at Str %d" % [max_balls() + 1, next_ball_strength()]
 	var acc_note := "higher chance to catch off-Perfect; lands throws closer"
 	if accuracy > 100:
 		if focus() <= 100.0:
