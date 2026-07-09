@@ -241,8 +241,7 @@ var pause_sel := 0        # cursor in the pause menu
 var round_scored := false
 # --- tricks: which trick the TRICK key is primed to (cycled with C), a trick
 # armed onto the next throw, the live-Spin timer, and the run's trick tally.
-var trick_primed := 0     # index into TRICKS the TRICK key will fire
-var trick_armed := -1     # a trick armed onto the next throw (TR_HIGH/TR_BTB), or -1
+var trick_armed := -1     # the arm trick permanently toggled on (TR_HIGH/TR_BTB), or -1 for OFF
 var trick_ready := -999   # tick a LIVE trick may fire again (cooldown)
 var spin_until := -999    # tick the current Spin ends; catches until then score double
 var spin_scored := false  # this Spin has already been credited as landed
@@ -366,8 +365,6 @@ func _ready() -> void:
 		if ua.has("--trick"):   # dev: unlock every trick and let the auto-player show them off
 			_demo_trick = true
 			level = 9
-			var unl := unlocked_tricks()
-			trick_primed = int(unl[0]) if not unl.is_empty() else 0
 			if ua.has("--unlock"):   # dev: also show the new-trick banner
 				trick_unlock = TR_SPIN
 				trick_unlock_tick = 0
@@ -1331,12 +1328,14 @@ func inner_pos(h: int) -> Vector2:
 
 
 func shoulder_pos(h: int) -> Vector2:
-	# where the arms leave the body: the shoulder joint of the eight-head figure
+	# where the arms leave the body. This sits at the OUTER corner of the jacket's
+	# shoulder (down and out from the old spot), so the arm springs from the edge of
+	# the shoulder and the torso no longer pokes out beside it.
 	var s := get_viewport_rect().size
 	var c := s.x * 0.5
 	var H := s.y * 0.056
-	var y := s.y * 0.80 - 6.72 * H
-	var dx := 0.72 * H
+	var y := s.y * 0.80 - 6.62 * H
+	var dx := 0.9 * H
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
@@ -1429,8 +1428,6 @@ func start_run(n: int) -> void:
 	trick_score = 0
 	trick_msg = ""
 	trick_msg_tick = -999
-	var unl := unlocked_tricks()
-	trick_primed = int(unl[0]) if not unl.is_empty() else 0
 	rng.seed = 20260705
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
 	hclose = [0.0, 0.0]
@@ -1580,12 +1577,12 @@ func do_throw(h: int, hold: int) -> void:
 	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
 	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 
-	# a trick armed by the TRICK key reshapes this throw before we roll its accuracy,
-	# so a High Toss genuinely flies (and is genuinely harder to catch)
+	# the active arm trick reshapes this throw before we roll its accuracy, so a High
+	# Toss genuinely flies (and is genuinely harder to catch). trick_armed is a PERMANENT
+	# toggle now: it is NOT cleared here, so every throw carries it until you switch off.
 	var this_trick := -1
 	if trick_armed >= 0:
 		this_trick = trick_armed
-		trick_armed = -1
 		if this_trick == TR_HIGH:
 			frac = 1.35
 		elif this_trick == TR_BTB:
@@ -1661,44 +1658,54 @@ func set_trick_msg(m: String) -> void:
 	trick_msg_tick = tick
 
 
+func unlocked_arm_tricks() -> Array:
+	# the tricks that style a throw (High Toss, Behind the Back), which the C toggle
+	# cycles. Spin is a live move on its own key and is not part of the toggle.
+	var out: Array = []
+	for i in TRICKS.size():
+		if trick_unlocked(i) and String(TRICKS[i]["kind"]) == "arm":
+			out.append(i)
+	return out
+
+
 func on_trick() -> void:
-	# The TRICK key (Space) fires whichever trick is primed. An "arm" trick loads
-	# onto the next throw; a "live" trick (Spin) acts on the balls already up.
-	var unl := unlocked_tricks()
-	if unl.is_empty():
-		set_trick_msg("no trick yet  -  keep leveling up")
+	# The TRICK key (Space) fires the live Spin. The arm tricks are a PERMANENT toggle
+	# on the C key, so they are not fired from here any more.
+	if not trick_unlocked(TR_SPIN):
+		set_trick_msg("Spin unlocks at level %d  -  arm tricks are on C" % int(TRICKS[TR_SPIN]["lvl"]))
 		return
-	if not unl.has(trick_primed):
-		trick_primed = int(unl[0])
-	var t: Dictionary = TRICKS[trick_primed]
-	if int(t["min_air"]) > 0 and balls_airborne() < int(t["min_air"]):
-		set_trick_msg("%s needs %d in the air" % [String(t["name"]), int(t["min_air"])])
+	var t: Dictionary = TRICKS[TR_SPIN]
+	if balls_airborne() < int(t["min_air"]):
+		set_trick_msg("Spin needs %d in the air" % int(t["min_air"]))
 		return
-	if String(t["kind"]) == "arm":
-		trick_armed = trick_primed
-		set_trick_msg("%s armed  -  throw it" % String(t["name"]))
-		play_sfx("ui2", -12.0)
-	else:
-		if tick < trick_ready:
-			return   # still cooling down; ignore the mash
-		spin_until = tick + SPIN_TICKS
-		spin_scored = false
-		trick_ready = tick + TRICK_COOLDOWN
-		set_trick_msg("SPIN")
-		play_sfx("streak", -7.0)
+	if tick < trick_ready:
+		return   # still cooling down; ignore the mash
+	spin_until = tick + SPIN_TICKS
+	spin_scored = false
+	trick_ready = tick + TRICK_COOLDOWN
+	set_trick_msg("SPIN")
+	play_sfx("streak", -7.0)
 
 
 func cycle_trick() -> void:
-	# C rotates the primed trick through the ones the current level has unlocked.
-	var unl := unlocked_tricks()
-	if unl.is_empty():
+	# C is a PERMANENT toggle over the arm tricks: it steps OFF -> High Toss ->
+	# Behind the Back -> OFF, and whatever it lands on styles EVERY throw until you
+	# switch again (not one throw at a time like before).
+	var arms := unlocked_arm_tricks()
+	if arms.is_empty():
 		set_trick_msg("no trick yet  -  keep leveling up")
 		return
-	var idx := unl.find(trick_primed)
-	idx = (idx + 1) % unl.size() if idx >= 0 else 0
-	trick_primed = int(unl[idx])
-	set_trick_msg("%s ready" % String(TRICKS[trick_primed]["name"]))
-	play_sfx("ui", -14.0)
+	var cyc: Array = [-1]
+	cyc.append_array(arms)
+	var idx := cyc.find(trick_armed)
+	idx = (idx + 1) % cyc.size() if idx >= 0 else 1
+	trick_armed = int(cyc[idx])
+	if trick_armed < 0:
+		set_trick_msg("tricks OFF  -  plain throws")
+		play_sfx("ui", -16.0)
+	else:
+		set_trick_msg("%s ON  -  every throw" % String(TRICKS[trick_armed]["name"]))
+		play_sfx("ui2", -13.0)
 
 
 func reward_trick(t: int, at: Vector2) -> void:
@@ -1760,7 +1767,6 @@ func announce_new_tricks(prev_level: int) -> void:
 		if lv > prev_level and lv <= level:
 			trick_unlock = i
 			trick_unlock_tick = tick
-			trick_primed = i
 			play_sfx("streak", -5.0)
 
 
@@ -2870,26 +2876,24 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 
 
 func draw_trick_hud(font: Font, s: Vector2) -> void:
-	var unl := unlocked_tricks()
-	if not unl.has(trick_primed):
-		trick_primed = int(unl[0])
-	var t: Dictionary = TRICKS[trick_primed]
+	# the persistent trick toggle: which arm trick styles every throw (or OFF), plus the
+	# live Spin on its own key once it is unlocked
 	var x := s.x * 0.5 - 150.0
 	var y := s.y - 132.0
-	draw_string(font, Vector2(x, y), "TRICK  -  %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 300, 16, Color(0.93, 0.8, 0.99))
-	var status := "Space to perform"
-	var scol := Color(0.82, 0.74, 0.92, 0.9)
-	if trick_armed == trick_primed:
-		status = "ARMED  -  throw it"
-		scol = Color(1.0, 0.86, 0.5)
-	elif String(t["kind"]) == "live" and tick < trick_ready:
-		status = "cooldown %.1fs" % (float(trick_ready - tick) / 120.0)
-		scol = Color(0.72, 0.62, 0.64, 0.85)
-	elif String(t["kind"]) == "live":
-		status = "Space to spin"
-	if unl.size() > 1:
-		status += "     C to switch"
-	draw_string(font, Vector2(x, y + 20.0), status, HORIZONTAL_ALIGNMENT_CENTER, 300, 13, scol)
+	var arms := unlocked_arm_tricks()
+	var on := trick_armed >= 0
+	var label := String(TRICKS[trick_armed]["name"]).to_upper() if on else "OFF"
+	var lc := Color(1.0, 0.86, 0.5) if on else Color(0.72, 0.66, 0.78, 0.85)
+	draw_string(font, Vector2(x, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
+	var status := ""
+	if not arms.is_empty():
+		status = "C to toggle"
+	if trick_unlocked(TR_SPIN):
+		var sp := "Space to spin"
+		if tick < trick_ready:
+			sp = "spin %.1fs" % (float(trick_ready - tick) / 120.0)
+		status += ("      " + sp) if status != "" else sp
+	draw_string(font, Vector2(x, y + 20.0), status, HORIZONTAL_ALIGNMENT_CENTER, 300, 13, Color(0.82, 0.74, 0.92, 0.9))
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
