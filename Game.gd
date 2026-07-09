@@ -1571,12 +1571,9 @@ func do_throw(h: int, hold: int) -> void:
 	b.wobble = WOBBLE_MAX * frac * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	b.to_hand = other(h) if pattern == CASCADE else h
-	b.from_pos = inner_pos(h)
-	if this_trick == TR_BTB:
-		# launch from across the body so the throw reads as a behind-the-back flourish
-		b.from_pos = inner_pos(other(h)) + Vector2(0, 12)
-		b.wobble += 5.0
+	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
 	b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+	# Behind the Back is a flourish, drawn as a high wide sweeping loop in flight_pos
 
 	throw_kick[h] = tick
 	charging[h] = false
@@ -2176,6 +2173,13 @@ func flight_pos(b: Ball) -> Vector2:
 	var pos := b.from_pos.lerp(b.to_pos, p)
 	pos.y -= 4.0 * b.arc * p * (1.0 - p)                 # parabolic arc
 	pos.x += b.wobble * sin(p * PI) * sin(p * 9.0)       # high-throw arc wobble
+	if b.trick == TR_BTB:
+		# a showy behind-the-back loop: the ball bows back toward the throwing side and
+		# lifts high over the mid-flight, then settles cleanly onto the catch point
+		var s := sin(p * PI)
+		var dir := 1.0 if b.from_pos.x >= b.to_pos.x else -1.0
+		pos.x += 62.0 * s * dir                          # loop back toward the throwing hand
+		pos.y -= 48.0 * s                                # and a tall, graceful lift
 	return pos
 
 
@@ -2294,59 +2298,66 @@ func draw_juggler(s: Vector2) -> void:
 	var head := Vector2(cx, s.y * 0.415)
 	var head_bottom := head.y + head_r
 	var shoulder_y := s.y * 0.50
-	var hip_y := s.y * 0.685
+	var hip_y := s.y * 0.665
 	var floor_y := s.y * 0.80
+	var waist_y := lerpf(shoulder_y, hip_y, 0.52)
 
 	# a soft ground shadow so the figure stands ON the stage instead of floating
 	draw_shadow(Vector2(cx, floor_y + 2.0), 96.0)
 
-	# legs: trousers (tapered quads) with a small pelvis join, then shoes
+	# legs: slim tapered trousers off a narrow pelvis, then shoes
 	var shoe := Color(0.20, 0.12, 0.09)
 	draw_colored_polygon(PackedVector2Array([   # pelvis
-		Vector2(cx - 30, hip_y - 10), Vector2(cx + 30, hip_y - 10),
-		Vector2(cx + 28, hip_y + 8), Vector2(cx - 28, hip_y + 8),
+		Vector2(cx - 22, hip_y - 12), Vector2(cx + 22, hip_y - 12),
+		Vector2(cx + 20, hip_y + 6), Vector2(cx - 20, hip_y + 6),
 	]), suit_dk)
-	draw_colored_polygon(PackedVector2Array([   # left leg
-		Vector2(cx - 27, hip_y), Vector2(cx - 3, hip_y),
-		Vector2(cx - 10, floor_y - 8), Vector2(cx - 25, floor_y - 8),
+	draw_colored_polygon(PackedVector2Array([   # left leg (thigh tapers to ankle)
+		Vector2(cx - 21, hip_y + 2), Vector2(cx - 3, hip_y + 2),
+		Vector2(cx - 8, floor_y - 8), Vector2(cx - 19, floor_y - 8),
 	]), suit_dk)
 	draw_colored_polygon(PackedVector2Array([   # right leg
-		Vector2(cx + 3, hip_y), Vector2(cx + 27, hip_y),
-		Vector2(cx + 25, floor_y - 8), Vector2(cx + 10, floor_y - 8),
+		Vector2(cx + 3, hip_y + 2), Vector2(cx + 21, hip_y + 2),
+		Vector2(cx + 19, floor_y - 8), Vector2(cx + 8, floor_y - 8),
 	]), suit_dk)
-	fill_ellipse(Vector2(cx - 24, floor_y - 4), 18.0, 8.0, shoe)   # toe points out
-	fill_ellipse(Vector2(cx + 24, floor_y - 4), 18.0, 8.0, shoe)
+	fill_ellipse(Vector2(cx - 22, floor_y - 4), 17.0, 7.5, shoe)   # toe points out
+	fill_ellipse(Vector2(cx + 22, floor_y - 4), 17.0, 7.5, shoe)
 
 	# neck: a tapered polygon that closes the head-to-torso gap (no floating stub)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 11, head_bottom - 7), Vector2(cx + 11, head_bottom - 7),
-		Vector2(cx + 15, shoulder_y + 6), Vector2(cx - 15, shoulder_y + 6),
+		Vector2(cx - 10, head_bottom - 7), Vector2(cx + 10, head_bottom - 7),
+		Vector2(cx + 13, shoulder_y + 2), Vector2(cx - 13, shoulder_y + 2),
 	]), skin)
 
-	# jacket with rounded shoulders (caps sit under where the arms attach)
-	draw_circle(Vector2(cx - 44, shoulder_y), 16.0, suit)
-	draw_circle(Vector2(cx + 44, shoulder_y), 16.0, suit)
+	# jacket: one tapered silhouette (sloped shoulders, a drawn-in waist, a slight
+	# hip flare) so the torso reads as a person, not a box
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 48, shoulder_y + 2), Vector2(cx + 48, shoulder_y + 2),
-		Vector2(cx + 34, hip_y), Vector2(cx - 34, hip_y),
+		Vector2(cx - 40, shoulder_y + 9), Vector2(cx - 15, shoulder_y - 2),
+		Vector2(cx + 15, shoulder_y - 2), Vector2(cx + 40, shoulder_y + 9),
+		Vector2(cx + 43, shoulder_y + 34), Vector2(cx + 26, waist_y), Vector2(cx + 31, hip_y),
+		Vector2(cx - 31, hip_y), Vector2(cx - 26, waist_y), Vector2(cx - 43, shoulder_y + 34),
 	]), suit)
+	draw_circle(Vector2(cx - 40, shoulder_y + 9), 12.0, suit)   # rounded shoulder caps
+	draw_circle(Vector2(cx + 40, shoulder_y + 9), 12.0, suit)
+	# a soft sheen on the upper-left chest gives the torso a little volume
+	draw_circle(Vector2(cx - 13, shoulder_y + 34), 24.0, Color(1.0, 0.95, 0.85, 0.05))
 
 	# cream collar V over the neck base
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 21, shoulder_y - 3), Vector2(cx, shoulder_y + 24), Vector2(cx - 3, shoulder_y - 3),
+		Vector2(cx - 18, shoulder_y - 2), Vector2(cx, shoulder_y + 24), Vector2(cx - 3, shoulder_y - 2),
 	]), collar)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx + 21, shoulder_y - 3), Vector2(cx, shoulder_y + 24), Vector2(cx + 3, shoulder_y - 3),
+		Vector2(cx + 18, shoulder_y - 2), Vector2(cx, shoulder_y + 24), Vector2(cx + 3, shoulder_y - 2),
 	]), collar)
 
-	# gold waistcoat down the front, with buttons
+	# waistcoat down the front, drawn in at the waist to follow the torso, with buttons
 	var vest_top := shoulder_y + 22.0
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 15, vest_top), Vector2(cx + 15, vest_top),
-		Vector2(cx + 21, hip_y - 4), Vector2(cx - 21, hip_y - 4),
+		Vector2(cx - 13, vest_top), Vector2(cx + 13, vest_top),
+		Vector2(cx + 12, waist_y), Vector2(cx + 16, hip_y - 6),
+		Vector2(cx - 16, hip_y - 6), Vector2(cx - 12, waist_y),
 	]), vest)
 	for bi in 3:
-		draw_circle(Vector2(cx, vest_top + 16.0 + float(bi) * 22.0), 2.6, button)
+		draw_circle(Vector2(cx, vest_top + 14.0 + float(bi) * 20.0), 2.6, button)
 
 	# head: hair behind, skin face over it, warm rim light
 	draw_circle(head + Vector2(0, -6), head_r + 1.0, hair)
