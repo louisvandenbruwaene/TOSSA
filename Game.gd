@@ -3132,7 +3132,11 @@ func audio_update() -> void:
 	# runs every frame in every state: pick the theme and glide the layer volumes
 	if not _audio_ready:
 		return
-	var want := clampi(cur_venue(), 0, 5) if (game_state == ST_PLAY or game_state == ST_ESTABLISH) else 2
+	var want := 2
+	if game_state == ST_PLAY or game_state == ST_ESTABLISH:
+		want = clampi(cur_venue(), 0, 5)
+	elif game_state == ST_CUTSCENE:
+		want = 0                     # the calmest, warmest theme under the story beats
 	if want != music_theme:
 		load_music_theme(want)
 	var in_play := game_state == ST_PLAY
@@ -3143,7 +3147,11 @@ func audio_update() -> void:
 	var bass_t := -13.0 if active else -60.0
 	var arp_t := lerpf(-15.0, -8.0, energy) if in_play else -14.0   # the relaxing bell notes lead
 	var crowd_t := lerpf(-30.0, -9.0, applause) if perf else -60.0
-	if game_state == ST_MENU or game_state == ST_CUTSCENE:
+	if game_state == ST_CUTSCENE:
+		pad_t = -21.0                # a whisper of a cushion, so the soft bells carry
+		bass_t = -60.0
+		arp_t = -13.0
+	elif game_state == ST_MENU:
 		pad_t = -17.0
 		bass_t = -60.0
 		arp_t = -15.0
@@ -3432,13 +3440,17 @@ func gen_music_floats(vi: int) -> Dictionary:
 	var dur_s := float(n) / float(AUDIO_SR)
 	var pf := [_align(root, dur_s), _align(root * 1.5, dur_s), _align(root * 2.0, dur_s)]
 	var lfo_cyc := maxf(1.0, round(0.15 * dur))   # whole cycles over the loop, so the tremolo never jumps
-	# compute the phase directly from i in 64-bit float (accumulating in a
-	# PackedFloat32Array drifted ~0.2rad over the buffer and left a loop click)
+	# weight the partials so the root leads and the bright octave is only a hint: a
+	# heavy top partial is what makes a sustained pad read as a thin electronic sheen
+	# rather than a warm cushion. compute the phase directly from i in 64-bit float
+	# (accumulating in a PackedFloat32Array drifted ~0.2rad and left a loop click).
+	var pw := [1.0, 0.7, 0.32]
+	var psum: float = float(pw[0]) + float(pw[1]) + float(pw[2])
 	for i in n:
 		var s := 0.0
 		for j in 3:
-			s += sin(TAU * float(pf[j]) * float(i) / float(AUDIO_SR))
-		pad[i] = (s / 3.0) * 0.3 * (0.85 + 0.15 * sin(TAU * float(i) / float(n) * lfo_cyc))
+			s += sin(TAU * float(pf[j]) * float(i) / float(AUDIO_SR)) * float(pw[j])
+		pad[i] = (s / psum) * 0.28 * (0.9 + 0.1 * sin(TAU * float(i) / float(n) * lfo_cyc))
 
 	# a sparse, relaxing melody of soft bells (pentatonic, so always consonant), with
 	# space between the notes so it reads as calm, not a busy arpeggio. Tails wrap.
@@ -3579,11 +3591,16 @@ func draw_gradient_v(r: Rect2, top: Color, bot: Color, steps: int = 22) -> void:
 
 
 func draw_gradient_h(r: Rect2, left: Color, right: Color, steps: int = 22) -> void:
+	# strips TILE exactly (each one's right edge is the next one's left), like
+	# draw_gradient_v. The old version overlapped strips by 1px, which doubled the
+	# alpha of a semi-transparent gradient at every seam and showed as faint vertical
+	# lines (visible in the vignette bands over the sky). Exact tiling removes them.
 	var n := maxi(1, steps)
 	for i in n:
 		var f := float(i) / float(n)
-		var x := r.position.x + r.size.x * f
-		draw_rect(Rect2(x, r.position.y, r.size.x / float(n) + 1.0, r.size.y), left.lerp(right, f))
+		var x0 := r.position.x + r.size.x * float(i) / float(n)
+		var x1 := r.position.x + r.size.x * float(i + 1) / float(n)
+		draw_rect(Rect2(x0, r.position.y, x1 - x0, r.size.y), left.lerp(right, f))
 
 
 func draw_vignette(s: Vector2, strength: float = 0.55) -> void:
@@ -3725,31 +3742,46 @@ func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand =
 	var lh: Vector2 = lhand if lhand != null else Vector2(pos.x - 34.0 * sc, hipY - 4.0 * sc)
 	var rh: Vector2 = rhand if rhand != null else Vector2(pos.x + 34.0 * sc, hipY - 4.0 * sc)
 
-	# legs
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(pos.x - 20.0 * sc, hipY), Vector2(pos.x - 3.0 * sc, hipY),
-		Vector2(pos.x - 6.0 * sc, pos.y), Vector2(pos.x - 19.0 * sc, pos.y)]), trouser)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(pos.x + 3.0 * sc, hipY), Vector2(pos.x + 20.0 * sc, hipY),
-		Vector2(pos.x + 19.0 * sc, pos.y), Vector2(pos.x + 6.0 * sc, pos.y)]), trouser)
-	fill_ellipse(Vector2(pos.x - 15.0 * sc, pos.y), 12.0 * sc, 5.0 * sc, Color(0.18, 0.11, 0.08))
-	fill_ellipse(Vector2(pos.x + 15.0 * sc, pos.y), 12.0 * sc, 5.0 * sc, Color(0.18, 0.11, 0.08))
+	# the same tapered proportions as the stage figure, so a scene person reads as a
+	# person and not a box: a drawn-in waist between shoulders and hips is the cue
+	var px := pos.x
+	var waistY := lerpf(shY, hipY, 0.52)
+	var chestY := lerpf(shY, hipY, 0.40)
 
-	# torso / coat
+	# legs: a narrow pelvis, trousers that taper to the ankle, then shoes
+	var shoe := Color(0.18, 0.11, 0.08)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(pos.x - 24.0 * sc, shY), Vector2(pos.x + 24.0 * sc, shY),
-		Vector2(pos.x + 20.0 * sc, hipY + 4.0 * sc), Vector2(pos.x - 20.0 * sc, hipY + 4.0 * sc)]), coat)
-	draw_circle(Vector2(pos.x - 24.0 * sc, shY), 10.0 * sc, coat)
-	draw_circle(Vector2(pos.x + 24.0 * sc, shY), 10.0 * sc, coat)
-	# a warm accent placket down the front
+		Vector2(px - 15.0 * sc, hipY - 6.0 * sc), Vector2(px + 15.0 * sc, hipY - 6.0 * sc),
+		Vector2(px + 13.0 * sc, hipY + 5.0 * sc), Vector2(px - 13.0 * sc, hipY + 5.0 * sc)]), trouser)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(px - 14.0 * sc, hipY + 2.0 * sc), Vector2(px - 2.0 * sc, hipY + 2.0 * sc),
+		Vector2(px - 5.0 * sc, pos.y - 3.0 * sc), Vector2(px - 13.0 * sc, pos.y - 3.0 * sc)]), trouser)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(px + 2.0 * sc, hipY + 2.0 * sc), Vector2(px + 14.0 * sc, hipY + 2.0 * sc),
+		Vector2(px + 13.0 * sc, pos.y - 3.0 * sc), Vector2(px + 5.0 * sc, pos.y - 3.0 * sc)]), trouser)
+	fill_ellipse(Vector2(px - 11.0 * sc, pos.y - 1.0 * sc), 11.0 * sc, 5.0 * sc, shoe)
+	fill_ellipse(Vector2(px + 11.0 * sc, pos.y - 1.0 * sc), 11.0 * sc, 5.0 * sc, shoe)
+
+	# torso: one tapered silhouette (sloped shoulders, a drawn-in waist, a hip flare)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(px - 26.0 * sc, shY + 6.0 * sc), Vector2(px - 10.0 * sc, shY - 3.0 * sc),
+		Vector2(px + 10.0 * sc, shY - 3.0 * sc), Vector2(px + 26.0 * sc, shY + 6.0 * sc),
+		Vector2(px + 28.0 * sc, chestY), Vector2(px + 17.0 * sc, waistY), Vector2(px + 22.0 * sc, hipY),
+		Vector2(px - 22.0 * sc, hipY), Vector2(px - 17.0 * sc, waistY), Vector2(px - 28.0 * sc, chestY)]), coat)
+	draw_circle(Vector2(px - 26.0 * sc, shY + 6.0 * sc), 8.5 * sc, coat)   # rounded shoulder caps
+	draw_circle(Vector2(px + 26.0 * sc, shY + 6.0 * sc), 8.5 * sc, coat)
+	draw_circle(Vector2(px - 9.0 * sc, chestY), 16.0 * sc, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
+
+	# a warm accent placket down the front, drawn in at the waist to follow the torso
 	var accent: Color = pal.get("accent", coat_dk)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(pos.x - 6.0 * sc, shY + 6.0 * sc), Vector2(pos.x + 6.0 * sc, shY + 6.0 * sc),
-		Vector2(pos.x + 8.0 * sc, hipY), Vector2(pos.x - 8.0 * sc, hipY)]), accent)
+		Vector2(px - 5.0 * sc, shY + 5.0 * sc), Vector2(px + 5.0 * sc, shY + 5.0 * sc),
+		Vector2(px + 6.0 * sc, waistY), Vector2(px + 8.0 * sc, hipY - 2.0 * sc),
+		Vector2(px - 8.0 * sc, hipY - 2.0 * sc), Vector2(px - 6.0 * sc, waistY)]), accent)
 
-	# arms reach to the hands
-	draw_arm_s(Vector2(pos.x - 22.0 * sc, shY), lh, 1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
-	draw_arm_s(Vector2(pos.x + 22.0 * sc, shY), rh, -1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
+	# arms reach to the hands, emerging from just under the shoulder caps
+	draw_arm_s(Vector2(px - 23.0 * sc, shY + 3.0 * sc), lh, 1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
+	draw_arm_s(Vector2(px + 23.0 * sc, shY + 3.0 * sc), rh, -1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
 
 	# neck, head, hair, face
 	draw_colored_polygon(PackedVector2Array([
@@ -3804,9 +3836,14 @@ func demo_juggle(center: Vector2, sc: float, count: int) -> Dictionary:
 	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade
 	var hl := center + Vector2(-56.0 * sc, 42.0 * sc)
 	var hr := center + Vector2(56.0 * sc, 42.0 * sc)
-	var T := 52.0
+	var T := 58.0                 # a touch slower reads as calmer, more relaxed
 	var peak := 104.0 * sc
 	var t := float(cine_tick)
+	# a gentle scoop so the hands are never frozen: they dip and lift in counterpoint,
+	# the way real juggling hands carry and release the props
+	var scoop := sin(TAU * t / (T * 2.0))
+	hl.y += scoop * 6.0 * sc
+	hr.y += -scoop * 6.0 * sc
 	var out: Array = []
 	for i in count:
 		var phase := fposmod(t + float(i) * (T * 2.0 / float(maxi(1, count))), T * 2.0)
@@ -4227,48 +4264,81 @@ func draw_ring_interior(s: Vector2) -> void:
 func scene_backyard(s: Vector2, stage: int) -> void:
 	draw_venue_exterior(s, 0)
 	var fy := s.y * 0.80
+	var ct := float(cine_tick)
 	match stage:
 		0:
-			# Bruna offers the three balls in her outstretched right hand; Milo stands
-			# close, ready. The balls sit IN her hand (reach_hand keeps the arm honest).
-			var bfeet := Vector2(s.x * 0.42, fy)
-			var mfeet := Vector2(s.x * 0.60, fy)
+			# Bruna offers the three balls in a slow, gentle presenting motion; Milo
+			# stands close and lifts a hand to receive. A slow weight-shift keeps both
+			# figures alive rather than posed. The balls sit IN her hand (reach_hand).
+			var sway := sin(ct * 0.018) * 2.0
+			var bfeet := Vector2(s.x * 0.42 + sway, fy)
+			var mfeet := Vector2(s.x * 0.60 - sway, fy)
 			draw_shadow(bfeet, 70.0)
 			draw_shadow(mfeet, 66.0)
-			var bob := sin(float(cine_tick) * 0.06) * 3.0
-			var bhand := reach_hand(bfeet, 1.05, 1.0, Vector2(66.0, -8.0 + bob))
+			var offer := 0.5 + 0.5 * sin(ct * 0.03)
+			var bhand := reach_hand(bfeet, 1.05, 1.0, Vector2(58.0 + offer * 10.0, -2.0 - offer * 8.0))
+			var mhand := reach_hand(mfeet, 1.0, -1.0, Vector2(-38.0, 6.0 - offer * 6.0))
 			draw_person(bfeet, 1.05, bruna_pal(), null, bhand, 1)
-			draw_person(mfeet, 1.0, milo_pal(0), reach_hand(mfeet, 1.0, -1.0, Vector2(-40.0, 6.0)), null, 0)
+			draw_person(mfeet, 1.0, milo_pal(0), mhand, null, 0)
 			for i in 3:
 				draw_ball_shape(bhand + Vector2(-6.0 + float(i) * 6.0, -7.0 - float(i) * 5.0), ball_color(i), 0.95)
 		1:
-			# now the balls are in Milo's hand, Bruna beside him with a nod
-			var bfeet := Vector2(s.x * 0.40, fy)
-			var mfeet := Vector2(s.x * 0.58, fy)
+			# the balls are in Milo's hand now; Bruna stands beside him with a slow,
+			# approving lift of the hand, both breathing on a gentle sway
+			var sway := sin(ct * 0.02) * 2.0
+			var bfeet := Vector2(s.x * 0.40 + sway, fy)
+			var mfeet := Vector2(s.x * 0.58 - sway, fy)
 			draw_shadow(bfeet, 76.0)
 			draw_shadow(mfeet, 76.0)
-			var mhand := reach_hand(mfeet, 1.15, -1.0, Vector2(-58.0, -14.0))
-			draw_person(bfeet, 1.1, bruna_pal(), null, reach_hand(bfeet, 1.1, 1.0, Vector2(58.0, -6.0)), 1)
+			var nod := 0.5 + 0.5 * sin(ct * 0.045)
+			var mhand := reach_hand(mfeet, 1.15, -1.0, Vector2(-54.0, -10.0 + sin(ct * 0.05) * 3.0))
+			var bhand := reach_hand(bfeet, 1.1, 1.0, Vector2(56.0, -2.0 - nod * 6.0))
+			draw_person(bfeet, 1.1, bruna_pal(), null, bhand, 1)
 			draw_person(mfeet, 1.15, milo_pal(0), mhand, null, 0)
 			for i in 3:
 				draw_ball_shape(mhand + Vector2(float(i) * 5.0 - 5.0, -6.0 - float(i) * 5.0), ball_color(i), 1.0)
 		2:
-			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
-			var u := fposmod(float(cine_tick) / 70.0, 1.0)
-			var frm := Vector2(s.x * 0.5 + 40.0, fy - 120.0)
-			var to := Vector2(s.x * 0.5 - 40.0, fy - 120.0)
+			# the first throw: one ball passed slowly hand to hand, the simplest juggle.
+			# The throwing hand lifts to release and settles, the catching hand rises to
+			# meet the ball, so the gesture reads as a real throw and not a frozen pose.
+			var mfeet := Vector2(s.x * 0.5, fy)
+			draw_shadow(mfeet, 80.0)
+			var T := 116.0
+			var u := fposmod(ct / T, 1.0)
+			var right_first := int(floor(ct / T)) % 2 == 0
+			# the hands rest low near the waist, so the non-throwing arm hangs relaxed
+			# rather than reading as a shrug, and the throw lifts clearly up from there
+			var restL := reach_hand(mfeet, 1.2, -1.0, Vector2(-32.0, 24.0))
+			var restR := reach_hand(mfeet, 1.2, 1.0, Vector2(32.0, 24.0))
+			var throw_lift := clampf(1.0 - u * 3.2, 0.0, 1.0)      # peaks at the release
+			var catch_lift := clampf((u - 0.62) * 2.9, 0.0, 1.0)   # rises into the catch
+			var handL := restL
+			var handR := restR
+			if right_first:
+				handR = restR + Vector2(2.0, -40.0 * throw_lift)
+				handL = restL + Vector2(-2.0, -34.0 * catch_lift)
+			else:
+				handL = restL + Vector2(-2.0, -40.0 * throw_lift)
+				handR = restR + Vector2(2.0, -34.0 * catch_lift)
+			draw_person(mfeet, 1.2, milo_pal(0), handL, handR, 0)
+			var frm := handR if right_first else handL
+			var to := handL if right_first else handR
 			var bp := frm.lerp(to, u)
 			bp.y -= 150.0 * 4.0 * u * (1.0 - u)
-			draw_person(Vector2(s.x * 0.5, fy), 1.2, milo_pal(0), Vector2(s.x * 0.5 - 46.0, fy - 118.0), Vector2(s.x * 0.5 + 46.0, fy - 140.0), 0)
 			draw_ball_shape(bp, ball_color(0), 1.1)
-			draw_silhouette(Vector2(s.x * 0.14, fy), 0.8, Color(0.06, 0.05, 0.06))
+			# Bruna watches from the shadowed edge, small and dim, no longer a black blob
+			var bfeet := Vector2(s.x * 0.15, fy)
+			draw_shadow(bfeet, 52.0)
+			draw_person(bfeet, 0.82, bruna_pal(), null, null, 1)
 		_:
 			draw_shadow(Vector2(s.x * 0.52, fy), 80.0)
 			var dj := demo_juggle(Vector2(s.x * 0.52, s.y * 0.5), 1.2, 3)
 			draw_person(Vector2(s.x * 0.52, fy), 1.2, milo_pal(0), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
 				draw_ball_shape(b["pos"], b["col"], 1.15)
-			draw_person(Vector2(s.x * 0.16, fy), 0.9, bruna_pal(), null, null, 1)
+			var bfeet := Vector2(s.x * 0.16 + sin(ct * 0.02) * 2.0, fy)
+			draw_shadow(bfeet, 58.0)
+			draw_person(bfeet, 0.9, bruna_pal(), null, null, 1)
 
 
 func scene_street(s: Vector2, stage: int) -> void:
