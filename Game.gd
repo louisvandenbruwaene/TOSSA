@@ -2669,8 +2669,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if points > 0:
 		draw_string(font, Vector2(30, 143), "+%d stat point%s  -  press Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7))
 
-	# a freshly unlocked trick announces itself, non-blocking so a live run is never frozen
-	if not tut_active and trick_unlock >= 0 and tick - trick_unlock_tick < 600:
+	# a freshly unlocked trick announces itself, non-blocking so a live run is never
+	# frozen. Only while actually juggling, so it never overlaps the round-over text
+	# or the results card (both of which sit centre-screen with the run stopped).
+	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 600:
 		draw_trick_unlock_banner(font, s)
 	# trick feedback line, centred (works even before any trick is unlocked)
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
@@ -2965,10 +2967,8 @@ func draw_menu(font: Font, s: Vector2) -> void:
 		draw_circle(Vector2(lx, s.y - 28.0), 5.0, Color(1.0, 0.72, 0.32, 0.6 * fl))
 	draw_dust(s, 22, Color(1.0, 0.85, 0.55))
 
-	# a live juggling cascade above the title (real motion, not a frozen motif)
-	var dj := demo_juggle(Vector2(cx, s.y * 0.15), 1.0, 3)
-	for b in dj["balls"]:
-		draw_ball_shape(b["pos"], b["col"], 1.25)
+	# a slow, graceful cascade above the title, with soft motion trails
+	draw_menu_cascade(Vector2(cx, s.y * 0.17), 1.0)
 
 	draw_title_glow(font, s.y * 0.32, "JUGGLE", 92, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
@@ -2985,6 +2985,36 @@ func draw_menu(font: Font, s: Vector2) -> void:
 
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func _cascade_pos(t: float, i: int, count: int, hl: Vector2, hr: Vector2, T: float, peak: float) -> Vector2:
+	var phase := fposmod(t + float(i) * (T * 2.0 / float(maxi(1, count))), T * 2.0)
+	var seg := 0 if phase < T else 1
+	var u := (phase - float(seg) * T) / T
+	var frm := hl if seg == 0 else hr
+	var to := hr if seg == 0 else hl
+	var p := frm.lerp(to, u)
+	p.y -= peak * 4.0 * u * (1.0 - u)   # a parabolic arc
+	return p
+
+
+func draw_menu_cascade(center: Vector2, sc: float) -> void:
+	# a calm, high cascade: much slower than the gameplay demo, each ball trailing a
+	# soft comet of faded echoes so the motion reads as elegant rather than busy
+	var count := 3
+	var T := 112.0                       # slow half-cycle (the gameplay demo uses 52)
+	var peak := 104.0 * sc
+	var spanx := 76.0 * sc
+	var hl := center + Vector2(-spanx, 42.0 * sc)
+	var hr := center + Vector2(spanx, 42.0 * sc)
+	var t := float(cine_tick) * 0.5      # slow, graceful clock
+	for i in count:
+		var col := ball_color(i)
+		for k in range(10, 0, -1):       # trail: faded echoes back along the path
+			var pp := _cascade_pos(t - float(k) * 3.0, i, count, hl, hr, T, peak)
+			var a := 0.11 * (1.0 - float(k) / 11.0)
+			draw_circle(pp, (12.5 - 0.75 * float(k)) * sc, Color(col.r, col.g, col.b, maxf(a, 0.0)))
+		draw_ball_shape(_cascade_pos(t, i, count, hl, hr, T, peak), col, 1.35)
 
 
 func draw_slots(font: Font, s: Vector2) -> void:
@@ -3508,12 +3538,16 @@ func draw_establish(font: Font, s: Vector2) -> void:
 # --- shared premium-look helpers ---------------------------------------------
 
 func draw_gradient_v(r: Rect2, top: Color, bot: Color, steps: int = 22) -> void:
-	# a vertical gradient, drawn as stacked strips (no shaders, per the art rule)
+	# a vertical gradient, drawn as stacked strips (no shaders, per the art rule).
+	# Strips TILE exactly (each one's bottom is the next one's top) rather than
+	# overlapping: an overlap doubled the alpha of semi-transparent gradients at
+	# every seam, which showed as dark horizontal lines (e.g. over the menu balls).
 	var n := maxi(1, steps)
 	for i in n:
 		var f := float(i) / float(n)
-		var y := r.position.y + r.size.y * f
-		draw_rect(Rect2(r.position.x, y, r.size.x, r.size.y / float(n) + 1.0), top.lerp(bot, f))
+		var y0 := r.position.y + r.size.y * float(i) / float(n)
+		var y1 := r.position.y + r.size.y * float(i + 1) / float(n)
+		draw_rect(Rect2(r.position.x, y0, r.size.x, y1 - y0), top.lerp(bot, f))
 
 
 func draw_gradient_h(r: Rect2, left: Color, right: Color, steps: int = 22) -> void:
