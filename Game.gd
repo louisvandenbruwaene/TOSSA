@@ -3715,94 +3715,99 @@ func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, slee
 
 
 func reach_hand(feet: Vector2, sc: float, side: float, off: Vector2) -> Vector2:
-	# a hand position guaranteed within a draw_person figure's arm reach, so a held
-	# prop placed at the same point stays in the hand (side +1 right, -1 left)
-	var sh := Vector2(feet.x + side * 22.0 * sc, feet.y - 112.0 * sc)
-	var maxr := 80.0 * sc
+	# a hand position guaranteed within a draw_person figure's arm reach (eight-head
+	# canon: shoulder at 6.55 heads, arm 2.85 heads long), so a held prop placed at the
+	# same point stays in the hand. side +1 right, -1 left. off is relative to the shoulder.
+	var H := 22.0 * sc
+	var sh := Vector2(feet.x + side * 0.74 * H, feet.y - 6.55 * H)
+	var maxr := 2.7 * H
 	if off.length() > maxr:
 		off = off.normalized() * maxr
 	return sh + off
 
 
 func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand = null, mood: int = 0) -> void:
-	# a repositionable, rescalable version of the stage figure, so scenes can stage
-	# two or three people at once. pos is the FEET, the figure grows upward from it.
-	var breathe := sin(float(cine_tick) * 0.05 + pos.x * 0.02) * 1.4 * sc
+	# A repositionable figure on the classical EIGHT-HEAD canon (Da Vinci's Vitruvian
+	# proportions): the whole body is eight head-heights tall, the crotch sits at the
+	# exact vertical midpoint, the elbow falls at the navel and the wrist at the hip, so
+	# a relaxed arm's fingertips reach mid-thigh. Everything is expressed off one head
+	# unit H, which is what makes the proportions read as human rather than childish.
+	# pos is the FEET; the figure grows upward from it.
+	var H := 22.0 * sc                 # one head-height: the unit of the whole canon
+	var px := pos.x
+	var breathe := sin(float(cine_tick) * 0.05 + pos.x * 0.02) * 0.055 * H
 	var skin: Color = pal.get("skin", Color(0.87, 0.64, 0.45))
 	var coat: Color = pal["coat"]
 	var coat_dk: Color = pal["coat_dk"]
 	var trouser: Color = pal.get("trouser", coat_dk)
 	var hair: Color = pal.get("hair", Color(0.25, 0.15, 0.1))
 
-	var hipY := pos.y - 58.0 * sc
-	var shY := pos.y - 112.0 * sc + breathe
-	var headC := Vector2(pos.x, pos.y - 146.0 * sc + breathe)
-	var hr := 17.0 * sc
+	# vertical stations, measured UP from the feet in head-heights (0 feet .. 8 crown)
+	var hip_y := pos.y - 4.0 * H       # crotch: the midpoint of the whole figure
+	var knee_y := pos.y - 2.0 * H
+	var waist_y := pos.y - 5.0 * H + breathe    # navel
+	var chest_y := pos.y - 6.0 * H + breathe
+	var sh_y := pos.y - 6.55 * H + breathe
+	var head_c := Vector2(px, pos.y - 7.5 * H + breathe)
+	var hr := 0.5 * H                  # head is one unit tall, so radius is half a unit
 
-	var lh: Vector2 = lhand if lhand != null else Vector2(pos.x - 34.0 * sc, hipY - 4.0 * sc)
-	var rh: Vector2 = rhand if rhand != null else Vector2(pos.x + 34.0 * sc, hipY - 4.0 * sc)
+	# a relaxed arm hangs so the wrist is at the hip (fingertips at mid-thigh)
+	var lh: Vector2 = lhand if lhand != null else Vector2(px - 0.62 * H, hip_y + 0.2 * H)
+	var rh: Vector2 = rhand if rhand != null else Vector2(px + 0.62 * H, hip_y + 0.2 * H)
 
-	# the same tapered proportions as the stage figure, so a scene person reads as a
-	# person and not a box: a drawn-in waist between shoulders and hips is the cue
-	var px := pos.x
-	var waistY := lerpf(shY, hipY, 0.52)
-	var chestY := lerpf(shY, hipY, 0.40)
-
-	# legs: a narrow pelvis, trousers that taper to the ankle, then shoes
+	# --- legs: thighs taper to the knee, calves to the ankle, then shoes
 	var shoe := Color(0.18, 0.11, 0.08)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 15.0 * sc, hipY - 6.0 * sc), Vector2(px + 15.0 * sc, hipY - 6.0 * sc),
-		Vector2(px + 13.0 * sc, hipY + 5.0 * sc), Vector2(px - 13.0 * sc, hipY + 5.0 * sc)]), trouser)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 14.0 * sc, hipY + 2.0 * sc), Vector2(px - 2.0 * sc, hipY + 2.0 * sc),
-		Vector2(px - 5.0 * sc, pos.y - 3.0 * sc), Vector2(px - 13.0 * sc, pos.y - 3.0 * sc)]), trouser)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px + 2.0 * sc, hipY + 2.0 * sc), Vector2(px + 14.0 * sc, hipY + 2.0 * sc),
-		Vector2(px + 13.0 * sc, pos.y - 3.0 * sc), Vector2(px + 5.0 * sc, pos.y - 3.0 * sc)]), trouser)
-	fill_ellipse(Vector2(px - 11.0 * sc, pos.y - 1.0 * sc), 11.0 * sc, 5.0 * sc, shoe)
-	fill_ellipse(Vector2(px + 11.0 * sc, pos.y - 1.0 * sc), 11.0 * sc, 5.0 * sc, shoe)
+	draw_capsule(Vector2(px - 0.40 * H, hip_y - 0.1 * H), Vector2(px - 0.34 * H, knee_y), 0.46 * H, 0.30 * H, trouser)
+	draw_capsule(Vector2(px - 0.34 * H, knee_y), Vector2(px - 0.32 * H, pos.y - 0.14 * H), 0.30 * H, 0.20 * H, trouser)
+	draw_capsule(Vector2(px + 0.40 * H, hip_y - 0.1 * H), Vector2(px + 0.34 * H, knee_y), 0.46 * H, 0.30 * H, trouser)
+	draw_capsule(Vector2(px + 0.34 * H, knee_y), Vector2(px + 0.32 * H, pos.y - 0.14 * H), 0.30 * H, 0.20 * H, trouser)
+	fill_ellipse(Vector2(px - 0.32 * H, pos.y - 0.1 * H), 0.5 * H, 0.2 * H, shoe)
+	fill_ellipse(Vector2(px + 0.32 * H, pos.y - 0.1 * H), 0.5 * H, 0.2 * H, shoe)
 
-	# torso: one tapered silhouette (sloped shoulders, a drawn-in waist, a hip flare)
+	# --- torso: one tapered silhouette, shoulders about two heads wide, a drawn-in
+	# waist at the navel and a slight hip flare, so the trunk reads as a ribcage over a
+	# pelvis rather than a box. The jacket hem falls just past the hip.
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 26.0 * sc, shY + 6.0 * sc), Vector2(px - 10.0 * sc, shY - 3.0 * sc),
-		Vector2(px + 10.0 * sc, shY - 3.0 * sc), Vector2(px + 26.0 * sc, shY + 6.0 * sc),
-		Vector2(px + 28.0 * sc, chestY), Vector2(px + 17.0 * sc, waistY), Vector2(px + 22.0 * sc, hipY),
-		Vector2(px - 22.0 * sc, hipY), Vector2(px - 17.0 * sc, waistY), Vector2(px - 28.0 * sc, chestY)]), coat)
-	draw_circle(Vector2(px - 26.0 * sc, shY + 6.0 * sc), 8.5 * sc, coat)   # rounded shoulder caps
-	draw_circle(Vector2(px + 26.0 * sc, shY + 6.0 * sc), 8.5 * sc, coat)
-	draw_circle(Vector2(px - 9.0 * sc, chestY), 16.0 * sc, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
+		Vector2(px - 0.92 * H, sh_y + 0.10 * H), Vector2(px - 0.32 * H, sh_y - 0.16 * H),
+		Vector2(px + 0.32 * H, sh_y - 0.16 * H), Vector2(px + 0.92 * H, sh_y + 0.10 * H),
+		Vector2(px + 0.80 * H, chest_y), Vector2(px + 0.52 * H, waist_y), Vector2(px + 0.70 * H, hip_y + 0.28 * H),
+		Vector2(px - 0.70 * H, hip_y + 0.28 * H), Vector2(px - 0.52 * H, waist_y), Vector2(px - 0.80 * H, chest_y)]), coat)
+	draw_circle(Vector2(px - 0.92 * H, sh_y + 0.10 * H), 0.16 * H, coat)   # rounded shoulder caps
+	draw_circle(Vector2(px + 0.92 * H, sh_y + 0.10 * H), 0.16 * H, coat)
+	draw_circle(Vector2(px - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
-	# a warm accent placket down the front, drawn in at the waist to follow the torso
+	# a warm accent placket down the centre line, drawn in at the waist to follow the torso
 	var accent: Color = pal.get("accent", coat_dk)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 5.0 * sc, shY + 5.0 * sc), Vector2(px + 5.0 * sc, shY + 5.0 * sc),
-		Vector2(px + 6.0 * sc, waistY), Vector2(px + 8.0 * sc, hipY - 2.0 * sc),
-		Vector2(px - 8.0 * sc, hipY - 2.0 * sc), Vector2(px - 6.0 * sc, waistY)]), accent)
+		Vector2(px - 0.17 * H, sh_y + 0.06 * H), Vector2(px + 0.17 * H, sh_y + 0.06 * H),
+		Vector2(px + 0.22 * H, waist_y), Vector2(px + 0.27 * H, hip_y + 0.2 * H),
+		Vector2(px - 0.27 * H, hip_y + 0.2 * H), Vector2(px - 0.22 * H, waist_y)]), accent)
 
-	# arms reach to the hands, emerging from just under the shoulder caps
-	draw_arm_s(Vector2(px - 23.0 * sc, shY + 3.0 * sc), lh, 1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
-	draw_arm_s(Vector2(px + 23.0 * sc, shY + 3.0 * sc), rh, -1.0, skin, coat, 40.0 * sc, 44.0 * sc, 6.5 * sc)
+	# --- arms: upper arm 1.5 heads, forearm 1.35 heads (elbow at the navel, wrist at hip)
+	var w := 0.22 * H
+	draw_arm_s(Vector2(px - 0.74 * H, sh_y + 0.08 * H), lh, 1.0, skin, coat, 1.5 * H, 1.35 * H, w)
+	draw_arm_s(Vector2(px + 0.74 * H, sh_y + 0.08 * H), rh, -1.0, skin, coat, 1.5 * H, 1.35 * H, w)
 
-	# neck, head, hair, face
+	# --- neck, head, hair, face
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(pos.x - 7.0 * sc, headC.y + hr - 3.0), Vector2(pos.x + 7.0 * sc, headC.y + hr - 3.0),
-		Vector2(pos.x + 9.0 * sc, shY + 4.0), Vector2(pos.x - 9.0 * sc, shY + 4.0)]), skin)
-	draw_circle(headC, hr, skin)
+		Vector2(px - 0.19 * H, head_c.y + hr - 0.12 * H), Vector2(px + 0.19 * H, head_c.y + hr - 0.12 * H),
+		Vector2(px + 0.26 * H, sh_y + 0.02 * H), Vector2(px - 0.26 * H, sh_y + 0.02 * H)]), skin)
+	draw_circle(head_c, hr, skin)
 	if pal.get("shawl", false):
 		# an old street juggler's shawl and hood
-		draw_circle(headC + Vector2(0, -2.0 * sc), hr + 3.0 * sc, hair)
-		draw_circle(headC, hr, skin)
+		draw_circle(head_c + Vector2(0, -0.1 * H), hr + 0.14 * H, hair)
+		draw_circle(head_c, hr, skin)
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(pos.x - 30.0 * sc, shY + 4.0), Vector2(pos.x + 30.0 * sc, shY + 4.0),
-			Vector2(pos.x + 22.0 * sc, shY + 30.0 * sc), Vector2(pos.x - 22.0 * sc, shY + 30.0 * sc)]), pal["coat_dk"])
+			Vector2(px - 0.44 * H, sh_y - 0.04 * H), Vector2(px + 0.44 * H, sh_y - 0.04 * H),
+			Vector2(px + 0.32 * H, sh_y + 0.5 * H), Vector2(px - 0.32 * H, sh_y + 0.5 * H)]), pal["coat_dk"])
 	else:
-		draw_circle(headC + Vector2(0, -hr * 0.5), hr, hair)   # hair cap
-		draw_circle(headC + Vector2(0, hr * 0.35), hr, skin)   # face lower half back over
+		draw_circle(head_c + Vector2(0, -hr * 0.5), hr, hair)   # hair cap
+		draw_circle(head_c + Vector2(0, hr * 0.35), hr, skin)   # face lower half back over
 	if String(pal.get("hat", "none")) == "top":
-		draw_rect(Rect2(headC.x - hr - 3.0 * sc, headC.y - hr - 22.0 * sc, (hr + 3.0 * sc) * 2.0, 6.0 * sc), Color(0.08, 0.07, 0.1))
-		draw_rect(Rect2(headC.x - hr * 0.8, headC.y - hr - 22.0 * sc, hr * 1.6, 22.0 * sc), Color(0.10, 0.09, 0.12))
-		draw_rect(Rect2(headC.x - hr * 0.8, headC.y - hr - 8.0 * sc, hr * 1.6, 3.0 * sc), accent)
-	draw_person_face(headC, hr, mood)
+		draw_rect(Rect2(head_c.x - hr - 0.14 * H, head_c.y - hr - H, (hr + 0.14 * H) * 2.0, 0.28 * H), Color(0.08, 0.07, 0.1))
+		draw_rect(Rect2(head_c.x - hr * 0.8, head_c.y - hr - H, hr * 1.6, H), Color(0.10, 0.09, 0.12))
+		draw_rect(Rect2(head_c.x - hr * 0.8, head_c.y - hr - 0.36 * H, hr * 1.6, 0.14 * H), accent)
+	draw_person_face(head_c, hr, mood)
 
 
 func draw_person_face(headC: Vector2, hr: float, mood: int) -> void:
@@ -3834,8 +3839,11 @@ func draw_simple_hand(pos: Vector2, close: float, inward: float, sc: float) -> v
 func demo_juggle(center: Vector2, sc: float, count: int) -> Dictionary:
 	# a small closed-form cascade: each ball rides a crossing arc, staggered in
 	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade
-	var hl := center + Vector2(-56.0 * sc, 42.0 * sc)
-	var hr := center + Vector2(56.0 * sc, 42.0 * sc)
+	# the hands scoop at about waist height and roughly a head apart, the natural
+	# juggling posture for the eight-head figure (shoulder-high, splayed hands read
+	# as a T-pose, not a cascade)
+	var hl := center + Vector2(-44.0 * sc, 74.0 * sc)
+	var hr := center + Vector2(44.0 * sc, 74.0 * sc)
 	var T := 58.0                 # a touch slower reads as calmer, more relaxed
 	var peak := 104.0 * sc
 	var t := float(cine_tick)
@@ -4269,57 +4277,66 @@ func scene_backyard(s: Vector2, stage: int) -> void:
 		0:
 			# Bruna offers the three balls in a slow, gentle presenting motion; Milo
 			# stands close and lifts a hand to receive. A slow weight-shift keeps both
-			# figures alive rather than posed. The balls sit IN her hand (reach_hand).
+			# figures alive rather than posed. Hands are placed at body stations in head
+			# units (H) so they read correctly against the eight-head figure.
 			var sway := sin(ct * 0.018) * 2.0
 			var bfeet := Vector2(s.x * 0.42 + sway, fy)
 			var mfeet := Vector2(s.x * 0.60 - sway, fy)
 			draw_shadow(bfeet, 70.0)
 			draw_shadow(mfeet, 66.0)
 			var offer := 0.5 + 0.5 * sin(ct * 0.03)
-			var bhand := reach_hand(bfeet, 1.05, 1.0, Vector2(58.0 + offer * 10.0, -2.0 - offer * 8.0))
-			var mhand := reach_hand(mfeet, 1.0, -1.0, Vector2(-38.0, 6.0 - offer * 6.0))
+			var hb := 22.0 * 1.05
+			var hm := 22.0 * 1.0
+			var bhand := bfeet + Vector2((2.2 + offer * 0.4) * hb, (-6.1 + offer * 0.35) * hb)
+			var mhand := mfeet + Vector2(-1.7 * hm, (-5.2 + offer * 0.25) * hm)
 			draw_person(bfeet, 1.05, bruna_pal(), null, bhand, 1)
 			draw_person(mfeet, 1.0, milo_pal(0), mhand, null, 0)
 			for i in 3:
 				draw_ball_shape(bhand + Vector2(-6.0 + float(i) * 6.0, -7.0 - float(i) * 5.0), ball_color(i), 0.95)
 		1:
-			# the balls are in Milo's hand now; Bruna stands beside him with a slow,
-			# approving lift of the hand, both breathing on a gentle sway
+			# the balls are in Milo's hand now, cradled near his chest; Bruna stands
+			# beside him with a slow approving lift of the hand, both on a gentle sway
 			var sway := sin(ct * 0.02) * 2.0
 			var bfeet := Vector2(s.x * 0.40 + sway, fy)
 			var mfeet := Vector2(s.x * 0.58 - sway, fy)
 			draw_shadow(bfeet, 76.0)
 			draw_shadow(mfeet, 76.0)
 			var nod := 0.5 + 0.5 * sin(ct * 0.045)
-			var mhand := reach_hand(mfeet, 1.15, -1.0, Vector2(-54.0, -10.0 + sin(ct * 0.05) * 3.0))
-			var bhand := reach_hand(bfeet, 1.1, 1.0, Vector2(56.0, -2.0 - nod * 6.0))
+			var hb := 22.0 * 1.1
+			var hm := 22.0 * 1.15
+			var mhand := mfeet + Vector2(-1.5 * hm, (-5.6 + sin(ct * 0.05) * 0.12) * hm)
+			var bhand := bfeet + Vector2(2.0 * hb, (-6.0 - nod * 0.3) * hb)
 			draw_person(bfeet, 1.1, bruna_pal(), null, bhand, 1)
 			draw_person(mfeet, 1.15, milo_pal(0), mhand, null, 0)
 			for i in 3:
 				draw_ball_shape(mhand + Vector2(float(i) * 5.0 - 5.0, -6.0 - float(i) * 5.0), ball_color(i), 1.0)
 		2:
 			# the first throw: one ball passed slowly hand to hand, the simplest juggle.
-			# The throwing hand lifts to release and settles, the catching hand rises to
-			# meet the ball, so the gesture reads as a real throw and not a frozen pose.
+			# Hands rest at the waist and the throw sweeps up and ACROSS the body to the
+			# release, the catching hand rising out to meet the ball, so it reads as a
+			# real throw. All positions are in head units off the eight-head figure.
 			var mfeet := Vector2(s.x * 0.5, fy)
 			draw_shadow(mfeet, 80.0)
+			var hm := 22.0 * 1.2
 			var T := 116.0
 			var u := fposmod(ct / T, 1.0)
 			var right_first := int(floor(ct / T)) % 2 == 0
-			# the hands rest low near the waist, so the non-throwing arm hangs relaxed
-			# rather than reading as a shrug, and the throw lifts clearly up from there
-			var restL := reach_hand(mfeet, 1.2, -1.0, Vector2(-32.0, 24.0))
-			var restR := reach_hand(mfeet, 1.2, 1.0, Vector2(32.0, 24.0))
+			var restL := mfeet + Vector2(-1.5 * hm, -4.6 * hm)
+			var restR := mfeet + Vector2(1.5 * hm, -4.6 * hm)
+			var throwL := mfeet + Vector2(-0.7 * hm, -6.5 * hm)   # up and in, across the body
+			var throwR := mfeet + Vector2(0.7 * hm, -6.5 * hm)
+			var catchL := mfeet + Vector2(-1.35 * hm, -5.7 * hm)  # out and up to receive
+			var catchR := mfeet + Vector2(1.35 * hm, -5.7 * hm)
 			var throw_lift := clampf(1.0 - u * 3.2, 0.0, 1.0)      # peaks at the release
 			var catch_lift := clampf((u - 0.62) * 2.9, 0.0, 1.0)   # rises into the catch
-			var handL := restL
-			var handR := restR
+			var handL: Vector2
+			var handR: Vector2
 			if right_first:
-				handR = restR + Vector2(2.0, -40.0 * throw_lift)
-				handL = restL + Vector2(-2.0, -34.0 * catch_lift)
+				handR = restR.lerp(throwR, throw_lift)
+				handL = restL.lerp(catchL, catch_lift)
 			else:
-				handL = restL + Vector2(-2.0, -40.0 * throw_lift)
-				handR = restR + Vector2(2.0, -34.0 * catch_lift)
+				handL = restL.lerp(throwL, throw_lift)
+				handR = restR.lerp(catchR, catch_lift)
 			draw_person(mfeet, 1.2, milo_pal(0), handL, handR, 0)
 			var frm := handR if right_first else handL
 			var to := handL if right_first else handR
