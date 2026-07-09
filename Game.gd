@@ -553,31 +553,43 @@ func _input(event: InputEvent) -> void:
 			KEY_6:
 				try_buy_glasses()
 		return
+	# a performance cannot be reset or rebuilt mid-set: no restart, no ball-count
+	# change, no prop swap, no bailing to practice. That would make a good ending
+	# trivial to fish for. You either FINISH cleanly (Enter) or drop out, and you
+	# only try again from the results card afterwards. Training stays freely resettable.
+	var performing := mode == MODE_PERFORM
 	match kc:
 		KEY_TAB:
 			sheet_open = true
 		KEY_S:
 			shop_open = true
 		KEY_P:
-			toggle_mode()
+			if not performing:
+				toggle_mode()
+		KEY_ENTER, KEY_KP_ENTER:
+			finish_performance()   # end the set on a high note, no drop needed
 		KEY_R:
-			start_run(num_balls)
+			if not performing:
+				start_run(num_balls)
 		KEY_BRACKETLEFT:
-			start_run(num_balls - 1)
+			if not performing:
+				start_run(num_balls - 1)
 		KEY_BRACKETRIGHT:
-			start_run(num_balls + 1)
+			if not performing:
+				start_run(num_balls + 1)
 		KEY_3:
-			start_run(3)
+			if not performing: start_run(3)
 		KEY_4:
-			start_run(4)
+			if not performing: start_run(4)
 		KEY_5:
-			start_run(5)
+			if not performing: start_run(5)
 		KEY_6:
-			start_run(6)
+			if not performing: start_run(6)
 		KEY_7:
-			start_run(7)
+			if not performing: start_run(7)
 		KEY_O:
-			cycle_prop(1)   # cycle to the next owned prop
+			if not performing:
+				cycle_prop(1)   # cycle to the next owned prop
 		KEY_C:
 			cycle_trick()   # rotate which trick the TRICK key (Space) is primed to
 		KEY_F1:
@@ -653,6 +665,17 @@ func toggle_mode() -> void:
 	else:
 		mode = MODE_TRAIN
 		start_run(num_balls)           # dropping back to practice is instant
+
+
+func finish_performance() -> void:
+	# End a performance gracefully while the props are still up, so a strong set can be
+	# banked on a high note instead of only ever ending on a full drop. Clearing running
+	# fires on_round_end from the running->false edge in _physics_process, which scores
+	# and shows the results card. It is not a drop, so nothing is penalised.
+	if mode != MODE_PERFORM or not running or tut_active:
+		return
+	play_sfx("streak", -6.0)   # a short rising flourish to close the set
+	running = false
 
 
 func begin_performance(n: int) -> void:
@@ -2341,27 +2364,29 @@ func draw_juggler(s: Vector2) -> void:
 	fill_ellipse(Vector2(cx - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
 	fill_ellipse(Vector2(cx + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
 
-	# neck: a short tapered column closing the head-to-torso gap (no floating stub)
+	# neck: a short skin column from just under the jaw down past the collar line, so a
+	# real (short) neck shows between the head and the coat instead of the head sitting
+	# straight on the shoulders
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.2 * H, head.y + head_r - 0.12 * H), Vector2(cx + 0.2 * H, head.y + head_r - 0.12 * H),
-		Vector2(cx + 0.26 * H, shoulder_y + 0.02 * H), Vector2(cx - 0.26 * H, shoulder_y + 0.02 * H)]), skin)
+		Vector2(cx - 0.18 * H, head.y + head_r - 0.05 * H), Vector2(cx + 0.18 * H, head.y + head_r - 0.05 * H),
+		Vector2(cx + 0.23 * H, shoulder_y + 0.14 * H), Vector2(cx - 0.23 * H, shoulder_y + 0.14 * H)]), skin)
 
-	# jacket: one tapered silhouette (sloped shoulders, a drawn-in waist, a slight
-	# hip flare) so the torso reads as a person, not a box
+	# jacket: one tapered silhouette (sloped shoulders, a drawn-in waist, a slight hip
+	# flare). Its neckline sits at the shoulders (not up near the chin) so the neck shows.
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.32 * H, shoulder_y - 0.16 * H),
-		Vector2(cx + 0.32 * H, shoulder_y - 0.16 * H), Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H),
+		Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.30 * H, shoulder_y - 0.04 * H),
+		Vector2(cx + 0.30 * H, shoulder_y - 0.04 * H), Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H),
 		Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
 		Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), suit)
 	draw_circle(Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)   # rounded shoulder caps
 	draw_circle(Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)
 	draw_circle(Vector2(cx - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
-	# cream collar V over the neck base
+	# cream collar V framing the neck base and running down the chest under the waistcoat
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.42 * H, shoulder_y - 0.14 * H), Vector2(cx, chest_y + 0.08 * H), Vector2(cx - 0.07 * H, shoulder_y - 0.14 * H)]), collar)
+		Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx - 0.05 * H, shoulder_y - 0.02 * H)]), collar)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx + 0.42 * H, shoulder_y - 0.14 * H), Vector2(cx, chest_y + 0.08 * H), Vector2(cx + 0.07 * H, shoulder_y - 0.14 * H)]), collar)
+		Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx + 0.05 * H, shoulder_y - 0.02 * H)]), collar)
 
 	# waistcoat down the front, drawn in at the waist to follow the torso, with buttons
 	var vest_top := shoulder_y + 0.52 * H
@@ -2372,12 +2397,11 @@ func draw_juggler(s: Vector2) -> void:
 	for bi in 3:
 		draw_circle(Vector2(cx, vest_top + 0.3 * H + float(bi) * 0.42 * H), 0.06 * H, button)
 
-	# head: hair behind, skin face over it, a hairline cap, warm rim light
-	draw_circle(head + Vector2(0, -0.1 * H), head_r + 0.05 * H, hair)
-	draw_circle(head, head_r, skin)
-	draw_circle(head + Vector2(0, -head_r * 0.5), head_r, hair)      # hair cap over the crown
-	draw_circle(head + Vector2(0, head_r * 0.4), head_r, skin)       # face lower half back over
-	draw_circle(head + Vector2(0, -0.06 * H), head_r, Color(1.0, 0.82, 0.55, 0.10))
+	# head: a full head of hair framing the crown and temples, the skin face over it so
+	# the hairline sits across the upper forehead, then a soft cheek highlight
+	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)   # hair mass, up and a touch larger
+	draw_circle(head, head_r, skin)                                       # face over it
+	draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
 	draw_face(head, head_r)
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
@@ -2723,13 +2747,21 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
 		draw_string(font, Vector2(30, s.y - 74), "%s  -  %d %s  -  %s" % [vname, num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
 		if set_hints:
-			var unlock := ""
-			if next_ball_strength() > 0:
-				unlock = "   ( next ball at Strength %d )" % next_ball_strength()
-			draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
-			draw_string(font, Vector2(30, s.y - 30),
-				"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc pause",
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+			if performing:
+				# a set in progress cannot be reset, only finished or dropped, so its
+				# hints lead with the finish key and drop the restart/rebuild controls
+				draw_string(font, Vector2(30, s.y - 52), "Enter  finish the set on a high note   ( no drop needed )", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.86, 0.55, 0.9))
+				draw_string(font, Vector2(30, s.y - 30),
+					"catch D/K  throw F/J (hold=higher)  Enter finish  Tab sheet  Esc pause",
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+			else:
+				var unlock := ""
+				if next_ball_strength() > 0:
+					unlock = "   ( next ball at Strength %d )" % next_ball_strength()
+				draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
+				draw_string(font, Vector2(30, s.y - 30),
+					"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc pause",
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
 
 		if not started:
 			var verb := "perform" if performing else "practise"
