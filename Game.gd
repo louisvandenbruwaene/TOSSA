@@ -3139,14 +3139,14 @@ func audio_update() -> void:
 	var perf := in_play and mode == MODE_PERFORM and not tut_active
 	var active := in_play and running
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
-	var pad_t := -13.0
-	var bass_t := -11.0 if active else -50.0
-	var arp_t := lerpf(-32.0, -9.0, energy) if in_play else -18.0
+	var pad_t := -17.0                                  # a soft cushion, never a droning hum
+	var bass_t := -13.0 if active else -60.0
+	var arp_t := lerpf(-15.0, -8.0, energy) if in_play else -14.0   # the relaxing bell notes lead
 	var crowd_t := lerpf(-30.0, -9.0, applause) if perf else -60.0
 	if game_state == ST_MENU or game_state == ST_CUTSCENE:
-		pad_t = -11.0
-		bass_t = -50.0
-		arp_t = -17.0
+		pad_t = -17.0
+		bass_t = -60.0
+		arp_t = -15.0
 	if not set_music:
 		pad_t = -80.0
 		bass_t = -80.0
@@ -3393,15 +3393,24 @@ func _align(freq: float, dur: float) -> float:
 	return maxf(1.0, round(freq * dur)) / dur
 
 
-func _pluck_into(buf: PackedFloat32Array, start: int, freq: float, decay: float, vol: float, wave: int) -> void:
+func _bell_into(buf: PackedFloat32Array, start: int, freq: float, decay: float, vol: float) -> void:
+	# a soft bell note: gentle attack (no click), long smooth decay, a quiet octave
+	# for shimmer. The tail WRAPS the buffer (modulo), so a looping melody never clicks.
 	var n := buf.size()
+	if n <= 0:
+		return
+	var atk := 0.012
+	var total := int(AUDIO_SR * (atk + decay * 2.2))
 	var ph := 0.0
-	for i in int(AUDIO_SR * decay * 3.0):
-		var idx := start + i
-		if idx >= n:
-			break
+	var ph2 := 0.0
+	for i in total:
+		var idx := (start + i) % n
 		ph += TAU * freq / AUDIO_SR
-		buf[idx] = clampf(buf[idx] + _wsamp(ph, wave) * exp(-float(i) / AUDIO_SR / maxf(decay, 0.0001)) * vol, -1.0, 1.0)
+		ph2 += TAU * freq * 2.0 / AUDIO_SR
+		var t := float(i) / AUDIO_SR
+		var e := (t / atk) if t < atk else exp(-(t - atk) / decay)
+		var s := sin(ph) + 0.28 * sin(ph2)
+		buf[idx] = clampf(buf[idx] + s / 1.28 * e * vol, -1.0, 1.0)
 
 
 func gen_music_floats(vi: int) -> Dictionary:
@@ -3416,27 +3425,35 @@ func gen_music_floats(vi: int) -> Dictionary:
 	var bass := PackedFloat32Array(); bass.resize(n)
 	var arp := PackedFloat32Array(); arp.resize(n)
 
-	# pad: a static power-chord drone (root, fifth, octave), aligned so it loops seamlessly
-	var pf := [_align(root, dur), _align(root * 1.5, dur), _align(root * 2.0, dur)]
-	var pph := PackedFloat32Array(); pph.resize(3)
+	# pad: a SOFT warm cushion (root, fifth, octave), aligned so it loops seamlessly.
+	# Kept quiet so it is a bed under the notes, never a droning hum. Align to the
+	# EXACT buffer length (n samples, not the float dur) or a fractional-sample
+	# mismatch leaves a click at the loop seam (was the tick in the backyard theme).
+	var dur_s := float(n) / float(AUDIO_SR)
+	var pf := [_align(root, dur_s), _align(root * 1.5, dur_s), _align(root * 2.0, dur_s)]
 	var lfo_cyc := maxf(1.0, round(0.15 * dur))   # whole cycles over the loop, so the tremolo never jumps
+	# compute the phase directly from i in 64-bit float (accumulating in a
+	# PackedFloat32Array drifted ~0.2rad over the buffer and left a loop click)
 	for i in n:
 		var s := 0.0
 		for j in 3:
-			pph[j] += TAU * float(pf[j]) / AUDIO_SR
-			s += sin(pph[j])
-		pad[i] = (s / 3.0) * 0.5 * (0.85 + 0.15 * sin(TAU * float(i) / float(n) * lfo_cyc))
+			s += sin(TAU * float(pf[j]) * float(i) / float(AUDIO_SR))
+		pad[i] = (s / 3.0) * 0.3 * (0.85 + 0.15 * sin(TAU * float(i) / float(n) * lfo_cyc))
 
-	var arp_pat := [0, 3, 7, 10, 12, 10, 7, 3]   # a minor riff, consonant under the drone
+	# a sparse, relaxing melody of soft bells (pentatonic, so always consonant), with
+	# space between the notes so it reads as calm, not a busy arpeggio. Tails wrap.
+	var penta := [0, 2, 4, 7, 9, 12, 14, 16]
+	var phrase := [[0.0, 2], [1.0, 4], [2.0, 5], [2.5, 4], [3.5, 1]]   # (beat in bar, penta index)
 	for bar in bars:
 		var croot := root * pow(2.0, float(chords[bar]) / 12.0)
-		for bt in 4:
-			_pluck_into(bass, int(AUDIO_SR * float(bar * 4 + bt) * beat), croot * 0.5, minf(beat * 0.9, 0.35), 0.5, 1)
-		for e in 8:
-			var f := croot * pow(2.0, float(arp_pat[e]) / 12.0) * 2.0
-			_pluck_into(arp, int(AUDIO_SR * (float(bar * 4) + float(e) * 0.5) * beat), f, 0.16, 0.32 * float(p["bright"]), 0)
-	_fade_ends(bass, 12)
-	_fade_ends(arp, 12)
+		# two gentle low root notes for body, not a busy bassline
+		_bell_into(bass, int(AUDIO_SR * float(bar * 4) * beat), croot * 0.5, 1.1, 0.42)
+		_bell_into(bass, int(AUDIO_SR * (float(bar * 4) + 2.0) * beat), croot * 0.5, 1.1, 0.42)
+		for note in phrase:
+			var boff: float = note[0]
+			var deg: int = penta[int(note[1])]
+			var f := croot * pow(2.0, float(deg) / 12.0) * 2.0
+			_bell_into(arp, int(AUDIO_SR * (float(bar * 4) + boff) * beat), f, 0.55, 0.42 * float(p["bright"]))
 	return {"pad": pad, "bass": bass, "arp": arp}
 
 
