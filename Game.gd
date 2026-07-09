@@ -44,8 +44,12 @@ const ARC_PER_AIR := 2.15  # arc peak (px) per airtime tick; balls crest above t
 
 # how much height hurts a catch, and the under-Strength penalties (ideas.rtf rule)
 const HEIGHT_CATCH_PENALTY := 0.35  # subtracted from the off-Perfect chance at max height
-const DEFICIT_HEIGHT := 0.5         # a full Strength deficit halves reachable height
+const DEFICIT_HEIGHT := 0.5         # a full Strength deficit halves the HELD (extra) height
+const DEFICIT_BASE := 0.4           # a full Strength deficit drags the TAP floor down this much,
+                                    # so a too-heavy prop goes lower even on a plain throw
 const DEFICIT_INACC := 1.1          # a full Strength deficit roughly doubles inaccuracy
+const DEFICIT_FLOOR := 0.85         # under-strength: minimum inaccuracy "as if" this much height,
+                                    # so even a low throw of a too-heavy prop is unsteady
 
 # --- inaccuracy scale (the risk half of the risk/reward) ----------------------
 const DRIFT_MAX := 26.0   # px lateral landing drift at max height
@@ -1569,39 +1573,53 @@ func do_throw(h: int, hold: int) -> void:
 	var b: Ball = stack(h).pop_front()
 	var weight := prop_weight()
 	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
-	# A tap is the LOWEST, snappiest throw (BASE_AIR); each tick of hold adds airtime.
-	# Strength makes each tick worth more height, so a strong juggler reaches a big
-	# throw in less time. Being under a prop's Required Strength cuts the reachable
-	# height (the ideas.rtf sagging-throw rule).
+	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Strength makes
+	# each tick worth more height, so a strong juggler reaches a big throw in less time.
+	# Being under a prop's Required Strength drags the WHOLE throw down (the ideas.rtf
+	# sagging-throw rule): a lower tap floor (DEFICIT_BASE) AND a lower reachable ceiling
+	# (DEFICIT_HEIGHT), so a too-heavy prop never gets up to a clean height no matter how
+	# long you hold it.
+	var base_air := float(BASE_AIR) * (1.0 - DEFICIT_BASE * deficit)
 	var gain_mult := (1.0 + float(strength) * STR_HOLD_EFF) * (1.0 - DEFICIT_HEIGHT * deficit)
-	var air := BASE_AIR + int(round(HOLD_GAIN * gain_mult * float(hold)))
-	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
+	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
-	# the active arm trick reshapes this throw before we roll its accuracy, so a High
-	# Toss genuinely flies (and is genuinely harder to catch). trick_armed is a PERMANENT
-	# toggle now: it is NOT cleared here, so every throw carries it until you switch off.
+	# the active arm trick reshapes this throw before we roll its accuracy, so a High Toss
+	# genuinely flies (and is genuinely harder to catch). trick_armed is a PERMANENT toggle
+	# now: it is NOT cleared here, so every throw carries it until you switch off. A trick's
+	# forced height is built off the SAME lowered base and Strength penalty, so an
+	# under-strength High Toss sags too and cannot cheat the sagging rule.
 	var this_trick := -1
 	if trick_armed >= 0:
 		this_trick = trick_armed
+		var tfrac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 		if this_trick == TR_HIGH:
-			frac = 1.35
+			tfrac = 1.35
 		elif this_trick == TR_BTB:
-			frac = clampf(frac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
-		air = BASE_AIR + int(round(frac * HOLD_GAIN * float(HOLD_MAX)))
+			tfrac = clampf(tfrac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
+		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX) * (1.0 - DEFICIT_HEIGHT * deficit)))
+	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
+	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
+	# Applause, and it clamps to 0 when the prop is too heavy to loft at all.
+	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 	b.height = frac
 	b.trick = this_trick
 
 	# Accuracy (dampened by low stamina) sets the base inaccuracy; a heavy prop and an
-	# under-strength throw both widen it, and it all scales with the throw's height.
+	# under-strength throw both widen it. Inaccuracy normally scales with the throw's
+	# HEIGHT, so a low throw is placed cleanly. But being under a prop's Required Strength
+	# makes the RELEASE ITSELF unsteady, so a "spread floor" keyed to the deficit keeps
+	# even a low under-strength throw drifting and wobbling. Without it, a weak juggler
+	# could just tap heavy rings low and place them perfectly, which felt wrong.
 	var inacc := inacc_factor() * (1.0 + WEIGHT_INACC * float(weight - 1) + DEFICIT_INACC * deficit)
-	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * frac * inacc))
-	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * frac * inacc
+	var spread := maxf(frac, deficit * DEFICIT_FLOOR)
+	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * spread * inacc))
+	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * spread * inacc
 
 	b.state = STATE_FLIGHT
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
-	b.wobble = WOBBLE_MAX * frac * inacc
+	b.wobble = WOBBLE_MAX * spread * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	b.to_hand = other(h) if pattern == CASCADE else h
 	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
@@ -1620,8 +1638,10 @@ func do_throw(h: int, hold: int) -> void:
 		# froze with no move able to recover it.
 		running = true
 	# a clean, controlled (low) throw earns a little Applause; a very high one does not
-	# and flags itself above the stage so the player learns height control
-	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)))
+	# and flags itself above the stage so the player learns height control. An
+	# under-strength throw is low but sloppy, so the deficit strips most of that reward:
+	# a sagging heavy prop should not read to the crowd as tidy control.
+	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)) * (1.0 - 0.8 * deficit))
 	if set_flags and frac >= 1.0:
 		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
@@ -2355,8 +2375,24 @@ func draw_juggler(s: Vector2) -> void:
 	var head := Vector2(cx, floor_y - 7.5 * H)
 	var head_r := 0.52 * H
 
-	# a soft ground shadow so the figure stands ON the stage instead of floating
+	# a soft ground shadow so the figure stands ON the stage instead of floating (drawn
+	# BEFORE the spin transform, so it stays put on the ground while the body turns)
 	draw_shadow(Vector2(cx, floor_y + 2.0), 96.0)
+
+	# a live Spin turns the WHOLE figure about its vertical axis. A 2D pirouette is faked
+	# by scaling the body width by cos(turn angle) about the centreline: full width facing
+	# front, a thin sliver at the profile, mirrored width facing away. facing_back then
+	# swaps the face for the back of the head. In sequence this reads as a real turn.
+	var facing_back := false
+	var spin_on := spinning()
+	if spin_on:
+		var sp := 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)
+		var ang := sp * TAU                       # exactly one full turn across the spin
+		var sx := cos(ang)
+		facing_back = sx < 0.0
+		if absf(sx) < 0.14:                        # never collapse fully to a line at the profile
+			sx = 0.14 if sx >= 0.0 else -0.14
+		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
 	# legs: a narrow pelvis, thighs tapering to the knee, calves to the ankle, shoes
 	var shoe := Color(0.20, 0.12, 0.09)
@@ -2388,27 +2424,37 @@ func draw_juggler(s: Vector2) -> void:
 	draw_circle(Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)
 	draw_circle(Vector2(cx - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
-	# cream collar V framing the neck base and running down the chest under the waistcoat
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx - 0.05 * H, shoulder_y - 0.02 * H)]), collar)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx + 0.05 * H, shoulder_y - 0.02 * H)]), collar)
+	# front-of-body detailing (collar V and the buttoned waistcoat) only shows while the
+	# figure faces the crowd; mid-spin, facing away, the plain back of the coat is seen
+	if not facing_back:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx - 0.05 * H, shoulder_y - 0.02 * H)]), collar)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx + 0.05 * H, shoulder_y - 0.02 * H)]), collar)
+		var vest_top := shoulder_y + 0.52 * H
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx - 0.3 * H, vest_top), Vector2(cx + 0.3 * H, vest_top),
+			Vector2(cx + 0.28 * H, waist_y), Vector2(cx + 0.36 * H, hip_y - 0.1 * H),
+			Vector2(cx - 0.36 * H, hip_y - 0.1 * H), Vector2(cx - 0.28 * H, waist_y)]), vest)
+		for bi in 3:
+			draw_circle(Vector2(cx, vest_top + 0.3 * H + float(bi) * 0.42 * H), 0.06 * H, button)
+	else:
+		# a plain collar band across the back of the neck
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H),
+			Vector2(cx + 0.24 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.24 * H, shoulder_y + 0.1 * H)]), collar)
 
-	# waistcoat down the front, drawn in at the waist to follow the torso, with buttons
-	var vest_top := shoulder_y + 0.52 * H
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.3 * H, vest_top), Vector2(cx + 0.3 * H, vest_top),
-		Vector2(cx + 0.28 * H, waist_y), Vector2(cx + 0.36 * H, hip_y - 0.1 * H),
-		Vector2(cx - 0.36 * H, hip_y - 0.1 * H), Vector2(cx - 0.28 * H, waist_y)]), vest)
-	for bi in 3:
-		draw_circle(Vector2(cx, vest_top + 0.3 * H + float(bi) * 0.42 * H), 0.06 * H, button)
-
-	# head: a full head of hair framing the crown and temples, the skin face over it so
-	# the hairline sits across the upper forehead, then a soft cheek highlight
+	# head: a full head of hair framing the crown and temples. Facing the crowd, the skin
+	# face sits over it; facing away mid-spin, the back of the head is all hair with a
+	# little skin at the nape, which is what sells the turn.
 	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)   # hair mass, up and a touch larger
-	draw_circle(head, head_r, skin)                                       # face over it
-	draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
-	draw_face(head, head_r)
+	if facing_back:
+		draw_circle(head, head_r, hair)                                   # back of the head, all hair
+		draw_circle(head + Vector2(0, head_r * 0.62), head_r * 0.42, skin)   # a sliver of nape
+	else:
+		draw_circle(head, head_r, skin)                                   # face over the hair
+		draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
+		draw_face(head, head_r)
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
 	draw_arm(shoulder_pos(LEFT), hpos[LEFT], LEFT, skin, suit)
@@ -2418,12 +2464,14 @@ func draw_juggler(s: Vector2) -> void:
 	draw_hand(LEFT)
 	draw_hand(RIGHT)
 
-	# a live Spin: sweeping motion streaks, and the juggler turns their back mid-spin
-	if spinning():
-		draw_spin_effect(Vector2(cx, (shoulder_y + hip_y) * 0.5), head, head_r, hair)
+	# done with the (possibly spinning) figure: return to screen space, then lay the
+	# sweeping motion streaks over the top so the turn reads as fast
+	if spin_on:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_spin_streaks(Vector2(cx, (shoulder_y + hip_y) * 0.5))
 
 
-func draw_spin_effect(center: Vector2, head: Vector2, head_r: float, hair: Color) -> void:
+func draw_spin_streaks(center: Vector2) -> void:
 	var prog := 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)   # 0 at start, 1 at end
 	# curved motion streaks sweeping around the body, flattened to read as a turn
 	var base_a := prog * TAU * 2.0
@@ -2435,9 +2483,6 @@ func draw_spin_effect(center: Vector2, head: Vector2, head_r: float, hair: Color
 			var rr := 66.0 - float(k) * 7.0
 			pts.append(center + Vector2(cos(a) * rr, sin(a) * rr * 0.55))
 		draw_polyline(pts, Color(1.0, 0.85, 0.5, 0.34 - 0.07 * float(k)), 3.0)
-	# mid-spin the performer faces away, so hair covers the face for a beat
-	if prog > 0.3 and prog < 0.7:
-		draw_circle(head + Vector2(0, -4), head_r + 1.0, hair)
 
 
 func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
