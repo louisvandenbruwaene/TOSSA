@@ -839,6 +839,9 @@ func tut_maintain() -> void:
 			tut_setup_step()
 		return
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
+		var steps := tut_lesson(tut_id)
+		var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+		var teach_hand := int(step.get("hand", RIGHT))
 		for _i in (num_balls - balls.size()):
 			var b := Ball.new()
 			b.state = STATE_HAND
@@ -846,10 +849,13 @@ func tut_maintain() -> void:
 			b.color = ball_color(balls.size()) if prop_type == PROP_BALLS else prop_color(prop_type)
 			b.spin_dir = 1.0
 			balls.append(b)
-			if stack(RIGHT).size() <= stack(LEFT).size():
-				_stack_r.append(b)
-			else:
+			# a single-ball step returns the ball to the exact hand it is teaching, so a
+			# fumble drops you back into the same lesson rather than the wrong hand
+			var to_left := (teach_hand == LEFT) if num_balls == 1 else (stack(RIGHT).size() > stack(LEFT).size())
+			if to_left:
 				_stack_l.append(b)
+			else:
+				_stack_r.append(b)
 
 
 func tut_finish() -> void:
@@ -1280,28 +1286,35 @@ func other(h: int) -> int:
 
 
 func stage_center() -> Vector2:
+	# the juggling hand height: about the figure's waist on the eight-head canon, so
+	# the hands scoop at a natural level and the arms keep a natural (canon) length
 	var s := get_viewport_rect().size
-	return Vector2(s.x * 0.5, s.y * 0.66)
+	return Vector2(s.x * 0.5, s.y * 0.57)
 
 
 func outer_pos(h: int) -> Vector2:
+	# the catch position, about a shoulder-and-a-half out. Narrower than before so the
+	# arms of the eight-head figure do not splay into long stretched sticks.
 	var c := stage_center()
-	var dx := 152.0
+	var dx := 104.0
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
 func inner_pos(h: int) -> Vector2:
 	# just outside the torso silhouette, so a carried ball never sits on the body
 	var c := stage_center()
-	var dx := 72.0
+	var dx := 58.0
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
 func shoulder_pos(h: int) -> Vector2:
+	# where the arms leave the body: the shoulder joint of the eight-head figure
 	var s := get_viewport_rect().size
 	var c := s.x * 0.5
-	var dx := 44.0
-	return Vector2(c - dx, s.y * 0.50) if h == LEFT else Vector2(c + dx, s.y * 0.50)
+	var H := s.y * 0.056
+	var y := s.y * 0.80 - 6.72 * H
+	var dx := 0.72 * H
+	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
 # where hand h wants to be right now: inner while carrying (to throw), else outer
@@ -1579,6 +1592,12 @@ func do_throw(h: int, hold: int) -> void:
 	charging[h] = false
 	if not started:
 		started = true
+		running = true
+	elif not running and mode == MODE_TRAIN:
+		# training and lessons always resume on a throw. Without this, one full drop
+		# latched running=false for good (update_sim only clears it, do_throw only set it
+		# on the first-ever throw), so misses stopped being cleaned up and the lesson
+		# froze with no move able to recover it.
 		running = true
 	# a clean, controlled (low) throw earns a little Applause; a very high one does not
 	# and flags itself above the stage so the player learns height control
@@ -2294,76 +2313,72 @@ func draw_juggler(s: Vector2) -> void:
 	var collar: Color = v["collar"]
 	var button := Color(0.34, 0.20, 0.11)
 
-	var head_r := 27.0
-	var head := Vector2(cx, s.y * 0.415)
-	var head_bottom := head.y + head_r
-	var shoulder_y := s.y * 0.50
-	var hip_y := s.y * 0.665
+	# the eight-head canon (same as the cutscene figure draw_person), so the in-play
+	# juggler reads as the same adult person: head one eighth of the height, the crotch
+	# at the vertical midpoint, a drawn-in waist. H is the head unit off the floor line.
 	var floor_y := s.y * 0.80
-	var waist_y := lerpf(shoulder_y, hip_y, 0.52)
+	var H := s.y * 0.056
+	var hip_y := floor_y - 4.0 * H
+	var knee_y := floor_y - 2.0 * H
+	var waist_y := floor_y - 5.0 * H
+	var chest_y := floor_y - 6.0 * H
+	var shoulder_y := floor_y - 6.72 * H
+	var head := Vector2(cx, floor_y - 7.5 * H)
+	var head_r := 0.52 * H
 
 	# a soft ground shadow so the figure stands ON the stage instead of floating
 	draw_shadow(Vector2(cx, floor_y + 2.0), 96.0)
 
-	# legs: slim tapered trousers off a narrow pelvis, then shoes
+	# legs: a narrow pelvis, thighs tapering to the knee, calves to the ankle, shoes
 	var shoe := Color(0.20, 0.12, 0.09)
 	draw_colored_polygon(PackedVector2Array([   # pelvis
-		Vector2(cx - 22, hip_y - 12), Vector2(cx + 22, hip_y - 12),
-		Vector2(cx + 20, hip_y + 6), Vector2(cx - 20, hip_y + 6),
-	]), suit_dk)
-	draw_colored_polygon(PackedVector2Array([   # left leg (thigh tapers to ankle)
-		Vector2(cx - 21, hip_y + 2), Vector2(cx - 3, hip_y + 2),
-		Vector2(cx - 8, floor_y - 8), Vector2(cx - 19, floor_y - 8),
-	]), suit_dk)
-	draw_colored_polygon(PackedVector2Array([   # right leg
-		Vector2(cx + 3, hip_y + 2), Vector2(cx + 21, hip_y + 2),
-		Vector2(cx + 19, floor_y - 8), Vector2(cx + 8, floor_y - 8),
-	]), suit_dk)
-	fill_ellipse(Vector2(cx - 22, floor_y - 4), 17.0, 7.5, shoe)   # toe points out
-	fill_ellipse(Vector2(cx + 22, floor_y - 4), 17.0, 7.5, shoe)
+		Vector2(cx - 0.62 * H, hip_y - 0.3 * H), Vector2(cx + 0.62 * H, hip_y - 0.3 * H),
+		Vector2(cx + 0.56 * H, hip_y + 0.12 * H), Vector2(cx - 0.56 * H, hip_y + 0.12 * H)]), suit_dk)
+	draw_capsule(Vector2(cx - 0.4 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
+	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
+	draw_capsule(Vector2(cx + 0.4 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
+	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
+	fill_ellipse(Vector2(cx - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+	fill_ellipse(Vector2(cx + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
 
-	# neck: a tapered polygon that closes the head-to-torso gap (no floating stub)
+	# neck: a short tapered column closing the head-to-torso gap (no floating stub)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 10, head_bottom - 7), Vector2(cx + 10, head_bottom - 7),
-		Vector2(cx + 13, shoulder_y + 2), Vector2(cx - 13, shoulder_y + 2),
-	]), skin)
+		Vector2(cx - 0.2 * H, head.y + head_r - 0.12 * H), Vector2(cx + 0.2 * H, head.y + head_r - 0.12 * H),
+		Vector2(cx + 0.26 * H, shoulder_y + 0.02 * H), Vector2(cx - 0.26 * H, shoulder_y + 0.02 * H)]), skin)
 
 	# jacket: one tapered silhouette (sloped shoulders, a drawn-in waist, a slight
 	# hip flare) so the torso reads as a person, not a box
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 40, shoulder_y + 9), Vector2(cx - 15, shoulder_y - 2),
-		Vector2(cx + 15, shoulder_y - 2), Vector2(cx + 40, shoulder_y + 9),
-		Vector2(cx + 43, shoulder_y + 34), Vector2(cx + 26, waist_y), Vector2(cx + 31, hip_y),
-		Vector2(cx - 31, hip_y), Vector2(cx - 26, waist_y), Vector2(cx - 43, shoulder_y + 34),
-	]), suit)
-	draw_circle(Vector2(cx - 40, shoulder_y + 9), 12.0, suit)   # rounded shoulder caps
-	draw_circle(Vector2(cx + 40, shoulder_y + 9), 12.0, suit)
-	# a soft sheen on the upper-left chest gives the torso a little volume
-	draw_circle(Vector2(cx - 13, shoulder_y + 34), 24.0, Color(1.0, 0.95, 0.85, 0.05))
+		Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.32 * H, shoulder_y - 0.16 * H),
+		Vector2(cx + 0.32 * H, shoulder_y - 0.16 * H), Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H),
+		Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
+		Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), suit)
+	draw_circle(Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)   # rounded shoulder caps
+	draw_circle(Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)
+	draw_circle(Vector2(cx - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
 	# cream collar V over the neck base
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 18, shoulder_y - 2), Vector2(cx, shoulder_y + 24), Vector2(cx - 3, shoulder_y - 2),
-	]), collar)
+		Vector2(cx - 0.42 * H, shoulder_y - 0.14 * H), Vector2(cx, chest_y + 0.08 * H), Vector2(cx - 0.07 * H, shoulder_y - 0.14 * H)]), collar)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx + 18, shoulder_y - 2), Vector2(cx, shoulder_y + 24), Vector2(cx + 3, shoulder_y - 2),
-	]), collar)
+		Vector2(cx + 0.42 * H, shoulder_y - 0.14 * H), Vector2(cx, chest_y + 0.08 * H), Vector2(cx + 0.07 * H, shoulder_y - 0.14 * H)]), collar)
 
 	# waistcoat down the front, drawn in at the waist to follow the torso, with buttons
-	var vest_top := shoulder_y + 22.0
+	var vest_top := shoulder_y + 0.52 * H
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 13, vest_top), Vector2(cx + 13, vest_top),
-		Vector2(cx + 12, waist_y), Vector2(cx + 16, hip_y - 6),
-		Vector2(cx - 16, hip_y - 6), Vector2(cx - 12, waist_y),
-	]), vest)
+		Vector2(cx - 0.3 * H, vest_top), Vector2(cx + 0.3 * H, vest_top),
+		Vector2(cx + 0.28 * H, waist_y), Vector2(cx + 0.36 * H, hip_y - 0.1 * H),
+		Vector2(cx - 0.36 * H, hip_y - 0.1 * H), Vector2(cx - 0.28 * H, waist_y)]), vest)
 	for bi in 3:
-		draw_circle(Vector2(cx, vest_top + 14.0 + float(bi) * 20.0), 2.6, button)
+		draw_circle(Vector2(cx, vest_top + 0.3 * H + float(bi) * 0.42 * H), 0.06 * H, button)
 
-	# head: hair behind, skin face over it, warm rim light
-	draw_circle(head + Vector2(0, -6), head_r + 1.0, hair)
+	# head: hair behind, skin face over it, a hairline cap, warm rim light
+	draw_circle(head + Vector2(0, -0.1 * H), head_r + 0.05 * H, hair)
 	draw_circle(head, head_r, skin)
-	draw_circle(head + Vector2(0, -2), head_r, Color(1.0, 0.82, 0.55, 0.10))
-	draw_face(head)
+	draw_circle(head + Vector2(0, -head_r * 0.5), head_r, hair)      # hair cap over the crown
+	draw_circle(head + Vector2(0, head_r * 0.4), head_r, skin)       # face lower half back over
+	draw_circle(head + Vector2(0, -0.06 * H), head_r, Color(1.0, 0.82, 0.55, 0.10))
+	draw_face(head, head_r)
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
 	draw_arm(shoulder_pos(LEFT), hpos[LEFT], LEFT, skin, suit)
@@ -2403,25 +2418,30 @@ func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
 	draw_colored_polygon(pts, col)
 
 
-func draw_face(head: Vector2) -> void:
+func draw_face(head: Vector2, r: float = 21.0) -> void:
+	# features scale to the head radius r, so the face stays proportioned after the
+	# figure moved to the eight-head canon (a smaller head than the old drawing)
 	var eye := Color(0.16, 0.10, 0.08)
-	draw_circle(head + Vector2(-9, -1), 3.2, eye)
-	draw_circle(head + Vector2(9, -1), 3.2, eye)
-	draw_circle(head + Vector2(-8, -2), 1.1, Color(1, 1, 1, 0.7))
-	draw_circle(head + Vector2(10, -2), 1.1, Color(1, 1, 1, 0.7))
+	var ex := r * 0.34
+	var ey := -r * 0.05
+	draw_circle(head + Vector2(-ex, ey), r * 0.14, eye)
+	draw_circle(head + Vector2(ex, ey), r * 0.14, eye)
+	draw_circle(head + Vector2(-ex + r * 0.05, ey - r * 0.05), r * 0.05, Color(1, 1, 1, 0.7))
+	draw_circle(head + Vector2(ex + r * 0.05, ey - r * 0.05), r * 0.05, Color(1, 1, 1, 0.7))
 	# expression: a smile on a streak, a wince just after a drop, else calm
 	var mood := 0
 	if tick - last_drop_tick < 45:
 		mood = -1
 	elif streak >= 3:
 		mood = 1
-	var my := head.y + 11.0
-	var mouth := PackedVector2Array([Vector2(head.x - 7, my + 1), Vector2(head.x + 7, my + 1)])
+	var my := head.y + r * 0.42
+	var mw := r * 0.3
+	var mouth := PackedVector2Array([Vector2(head.x - mw, my), Vector2(head.x + mw, my)])
 	if mood == 1:
-		mouth = PackedVector2Array([Vector2(head.x - 8, my - 2), Vector2(head.x, my + 4), Vector2(head.x + 8, my - 2)])
+		mouth = PackedVector2Array([Vector2(head.x - mw, my - r * 0.09), Vector2(head.x, my + r * 0.16), Vector2(head.x + mw, my - r * 0.09)])
 	elif mood == -1:
-		mouth = PackedVector2Array([Vector2(head.x - 7, my + 3), Vector2(head.x, my - 2), Vector2(head.x + 7, my + 3)])
-	draw_polyline(mouth, Color(0.45, 0.20, 0.16), 2.5)
+		mouth = PackedVector2Array([Vector2(head.x - mw, my + r * 0.12), Vector2(head.x, my - r * 0.09), Vector2(head.x + mw, my + r * 0.12)])
+	draw_polyline(mouth, Color(0.45, 0.20, 0.16), maxf(1.8, r * 0.11))
 
 
 func draw_capsule(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> void:
@@ -3747,9 +3767,9 @@ func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand =
 	var knee_y := pos.y - 2.0 * H
 	var waist_y := pos.y - 5.0 * H + breathe    # navel
 	var chest_y := pos.y - 6.0 * H + breathe
-	var sh_y := pos.y - 6.55 * H + breathe
+	var sh_y := pos.y - 6.72 * H + breathe      # shoulders ride ~1.3 heads below the crown
 	var head_c := Vector2(px, pos.y - 7.5 * H + breathe)
-	var hr := 0.5 * H                  # head is one unit tall, so radius is half a unit
+	var hr := 0.52 * H                 # head just over one unit, so it does not read as a pinhead
 
 	# a relaxed arm hangs so the wrist is at the hip (fingertips at mid-thigh)
 	var lh: Vector2 = lhand if lhand != null else Vector2(px - 0.62 * H, hip_y + 0.2 * H)
@@ -4229,11 +4249,23 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 
 
 func draw_silhouette(feet: Vector2, sc: float, col: Color) -> void:
-	var shY := feet.y - 108.0 * sc
+	# a background onlooker: the same eight-head proportion as the real figures, but
+	# rendered as one flat silhouette (only a suggestion of a person at the light's edge)
+	var H := 17.0 * sc
+	var px := feet.x
+	var hip_y := feet.y - 4.0 * H
+	var knee_y := feet.y - 2.0 * H
+	var sh_y := feet.y - 6.72 * H
+	draw_capsule(Vector2(px - 0.36 * H, hip_y), Vector2(px - 0.32 * H, knee_y), 0.42 * H, 0.28 * H, col)
+	draw_capsule(Vector2(px - 0.32 * H, knee_y), Vector2(px - 0.3 * H, feet.y - 0.1 * H), 0.28 * H, 0.2 * H, col)
+	draw_capsule(Vector2(px + 0.36 * H, hip_y), Vector2(px + 0.32 * H, knee_y), 0.42 * H, 0.28 * H, col)
+	draw_capsule(Vector2(px + 0.32 * H, knee_y), Vector2(px + 0.3 * H, feet.y - 0.1 * H), 0.28 * H, 0.2 * H, col)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(feet.x - 16.0 * sc, shY), Vector2(feet.x + 16.0 * sc, shY),
-		Vector2(feet.x + 12.0 * sc, feet.y), Vector2(feet.x - 12.0 * sc, feet.y)]), col)
-	draw_circle(Vector2(feet.x, shY - 16.0 * sc), 12.0 * sc, col)
+		Vector2(px - 0.85 * H, sh_y), Vector2(px + 0.85 * H, sh_y),
+		Vector2(px + 0.55 * H, hip_y + 0.2 * H), Vector2(px - 0.55 * H, hip_y + 0.2 * H)]), col)
+	draw_circle(Vector2(px - 0.85 * H, sh_y), 0.16 * H, col)
+	draw_circle(Vector2(px + 0.85 * H, sh_y), 0.16 * H, col)
+	draw_circle(Vector2(px, feet.y - 7.5 * H), 0.52 * H, col)
 
 
 func draw_curtain(s: Vector2) -> void:
