@@ -178,6 +178,7 @@ class Ball:
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
 	var trick := -1           # which trick shaped this throw (TR_HIGH/TR_BTB), or -1 for a plain throw
+	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
 
 
 var tick := 0
@@ -294,6 +295,15 @@ var tut_flash := ""       # brief "Nice!" feedback between steps
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
+# cosmetic juice layer: particles (sparks, embers, confetti, shock rings), a short
+# hit-stop after big impacts, and the timers that drive HUD/results animation.
+# None of this touches the sim, so determinism and fairness are untouched.
+var parts: Array[Dictionary] = []
+var freeze := 0             # hit-stop ticks left: the world holds, input still reads
+var results_tick := -999    # tick the results card opened (drives its reveal)
+var results_stamped := false  # the grade stamp sound has fired
+var record_broken := false  # beat this venue's best mid-run (fires the flash once)
+var last_streak_tick := -999  # when the streak last grew, for the multiplier pulse
 
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
@@ -301,6 +311,7 @@ var set_hints := true     # show the control hints along the bottom
 var set_flags := true     # show the TOO LOW / too high throw flags
 var set_music := true     # the procedural adaptive soundtrack
 var set_sfx := true       # catch/throw/drop sound effects and the crowd bed
+var set_fullscreen := false  # borderless fullscreen (also toggled live with F11)
 
 # --- procedural audio (code-only, ART_AND_MUSIC.md): pre-rendered PCM buffers,
 # adaptive music by volume-automating looping layers. See setup_audio().
@@ -350,6 +361,8 @@ func _ready() -> void:
 	if sa != -1 and sa + 1 < ua.size():
 		_shot_tick = int(ua[sa + 1])
 	load_settings()
+	if set_fullscreen:
+		apply_fullscreen()                       # honour the remembered display mode
 	setup_audio()                                # synthesise all sound at startup
 	var da := ua.find("--dumpaudio")             # dev: write every sound to <dir>, then quit
 	if da != -1 and da + 1 < ua.size():
@@ -387,6 +400,7 @@ func _ready() -> void:
 			peak_applause = 0.94; tricks_landed = 5; trick_score = 1350
 			last_pay = 240; last_rep_delta = 22; run_xp = 190; points = 3
 			started = true; running = false; results_open = true; results_record = true
+			results_tick = 0
 		if ua.has("--pause"):   # dev: open the pause menu for a screenshot
 			open_pause()
 	else:
@@ -436,8 +450,20 @@ func _physics_process(delta: float) -> void:
 			sheet_repeat(delta)   # debug build only: holding a stat key keeps stepping it
 		queue_redraw()   # the sheet, shop, and pause menu all halt the sim; nothing advances
 		return
+	if freeze > 0:
+		# hit-stop: the world holds its breath for a few ticks so a drop lands with
+		# weight. Input is still read (a press during the hold acts on the held world,
+		# never lost) and the hands keep easing, but tick and the sim do not advance.
+		freeze -= 1
+		if not _demo:
+			_read_inputs()
+		update_hands()
+		queue_redraw()
+		return
 	tick += 1
-	step_effects()   # age the egg-break shards and yolk splats
+	step_effects()   # age the egg-break shards, yolk splats, and particles
+	if results_open:
+		results_anim_sfx()   # the card's count-up ticks, stamp, and record fanfare
 	if _eggdemo and tick % 42 == 0:
 		var vp := get_viewport_rect().size
 		spawn_egg_break(Vector2(vp.x * 0.5 + randf_range(-140, 140), vp.y * 0.42))
@@ -467,6 +493,12 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var kc: int = event.physical_keycode
+	if kc == KEY_F11:
+		# fullscreen toggle, available from every screen, remembered across launches
+		set_fullscreen = not set_fullscreen
+		apply_fullscreen()
+		save_settings()
+		return
 	match game_state:
 		ST_MENU:
 			menu_input(kc)
@@ -980,7 +1012,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 6   # music, sound, shake, hints, flags, Back
+	var n := 7   # music, sound, shake, hints, flags, fullscreen, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -1001,6 +1033,9 @@ func settings_input(kc: int) -> void:
 				4:
 					set_flags = not set_flags
 				5:
+					set_fullscreen = not set_fullscreen
+					apply_fullscreen()
+				6:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -1009,6 +1044,11 @@ func settings_input(kc: int) -> void:
 			save_settings()
 			menu_sel = 0
 			game_state = ST_MENU
+
+
+func apply_fullscreen() -> void:
+	DisplayServer.window_set_mode(
+		DisplayServer.WINDOW_MODE_FULLSCREEN if set_fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
 
 
 # --- cinematic beat engine (shared by story cutscenes and tutorials) ----------
@@ -1146,6 +1186,7 @@ func load_settings() -> void:
 		set_flags = bool(cf.get_value("opt", "flags", true))
 		set_music = bool(cf.get_value("opt", "music", true))
 		set_sfx = bool(cf.get_value("opt", "sfx", true))
+		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
 
 
 func save_settings() -> void:
@@ -1155,6 +1196,7 @@ func save_settings() -> void:
 	cf.set_value("opt", "flags", set_flags)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
+	cf.set_value("opt", "fullscreen", set_fullscreen)
 	cf.save(SETTINGS_PATH)
 
 
@@ -1314,6 +1356,14 @@ func other(h: int) -> int:
 	return RIGHT if h == LEFT else LEFT
 
 
+func atick() -> float:
+	# one cosmetic clock that advances in EVERY state: tick runs during play,
+	# cine_tick runs in menus and cutscenes, so their sum always moves. Scenery
+	# animation (stars, dust, lanterns, marquee bulbs) keys off this, which lets
+	# the same primitives breathe both in cutscenes and behind live play.
+	return float(tick + cine_tick)
+
+
 func stage_center() -> Vector2:
 	# the juggling hand height: about the figure's waist on the eight-head canon, so
 	# the hands scoop at a natural level and the arms keep a natural (canon) length
@@ -1425,6 +1475,12 @@ func start_run(n: int) -> void:
 	run_venue = venue_index()   # records and the results card key off where you performed
 	results_open = false
 	results_record = false
+	results_tick = -999
+	results_stamped = false
+	record_broken = false
+	last_streak_tick = -999
+	freeze = 0
+	parts.clear()
 	paused = false
 	round_scored = false
 	_prev_running = false
@@ -1509,21 +1565,32 @@ func on_catch(h: int) -> void:
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
+		last_streak_tick = tick
 		score += 100 * streak
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
-		if streak % 5 == 0:
+		spawn_parts(outer_pos(h), Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
+		spawn_parts(outer_pos(h), Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
+		if streak % 10 == 0:
+			# a milestone: a beat of hit-stop, a shock ring, and the crowd lifts
+			freeze = 4
+			spawn_parts(outer_pos(h), Color(1.0, 0.82, 0.4), 2, 0.0, "ring")
+			if mode == MODE_PERFORM:
+				play_sfx("cheer", -11.0)
+		elif streak % 5 == 0:
 			play_sfx("streak", -7.0)   # a rising flourish at every fifth in a row
 	elif best_d <= W_GOOD:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
+		last_streak_tick = tick
 		score += 50 * streak
 		applause = minf(1.0, applause + 0.025)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
 		play_sfx("good", -8.0)
+		spawn_parts(outer_pos(h), Color(0.85, 0.92, 0.6), 4, 2.4, "spark")
 		if streak % 5 == 0:
 			play_sfx("streak", -8.0)
 	else:
@@ -1533,6 +1600,14 @@ func on_catch(h: int) -> void:
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
+	# the record chase: passing your own best AT this venue mid-run is a moment
+	if mode == MODE_PERFORM and not record_broken and run_venue >= 0 and run_venue < best_scores.size() \
+			and best_scores[run_venue] > 0 and score > best_scores[run_venue]:
+		record_broken = true
+		var s := get_viewport_rect().size
+		add_popup(Vector2(s.x * 0.5, s.y * 0.27), "NEW RECORD!", Color(1.0, 0.86, 0.42))
+		play_sfx("record", -7.0)
+		spawn_parts(Vector2(s.x * 0.5, s.y * 0.16), Color(1.0, 0.85, 0.45), 26, 2.6, "confetti")
 
 	# a live Spin doubles whatever this catch scored, and credits the trick once
 	if spinning():
@@ -1576,6 +1651,7 @@ func do_throw(h: int, hold: int) -> void:
 	if stack(h).is_empty():
 		return
 	var b: Ball = stack(h).pop_front()
+	b.trail = PackedVector2Array()
 	var weight := prop_weight()
 	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
 	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Height is set by
@@ -1835,6 +1911,8 @@ func on_round_end() -> void:
 			results_record = true
 		# the results panel takes over the end-of-run screen for performances
 		results_open = true
+		results_tick = tick
+		results_stamped = false
 	# story beats fire on reputation milestones, once each: first the venue
 	# promotions (tiers 1..5), then the endgame chapters past the arena (the
 	# rivalry turning, the record ordeal, the finale). Both accumulate into one
@@ -2240,6 +2318,8 @@ func drop_ball(b: Ball, why: String) -> void:
 	applause = maxf(0.0, applause - 0.26)
 	if set_shake:
 		shake = 5.0
+	freeze = 8   # a short hit-stop so the loss registers before play rolls on
+	spawn_parts(flight_pos(b), Color(0.75, 0.5, 0.4), 10, 2.6, "spark")
 	var dtext := why
 	if b.kind == PROP_EGGS:
 		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf). A lesson
@@ -2263,6 +2343,13 @@ func update_sim() -> void:
 	for b in balls:
 		if b.state == STATE_FLIGHT and tick > b.land_tick + MISS_GRACE:
 			lost.append(b)
+		elif b.state == STATE_FLIGHT and tick % 2 == 0:
+			# the flight trail (ART doc 4): sample the path so a comet tail follows the
+			# prop, longer for higher (riskier) throws, so risk is legible at a glance
+			b.trail.append(flight_pos(b))
+			var maxlen := 5 + int(clampf(b.height, 0.0, 1.4) * 8.0)
+			while b.trail.size() > maxlen:
+				b.trail.remove_at(0)
 	for b in lost:
 		drop_ball(b, "DROP")
 	peak_applause = maxf(peak_applause, applause)
@@ -2337,6 +2424,7 @@ func _draw() -> void:
 	draw_targets()
 	draw_balls_in_flight()
 	draw_egg_shards()      # flying shell pieces read above the stage
+	draw_charge_gauges()   # the hold-to-throw height gauge beside a charging hand
 	draw_vignette(s, 0.5)  # frame the lit stage so it reads photographed, not flat
 	if tut_active:
 		draw_tutorial_banner(font, s)   # a lesson shows only the guided banner, no HUD
@@ -2345,6 +2433,7 @@ func _draw() -> void:
 	draw_popups(font)
 	if results_open and not tut_active:
 		draw_results(font, s)   # the end-of-performance card, over the frozen stage
+	draw_parts()           # sparks and confetti ride above the stage and the card
 	if sheet_open:
 		draw_sheet(font, s)
 	if shop_open:
@@ -2366,44 +2455,164 @@ func draw_backdrop(s: Vector2) -> void:
 	var sky_bot := Color(glow.r * 0.10 + 0.02, glow.g * 0.09 + 0.02, glow.b * 0.10 + 0.03)
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
 
-	# spotlight cone from above centre
+	var fy := s.y * 0.80
+
+	# the venue's own set dressing sits behind the light, then a dark veil pushes it
+	# back into the depth, so the escalating ladder is FELT without ever competing
+	# with the props (ART pillars 1 and 4)
+	draw_venue_dressing(s, vi, fy, glow)
+	draw_rect(Rect2(0, 0, s.x, fy), Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5, 0.42))
+
+	# spotlight cone from above centre: it narrows and warms a touch as a streak
+	# builds, the light literally rewarding focus (ART doc, Section 2)
+	var hot := clampf(float(streak) / 15.0, 0.0, 1.0) if game_state == ST_PLAY else 0.0
 	var top := Vector2(s.x * 0.5, -40.0)
-	var spread := 300.0
+	var spread := 300.0 - 44.0 * hot
 	var cone := PackedVector2Array([
 		top,
 		Vector2(s.x * 0.5 - spread, s.y * 0.82),
 		Vector2(s.x * 0.5 + spread, s.y * 0.82),
 	])
-	draw_colored_polygon(cone, Color(glow.r, glow.g, glow.b, spot))
+	draw_colored_polygon(cone, Color(glow.r, glow.g, glow.b, spot * (1.0 + 0.5 * hot)))
 
 	# a SMOOTH warm light pool on the performer, built from many faint overlapping
 	# discs (bright centre fading out), so it reads as a soft spotlight instead of
 	# the hard target rings it used to be. A small floor keeps the stage from a void.
 	var pc := Vector2(s.x * 0.5, s.y * 0.50)
-	var pool := 0.045 + spot * 0.9
+	var pool := (0.045 + spot * 0.9) * (1.0 + 0.30 * hot)
 	for i in 26:
 		var f := float(i) / 25.0                       # 0 outer .. 1 inner
-		var r := lerpf(410.0, 34.0, f)
+		var r := lerpf(410.0 - 40.0 * hot, 34.0, f)
 		var a := pool * (0.06 + 0.94 * f) * 0.16
 		draw_circle(pc, r, Color(glow.r, glow.g, glow.b, a))
 
 	# stage floor, with a soft warm lip of light where it meets the light pool
-	var fy := s.y * 0.80
 	draw_rect(Rect2(0, fy, s.x, s.y - fy), floor_c)
 	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
 	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(glow.r, glow.g, glow.b, 0.55), 3.0)
 
-	# crowd: a row of dim heads seated in front, more of them at grander venues, and
-	# brighter while the crowd is pleased. Suggestion, not detail (ART_AND_MUSIC.md).
-	var heads := 10 + vi * 7
+	# footlights along the stage lip once the career reaches ticketed rooms
+	if vi >= 2:
+		for i in 12:
+			var lx := s.x * (float(i) + 0.5) / 12.0
+			var fl := 0.6 + 0.4 * sin(atick() * 0.05 + float(i) * 1.7)
+			draw_circle(Vector2(lx, fy + 3.0), 10.0, Color(glow.r, glow.g, glow.b, 0.05 * fl))
+			draw_circle(Vector2(lx, fy + 3.0), 3.0, Color(1.0, 0.85, 0.55, 0.4 * fl))
+
+	draw_crowd(s, vi, fy, glow)
+
+	# a drop briefly cools the whole room, the visual half of the music duck
+	if game_state == ST_PLAY and tick - last_drop_tick < 26 and tick - last_drop_tick >= 0:
+		var da := 0.12 * (1.0 - float(tick - last_drop_tick) / 26.0)
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.35, 0.45, 0.65, da))
+
+
+func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
+	# the crowd is a suggestion that LIVES: heads with shoulders that bob with the
+	# applause, brightening as they warm, an extra row at grander venues, and the
+	# occasional pair of hands thrown up when the room is truly won over
+	var performing := mode == MODE_PERFORM and game_state == ST_PLAY
 	var lit := 0.07
-	if mode == MODE_PERFORM:
-		lit = 0.08 + 0.13 * applause
-	for i in heads:
-		var hx := s.x * (float(i) + 0.5) / float(heads)
-		var hy := fy + 14.0 + fmod(float(i) * 1.7, 5.0)
-		var hr := 6.0 + fmod(float(i) * 2.3, 3.0)
-		draw_circle(Vector2(hx, hy), hr, Color(glow.r, glow.g, glow.b, lit))
+	if performing:
+		lit = 0.08 + 0.14 * applause
+	var bob_amp := (0.4 + 2.2 * applause) if performing else 0.6
+	var rows := 2 if vi >= 2 else 1
+	for r in rows:
+		var heads := 10 + vi * 7 - r * 3
+		var base_y := fy + 14.0 + float(r) * 21.0
+		var row_lit := lit * (1.0 - 0.35 * float(r))
+		for i in heads:
+			var hx := s.x * (float(i) + 0.5) / float(heads) + float(r) * 7.0
+			var bob := sin(atick() * 0.045 + float(i) * 1.31 + float(r) * 2.2) * bob_amp
+			var hy := base_y + fmod(float(i) * 1.7, 5.0) + bob
+			var hr := 6.0 + fmod(float(i) * 2.3, 3.0) + float(r)
+			var c := Color(glow.r, glow.g, glow.b, row_lit)
+			draw_circle(Vector2(hx, hy), hr, c)                                   # head
+			fill_ellipse(Vector2(hx, hy + hr + 5.0), hr * 1.9, hr * 0.9,
+				Color(glow.r, glow.g, glow.b, row_lit * 0.7))                     # shoulders, softer
+			if performing and applause > 0.82 and (i + r * 3) % 4 == 0:
+				var up := absf(sin(atick() * 0.09 + float(i)))                     # hands up!
+				draw_circle(Vector2(hx - hr, hy - hr - 4.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
+				draw_circle(Vector2(hx + hr, hy - hr - 5.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
+
+
+func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
+	# what the stage LOOKS OUT ON, per rung of the ladder. Dim, at the edges, and
+	# behind a veil, so the centre stays clear for juggling.
+	match vi:
+		0:   # backyard: dusk stars, the old tree, a fence, the house with a lit window
+			draw_stars(s, 20, 0.42)
+			draw_tree(Vector2(s.x * 0.09, fy + 2.0), 1.0)
+			draw_fence(s, fy - 2.0, s.x * 0.60, s.x * 0.97)
+			draw_house(Vector2(s.x * 0.88, fy + 2.0), 132.0, 108.0)
+		1:   # street corner: the cold city behind one warm lamp. The skyline gets its
+			# own heavy night veil: lit windows read as distant, never as clutter.
+			draw_moon(Vector2(s.x * 0.87, s.y * 0.13), 20.0)
+			draw_stars(s, 26, 0.38)
+			draw_city_row(s, fy)
+			draw_rect(Rect2(0, 0, s.x, fy), Color(0.03, 0.04, 0.09, 0.78))
+			draw_streetlamp(Vector2(s.x * 0.07, fy), fy)
+		2:   # small theatre: velvet wings and a valance frame the stage
+			draw_theatre_wings(s, fy)
+		3:   # circus: the big-top canopy overhead and a string of lanterns
+			draw_circus_canopy(s)
+			draw_lantern_string(Vector2(-10.0, s.y * 0.20), Vector2(s.x + 10.0, s.y * 0.24))
+		4:   # championship: cool banners, a scoreboard glow high in the dark
+			for bx in [s.x * 0.06, s.x * 0.16, s.x * 0.84, s.x * 0.94]:
+				draw_banner(Vector2(bx, s.y * 0.06), Color(0.3, 0.5, 0.9))
+			draw_rect(Rect2(s.x * 0.36, s.y * 0.04, s.x * 0.28, 8.0), Color(0.6, 0.8, 1.0, 0.10))
+			draw_stars(s, 14, 0.3)
+		_:   # world arena: a vast bowl of warm crowd-lights and roaming beams
+			for i in 110:
+				var seed := float(i) * 17.7
+				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x
+				var y := fy - 30.0 - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.34
+				if absf(x - s.x * 0.5) < s.x * 0.17 and y > s.y * 0.3:
+					continue   # keep the juggling window clear
+				var a := 0.25 + 0.35 * sin(atick() * 0.05 + seed)
+				draw_circle(Vector2(x, y), 1.6, Color(1.0, 0.82, 0.52, clampf(a, 0.08, 0.6)))
+			for k in 2:
+				var ang := sin(atick() * 0.008 + float(k) * 2.6) * 0.55
+				var src := Vector2(s.x * (0.22 + 0.56 * float(k)), -20.0)
+				var dir := Vector2(sin(ang) * 0.6, 1.0).normalized()
+				var perp := Vector2(-dir.y, dir.x) * 30.0
+				draw_colored_polygon(PackedVector2Array([src, src + dir * 900.0 + perp, src + dir * 900.0 - perp]),
+					Color(glow.r, glow.g, glow.b, 0.05))
+
+
+func draw_theatre_wings(s: Vector2, fy: float) -> void:
+	# red velvet wings at both edges and a swagged valance across the top
+	var ww := s.x * 0.085
+	for side in [0.0, 1.0]:
+		var x0 := 0.0 if side == 0.0 else s.x - ww
+		draw_gradient_h(Rect2(x0, 0, ww, fy), Color(0.30, 0.05, 0.08) if side == 0.0 else Color(0.13, 0.02, 0.04),
+			Color(0.13, 0.02, 0.04) if side == 0.0 else Color(0.30, 0.05, 0.08), 8)
+		for k in 4:
+			var fx := x0 + ww * (float(k) + 0.5) / 4.0
+			draw_rect(Rect2(fx - 2.0, 0, 4.0, fy), Color(0.09, 0.015, 0.03, 0.8))
+	var vh := s.y * 0.075
+	draw_rect(Rect2(0, 0, s.x, vh), Color(0.30, 0.05, 0.08))
+	for i in 9:
+		var cx := s.x * (float(i) + 0.5) / 9.0
+		draw_arc(Vector2(cx, vh * 0.2), s.x / 18.0, 0.35, PI - 0.35, 18, Color(0.14, 0.02, 0.04), vh * 0.5, true)
+	draw_line(Vector2(0, vh + 2.0), Vector2(s.x, vh + 2.0), Color(0.85, 0.65, 0.3, 0.5), 2.0)
+
+
+func draw_circus_canopy(s: Vector2) -> void:
+	# striped tent cloth fanning down from the peak of the frame
+	var top := Vector2(s.x * 0.5, -s.y * 0.24)
+	var n := 12
+	var hemy := s.y * 0.15
+	for i in n:
+		var a0 := lerpf(-s.x * 0.62, s.x * 0.62, float(i) / float(n))
+		var a1 := lerpf(-s.x * 0.62, s.x * 0.62, float(i + 1) / float(n))
+		var col := Color(0.42, 0.11, 0.12) if i % 2 == 0 else Color(0.45, 0.42, 0.38)
+		draw_colored_polygon(PackedVector2Array([top,
+			Vector2(s.x * 0.5 + a0, hemy + absf(a0) * 0.06),
+			Vector2(s.x * 0.5 + a1, hemy + absf(a1) * 0.06)]), col)
+	for i in n + 1:
+		var hx := s.x * 0.5 + lerpf(-s.x * 0.62, s.x * 0.62, float(i) / float(n))
+		draw_circle(Vector2(hx, hemy + absf(hx - s.x * 0.5) * 0.06), 3.0, Color(0.85, 0.7, 0.4, 0.5))
 
 
 func draw_juggler(s: Vector2) -> void:
@@ -2659,20 +2868,75 @@ func draw_hand(h: int) -> void:
 
 
 func draw_targets() -> void:
-	# a landing ring brightens as a catch nears, so high-throw drift is readable
+	# a landing ring brightens as a catch nears, and its COLOUR teaches the timing:
+	# warm gold on approach, bright green while the press would land Good or better,
+	# with a white flash inside the Perfect band. The windows become visible skill.
+	var wp := perfect_window()
 	for b in balls:
 		if b.state == STATE_FLIGHT:
 			var dd := b.land_tick - tick
 			if dd >= -MISS_GRACE and dd < 46:
 				var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
-				draw_arc(b.to_pos, 22.0 * prop_scale(b.kind), 0.0, TAU, 40,
-					Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
+				var adiff := absi(dd)
+				var r := 22.0 * prop_scale(b.kind)
+				if adiff <= wp:
+					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
+					draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
+				elif adiff <= W_GOOD:
+					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.65, 0.95, 0.55, 0.85), 4.0, true)
+				elif adiff <= W_LATE and dd < 0:
+					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.95, 0.7, 0.4, 0.7), 3.0, true)
+				else:
+					draw_arc(b.to_pos, r, 0.0, TAU, 40,
+						Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
 
 
 func draw_balls_in_flight() -> void:
 	for b in balls:
 		if b.state == STATE_FLIGHT:
+			draw_trail(b)
 			draw_prop(b, flight_pos(b))
+
+
+func draw_trail(b: Ball) -> void:
+	# the comet tail behind a flying prop: longer for higher throws, its colour
+	# cooling toward a pale blue with height, so a risky throw is visibly risky
+	var n := b.trail.size()
+	if n < 2:
+		return
+	var cool := clampf(b.height * 0.5, 0.0, 0.6)
+	var base := b.color.lerp(Color(0.72, 0.82, 1.0), cool)
+	var sc := prop_scale(b.kind)
+	for i in n:
+		var f := float(i + 1) / float(n)   # 0 tail .. 1 head
+		draw_circle(b.trail[i], (2.0 + 6.0 * f) * sc, Color(base.r, base.g, base.b, 0.16 * f * f))
+
+
+func draw_charge_gauges() -> void:
+	# while THROW is held, a slim gauge grows beside that hand: green is a snappy
+	# controlled throw, amber buys airtime, red is the wild top. A faint tick above
+	# the stage previews the apex, so height control is learnable by eye.
+	for h in [LEFT, RIGHT]:
+		if not charging[h] or stack(h).is_empty():
+			continue
+		var hold := clampi(tick - int(charge_start[h]), 0, HOLD_MAX)
+		var f := float(hold) / float(HOLD_MAX)
+		var pos: Vector2 = hpos[h]
+		var gx := pos.x + (-30.0 if h == LEFT else 30.0) - 3.0
+		var gh := 52.0
+		var gy := pos.y + 10.0
+		draw_rect(Rect2(gx, gy - gh, 6.0, gh), Color(0.08, 0.05, 0.06, 0.75))
+		var col := Color(0.55, 0.9, 0.5).lerp(Color(1.0, 0.72, 0.3), clampf(f * 1.6, 0.0, 1.0))
+		if f > 0.78:
+			col = col.lerp(Color(1.0, 0.35, 0.3), (f - 0.78) / 0.22)
+		draw_rect(Rect2(gx, gy - gh * f, 6.0, gh * f), col)
+		draw_rect(Rect2(gx - 1.0, gy - gh * 0.78, 8.0, 1.5), Color(1.0, 0.9, 0.7, 0.7))
+		# apex preview: where this throw would crest if released now
+		var deficit := prop_deficit()
+		var air := float(BASE_AIR) * (1.0 - DEFICIT_BASE * deficit) + HOLD_GAIN * (1.0 - DEFICIT_HEIGHT * deficit) * float(hold)
+		var apex_y := pos.y - ARC_PER_AIR * air
+		var cx := stage_center().x
+		draw_line(Vector2(cx - 26.0, apex_y), Vector2(cx + 26.0, apex_y), Color(col.r, col.g, col.b, 0.5), 1.5)
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
@@ -2692,8 +2956,21 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
 		ang = b.spin_dir * p * TAU * 2.0   # two tumbles across the flight
 	match b.kind:
-		PROP_EGGS:
-			draw_egg(pos, b.color, sc)
+		PROP_EGGS, PROP_BALLS:
+			# squash and stretch: a fast ball elongates slightly along its motion,
+			# which makes the arc feel alive at zero cost to readability
+			var k := 0.0
+			var vang := 0.0
+			if b.state == STATE_FLIGHT and b.trail.size() > 0:
+				var vel := pos - b.trail[b.trail.size() - 1]
+				k = clampf(vel.length() * 0.025, 0.0, 0.22)
+				vang = vel.angle()
+			draw_set_transform(pos, vang, Vector2(1.0 + k, 1.0 - k))
+			if b.kind == PROP_EGGS:
+				draw_egg(Vector2.ZERO, b.color, sc)
+			else:
+				draw_ball_shape(Vector2.ZERO, b.color, sc)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		PROP_RINGS:
 			draw_ring_prop(pos, b.color, sc)
 		PROP_CLUBS:
@@ -2788,54 +3065,108 @@ func draw_prop_icon(kind: int, pos: Vector2) -> void:
 			draw_ball_shape(pos, col, sc)
 
 
+func hud_panel(r: Rect2) -> void:
+	# a soft dark card with an ember hairline, so HUD numbers sit on something
+	# instead of floating loose over the stage
+	draw_rect(r, Color(0.05, 0.03, 0.045, 0.55))
+	draw_rect(r, Color(0.9, 0.6, 0.35, 0.22), false, 1.0)
+
+
+func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
+	# a small keyboard-key box; returns its width so hints can chain
+	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0)
+	draw_rect(Rect2(x, y, w, 19.0), Color(0.15, 0.10, 0.10, 0.92))
+	draw_rect(Rect2(x, y, w, 19.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
+	draw_string(font, Vector2(x, y + 14.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, 12, Color(1.0, 0.9, 0.7))
+	return w
+
+
+func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
+	# items: [[keys: Array, action: String], ...] drawn centred as keycaps + labels
+	var total := 0.0
+	for it in items:
+		for k in it[0]:
+			total += maxf(21.0, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0) + 3.0
+		total += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 22.0
+	total -= 22.0
+	var x := cx - total * 0.5
+	for it in items:
+		for k in it[0]:
+			x += draw_keycap(font, x, y, String(k)) + 3.0
+		x += 3.0
+		draw_string(font, Vector2(x, y + 14.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.62, 0.9))
+		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
+
+
 func draw_hud(font: Font, s: Vector2) -> void:
-	var by := 40.0
 	var performing := mode == MODE_PERFORM
 
-	# mode label, top centre; Applause bar only when performing (not training)
+	# ---- top-left card: score, the record chase, streak heat, accuracy, level ----
+	hud_panel(Rect2(18, 14, 322, 132))
+	draw_string(font, Vector2(34, 46), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
+	draw_string(font, Vector2(96, 48), str(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color(1.0, 0.92, 0.72))
+	if performing and run_venue >= 0 and run_venue < best_scores.size() and best_scores[run_venue] > 0:
+		if record_broken:
+			var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
+			draw_string(font, Vector2(200, 42), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.86, 0.42, ra))
+		else:
+			draw_string(font, Vector2(200, 42), "best  %d" % best_scores[run_venue], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.64, 0.56))
+	# streak: the multiplier IS the streak, so show it as a heat-coloured x that
+	# pops on every extension (the addictive number to protect)
+	var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
+	var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
+	var pulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
+	draw_string(font, Vector2(34, 78), "x%d" % streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 21 + pulse, scol2)
+	draw_string(font, Vector2(96, 78), "streak   best %d" % best_streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.6))
+	var acc := "-"
+	if caught + dropped > 0:
+		acc = "%d%%" % int(round(100.0 * float(caught) / float(caught + dropped)))
+	draw_string(font, Vector2(34, 100), "caught %d    dropped %d    clean %s" % [caught, dropped, acc], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
+	var need := xp_to_next(level)
+	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+	draw_string(font, Vector2(34, 128), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.85, 0.5))
+	draw_rect(Rect2(88, 117, 160, 9), Color(0.2, 0.14, 0.11, 0.7))
+	draw_rect(Rect2(88, 117, 160.0 * xf, 9), Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(258, 126), "%d / %d" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.72, 0.58))
+	if points > 0:
+		var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
+		draw_string(font, Vector2(34, 146 + 14), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7, pa))
+
+	# ---- top centre: mode tag and the Applause meter with its high-water mark ----
 	var mlabel := "PERFORMING" if performing else "TRAINING"
 	if debug_mode:
 		mlabel += "   -   DEBUG"
 	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
-	draw_string(font, Vector2(s.x * 0.5 - 200, 22), mlabel, HORIZONTAL_ALIGNMENT_CENTER, 400, 15, mcol)
+	draw_string(font, Vector2(s.x * 0.5 - 200, 26), mlabel, HORIZONTAL_ALIGNMENT_CENTER, 400, 14, mcol)
 	if performing:
 		var bw := 300.0
 		var bx := s.x * 0.5 - bw * 0.5
+		var by := 36.0
+		draw_rect(Rect2(bx - 2, by - 2, bw + 4, 19.0), Color(0.05, 0.03, 0.045, 0.6))
 		draw_rect(Rect2(bx, by, bw, 15.0), Color(0.2, 0.14, 0.11, 0.7))
 		var pcol := Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.85, 0.42), applause)
 		draw_rect(Rect2(bx, by, bw * applause, 15.0), pcol)
-		draw_string(font, Vector2(bx, by - 4.0), "APPLAUSE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.9, 0.7, 0.8))
+		draw_rect(Rect2(bx + bw * peak_applause - 1.0, by - 2.0, 2.0, 19.0), Color(1.0, 0.95, 0.8, 0.75))
+		draw_string(font, Vector2(bx + 6, by + 12.0), "APPLAUSE", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.1, 0.05, 0.04, 0.75))
 
-	# stamina bar, top right (turns red when fatigue starts biting Accuracy)
-	var sw := 220.0
-	var sx := s.x - 30.0 - sw
+	# ---- top-right card: stamina, purse, reputation ----
+	var pw := 250.0
+	var px := s.x - 18.0 - pw
+	hud_panel(Rect2(px, 14, pw, 96))
+	var sx := px + 16.0
+	var sw := pw - 32.0
 	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-	draw_rect(Rect2(sx, by, sw, 15.0), Color(0.2, 0.14, 0.11, 0.7))
+	draw_string(font, Vector2(sx, 34), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.9, 0.85, 0.8))
+	draw_string(font, Vector2(sx + sw - 70.0, 34), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 70.0, 11, Color(0.85, 0.9, 0.85, 0.8))
+	draw_rect(Rect2(sx, 40, sw, 12.0), Color(0.2, 0.14, 0.11, 0.7))
 	var scol := Color(0.55, 0.80, 0.6)
 	if sfrac < STAM_LOW:
 		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
-	draw_rect(Rect2(sx, by, sw * sfrac, 15.0), scol)
-	draw_string(font, Vector2(sx, by - 4.0), "STAMINA  %d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.9, 0.85, 0.8))
-	draw_string(font, Vector2(sx, by + 30.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
-	draw_string(font, Vector2(sx, by + 50.0), "Rep %d  %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
-
-	# score / streak / catches, top left
-	draw_string(font, Vector2(30, 44), "SCORE  %d" % score, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.9, 0.7))
-	draw_string(font, Vector2(30, 72), "STREAK %d   best %d" % [streak, best_streak], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.9, 0.8, 0.6))
-	var acc := "-"
-	if caught + dropped > 0:
-		acc = "%d%%" % int(round(100.0 * float(caught) / float(caught + dropped)))
-	draw_string(font, Vector2(30, 94), "CAUGHT %d  DROPPED %d  (%s)" % [caught, dropped, acc], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.58))
-
-	# level + xp bar
-	var need := xp_to_next(level)
-	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_string(font, Vector2(30, 121), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.85, 0.5))
-	draw_rect(Rect2(72, 110, 180, 10), Color(0.2, 0.14, 0.11, 0.7))
-	draw_rect(Rect2(72, 110, 180.0 * xf, 10), Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(262, 120), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.8, 0.72, 0.58))
-	if points > 0:
-		draw_string(font, Vector2(30, 143), "+%d stat point%s  -  press Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7))
+	draw_rect(Rect2(sx, 40, sw * sfrac, 12.0), scol)
+	draw_circle(Vector2(sx + 7.0, 70.0), 6.0, Color(1.0, 0.84, 0.4))
+	draw_circle(Vector2(sx + 5.0, 68.0), 2.0, Color(1.0, 0.95, 0.7))
+	draw_string(font, Vector2(sx + 20.0, 76.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(sx, 98.0), "Rep %d   %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
 
 	# a freshly unlocked trick announces itself, non-blocking so a live run is never
 	# frozen. Only while actually juggling, so it never overlaps the round-over text
@@ -2853,94 +3184,144 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	# the round chrome (venue line, control hints, ROUND OVER, start prompt) is
 	# hidden during a lesson, and behind the results card, to keep those clean
 	if not tut_active and not results_open:
-		var patt := "CASCADE  (crossing)" if pattern == CASCADE else "FOUNTAIN  (columns)"
+		var patt := "cascade" if pattern == CASCADE else "fountain"
 		var propname := String(cur_prop()["name"]).to_upper()
 		var vname := String(venue_data(venue_index())["name"]).to_upper()
 		if prop_deficit() > 0.0:
-			draw_string(font, Vector2(30, s.y - 96), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
-		draw_string(font, Vector2(30, s.y - 74), "%s  -  %d %s  -  %s" % [vname, num_balls, propname, patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.8, 0.5))
+			draw_string(font, Vector2(30, s.y - 92), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
+		hud_panel(Rect2(18, s.y - 78, 330, 60))
+		draw_string(font, Vector2(34, s.y - 54), vname, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.8, 0.5))
+		draw_prop_icon(prop_type, Vector2(44, s.y - 34))
+		draw_string(font, Vector2(64, s.y - 28), "%d %s   -   %s" % [num_balls, propname.to_lower(), patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.6))
+		if not performing and next_ball_strength() > 0:
+			draw_string(font, Vector2(34, s.y - 86), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.66, 0.56, 0.85))
 		if set_hints:
+			var cx := s.x * 0.5 + 90.0
 			if performing:
 				# a set in progress cannot be reset, only finished or dropped, so its
 				# hints lead with the finish key and drop the restart/rebuild controls
-				draw_string(font, Vector2(30, s.y - 52), "Enter  finish the set on a high note   ( no drop needed )", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.86, 0.55, 0.9))
-				draw_string(font, Vector2(30, s.y - 30),
-					"catch D/K  throw F/J (hold=higher)  Enter finish  Tab sheet  Esc pause",
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+				draw_hints_row(font, cx, s.y - 34, [
+					[["D", "K"], "catch"], [["F", "J"], "throw, hold = higher"],
+					[["Enter"], "finish set"], [["Esc"], "pause"]])
 			else:
-				var unlock := ""
-				if next_ball_strength() > 0:
-					unlock = "   ( next ball at Strength %d )" % next_ball_strength()
-				draw_string(font, Vector2(30, s.y - 52), "[ ] count   O prop   S shop%s" % unlock, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.78, 0.7, 0.58, 0.85))
-				draw_string(font, Vector2(30, s.y - 30),
-					"catch D/K  throw F/J (hold=higher)  O prop  P perform/train  Tab sheet  R restart  Esc pause",
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.6, 0.85))
+				draw_hints_row(font, cx, s.y - 58, [
+					[["D", "K"], "catch"], [["F", "J"], "throw, hold = higher"],
+					[["P"], "perform"], [["R"], "restart"]])
+				draw_hints_row(font, cx, s.y - 34, [
+					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["S"], "shop"],
+					[["Tab"], "sheet"], [["Esc"], "pause"]])
 
 		if not started:
 			var verb := "perform" if performing else "practise"
-			draw_string(font, Vector2(s.x * 0.5 - 220, s.y * 0.23),
-				"press a THROW (F or J) to %s   -   P to %s instead" % [verb, "train" if performing else "perform"],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.55))
+			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
+			draw_string(font, Vector2(0, s.y * 0.23), "press a THROW  ( F or J )  to %s" % verb,
+				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
+			draw_string(font, Vector2(0, s.y * 0.23 + 26.0), "P to %s instead" % ("train" if performing else "perform"),
+				HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.85, 0.75, 0.6, 0.8))
 		elif not running and not results_open:
 			# training (or a performance with no panel) keeps the plain end-of-run line
-			draw_string(font, Vector2(s.x * 0.5 - 150, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1.0, 0.5, 0.4))
-			draw_string(font, Vector2(s.x * 0.5 - 190, s.y * 0.20 + 40), "best streak %d   XP +%d   -   press R to go again" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(0.9, 0.82, 0.7))
+			draw_string(font, Vector2(0, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_CENTER, s.x, 40, Color(1.0, 0.5, 0.4))
+			draw_string(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   press R to go again" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
 
 
-func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color) -> void:
-	draw_string(font, Vector2(lx, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.78, 0.72, 0.66))
-	draw_string(font, Vector2(rx - 300.0, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 18, vc)
+func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0) -> void:
+	if a <= 0.0:
+		return
+	var slide := (1.0 - a) * 10.0
+	draw_string(font, Vector2(lx + slide, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.78, 0.72, 0.66, a))
+	draw_string(font, Vector2(rx - 300.0 + slide, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 18, Color(vc.r, vc.g, vc.b, a))
+
+
+func results_age() -> int:
+	return tick - results_tick if results_tick >= 0 else 999
+
+
+func results_anim_sfx() -> void:
+	# the results card's little sound story, run from the physics tick (draw code
+	# must never play audio): soft ticks under the score count-up, the stamp thud,
+	# and the record fanfare with a confetti drop
+	var age := results_age()
+	if age > 8 and age <= 54 and age % 5 == 0:
+		play_sfx("count", -22.0, 1.0 + float(age) * 0.004)
+	if age >= 64 and not results_stamped:
+		results_stamped = true
+		play_sfx("stamp", -8.0)
+		if results_record:
+			play_sfx("record", -7.0)
+			var s := get_viewport_rect().size
+			spawn_parts(Vector2(s.x * 0.5, s.y * 0.5 - 240.0), Color(1.0, 0.85, 0.45), 20, 2.8, "confetti")
+			spawn_parts(Vector2(s.x * 0.5 - 200.0, s.y * 0.5 - 220.0), Color(0.72, 0.86, 0.95), 12, 2.4, "confetti")
+			spawn_parts(Vector2(s.x * 0.5 + 200.0, s.y * 0.5 - 220.0), Color(0.95, 0.55, 0.45), 12, 2.4, "confetti")
 
 
 func draw_results(font: Font, s: Vector2) -> void:
 	# the end-of-performance card: the grade, the numbers, the pay and rep swing, and
-	# the venue record to chase. This is the meta payoff screen for a whole set.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82))
+	# the venue record to chase. It REVEALS itself: rows slide in one by one while
+	# the score counts up, then the grade stamps down. Anticipation is the payoff.
+	var age := results_age()
+	var card_a := clampf(float(age) / 14.0, 0.0, 1.0)
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82 * card_a))
 	var pw := 580.0
 	var ph := 460.0
 	var px := s.x * 0.5 - pw * 0.5
-	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	var py := s.y * 0.5 - ph * 0.5 + (1.0 - card_a) * 24.0
+	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98 * card_a))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5 * card_a), false, 2.0)
+	if card_a < 1.0:
+		return
 	var lx := px + 34.0
 	var rx := px + pw - 34.0
 
-	# header: the run's venue, and a grade badge to the right
+	# header: the run's venue; the grade badge stamps in later, once the rows are up
 	draw_string(font, Vector2(lx, py + 40.0), "PERFORMANCE", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.72, 0.55))
 	draw_string(font, Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
-	var g := run_grade()
-	var gc := grade_color(g)
-	var bc := Vector2(rx - 42.0, py + 56.0)
-	draw_circle(bc, 42.0, Color(gc.r, gc.g, gc.b, 0.14))
-	draw_arc(bc, 42.0, 0.0, TAU, 40, gc, 3.0, true)
-	draw_string(font, Vector2(bc.x - 42.0, bc.y + 21.0), g, HORIZONTAL_ALIGNMENT_CENTER, 84.0, 58, gc)
+	if age >= 64:
+		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
+		var sc := 1.0 + 1.1 * (1.0 - k) * (1.0 - k)   # stamps down from large to rest
+		var g := run_grade()
+		var gc := grade_color(g)
+		var bc := Vector2(rx - 42.0, py + 56.0)
+		draw_set_transform(bc, -0.06 * (1.0 - k), Vector2(sc, sc))
+		draw_circle(Vector2.ZERO, 42.0, Color(gc.r, gc.g, gc.b, 0.14 * k + 0.06))
+		draw_arc(Vector2.ZERO, 42.0, 0.0, TAU, 40, gc, 3.0, true)
+		draw_string(font, Vector2(-42.0, 21.0), g, HORIZONTAL_ALIGNMENT_CENTER, 84.0, 58, gc)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_line(Vector2(lx, py + 104.0), Vector2(rx, py + 104.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
-	# stat rows
+	# stat rows, each fading in a beat after the last; the score value counts up
+	var t_count := clampf(float(age - 8) / 46.0, 0.0, 1.0)
+	var eased := 1.0 - pow(1.0 - t_count, 3.0)
+	var shown_score := int(round(float(score) * eased))
+	var ra := func(i: int) -> float: return clampf(float(age - 10 - i * 7) / 10.0, 0.0, 1.0)
 	var y := py + 140.0
 	var rowh := 40.0
-	_result_row(font, lx, rx, y, "Score", str(score), Color(1.0, 0.92, 0.72))
-	var rec := "NEW VENUE RECORD" if results_record else "best here   %d" % best_scores[run_venue]
-	var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
-	draw_string(font, Vector2(rx - 300.0, y + 15.0), rec, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 13, recc)
+	_result_row(font, lx, rx, y, "Score", str(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
+	if age > 54:
+		var rec := "NEW VENUE RECORD" if results_record else "best here   %d" % best_scores[run_venue]
+		var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
+		if results_record:
+			recc.a = 0.7 + 0.3 * sin(float(tick) * 0.1)
+		draw_string(font, Vector2(rx - 300.0, y + 15.0), rec, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 13, recc)
 	y += rowh + 8.0
 	var pct := int(round(100.0 * run_clean()))
-	_result_row(font, lx, rx, y, "Caught  /  Dropped", "%d  /  %d    (%d%%)" % [caught, dropped, pct], Color(0.86, 0.9, 0.82)); y += rowh
-	_result_row(font, lx, rx, y, "Best streak", str(best_streak), Color(0.9, 0.82, 0.6)); y += rowh
+	_result_row(font, lx, rx, y, "Caught  /  Dropped", "%d  /  %d    (%d%%)" % [caught, dropped, pct], Color(0.86, 0.9, 0.82), ra.call(1)); y += rowh
+	_result_row(font, lx, rx, y, "Best streak", str(best_streak), Color(0.9, 0.82, 0.6), ra.call(2)); y += rowh
 	var tval := "%d   (+%d)" % [tricks_landed, trick_score] if trick_score > 0 else str(tricks_landed)
-	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99)); y += rowh
+	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99), ra.call(3)); y += rowh
 	draw_line(Vector2(lx, y - 6.0), Vector2(rx, y - 6.0), Color(0.9, 0.6, 0.35, 0.2), 1.0)
-	_result_row(font, lx, rx, y + 20.0, "Pay", "+%d gold" % last_pay, Color(1.0, 0.86, 0.45)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "Pay", "+%d gold" % last_pay, Color(1.0, 0.86, 0.45), ra.call(4)); y += rowh
 	var rsign := "+" if last_rep_delta >= 0 else ""
 	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
-	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol); y += rowh
-	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%d" % run_xp, Color(0.82, 0.9, 0.7)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%d" % run_xp, Color(0.82, 0.9, 0.7), ra.call(6)); y += rowh
 
-	# footer: how to continue
-	var foot := "R  go again      S  shop      Esc  menu"
-	if points > 0:
-		foot = "R  go again      Tab  +%d point%s      S  shop      Esc  menu" % [points, "" if points == 1 else "s"]
-	draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64))
+	# footer: how to continue, breathing gently once everything is revealed
+	if age > 80:
+		var fa := 0.7 + 0.3 * sin(float(tick) * 0.05)
+		var foot := "R  go again      S  shop      Esc  menu"
+		if points > 0:
+			foot = "R  go again      Tab  +%d point%s      S  shop      Esc  menu" % [points, "" if points == 1 else "s"]
+		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
 
 
 func draw_pause(font: Font, s: Vector2) -> void:
@@ -2977,7 +3358,7 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(0.10, 0.06, 0.08, 0.9 * a))
 	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(1.0, 0.82, 0.45, 0.55 * a), false, 2.0)
 	draw_string(font, Vector2(bx, cy - 4.0), "NEW TRICK   -   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 21, Color(1.0, 0.88, 0.5, a))
-	var how := "press C to select it, then Space to spin" if String(t["kind"]) == "live" else "press Space to arm it, then throw"
+	var how := "press Space to spin while two or more are airborne" if String(t["kind"]) == "live" else "press C to toggle it on  -  it styles every throw"
 	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
 	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
 
@@ -3156,6 +3537,7 @@ func draw_menu(font: Font, s: Vector2) -> void:
 		var col := Color(1.0, 0.9, 0.55) if sel else Color(0.72, 0.66, 0.6)
 		draw_string(font, Vector2(0, oy + float(i) * 44.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
 	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down to choose    Enter to select", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(s.x - 120.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 12, Color(0.6, 0.55, 0.5, 0.7))
 
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -3228,7 +3610,7 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
-	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Control hints", set_hints], ["Throw flags (TOO LOW / high)", set_flags]]
+	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Control hints", set_hints], ["Throw flags (TOO LOW / high)", set_flags], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var oy := s.y * 0.30
@@ -3493,10 +3875,53 @@ func _splat_sound() -> PackedFloat32Array:
 	return out
 
 
+func _cheer_sound() -> PackedFloat32Array:
+	# a crowd swell: the same heavy-lowpassed noise as the murmur bed, but shaped
+	# with a rise-and-fall envelope so it reads as a lift of the whole room
+	var dur := 1.1
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var lp := 0.0
+	var lp2 := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		lp = lp * 0.982 + (randf() * 2.0 - 1.0) * 0.018
+		lp2 = lp2 * 0.86 + lp * 0.14
+		var e := clampf(t / 0.28, 0.0, 1.0) * exp(-maxf(t - 0.28, 0.0) / 0.34)
+		out[i] = lp2 * e
+	var pk := 0.0001
+	for i in n:
+		pk = maxf(pk, absf(out[i]))
+	for i in n:
+		out[i] *= 0.55 / pk
+	return out
+
+
+func _stamp_sound() -> PackedFloat32Array:
+	# a heavy stamp for the grade badge: a low thump plus a snap of noise
+	var dur := 0.22
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		ph += TAU * lerpf(140.0, 62.0, clampf(t / 0.12, 0.0, 1.0)) / AUDIO_SR
+		var body := sin(ph) * exp(-t / 0.09)
+		var snap := (randf() * 2.0 - 1.0) * exp(-t / 0.012) * 0.6
+		out[i] = clampf((body * 0.9 + snap) * 0.7, -1.0, 1.0)
+	return out
+
+
 func gen_sfx() -> void:
 	# catch feedback, by quality: perfect is satisfying, good is a warm nod, late is a
 	# dull "meh", whiff is a soft airy miss. These are the load-bearing sounds.
 	sfx["perfect"] = _wav(_catch_perfect(), false)
+	sfx["cheer"] = _wav(_cheer_sound(), false)
+	sfx["stamp"] = _wav(_stamp_sound(), false)
+	sfx["count"] = _wav(_tone([1318.5], [1.0], 0.05, 0, 0.001, 0.02, 0.22, 0.0), false)
+	sfx["record"] = _wav(_seq_bells([659.3, 784.0, 987.8, 1318.5], 0.09, 0.5), false)
 	sfx["good"] = _wav(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0), false)
 	sfx["late"] = _wav(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03), false)
 	sfx["whiff"] = _wav(_tone([520.0], [1.0], 0.10, 0, 0.001, 0.045, 0.20, 0.4), false)
@@ -3667,10 +4092,21 @@ func draw_cutscene(font: Font, s: Vector2) -> void:
 	if script.is_empty():
 		return
 	var shot: Dictionary = script[clampi(cs_shot, 0, script.size() - 1)]
+	var age := cine_tick - cs_shot_start
+
+	# a slow Ken Burns camera: each shot drifts through a gentle zoom (alternating
+	# push-in and pull-back) with a whisper of lateral pan, so a held tableau reads
+	# as a filmed scene rather than a still. The scene always overfills the frame
+	# (zoom stays above 1), so no edge is ever exposed.
+	var hold := maxi(1, int(shot.get("hold", 300)))
+	var prog := clampf(float(age) / float(hold), 0.0, 1.0)
+	var z := lerpf(1.03, 1.10, prog) if cs_shot % 2 == 0 else lerpf(1.10, 1.03, prog)
+	var pan := sin(float(cs_shot) * 1.7) * 16.0 * (prog - 0.5)
+	draw_set_transform(s * 0.5 * (1.0 - z) + Vector2(pan, 0.0), 0.0, Vector2(z, z))
 	draw_shot(shot, s)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	# each cut dissolves in from black, so the shots read as a film, not a slideshow
-	var age := cine_tick - cs_shot_start
 	var fin := clampf(float(age) / 22.0, 0.0, 1.0)
 	if fin < 1.0:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
@@ -3685,16 +4121,19 @@ func draw_cutscene(font: Font, s: Vector2) -> void:
 	draw_title_glow(font, 30.0, title, 30, Color(1.0, 0.88, 0.55), s)
 	draw_ornament(s.x * 0.5, 58.0, 150.0, Color(0.82, 0.62, 0.34, 0.85))
 
-	# caption in the lower bar, fading in just after the picture
+	# caption in the lower bar: it fades in just after the picture and TYPES itself
+	# out, an unhurried storyteller's cadence that also paces the reader's eye
 	var capA := clampf(float(age - 8) / 20.0, 0.0, 1.0)
 	var who := String(shot.get("who", ""))
 	var cap := String(shot.get("cap", ""))
+	var chars := maxi(0, int(float(age - 12) * 1.15))
+	var shown := cap.substr(0, mini(chars, cap.length()))
 	var mx := 96.0
 	var cy := s.y - botbar + 32.0
 	if who != "":
 		draw_string(font, Vector2(mx, cy), who, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(1.0, 0.82, 0.42, capA))
 		cy += 27.0
-	draw_multiline_string(font, Vector2(mx, cy), cap, HORIZONTAL_ALIGNMENT_LEFT, s.x - 2.0 * mx, 20, -1, Color(0.95, 0.9, 0.82, capA))
+	draw_multiline_string(font, Vector2(mx, cy), shown, HORIZONTAL_ALIGNMENT_LEFT, s.x - 2.0 * mx, 20, -1, Color(0.95, 0.9, 0.82, capA))
 
 	draw_shot_dots(script.size(), cs_shot, s.x * 0.5, s.y - 20.0)
 	draw_string(font, Vector2(s.x - 220.0, s.y - 14.0), "any key:  next", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.72, 0.67, 0.6))
@@ -3714,7 +4153,11 @@ func draw_shot(shot: Dictionary, s: Vector2) -> void:
 # --- the establishing card: WHERE you are about to perform --------------------
 
 func draw_establish(font: Font, s: Vector2) -> void:
+	# the exterior drifts in a slow push, matching the cutscene camera language
+	var ez := 1.0 + 0.07 * clampf(float(cine_tick) / 340.0, 0.0, 1.0)
+	draw_set_transform(s * 0.5 * (1.0 - ez), 0.0, Vector2(ez, ez))
 	draw_venue_exterior(s, establish_venue)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var fin := clampf(float(cine_tick) / 26.0, 0.0, 1.0)
 	if fin < 1.0:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
@@ -3820,10 +4263,10 @@ func draw_dust(s: Vector2, n: int, glow: Color) -> void:
 		var seed := float(i) * 41.3
 		var bx := fposmod(sin(seed) * 43758.5, 1.0)
 		var speed := 0.15 + fposmod(cos(seed) * 12.9, 1.0) * 0.25
-		var by := fposmod(0.9 - float(cine_tick) * 0.0008 * speed - float(i) * 0.13, 1.0)
-		var px := bx * s.x + sin(float(cine_tick) * 0.01 + seed) * 12.0
+		var by := fposmod(0.9 - atick() * 0.0008 * speed - float(i) * 0.13, 1.0)
+		var px := bx * s.x + sin(atick() * 0.01 + seed) * 12.0
 		var py := by * s.y
-		var a := 0.10 + 0.10 * sin(float(cine_tick) * 0.03 + seed)
+		var a := 0.10 + 0.10 * sin(atick() * 0.03 + seed)
 		draw_circle(Vector2(px, py), 1.4, Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
 
 
@@ -4044,7 +4487,82 @@ func spawn_egg_break(at: Vector2) -> void:
 		"r": 3.0, "born": tick})
 
 
+# --- the cosmetic particle layer: sparks, embers, confetti, shock rings --------
+# Spawned on catches, drops, records and torches; stepped here, never in the sim,
+# and drawn late so the juice sits over the stage. All positions use the global
+# randf (cosmetic RNG), so the deterministic sim rng is never consumed.
+
+func spawn_parts(at: Vector2, col: Color, n: int, spd: float, kind: String = "spark") -> void:
+	for _i in n:
+		var ang := randf_range(-PI, PI) if kind != "confetti" else randf_range(-PI * 0.8, -PI * 0.2)
+		var v := Vector2(cos(ang), sin(ang)) * randf_range(spd * 0.4, spd)
+		if kind == "spark":
+			v.y -= spd * 0.5   # sparks kick upward off the impact
+		var life := 34
+		if kind == "confetti":
+			life = 90
+		elif kind == "ring":
+			life = 18   # a quick pulse; a lingering circle reads as clutter
+		parts.append({"kind": kind, "pos": at + Vector2(randf_range(-3, 3), randf_range(-3, 3)),
+			"vel": v, "col": col, "born": tick, "life": life,
+			"seed": randf() * TAU, "r": randf_range(1.6, 3.0)})
+
+
+func step_parts() -> void:
+	if parts.is_empty():
+		return
+	var keep: Array[Dictionary] = []
+	for d in parts:
+		var v: Vector2 = d["vel"]
+		match String(d["kind"]):
+			"spark":
+				v.y += 0.16
+				v *= 0.96
+			"ember":
+				v.y -= 0.05   # embers drift up off the flame
+				v.x += sin(float(tick) * 0.2 + float(d["seed"])) * 0.05
+				v *= 0.98
+			"confetti":
+				v.y = minf(v.y + 0.10, 1.4)   # flutter down, swaying
+				v.x = sin(float(tick) * 0.11 + float(d["seed"])) * 1.1
+			"ring":
+				pass
+		d["vel"] = v
+		d["pos"] = Vector2(d["pos"]) + v
+		if tick - int(d["born"]) < int(d["life"]):
+			keep.append(d)
+	parts = keep
+
+
+func draw_parts() -> void:
+	for d in parts:
+		var age := tick - int(d["born"])
+		var f := clampf(1.0 - float(age) / float(int(d["life"])), 0.0, 1.0)
+		var p: Vector2 = d["pos"]
+		var c: Color = d["col"]
+		match String(d["kind"]):
+			"ring":
+				# an expanding shockwave stroke that thins as it grows
+				var rr := 14.0 + float(age) * 2.6
+				draw_arc(p, rr, 0.0, TAU, 40, Color(c.r, c.g, c.b, 0.5 * f), maxf(1.0, 3.5 * f), true)
+			"confetti":
+				var ang := float(d["seed"]) + float(age) * 0.12
+				draw_set_transform(p, ang, Vector2.ONE)
+				draw_rect(Rect2(-3.0, -1.6, 6.0, 3.2), Color(c.r, c.g, c.b, 0.9 * f))
+				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			"ember":
+				draw_circle(p, float(d["r"]) * (0.6 + 0.4 * f), Color(c.r, c.g, c.b, 0.7 * f))
+			_:
+				draw_circle(p, float(d["r"]) * f + 0.6, Color(c.r, c.g, c.b, 0.9 * f))
+
+
 func step_effects() -> void:
+	step_parts()
+	# lit torches shed a lazy ember now and then, so fire reads as fire
+	if tick % 9 == 0:
+		for b in balls:
+			if b.kind == PROP_TORCHES and b.state == STATE_FLIGHT:
+				spawn_parts(flight_pos(b) + Vector2(0, -10), Color(1.0, 0.6, 0.2), 1, 0.7, "ember")
 	var keep_sh: Array[Dictionary] = []
 	for d in shards:
 		var v: Vector2 = d["vel"]
@@ -4117,7 +4635,13 @@ func draw_popups(font: Font) -> void:
 		var pos: Vector2 = p["pos"] + Vector2(0, -float(age) * 0.6)
 		var c: Color = p["col"]
 		c.a = a
-		draw_string(font, pos, p["text"], HORIZONTAL_ALIGNMENT_CENTER, 120, 18, c)
+		var txt := String(p["text"])
+		# the big moments land bigger, with a quick settle from oversized to rest
+		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL")
+		var size := 18
+		if big:
+			size = 23 + maxi(0, 6 - age)
+		draw_string(font, pos - Vector2(60.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
 
 
 # --- venue exteriors: the "where", shared by establishing cards and wide shots -
@@ -4233,7 +4757,7 @@ func draw_stars(s: Vector2, n: int, topfrac: float) -> void:
 		var seed := float(i) * 23.13
 		var x := fposmod(sin(seed) * 43758.5, 1.0) * s.x
 		var y := fposmod(cos(seed) * 24137.0, 1.0) * s.y * topfrac
-		var a := 0.3 + 0.5 * sin(float(cine_tick) * 0.04 + seed)
+		var a := 0.3 + 0.5 * sin(atick() * 0.04 + seed)
 		draw_circle(Vector2(x, y), 1.3, Color(1, 1, 1, clampf(a, 0.05, 0.7)))
 
 
@@ -4247,7 +4771,7 @@ func draw_house(base: Vector2, w: float, h: float) -> void:
 	draw_rect(Rect2(base.x - w * 0.5, base.y - h, w, h), Color(0.10, 0.09, 0.11))
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(base.x - w * 0.6, base.y - h), Vector2(base.x + w * 0.6, base.y - h), Vector2(base.x, base.y - h - h * 0.5)]), Color(0.07, 0.06, 0.08))
-	var flick := 0.7 + 0.3 * sin(float(cine_tick) * 0.05)
+	var flick := 0.7 + 0.3 * sin(atick() * 0.05)
 	var wx := base.x - w * 0.20
 	var wy := base.y - h * 0.66
 	draw_circle(Vector2(wx + w * 0.11, wy + h * 0.14), w * 0.3, Color(1.0, 0.7, 0.3, 0.12 * flick))
@@ -4278,7 +4802,7 @@ func draw_grass(s: Vector2, y: float) -> void:
 	var x := 0.0
 	while x < s.x:
 		var hgt := 6.0 + fposmod(sin(x) * 20.0, 1.0) * 8.0
-		draw_line(Vector2(x, y + 6.0), Vector2(x + sin(float(cine_tick) * 0.02 + x) * 2.0, y + 6.0 - hgt), col, 2.0)
+		draw_line(Vector2(x, y + 6.0), Vector2(x + sin(atick() * 0.02 + x) * 2.0, y + 6.0 - hgt), col, 2.0)
 		x += 14.0
 
 
@@ -4325,7 +4849,7 @@ func draw_marquee(center: Vector2, w: float) -> void:
 	draw_rect(Rect2(center.x - w * 0.5, center.y - h * 0.5, w, h), Color(0.9, 0.7, 0.35), false, 2.0)
 	var n := int(w / 16.0)
 	for i in n:
-		var on := ((i + int(cine_tick / 12)) % 2) == 0
+		var on := ((i + int(atick() / 12.0)) % 2) == 0
 		var bx := center.x - w * 0.5 + w * (float(i) + 0.5) / float(n)
 		var col := Color(1.0, 0.85, 0.4) if on else Color(0.4, 0.3, 0.2)
 		draw_circle(Vector2(bx, center.y - h * 0.5 - 4.0), 2.5, col)
@@ -4346,7 +4870,7 @@ func draw_bigtop(base: Vector2, w: float, h: float) -> void:
 	draw_circle(Vector2(base.x, base.y - 70.0), 16.0, Color(0.08, 0.06, 0.06))
 	draw_rect(Rect2(base.x - 30.0, base.y - 8.0, 60.0, 8.0), Color(0.6, 0.15, 0.15))
 	draw_rect(Rect2(top.x - 2.0, top.y - 40.0, 4.0, 40.0), Color(0.3, 0.2, 0.14))
-	var fl := sin(float(cine_tick) * 0.1) * 6.0
+	var fl := sin(atick() * 0.1) * 6.0
 	draw_colored_polygon(PackedVector2Array([Vector2(top.x + 2.0, top.y - 40.0), Vector2(top.x + 30.0, top.y - 34.0 + fl), Vector2(top.x + 2.0, top.y - 28.0)]), Color(0.95, 0.75, 0.3))
 
 
@@ -4361,7 +4885,7 @@ func draw_lantern_string(a: Vector2, b: Vector2) -> void:
 			var p2 := a.lerp(b, t2)
 			p2.y += sin(t2 * PI) * 26.0
 			draw_line(p, p2, Color(0.3, 0.2, 0.15), 1.5)
-		var fl := 0.7 + 0.3 * sin(float(cine_tick) * 0.08 + float(i))
+		var fl := 0.7 + 0.3 * sin(atick() * 0.08 + float(i))
 		draw_circle(p, 7.0, Color(1.0, 0.72, 0.35, 0.18 * fl))
 		draw_circle(p, 4.0, Color(1.0, 0.8, 0.4, fl))
 
@@ -4377,7 +4901,7 @@ func draw_arena_bowl(base: Vector2, w: float, h: float, body: Color, rim: Color)
 
 func draw_banner(top: Vector2, col: Color) -> void:
 	draw_rect(Rect2(top.x - 2.0, top.y, 4.0, 210.0), Color(0.1, 0.1, 0.12))
-	var fl := sin(float(cine_tick) * 0.12 + top.x) * 5.0
+	var fl := sin(atick() * 0.12 + top.x) * 5.0
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(top.x + 2.0, top.y), Vector2(top.x + 40.0, top.y + 6.0 + fl), Vector2(top.x + 40.0, top.y + 30.0 + fl), Vector2(top.x + 2.0, top.y + 30.0)]), col)
 
