@@ -66,6 +66,22 @@ const ST_CUTSCENE := 3    # an illustrated story beat (now an animated mini-film
 const ST_PLAY := 4        # the juggling itself
 const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before a set
 const ST_CREDITS := 6     # a slow, code-drawn credits roll after the grand finale
+const ST_DAY := 7         # the day hub: a juggler's life between performances
+
+# --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
+# A day holds three action segments. Performing or practicing spends one, eating
+# and shopping are quick, sleeping ends the day. Stamina persists across the day
+# and only sleep restores it, so the existing fatigue rules finally have a rhythm.
+# Skill-first guardrail: none of this touches the catch or throw timing floor.
+const SEG_PER_DAY := 3
+const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly up
+const EAT_STAM := 14.0
+const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
+const INN_COST := 15       # a proper bed: full stamina on waking
+const ROUGH_FRAC := 0.6    # sleeping rough is free but restores only this fraction
+const VENUE_PAY := 0.35    # each venue tier pays this much more than the last
+const BUSK_FLOOR := 8      # a broke juggler always earns at least this from the hat
+const BROKE_GOLD := 20     # the busking floor applies below this purse
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
@@ -270,6 +286,15 @@ var _prev_running := false
 var game_state := ST_MENU
 var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
+
+# --- day-loop state (persisted per slot) ---------------------------------------
+var day := 1              # which day of the career this is
+var seg_used := 0         # action segments spent today (0..SEG_PER_DAY)
+var venue_pick := 0       # which unlocked venue you have chosen to play
+var meals := 0            # meals eaten toward the next point of Strength
+var day_sel := 0          # cursor in the day hub
+var day_msg := ""         # transient hub feedback ("the day is spent, sleep")
+var day_msg_tick := -999  # cine_tick the message appeared
 var venue_seen := 0       # highest venue reached, so promotions fire once
 var story_seen := 0       # how many endgame story milestones have played (see STORY_REP)
 var cutscene_queue: Array[String] = []  # pending story beats to show
@@ -407,7 +432,7 @@ func _ready() -> void:
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
-	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause")
+	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day")
 	if ua.has("--menu"):
 		skip_menu = false
 	if skip_menu:
@@ -460,6 +485,8 @@ func _ready() -> void:
 	if ua.has("--credits"):           # dev: jump straight to the credits roll for a screenshot
 		game_state = ST_CREDITS
 		cine_tick = 0
+	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
+		enter_day()
 	var ni := ua.find("--csn")        # dev: pin a specific shot index for a stable capture
 	if ni != -1 and ni + 1 < ua.size():
 		cs_shot = int(ua[ni + 1])
@@ -576,6 +603,9 @@ func _input(event: InputEvent) -> void:
 		ST_CREDITS:
 			credits_key()
 			return
+		ST_DAY:
+			day_input(kc)
+			return
 	# the in-play pause menu owns all input while it is up
 	if paused:
 		pause_input(kc)
@@ -586,71 +616,33 @@ func _input(event: InputEvent) -> void:
 		if kc == KEY_ESCAPE:
 			open_pause()
 		return
-	# the end-of-performance results panel: go again, spend/shop, or leave to the
-	# menu. It stays open behind the sheet and shop, so you can invest then continue.
+	# the end-of-performance results panel: go again (another booking, so it costs
+	# a fresh day segment), spend/shop, or step back out into the day. It stays
+	# open behind the sheet and shop, so you can invest then continue.
 	if results_open and not sheet_open and not shop_open:
 		match kc:
 			KEY_R, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-				results_open = false
-				start_run(num_balls)
+				if segments_left() > 0:
+					seg_used += 1
+					save_progress()
+					results_open = false
+					start_run(num_balls)
+				else:
+					play_sfx("whiff", -10.0)   # the day is spent, sleep first
 			KEY_TAB:
 				sheet_open = true
 			KEY_S:
 				shop_open = true
 			KEY_ESCAPE:
 				results_open = false
-				game_state = ST_MENU
+				enter_day()
 		return
 	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
-		match kc:
-			KEY_TAB, KEY_ESCAPE:
-				sheet_open = false
-			KEY_1:
-				_sheet_invest("acc")
-			KEY_2:
-				_sheet_invest("str")
-			KEY_3:
-				_sheet_invest("end")
-			KEY_Q:
-				if debug_mode: _adjust("acc", -1)
-			KEY_W:
-				if debug_mode: _adjust("str", -1)
-			KEY_E:
-				if debug_mode: _adjust("end", -1)
-			KEY_M:
-				if debug_mode:
-					money += 50
-					save_progress()
-			KEY_N:
-				if debug_mode:
-					money = maxi(0, money - 50)
-					save_progress()
-			KEY_PERIOD:
-				if debug_mode:   # raise reputation to preview later venues/costumes
-					reputation += 250
-					save_progress()
-			KEY_COMMA:
-				if debug_mode:
-					reputation = maxi(0, reputation - 250)
-					save_progress()
+		sheet_input(kc)
 		return
 	if shop_open:
-		match kc:
-			KEY_TAB, KEY_ESCAPE, KEY_S:
-				shop_open = false
-			KEY_1:
-				try_buy(PROP_EGGS)
-			KEY_2:
-				try_buy(PROP_RINGS)
-			KEY_3:
-				try_buy(PROP_CLUBS)
-			KEY_4:
-				try_buy(PROP_KNIVES)
-			KEY_5:
-				try_buy(PROP_TORCHES)
-			KEY_6:
-				try_buy_glasses()
+		shop_input(kc)
 		return
 	# a performance cannot be reset or rebuilt mid-set: no restart, no ball-count
 	# change, no prop swap, no bailing to practice. That would make a good ending
@@ -662,9 +654,6 @@ func _input(event: InputEvent) -> void:
 			sheet_open = true
 		KEY_S:
 			shop_open = true
-		KEY_P:
-			if not performing:
-				toggle_mode()
 		KEY_ENTER, KEY_KP_ENTER:
 			finish_performance()   # end the set on a high note, no drop needed
 		KEY_R:
@@ -793,25 +782,16 @@ func pause_activate() -> void:
 		0:   # resume the run right where it froze
 			paused = false
 			play_sfx("ui2", -14.0)
-		1:   # step back to the main menu (clearing any lesson or panels)
+		1:   # end the session and step back out into the day (clears any panels)
 			paused = false
 			tut_active = false
 			results_open = false
 			sheet_open = false
 			shop_open = false
-			game_state = ST_MENU
-			menu_sel = 0
+			enter_day()
 			play_sfx("ui", -12.0)
 		2:   # leave the game
 			get_tree().quit()
-
-
-func toggle_mode() -> void:
-	if mode == MODE_TRAIN:
-		begin_performance(num_balls)   # show the venue exterior, then go on stage
-	else:
-		mode = MODE_TRAIN
-		start_run(num_balls)           # dropping back to practice is instant
 
 
 func finish_performance() -> void:
@@ -830,7 +810,7 @@ func begin_performance(n: int) -> void:
 	# the way a film cuts to the outside of the building before the scene inside
 	mode = MODE_PERFORM
 	establish_after = n
-	establish_venue = venue_index()
+	establish_venue = play_venue()
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -838,6 +818,220 @@ func begin_performance(n: int) -> void:
 func establish_key() -> void:
 	game_state = ST_PLAY
 	start_run(establish_after)   # the card dismissed: walk out and begin the set
+
+
+# =============================================================================
+# The day hub (GDD 4.5): a juggler's life between performances. A day holds
+# SEG_PER_DAY action segments. Performing and practicing each spend one, eating
+# and the shop are quick, sleep ends the day and restores stamina. Everything
+# here is texture and pacing around the juggling, never a new difficulty axis,
+# so the skill-first guardrails are untouched.
+# =============================================================================
+
+func play_venue() -> int:
+	# the stage you CHOSE to play tonight, never above what reputation unlocks
+	return clampi(venue_pick, 0, venue_index())
+
+
+func segments_left() -> int:
+	return maxi(0, SEG_PER_DAY - seg_used)
+
+
+func seg_name() -> String:
+	var names := ["morning", "afternoon", "evening", "night"]
+	return names[clampi(seg_used, 0, 3)]
+
+
+func enter_day() -> void:
+	game_state = ST_DAY
+	day_sel = 0
+	day_msg = ""
+	view_venue = -1
+	cine_tick = 0
+	save_progress()
+
+
+func set_day_msg(m: String) -> void:
+	day_msg = m
+	day_msg_tick = cine_tick
+
+
+func day_rows() -> Array[Dictionary]:
+	# the hub's actions with their live enabled state and the reason when not.
+	# built fresh every frame and every keypress so drawing and input always agree.
+	var vname := String(venue_data(play_venue())["name"])
+	var out: Array[Dictionary] = []
+	var spent := segments_left() <= 0
+	out.append({"id": "perform", "name": "PERFORM  at  %s" % vname,
+		"cost": "1 segment", "ok": not spent,
+		"why": "the day is spent, sleep first" if spent else "",
+		"sub": "earn gold and reputation. Left and Right choose the stage."})
+	out.append({"id": "practice", "name": "PRACTICE",
+		"cost": "1 segment", "ok": not spent,
+		"why": "the day is spent, sleep first" if spent else "",
+		"sub": "a free session, no crowd and no pay. Restart as often as you like."})
+	var full := stamina >= stamina_max - 1.0
+	var can_eat := money >= EAT_COST and not full
+	var eat_why := ""
+	if money < EAT_COST:
+		eat_why = "not enough gold"
+	elif full:
+		eat_why = "not hungry yet"
+	out.append({"id": "eat", "name": "EAT",
+		"cost": "%d gold" % EAT_COST, "ok": can_eat, "why": eat_why,
+		"sub": "a hot meal restores stamina. Every third meal builds a point of Strength."})
+	out.append({"id": "inn", "name": "SLEEP  at the inn",
+		"cost": "%d gold" % INN_COST, "ok": money >= INN_COST,
+		"why": "not enough gold" if money < INN_COST else "",
+		"sub": "ends the day. Wake fully rested."})
+	out.append({"id": "rough", "name": "SLEEP  rough",
+		"cost": "free", "ok": true, "why": "",
+		"sub": "ends the day. A cold doorway restores only part of your strength."})
+	out.append({"id": "shop", "name": "SHOP",
+		"cost": "", "ok": true, "why": "",
+		"sub": "props and gear. New props teach themselves the first time."})
+	return out
+
+
+func day_input(kc: int) -> void:
+	# the sheet and shop overlays keep their usual keys while open over the hub
+	if sheet_open:
+		sheet_input(kc)
+		return
+	if shop_open:
+		shop_input(kc)
+		return
+	var rows := day_rows()
+	var n := rows.size()
+	match kc:
+		KEY_UP, KEY_W:
+			day_sel = (day_sel + n - 1) % n
+			play_sfx("ui", -14.0)
+		KEY_DOWN, KEY_S:
+			day_sel = (day_sel + 1) % n
+			play_sfx("ui", -14.0)
+		KEY_LEFT, KEY_RIGHT:
+			# choosing tonight's stage is free, any venue reputation has unlocked
+			if String(rows[day_sel]["id"]) == "perform":
+				var dir := 1 if kc == KEY_RIGHT else -1
+				var top := venue_index()
+				venue_pick = (play_venue() + dir + top + 1) % (top + 1)
+				play_sfx("ui2", -14.0)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			day_activate(String(rows[day_sel]["id"]), bool(rows[day_sel]["ok"]), String(rows[day_sel]["why"]))
+		KEY_TAB:
+			sheet_open = true
+			play_sfx("ui2", -13.0)
+		KEY_ESCAPE:
+			save_progress()
+			game_state = ST_MENU
+			menu_sel = 0
+			play_sfx("ui", -12.0)
+
+
+func day_activate(id: String, ok: bool, why: String) -> void:
+	if not ok:
+		set_day_msg(why)
+		play_sfx("whiff", -10.0)
+		return
+	match id:
+		"perform":
+			seg_used += 1
+			save_progress()
+			begin_performance(num_balls)
+			play_sfx("ui2", -11.0)
+		"practice":
+			seg_used += 1
+			save_progress()
+			mode = MODE_TRAIN
+			game_state = ST_PLAY
+			start_run(num_balls)
+			play_sfx("ui2", -11.0)
+		"eat":
+			money -= EAT_COST
+			stamina = minf(stamina_max, stamina + EAT_STAM)
+			meals += 1
+			if meals % MEALS_PER_STR == 0 and strength < 100:
+				strength += 1
+				set_day_msg("the good food is paying off  -  Strength +1")
+				play_sfx("streak", -8.0)
+			else:
+				set_day_msg("a hot meal, stamina restored a little")
+				play_sfx("coin", -10.0)
+			save_progress()
+		"inn":
+			money -= INN_COST
+			sleep_day(1.0)
+		"rough":
+			sleep_day(ROUGH_FRAC)
+		"shop":
+			shop_open = true
+			play_sfx("ui2", -13.0)
+
+
+func sleep_day(frac: float) -> void:
+	# the day turns over: segments refill and stamina comes back by how well you
+	# slept. Sleeping rough never DRAINS you, it just fails to top you up fully.
+	day += 1
+	seg_used = 0
+	stamina = maxf(stamina, stamina_max * frac)
+	set_day_msg("day %d  -  %s" % [day, "you wake rested" if frac >= 1.0 else "a stiff back, but a new day"])
+	play_sfx("streak", -9.0)
+	save_progress()
+
+
+func sheet_input(kc: int) -> void:
+	# the character sheet's keys, shared by the play overlay and the day hub
+	match kc:
+		KEY_TAB, KEY_ESCAPE:
+			sheet_open = false
+		KEY_1:
+			_sheet_invest("acc")
+		KEY_2:
+			_sheet_invest("str")
+		KEY_3:
+			_sheet_invest("end")
+		KEY_Q:
+			if debug_mode: _adjust("acc", -1)
+		KEY_W:
+			if debug_mode: _adjust("str", -1)
+		KEY_E:
+			if debug_mode: _adjust("end", -1)
+		KEY_M:
+			if debug_mode:
+				money += 50
+				save_progress()
+		KEY_N:
+			if debug_mode:
+				money = maxi(0, money - 50)
+				save_progress()
+		KEY_PERIOD:
+			if debug_mode:   # raise reputation to preview later venues/costumes
+				reputation += 250
+				save_progress()
+		KEY_COMMA:
+			if debug_mode:
+				reputation = maxi(0, reputation - 250)
+				save_progress()
+
+
+func shop_input(kc: int) -> void:
+	# the shop's keys, shared by the play overlay and the day hub
+	match kc:
+		KEY_TAB, KEY_ESCAPE, KEY_S:
+			shop_open = false
+		KEY_1:
+			try_buy(PROP_EGGS)
+		KEY_2:
+			try_buy(PROP_RINGS)
+		KEY_3:
+			try_buy(PROP_CLUBS)
+		KEY_4:
+			try_buy(PROP_KNIVES)
+		KEY_5:
+			try_buy(PROP_TORCHES)
+		KEY_6:
+			try_buy_glasses()
 
 
 func cycle_prop(dir: int) -> void:
@@ -1036,10 +1230,9 @@ func tut_finish() -> void:
 	mode = MODE_TRAIN
 	if not was_prop:
 		prop_type = PROP_BALLS   # after the basics, drop back to plain balls
-	var s := get_viewport_rect().size
-	add_popup(Vector2(s.x * 0.5, s.y * 0.40), "lesson complete", Color(1.0, 0.86, 0.42))
 	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
-	start_run(3)
+	enter_day()
+	set_day_msg("lesson complete  -  your day begins")
 
 
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
@@ -1269,15 +1462,18 @@ func finish_beats() -> void:
 		game_state = ST_CREDITS
 		cine_tick = 0
 		return
-	game_state = ST_PLAY
 	if not started:
-		# a fresh game: after the opening story, teach the basics hands-on before the
-		# first real run (one ball, then two, then the cascade)
+		# a fresh game: after the opening story, teach the basics hands-on before
+		# the day begins (one ball, then two, then the cascade)
 		if not seen_tuts.has("balls"):
 			seen_tuts.append("balls")
 			begin_tutorial("balls")
 		else:
-			start_run(3)
+			enter_day()
+		return
+	# a promotion beat fired mid-career: return to the frozen stage, where the
+	# results card is still waiting to be dismissed into the day
+	game_state = ST_PLAY
 
 
 func start_slot(i: int) -> void:
@@ -1288,8 +1484,7 @@ func start_slot(i: int) -> void:
 		begin_cutscene(["intro"])
 	else:
 		load_progress()
-		game_state = ST_PLAY
-		start_run(3)
+		enter_day()   # an existing career resumes at its day, not mid-juggle
 
 
 func reset_new_game() -> void:
@@ -1308,6 +1503,10 @@ func reset_new_game() -> void:
 	venue_seen = 0
 	story_seen = 0
 	best_scores = [0, 0, 0, 0, 0, 0]
+	day = 1
+	seg_used = 0
+	venue_pick = 0
+	meals = 0
 	started = false
 	stamina_max = 50.0 + float(endurance)
 	stamina = stamina_max
@@ -1685,11 +1884,16 @@ func start_run(n: int) -> void:
 	running = false
 	started = false
 	stamina_max = 50.0 + float(endurance)
-	stamina = stamina_max          # each run starts rested
+	# stamina PERSISTS through the day now: only sleep (or a meal) restores it, so
+	# a third booking in one evening is genuinely tired work. Dev auto-runs top up
+	# so screenshots stay comparable.
+	if _demo or _shot or debug_mode:
+		stamina = stamina_max
+	stamina = clampf(stamina, 0.0, stamina_max)
 	run_xp = 0
 	last_pay = 0
 	last_rep_delta = 0
-	run_venue = venue_index()   # records and the results card key off where you performed
+	run_venue = play_venue()   # records and the results card key off where you performed
 	results_open = false
 	results_record = false
 	results_tick = -999
@@ -2119,7 +2323,13 @@ func on_round_end() -> void:
 		var rep_delta := int(round((quality - 0.5) * float(REP_SWING)))
 		reputation = maxi(0, reputation + rep_delta)
 		last_rep_delta = rep_delta
-		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult()))
+		# a grander stage pays more for the same set (the climb is worth money),
+		# and a broke juggler always leaves with SOMETHING in the hat, so debt is
+		# tension rather than a dead end (GDD 4.4 busking floor)
+		var venue_mult := 1.0 + VENUE_PAY * float(run_venue)
+		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult() * venue_mult))
+		if money < BROKE_GOLD and caught > 0:
+			last_pay = maxi(last_pay, BUSK_FLOOR)
 		money += last_pay
 		if last_pay > 0:
 			play_sfx("coin", -8.0)   # the pay chime at the end of a performance
@@ -2326,7 +2536,7 @@ func venue_index_of(rep: int) -> int:
 
 func cur_venue() -> int:
 	# cutscenes and previews can override which venue palette we render
-	return view_venue if view_venue >= 0 else venue_index()
+	return view_venue if view_venue >= 0 else play_venue()
 
 
 func venue_data(i: int) -> Dictionary:
@@ -2507,8 +2717,16 @@ func load_progress() -> void:
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
 				best_scores[i] = int((bs as Array)[i])
+		day = int(cf.get_value("day", "day", 1))
+		seg_used = int(cf.get_value("day", "seg_used", 0))
+		venue_pick = int(cf.get_value("day", "venue_pick", -1))
+		meals = int(cf.get_value("day", "meals", 0))
 	stamina_max = 50.0 + float(endurance)
-	stamina = stamina_max
+	# stamina persists through the day now (sleep restores it). An old save that
+	# predates the day loop simply wakes rested.
+	stamina = clampf(float(cf.get_value("day", "stamina", stamina_max)), 0.0, stamina_max)
+	if venue_pick < 0:
+		venue_pick = venue_index()   # older saves default to their grandest stage
 
 
 func save_progress() -> void:
@@ -2527,6 +2745,11 @@ func save_progress() -> void:
 	cf.set_value("prog", "venue_seen", venue_seen)
 	cf.set_value("prog", "story_seen", story_seen)
 	cf.set_value("prog", "best_scores", best_scores)
+	cf.set_value("day", "day", day)
+	cf.set_value("day", "seg_used", seg_used)
+	cf.set_value("day", "venue_pick", venue_pick)
+	cf.set_value("day", "meals", meals)
+	cf.set_value("day", "stamina", stamina)
 	cf.save(save_file())
 
 
@@ -2646,6 +2869,13 @@ func _draw() -> void:
 			return
 		ST_CREDITS:
 			draw_credits(font, s)
+			return
+		ST_DAY:
+			draw_day(font, s)
+			if sheet_open:
+				draw_sheet(font, s)
+			if shop_open:
+				draw_shop(font, s)
 			return
 	draw_backdrop(s)
 	draw_egg_splats()      # yolk on the floor sits behind the performer
@@ -3463,13 +3693,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if not tut_active and not results_open:
 		var patt := "cascade" if pattern == CASCADE else "fountain"
 		var propname := String(cur_prop()["name"]).to_upper()
-		var vname := String(venue_data(venue_index())["name"]).to_upper()
+		var vname := String(venue_data(play_venue())["name"]).to_upper()
 		if prop_deficit() > 0.0:
 			draw_string(font, Vector2(30, s.y - 106), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
 		hud_panel(Rect2(18, s.y - 78, 330, 60))
 		draw_string(font, Vector2(34, s.y - 54), vname, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.8, 0.5))
 		draw_prop_icon(prop_type, Vector2(44, s.y - 34))
-		draw_string(font, Vector2(64, s.y - 28), "%d %s   -   %s" % [num_balls, propname.to_lower(), patt], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.6))
+		draw_string(font, Vector2(64, s.y - 28), "%d %s   -   %s   -   day %d, %s" % [num_balls, propname.to_lower(), patt, day, seg_name()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.6))
 		if not performing and next_ball_strength() > 0:
 			draw_string(font, Vector2(34, s.y - 86), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.66, 0.56, 0.85))
 		if set_hints:
@@ -3485,7 +3715,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			else:
 				draw_hints_row(font, cx, s.y - 58, [
 					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
-					[["P"], "perform"], [["R"], "restart"]])
+					[["R"], "restart"]])
 				draw_hints_row(font, cx, s.y - 34, [
 					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["S"], "shop"],
 					[["Tab"], "sheet"], [k_pause(), "pause"]])
@@ -3496,7 +3726,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var tnames := "( L2 or R2 )" if pad_active() else "( F or J )"
 			draw_string(font, Vector2(0, s.y * 0.23), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
-			draw_string(font, Vector2(0, s.y * 0.23 + 26.0), "P to %s instead" % ("train" if performing else "perform"),
+			draw_string(font, Vector2(0, s.y * 0.23 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.85, 0.75, 0.6, 0.8))
 		elif not running and not results_open:
 			# training (or a performance with no panel) keeps the plain end-of-run line
@@ -3617,7 +3847,7 @@ func draw_pause(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
 	draw_string(font, Vector2(px, py + 52.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 30, Color(1.0, 0.86, 0.5))
 	draw_ornament(px + pw * 0.5, py + 70.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
-	var opts: Array[String] = ["Resume", "Main Menu", "Quit Game"]
+	var opts: Array[String] = ["Resume", "End the session", "Quit Game"]
 	var oy := py + 116.0
 	for i in opts.size():
 		var sel := i == pause_sel
@@ -3799,6 +4029,87 @@ func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> 
 # Menu, save-slot, settings, and cutscene screens.
 # -----------------------------------------------------------------------------
 
+func draw_day(font: Font, s: Vector2) -> void:
+	# the day hub: the chosen venue's exterior breathes behind a veil while the
+	# day's ledger and actions sit over it. The world is where you will play
+	# tonight, which makes choosing a stage feel like standing in front of it.
+	draw_venue_exterior(s, play_venue())
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.60))
+	draw_vignette(s, 0.55)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+	# header: which day it is and how much of it is left, as three little diamonds
+	draw_title_glow(font, s.y * 0.055, "DAY %d" % day, 40, Color(1.0, 0.88, 0.5), s)
+	draw_string(font, Vector2(0, s.y * 0.055 + 66.0), seg_name(), HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.8, 0.62))
+	draw_ornament(s.x * 0.5, s.y * 0.055 + 86.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
+	for i in SEG_PER_DAY:
+		var px := s.x * 0.5 + (float(i) - 1.0) * 26.0
+		var py := s.y * 0.055 + 110.0
+		var left := i < segments_left()
+		var c := Color(1.0, 0.85, 0.45, 0.95) if left else Color(0.5, 0.42, 0.36, 0.5)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(px, py - 7.0), Vector2(px + 7.0, py), Vector2(px, py + 7.0), Vector2(px - 7.0, py)]), c)
+
+	# the ledger card: purse, reputation, stamina, and the road to the next meal bonus
+	var lw := 300.0
+	var lx := 40.0
+	var ly := s.y * 0.30
+	hud_panel(Rect2(lx, ly, lw, 168.0))
+	draw_circle(Vector2(lx + 26.0, ly + 30.0), 7.0, Color(1.0, 0.84, 0.4))
+	draw_circle(Vector2(lx + 23.0, ly + 27.0), 2.4, Color(1.0, 0.95, 0.7))
+	draw_string(font, Vector2(lx + 42.0, ly + 37.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(lx + 20.0, ly + 64.0), "Rep %d   %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.85))
+	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
+	draw_string(font, Vector2(lx + 20.0, ly + 92.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.9, 0.85, 0.85))
+	draw_string(font, Vector2(lx + lw - 90.0, ly + 92.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 70.0, 12, Color(0.85, 0.9, 0.85, 0.85))
+	draw_rect(Rect2(lx + 20.0, ly + 100.0, lw - 40.0, 12.0), Color(0.2, 0.14, 0.11, 0.7))
+	var scol := Color(0.55, 0.80, 0.6)
+	if sfrac < STAM_LOW:
+		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
+	draw_rect(Rect2(lx + 20.0, ly + 100.0, (lw - 40.0) * sfrac, 12.0), scol)
+	if sfrac < STAM_LOW:
+		draw_string(font, Vector2(lx + 20.0, ly + 130.0), "worn out  -  throws are getting wild", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.6, 0.45))
+	else:
+		draw_string(font, Vector2(lx + 20.0, ly + 130.0), "rested enough to work", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.68, 0.6))
+	var to_str := MEALS_PER_STR - (meals % MEALS_PER_STR)
+	draw_string(font, Vector2(lx + 20.0, ly + 152.0), "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.68, 0.6))
+
+	# the actions, centred right of the ledger
+	var rows := day_rows()
+	var ax := s.x * 0.42
+	var aw := s.x * 0.52
+	var ay := s.y * 0.285
+	for i in rows.size():
+		var r: Dictionary = rows[i]
+		var sel := i == day_sel
+		var ok := bool(r["ok"])
+		var ry := ay + float(i) * 52.0
+		if sel:
+			hud_panel(Rect2(ax - 16.0, ry - 24.0, aw, 46.0))
+		var name_c := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
+		if not ok:
+			name_c = Color(0.55, 0.5, 0.46)
+		draw_string(font, Vector2(ax, ry), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 21, name_c)
+		var cost := String(r["cost"])
+		if cost != "":
+			var cc := Color(0.85, 0.75, 0.58, 0.9) if ok else Color(0.55, 0.5, 0.46)
+			draw_string(font, Vector2(ax + aw - 160.0, ry), cost, HORIZONTAL_ALIGNMENT_RIGHT, 130.0, 14, cc)
+		if sel and String(r["id"]) == "perform":
+			draw_string(font, Vector2(ax + 18.0, ry + 16.0), "Left / Right choose the stage", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.68, 0.58, 0.9))
+
+	# the selected action explains itself under the list
+	var selr: Dictionary = rows[day_sel]
+	draw_string(font, Vector2(ax, ay + float(rows.size()) * 52.0 + 8.0), String(selr["sub"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.85, 0.78, 0.66))
+
+	# transient feedback (a meal eaten, a spent day) fades after a few seconds
+	if day_msg != "" and cine_tick - day_msg_tick < 300:
+		var ma := clampf(1.0 - float(cine_tick - day_msg_tick - 220) / 80.0, 0.0, 1.0)
+		draw_string(font, Vector2(0, s.y - 92.0), day_msg, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.88, 0.55, ma))
+
+	draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
+		[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]])
+
+
 func draw_menu(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
 	# a deep theatre backdrop: warm gradient, one spotlight, a row of footlights
@@ -3973,7 +4284,7 @@ func audio_update() -> void:
 	if not _audio_ready:
 		return
 	var want := 2
-	if game_state == ST_PLAY or game_state == ST_ESTABLISH:
+	if game_state == ST_PLAY or game_state == ST_ESTABLISH or game_state == ST_DAY:
 		want = clampi(cur_venue(), 0, 5)
 	elif game_state == ST_CUTSCENE:
 		want = 0                     # the calmest, warmest theme under the story beats
