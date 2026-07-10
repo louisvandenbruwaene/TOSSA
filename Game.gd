@@ -67,6 +67,7 @@ const ST_PLAY := 4        # the juggling itself
 const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before a set
 const ST_CREDITS := 6     # a slow, code-drawn credits roll after the grand finale
 const ST_DAY := 7         # the day hub: a juggler's life between performances
+const ST_STATS := 8       # the career ledger: every record and lifetime number
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -288,6 +289,10 @@ var best_scores: Array[int] = [0, 0, 0, 0, 0, 0]  # best performance score per v
 # are pure skill. Separate per-venue bests, toggled per booking in the day hub.
 var purist := false
 var best_scores_purist: Array[int] = [0, 0, 0, 0, 0, 0]
+# --- the career ledger (persisted per slot): lifetime numbers behind the record
+# boards, shown on the RECORDS AND HISTORY screen reached from Settings
+var career := {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
+	"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0}
 var results_open := false # the end-of-performance results panel is showing
 var results_record := false  # this performance beat the venue's record
 var paused := false       # the in-play pause menu is up (freezes the sim)
@@ -469,7 +474,7 @@ func _ready() -> void:
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
-	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day")
+	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
 	if ua.has("--menu"):
 		skip_menu = false
 	if skip_menu:
@@ -528,6 +533,9 @@ func _ready() -> void:
 		cine_tick = 0
 	if ua.has("--credits"):           # dev: jump straight to the credits roll for a screenshot
 		game_state = ST_CREDITS
+		cine_tick = 0
+	if ua.has("--stats"):             # dev: the records-and-history screen, for a screenshot
+		game_state = ST_STATS
 		cine_tick = 0
 	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
 		enter_day()
@@ -643,6 +651,11 @@ func _input(event: InputEvent) -> void:
 			return
 		ST_SETTINGS:
 			settings_input(kc)
+			return
+		ST_STATS:
+			if kc == KEY_ESCAPE or kc == KEY_ENTER or kc == KEY_KP_ENTER:
+				game_state = ST_SETTINGS
+				play_sfx("ui", -12.0)
 			return
 		ST_CUTSCENE:
 			cutscene_key(kc)
@@ -1022,6 +1035,7 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			play_sfx("ui2", -11.0)
 		"practice":
 			seg_used += 1
+			career["practices"] = int(career["practices"]) + 1
 			save_progress()
 			mode = MODE_TRAIN
 			game_state = ST_PLAY
@@ -1074,6 +1088,7 @@ func sleep_day(frac: float) -> void:
 	# slept. Sleeping rough never DRAINS you, it just fails to top you up fully.
 	day += 1
 	seg_used = 0
+	career["days"] = maxi(int(career["days"]), day)
 	stamina = maxf(stamina, stamina_max * frac)
 	set_day_msg("day %d  -  %s" % [day, "you wake rested" if frac >= 1.0 else "a stiff back, but a new day"])
 	play_sfx("streak", -9.0)
@@ -1457,7 +1472,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 7   # music, sound, shake, hints, flags, fullscreen, Back
+	var n := 8   # music, sound, shake, hints, flags, fullscreen, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -1481,6 +1496,8 @@ func settings_input(kc: int) -> void:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
 				6:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				7:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -1623,6 +1640,8 @@ func reset_new_game() -> void:
 	best_scores_purist = [0, 0, 0, 0, 0, 0]
 	pattern_sel = CASCADE
 	purist = false
+	career = {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
+		"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0}
 	day = 1
 	seg_used = 0
 	venue_pick = 0
@@ -2116,6 +2135,7 @@ func on_catch(h: int) -> void:
 	stack(h).append(best)
 	catch_flash[h] = tick
 	caught += 1
+	career["catches"] = int(career["catches"]) + 1
 	if tut_active:
 		tut_on_catch()   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
@@ -2536,6 +2556,11 @@ func on_round_end() -> void:
 		money += last_pay
 		if last_pay > 0:
 			play_sfx("coin", -8.0)   # the pay chime at the end of a performance
+		# the career ledger remembers every set
+		career["perfs"] = int(career["perfs"]) + 1
+		career["gold_earned"] = int(career["gold_earned"]) + last_pay
+		career["tricks"] = int(career["tricks"]) + tricks_landed
+		career["best_score"] = maxi(int(career["best_score"]), score)
 		# a new personal best at this venue is the meta hook: a target to chase.
 		# A Purist booking writes to the Purist board and never the assisted one.
 		results_record = false
@@ -2546,6 +2571,7 @@ func on_round_end() -> void:
 		results_open = true
 		results_tick = tick
 		results_stamped = false
+	career["best_streak"] = maxi(int(career["best_streak"]), best_streak)
 	# story beats fire on reputation milestones, once each: first the venue
 	# promotions (tiers 1..5), then the endgame chapters past the arena (the
 	# rivalry turning, the record ordeal, the finale). Both accumulate into one
@@ -2942,6 +2968,11 @@ func load_progress() -> void:
 			for i in mini((bp as Array).size(), best_scores_purist.size()):
 				best_scores_purist[i] = int((bp as Array)[i])
 		pattern_sel = int(cf.get_value("prog", "pattern_sel", CASCADE))
+		var cr: Variant = cf.get_value("prog", "career", {})
+		if cr is Dictionary:
+			for k in career:
+				if (cr as Dictionary).has(k):
+					career[k] = int((cr as Dictionary)[k])
 		purist = bool(cf.get_value("day", "purist", false))
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
@@ -2973,6 +3004,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
+	cf.set_value("prog", "career", career)
 	cf.set_value("day", "purist", purist)
 	cf.set_value("day", "day", day)
 	cf.set_value("day", "seg_used", seg_used)
@@ -2991,6 +3023,7 @@ func drop_ball(b: Ball, why: String) -> void:
 		return
 	balls.erase(b)
 	dropped += 1
+	career["drops"] = int(career["drops"]) + 1
 	streak = 0
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
@@ -3091,6 +3124,9 @@ func _draw() -> void:
 			return
 		ST_SETTINGS:
 			draw_settings(font, s)
+			return
+		ST_STATS:
+			draw_stats(font, s)
 			return
 		ST_CUTSCENE:
 			draw_cutscene(font, s)
@@ -4541,10 +4577,64 @@ func draw_settings(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
 		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
 
-	var bsel := menu_sel == rows.size()
-	draw_string(font, Vector2(0, oy + float(rows.size()) * 52.0 + 30.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	var rsel := menu_sel == rows.size()
+	var rry := oy + float(rows.size()) * 52.0
+	draw_string(font, Vector2(px, rry), ("> " if rsel else "  ") + "Records and history", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if rsel else Color(0.8, 0.74, 0.66))
+	var bsel := menu_sel == rows.size() + 1
+	draw_string(font, Vector2(0, rry + 52.0 + 30.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	var tfoot := "Up / Down    A to toggle    B to go back" if pad_active() else "Up / Down    Enter to toggle    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func draw_stats(font: Font, s: Vector2) -> void:
+	# the career ledger: the two record boards side by side over the lifetime
+	# numbers, so every high score the save has ever set stays visible
+	view_venue = 4
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.68))
+	draw_title_glow(font, s.y * 0.06, "RECORDS AND HISTORY", 36, Color(1.0, 0.88, 0.5), s)
+	draw_ornament(s.x * 0.5, s.y * 0.06 + 62.0, 210.0, Color(0.82, 0.62, 0.34, 0.85))
+
+	# left: the venue record boards, assisted and Purist
+	var lx := s.x * 0.5 - 470.0
+	var ly := s.y * 0.30
+	hud_panel(Rect2(lx - 20.0, ly - 34.0, 460.0, 300.0))
+	draw_string(font, Vector2(lx, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
+	draw_string(font, Vector2(lx + 230.0, ly), "best", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.8, 0.74, 0.66))
+	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.82, 0.72, 0.85))
+	for i in 6:
+		var ry := ly + 34.0 + float(i) * 38.0
+		var nm := String(venue_data(i)["name"])
+		var reached := i <= venue_index()
+		draw_string(font, Vector2(lx, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66) if reached else Color(0.5, 0.46, 0.42))
+		var b := best_scores[i]
+		var p := best_scores_purist[i]
+		draw_string(font, Vector2(lx + 230.0, ry), str(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 330.0, ry), str(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
+
+	# right: the lifetime numbers
+	var rx := s.x * 0.5 + 30.0
+	hud_panel(Rect2(rx - 20.0, ly - 34.0, 460.0, 300.0))
+	draw_string(font, Vector2(rx, ly), "THE CAREER SO FAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
+	var lines := [
+		["days on the road", str(int(career["days"]))],
+		["performances", str(int(career["perfs"]))],
+		["practice sessions", str(int(career["practices"]))],
+		["catches  /  drops", "%d  /  %d" % [int(career["catches"]), int(career["drops"])]],
+		["longest streak ever", str(int(career["best_streak"]))],
+		["highest score anywhere", str(int(career["best_score"]))],
+		["tricks landed", str(int(career["tricks"]))],
+		["gold earned on stage", str(int(career["gold_earned"]))],
+	]
+	for i in lines.size():
+		var ry := ly + 34.0 + float(i) * 30.0
+		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66))
+		draw_string(font, Vector2(rx + 280.0, ry), String(lines[i][1]), HORIZONTAL_ALIGNMENT_RIGHT, 140.0, 15, Color(1.0, 0.9, 0.65))
+
+	draw_string(font, Vector2(0, s.y - 42.0), "Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
