@@ -11,6 +11,10 @@ floor) and awaits Louis's playtest. Still open: item 2 (content depth), item 5
 (audio breadth), and the rest of item 7 (export presets, capsule art,
 Steamworks).
 
+Louis playtest feedback 2026-07-10 (evening) added as items 9 to 11 below.
+These are direct player notes, so they outrank the older open items: take 9,
+10 and 11 first next session.
+
 ## 1. The day/life loop (the big missing piece) - BUILT 2026-07-10
 
 The GDD (Section 4.5) promises a light juggler's life between performances and
@@ -80,3 +84,42 @@ proper app icon at export sizes.
 The --demo auto-player plays on real save slot 0, so screenshot and test runs
 can nudge a genuine career. Point it at a scratch save the way --debug already
 uses juggle_debug.cfg.
+
+## 9. Cutscene animation pass (Louis playtest note, 2026-07-10)
+
+The cutscenes read as weirdly animated: the motion is too fast overall, and
+some shots show ugly juggling or ugly ball holding. Work to do: slow every
+scene's oscillation clocks (the ct multipliers in the scene tableaux and the
+demo_juggle cadence when it plays inside a cutscene), then audit each shot for
+prop placement so held balls sit convincingly IN the palm (the reach_hand and
+hand offset math) and the juggled arcs look like real cascade timing rather
+than floaty loops. Check every beat with windowed --cutscene <id> --csn <n>
+screenshots, shot by shot. The Ken Burns camera and typewriter captions are
+fine, it is the FIGURE motion that needs the pass.
+
+## 10. Music rework: enthusiastic, Balatro-like, less noise (Louis, 2026-07-10)
+
+The current background music has too much white noise in it and feels a bit
+too sad. Louis wants an enthusiastic, Balatro-like melody, still tailored per
+stage. Concrete direction: hunt down every noise component in the beds (the
+crowd murmur bed and any noisy synthesis in the loops) and either remove or
+heavily darken them, move the harmony from sparse melancholy bells to an
+upbeat major hook with a groove (Balatro's trick is a short catchy loop with
+a relaxed swing and a warm bass pulse, energetic without being busy), add a
+light rhythmic layer that can fade in with the applause energy, and keep the
+per-venue tailoring (root, tempo, brightness per tier) on top of the one
+shared hook so the climb still reads as one piece of music growing up. The
+adaptive volume-automation architecture stays, only the material changes.
+
+## 11. Trick input redesign: Space as a one-shot powerup (Louis, 2026-07-10)
+
+Replace the permanent arm-trick toggle. Louis wants the trick button to feel
+like a POWERUP: pressing Space empowers the throw made at the same moment, so
+space plus catch-throw produces exactly one trick shot. C (or the pad's Y)
+still cycles WHICH trick is selected, the selection persists after use, but
+every single use requires its own Space press. So: press Space, the very next
+throw (or the simultaneous one) becomes the selected trick, then the system
+disarms itself while remembering the selection. Spin fits the same grammar:
+with Spin selected, Space performs the spin. Update the trick HUD, the
+trick-unlock banner text, and the tutorialised hints to teach the new model,
+and make sure the demo auto-player (--demo --trick) still exercises it.
