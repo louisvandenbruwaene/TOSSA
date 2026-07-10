@@ -1830,93 +1830,97 @@ func draw_remap(font: Font, s: Vector2) -> void:
 func cutscene_script(id: String) -> Array:
 	# Each story beat is a short film: a list of animated SHOTS. "scene" picks the
 	# tableau, "stage" the moment inside it, "who" names a speaker (gold), "cap" is
-	# the line, "hold" is how long it plays before it auto-cuts. Prose stays warm
-	# and spare (STORY.md), and free of dashes and semicolons.
+	# the line, "hold" is how long it plays before it auto-cuts. The arc (STORY.md):
+	# Bruna was the Marvel of Two Hands until the gear circuit shut her out for
+	# refusing to buy her act. Milo carries her three balls, and her unfinished
+	# fight, all the way to the arena. Silvio is the gear empire's heir, and money
+	# beating hands is the one thing his life cannot afford to see disproved.
+	# Prose stays warm and spare, free of dashes and semicolons.
 	match id:
 		"intro":
 			return [
-				{"scene": "backyard", "stage": 0, "who": "", "hold": 340,
-					"cap": "A backyard at dusk. An old street juggler named Bruna presses three worn balls into your hands and steps back."},
-				{"scene": "backyard", "stage": 1, "who": "Bruna", "hold": 360,
-					"cap": "\"Three balls. Two hands. Everything else in this trade is just noise on top of that.\""},
-				{"scene": "backyard", "stage": 2, "who": "Bruna", "hold": 380,
-					"cap": "\"Gear gets you to the door. The crowd is the thing you earn once you are inside. Now throw.\""},
-				{"scene": "backyard", "stage": 3, "who": "", "hold": 360,
-					"cap": "So it begins, with nothing to your name but a pair of quick hands and something to prove."},
+				{"scene": "backyard", "stage": 0, "who": "", "hold": 360,
+					"cap": "The yard behind the boarding house, dusk. Old Bruna watches you fumble a pear and catch it without looking. She goes inside, and comes back holding three worn leather balls."},
+				{"scene": "backyard", "stage": 1, "who": "Bruna", "hold": 400,
+					"cap": "\"Forty years ago they called me the Marvel of Two Hands. Then the circuit learned my hands could not be bought, and every door in the country closed at once. These three are all I kept.\""},
+				{"scene": "backyard", "stage": 2, "who": "Bruna", "hold": 400,
+					"cap": "\"The gear men own every stage from here to the arena. Two clean hands cannot buy a door any more. So you will not buy it. You will take it. Now throw.\""},
+				{"scene": "backyard", "stage": 3, "who": "", "hold": 380,
+					"cap": "You are nobody, and it is late, and she is old. Every throw you land from this yard on is an argument that she was right."},
 			]
 		"v1":
 			return [
 				{"scene": "street", "stage": 0, "who": "", "hold": 340,
-					"cap": "A cold corner and a warm lamp. A hat on the cobbles. The city does not slow down for anyone who has not earned it."},
-				{"scene": "street", "stage": 1, "who": "", "hold": 340,
-					"cap": "You find the pulse of it. One stranger slows to watch. Then another stops beside them."},
-				{"scene": "street", "stage": 2, "who": "", "hold": 380,
-					"cap": "The first coin rings in the hat. It only ever comes when the hands are clean, and never a moment before."},
+					"cap": "A cold corner under one lamp. The hat on the cobbles is hers, from the old act, and it has held nothing all day."},
+				{"scene": "street", "stage": 1, "who": "", "hold": 360,
+					"cap": "You find the rhythm and a stranger stops. Then two more. Rent is due in six days, and nobody watching knows that, which is exactly why it works."},
+				{"scene": "street", "stage": 2, "who": "Bruna", "hold": 400,
+					"cap": "The first coin rings in the hat. Bruna does not smile. \"Coins are noise, kid. Make them remember the name. The name is the wage.\""},
 			]
 		"v2":
 			return [
 				{"scene": "theatre", "stage": 0, "who": "", "hold": 340,
-					"cap": "Indoors now, and ticketed. Your name is printed on the bill, close to the bottom."},
-				{"scene": "theatre", "stage": 1, "who": "Silvio", "hold": 400,
-					"cap": "\"Real hands, kid. Genuine talent. A pity real hands are so slow to pay the rent.\""},
-				{"scene": "theatre", "stage": 2, "who": "", "hold": 380,
-					"cap": "Silvio Grand headlines above you, gracious in the way that stings. You watch from the wings, and you learn."},
+					"cap": "A ticketed house, and your name printed at the very bottom of the bill. Bottom is still ON the bill."},
+				{"scene": "theatre", "stage": 1, "who": "Silvio", "hold": 430,
+					"cap": "\"So you are Bruna's boy. Real hands, I can tell from here. She had real hands too, and look where honest got her. My family sells certainty, kid. Yours sells sweat.\""},
+				{"scene": "theatre", "stage": 2, "who": "", "hold": 400,
+					"cap": "Silvio Grand headlines with torches that balance themselves. From the seats nobody can tell. From the wings you can, and you stand there every night, memorising the difference."},
 			]
 		"v3":
 			return [
 				{"scene": "circus", "stage": 0, "who": "", "hold": 340,
-					"cap": "A travelling troupe pitches its tent at the edge of town and waves you inside."},
+					"cap": "A travelling troupe pitches its tent at the edge of town. No bill, no bottom line, no Silvio. They saw the street show, and left a knife and a note. Come learn."},
 				{"scene": "circus", "stage": 1, "who": "", "hold": 380,
-					"cap": "Lantern light and sawdust and a found family. Here the spectacle is real, and so is the fall."},
-				{"scene": "circus", "stage": 2, "who": "", "hold": 380,
-					"cap": "They teach you the weight of a blade and the cost of dropping one. You decide not to drop one."},
+					"cap": "Sawdust, lantern light, and people who do not lie for a living. Here a blade is a blade. It weighs what it weighs and it forgives nothing."},
+				{"scene": "circus", "stage": 2, "who": "", "hold": 400,
+					"cap": "\"Bruna sent us students before,\" the knife thrower says. \"Every one of them switched to the easy gear by winter.\" She watches you wave away the catching net, and nods once."},
 			]
 		"v4":
 			return [
 				{"scene": "champ", "stage": 0, "who": "", "hold": 340,
-					"cap": "No hat this time. A scoreboard. The best in the country, measured down to the single catch."},
-				{"scene": "champ", "stage": 1, "who": "Silvio", "hold": 400,
-					"cap": "\"Second place. Close, though. Buy yourself better torches and maybe next year is yours.\""},
+					"cap": "The nationals. A scoreboard instead of a hat, judges instead of a crowd, and the number they write down outlives the applause."},
+				{"scene": "champ", "stage": 1, "who": "Silvio", "hold": 420,
+					"cap": "\"Second place. Genuinely close. Do you know the difference between us? About four thousand in equipment. Talent was never going to be enough. Ask your teacher how that ends.\""},
 				{"scene": "champ", "stage": 2, "who": "", "hold": 420,
-					"cap": "He wins on paper with the priciest gear money can buy. You place second on a cleaner run. The gap is narrowing, and it is narrowing from your side."},
+					"cap": "He wins on paper. You walk home counting the two catches you gave away, and Bruna says nothing at all, and the silence says the gap is yours, and that it can close."},
 			]
 		"rival":
 			return [
 				{"scene": "champ", "stage": 0, "who": "", "hold": 340,
-					"cap": "The international stage. The finest hands alive, and the first room no amount of money can buy your way through."},
-				{"scene": "champ", "stage": 3, "who": "", "hold": 400,
-					"cap": "Silvio lunges for a torch his gear has thrown a hand's width wrong. It falls. The room does not gasp. It simply goes quiet."},
-				{"scene": "champ", "stage": 2, "who": "", "hold": 420,
-					"cap": "You keep it clean, and you keep it up, long past where nerve alone can carry a set. The rivalry turns here, and it turns quietly."},
+					"cap": "The internationals. The finest hands alive, and the first room where his family's money buys no judge."},
+				{"scene": "champ", "stage": 3, "who": "", "hold": 430,
+					"cap": "Mid-routine, a torch his gear threw a hand's width wrong comes down. Silvio lunges, misses, and for one long second stares at his own empty hands. The room goes quiet the way a debt goes quiet."},
+				{"scene": "champ", "stage": 2, "who": "Silvio", "hold": 430,
+					"cap": "You keep your set clean past where nerve should break. On the way out he stops you. \"She really never dropped, did she.\" It is not a question, and you do not answer it."},
 			]
 		"record":
 			return [
-				{"scene": "arena", "stage": 0, "who": "", "hold": 340,
-					"cap": "Not a show tonight. An ordeal. One routine, impossibly long, and a single drop ends all of it."},
-				{"scene": "arena", "stage": 1, "who": "", "hold": 400,
-					"cap": "The music thins to almost nothing. There is only the count, your breath, and the weight moving through your hands."},
-				{"scene": "arena", "stage": 2, "who": "", "hold": 440,
-					"cap": "You hold, and hold, past the point where most hands give out, and the number climbs into places nobody has written down before."},
+				{"scene": "arena", "stage": 0, "who": "", "hold": 360,
+					"cap": "Not a show. An ordeal with your name on it. One routine, impossibly long, and a single drop ends everything in front of everyone."},
+				{"scene": "arena", "stage": 1, "who": "", "hold": 420,
+					"cap": "The music thins to your own breath. Somewhere past four hundred you stop counting for the judges and start counting for her, one clean catch for every year they took."},
+				{"scene": "arena", "stage": 2, "who": "", "hold": 460,
+					"cap": "You hold past the point where hands become argument, and the number climbs onto pages no gear has ever printed. It was her record they buried. You raise it, and the first face you look for is hers."},
 			]
 		"finale":
 			return [
-				{"scene": "arena", "stage": 3, "who": "", "hold": 380,
-					"cap": "Five torches. The largest crowd there is. A set that asks for everything at once and gives back nothing but the room's held breath."},
+				{"scene": "arena", "stage": 3, "who": "", "hold": 420,
+					"cap": "Five torches, the largest crowd there is, and one seat in the front row held under a name no poster has printed in forty years. Bruna. The Marvel of Two Hands."},
+				{"scene": "arena", "stage": 3, "who": "", "hold": 420,
+					"cap": "Silvio watches from the stands, retired, lighter somehow. The empire sells catching nets now. He sent two tickets and a note. One debt paid."},
 				{"scene": "arena", "stage": 3, "who": "", "hold": 400,
-					"cap": "Silvio watches from the seats now, where the shortcut always ends. He is not bitter. He simply never learned to do this."},
-				{"scene": "arena", "stage": 3, "who": "", "hold": 380,
-					"cap": "Clean catch. Clean throw. The same two things she taught you, under all the pressure the world can bring. You land it."},
-				{"scene": "backyard", "stage": 3, "who": "Bruna", "hold": 480,
-					"cap": "\"There it is. Talent was always the cheap part, kid. This you earned.\" The same backyard. The same two hands. The circle closes."},
+					"cap": "Clean catch. Clean throw. The two things she taught you in a backyard, carried all the way here. You land the last torch, the roof comes off, and you point one hand at the front row."},
+				{"scene": "backyard", "stage": 3, "who": "Bruna", "hold": 500,
+					"cap": "\"There it is,\" she says, in the yard where it started, pressing the three worn balls back into your hands. \"They were never mine, kid. I was keeping them for whoever came to finish it.\" The circle closes."},
 			]
 		_:
 			return [
 				{"scene": "arena", "stage": 0, "who": "", "hold": 360,
-					"cap": "The largest crowd there is, a field of small warm lights in one great dark bowl."},
+					"cap": "The World Arena. A bowl of small warm lights, and every light is a person who paid to see whether the story they heard about you is true."},
 				{"scene": "arena", "stage": 1, "who": "", "hold": 400,
-					"cap": "Silvio watches from the seats now. No gear on earth can carry this stage. Only your hands can."},
+					"cap": "Silvio's seats are good ones now. No gear on earth carries this stage. Only hands, and everything they cost."},
 				{"scene": "arena", "stage": 2, "who": "", "hold": 420,
-					"cap": "So you throw, the way she taught you in a backyard a lifetime ago. Clean catch. Clean throw. The whole world holds its breath."},
+					"cap": "So you throw the way she taught you, a lifetime of yards and corners ago. Clean catch. Clean throw. The whole world holds its breath with you."},
 			]
 
 
