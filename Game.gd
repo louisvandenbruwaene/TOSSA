@@ -5150,7 +5150,9 @@ func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand =
 	# pos is the FEET; the figure grows upward from it.
 	var H := 22.0 * sc                 # one head-height: the unit of the whole canon
 	var px := pos.x
-	var breathe := sin(float(cine_tick) * 0.05 + pos.x * 0.02) * 0.055 * H
+	# cine_tick runs at 120/s, so 0.016 is a calm ~3.3 second breath. The old 0.05
+	# panted at once a second, which read as jittery on every figure at once.
+	var breathe := sin(float(cine_tick) * 0.016 + pos.x * 0.02) * 0.055 * H
 	var skin: Color = pal.get("skin", Color(0.87, 0.64, 0.45))
 	var coat: Color = pal["coat"]
 	var coat_dk: Color = pal["coat_dk"]
@@ -5251,22 +5253,27 @@ func draw_simple_hand(pos: Vector2, close: float, inward: float, sc: float) -> v
 
 # --- juggle demonstration (tutorials, and juggling story figures) -------------
 
-func demo_juggle(center: Vector2, sc: float, count: int) -> Dictionary:
+func demo_juggle(center: Vector2, sc: float, count: int, T: float = 84.0) -> Dictionary:
 	# a small closed-form cascade: each ball rides a crossing arc, staggered in
 	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade
 	# the hands scoop at about waist height and roughly a head apart, the natural
 	# juggling posture for the eight-head figure (shoulder-high, splayed hands read
-	# as a T-pose, not a cascade)
+	# as a T-pose, not a cascade).
+	# T is ticks (120/s) per throw. The default 84 is the calm story cadence from
+	# Louis's animation pass, and each half-cycle now ends with a DWELL: the ball
+	# rides IN the scooping hand for a third of the beat before it relaunches.
+	# Always-airborne balls were the "floaty loops" note, since real cascade rhythm
+	# is carry, throw, carry, never perpetual flight.
 	var hl := center + Vector2(-44.0 * sc, 74.0 * sc)
 	var hr := center + Vector2(44.0 * sc, 74.0 * sc)
-	var T := 58.0                 # a touch slower reads as calmer, more relaxed
+	var dwell := 0.32             # fraction of each beat the ball spends held
 	var peak := 104.0 * sc
 	var t := float(cine_tick)
 	# a gentle scoop so the hands are never frozen: they dip and lift in counterpoint,
 	# the way real juggling hands carry and release the props
 	var scoop := sin(TAU * t / (T * 2.0))
-	hl.y += scoop * 6.0 * sc
-	hr.y += -scoop * 6.0 * sc
+	hl.y += scoop * 7.0 * sc
+	hr.y += -scoop * 7.0 * sc
 	var out: Array = []
 	for i in count:
 		var phase := fposmod(t + float(i) * (T * 2.0 / float(maxi(1, count))), T * 2.0)
@@ -5274,8 +5281,16 @@ func demo_juggle(center: Vector2, sc: float, count: int) -> Dictionary:
 		var u := (phase - float(seg) * T) / T
 		var frm := hl if seg == 0 else hr
 		var to := hr if seg == 0 else hl
-		var p := frm.lerp(to, u)
-		p.y -= peak * 4.0 * u * (1.0 - u)
+		var p: Vector2
+		if u < 1.0 - dwell:
+			var uf := u / (1.0 - dwell)   # in flight: launch to landing
+			p = frm.lerp(to, uf)
+			# left-hand throws fly a touch higher than right-hand ones, so the two
+			# crossing arcs weave at different heights instead of eclipsing each
+			# other dead centre (which made a 5-ball pattern read as 3 balls)
+			p.y -= peak * 4.0 * uf * (1.0 - uf) * (1.06 if seg == 0 else 0.92)
+		else:
+			p = to                        # carried: the ball sits in the scooping hand
 		out.append({"pos": p, "col": ball_color(i)})
 	return {"balls": out, "hl": hl, "hr": hr, "peak": peak}
 
@@ -5787,37 +5802,42 @@ func scene_backyard(s: Vector2, stage: int) -> void:
 			# stands close and lifts a hand to receive. A slow weight-shift keeps both
 			# figures alive rather than posed. Hands are placed at body stations in head
 			# units (H) so they read correctly against the eight-head figure.
-			var sway := sin(ct * 0.018) * 2.0
+			var sway := sin(ct * 0.014) * 2.0
 			var bfeet := Vector2(s.x * 0.42 + sway, fy)
 			var mfeet := Vector2(s.x * 0.60 - sway, fy)
 			draw_shadow(bfeet, 70.0)
 			draw_shadow(mfeet, 66.0)
-			var offer := 0.5 + 0.5 * sin(ct * 0.03)
+			var offer := 0.5 + 0.5 * sin(ct * 0.013)   # a slow, deliberate presenting gesture
 			var hb := 22.0 * 1.05
 			var hm := 22.0 * 1.0
 			var bhand := bfeet + Vector2((2.2 + offer * 0.4) * hb, (-6.1 + offer * 0.35) * hb)
 			var mhand := mfeet + Vector2(-1.7 * hm, (-5.2 + offer * 0.25) * hm)
 			draw_person(bfeet, 1.05, bruna_pal(), null, bhand, 1)
 			draw_person(mfeet, 1.0, milo_pal(0), mhand, null, 0)
+			# the three balls sit cradled in the offering palm as a nested pyramid,
+			# two resting on the hand and one in their groove, not a floating ladder
+			var cradle: Array[Vector2] = [Vector2(-10.0, -5.0), Vector2(10.0, -5.0), Vector2(0.0, -22.0)]
 			for i in 3:
-				draw_ball_shape(bhand + Vector2(-6.0 + float(i) * 6.0, -7.0 - float(i) * 5.0), ball_color(i), 0.95)
+				draw_ball_shape(bhand + cradle[i], ball_color(i), 0.95)
 		1:
 			# the balls are in Milo's hand now, cradled near his chest; Bruna stands
 			# beside him with a slow approving lift of the hand, both on a gentle sway
-			var sway := sin(ct * 0.02) * 2.0
+			var sway := sin(ct * 0.014) * 2.0
 			var bfeet := Vector2(s.x * 0.40 + sway, fy)
 			var mfeet := Vector2(s.x * 0.58 - sway, fy)
 			draw_shadow(bfeet, 76.0)
 			draw_shadow(mfeet, 76.0)
-			var nod := 0.5 + 0.5 * sin(ct * 0.045)
+			var nod := 0.5 + 0.5 * sin(ct * 0.018)   # a slow approving lift, not a wave
 			var hb := 22.0 * 1.1
 			var hm := 22.0 * 1.15
-			var mhand := mfeet + Vector2(-1.5 * hm, (-5.6 + sin(ct * 0.05) * 0.12) * hm)
+			var mhand := mfeet + Vector2(-1.4 * hm, (-5.15 + sin(ct * 0.02) * 0.12) * hm)
 			var bhand := bfeet + Vector2(2.0 * hb, (-6.0 - nod * 0.3) * hb)
 			draw_person(bfeet, 1.1, bruna_pal(), null, bhand, 1)
 			draw_person(mfeet, 1.15, milo_pal(0), mhand, null, 0)
+			# cradled against the chest: the same nested pyramid, riding the hand's bob
+			var cradle2: Array[Vector2] = [Vector2(-11.0, -5.0), Vector2(11.0, -5.0), Vector2(0.0, -23.0)]
 			for i in 3:
-				draw_ball_shape(mhand + Vector2(float(i) * 5.0 - 5.0, -6.0 - float(i) * 5.0), ball_color(i), 1.0)
+				draw_ball_shape(mhand + cradle2[i], ball_color(i), 1.0)
 		2:
 			# the first throw: one ball passed slowly hand to hand, the simplest juggle.
 			# Hands rest at the waist and the throw sweeps up and ACROSS the body to the
@@ -5826,7 +5846,7 @@ func scene_backyard(s: Vector2, stage: int) -> void:
 			var mfeet := Vector2(s.x * 0.5, fy)
 			draw_shadow(mfeet, 80.0)
 			var hm := 22.0 * 1.2
-			var T := 116.0
+			var T := 168.0   # one unhurried pass every 1.4 seconds: this is the FIRST throw
 			var u := fposmod(ct / T, 1.0)
 			var right_first := int(floor(ct / T)) % 2 == 0
 			var restL := mfeet + Vector2(-1.5 * hm, -4.6 * hm)
@@ -5835,21 +5855,26 @@ func scene_backyard(s: Vector2, stage: int) -> void:
 			var throwR := mfeet + Vector2(0.7 * hm, -6.5 * hm)
 			var catchL := mfeet + Vector2(-1.35 * hm, -5.7 * hm)  # out and up to receive
 			var catchR := mfeet + Vector2(1.35 * hm, -5.7 * hm)
-			var throw_lift := clampf(1.0 - u * 3.2, 0.0, 1.0)      # peaks at the release
-			var catch_lift := clampf((u - 0.62) * 2.9, 0.0, 1.0)   # rises into the catch
+			var throw_lift := clampf(1.0 - u * 2.6, 0.0, 1.0)      # settles back after release
+			var catch_lift := clampf((u - 0.5) * 2.8, 0.0, 1.0)    # fully out when the ball lands
+			# after the catch (u = 0.86) the catching hand CARRIES the ball up and
+			# across into its own windup, so the loop wraps with no teleport and the
+			# ball is visibly held between passes rather than flying forever
+			var carry := clampf((u - 0.86) / 0.14, 0.0, 1.0)
 			var handL: Vector2
 			var handR: Vector2
 			if right_first:
 				handR = restR.lerp(throwR, throw_lift)
-				handL = restL.lerp(catchL, catch_lift)
+				handL = restL.lerp(catchL, catch_lift).lerp(throwL, carry)
 			else:
 				handL = restL.lerp(throwL, throw_lift)
-				handR = restR.lerp(catchR, catch_lift)
+				handR = restR.lerp(catchR, catch_lift).lerp(throwR, carry)
 			draw_person(mfeet, 1.2, milo_pal(0), handL, handR, 0)
 			var frm := handR if right_first else handL
 			var to := handL if right_first else handR
-			var bp := frm.lerp(to, u)
-			bp.y -= 150.0 * 4.0 * u * (1.0 - u)
+			var uf := minf(u / 0.86, 1.0)
+			var bp := frm.lerp(to, uf)
+			bp.y -= 150.0 * 4.0 * uf * (1.0 - uf)
 			draw_ball_shape(bp, ball_color(0), 1.1)
 			# Bruna watches from the shadowed edge, small and dim, no longer a black blob
 			var bfeet := Vector2(s.x * 0.15, fy)
@@ -5887,7 +5912,7 @@ func scene_street(s: Vector2, stage: int) -> void:
 				draw_ball_shape(b["pos"], b["col"], 1.1)
 			draw_silhouette(Vector2(s.x * 0.72, fy), 0.9, Color(0.06, 0.05, 0.07))
 			# a coin arcs down into the hat by the lamp
-			var u := fposmod(float(cine_tick) / 90.0, 1.0)
+			var u := fposmod(float(cine_tick) / 132.0, 1.0)
 			var frm := Vector2(s.x * 0.72, fy - 120.0)
 			var to := Vector2(s.x * 0.32 + 46.0, fy - 2.0)
 			var cp := frm.lerp(to, u)
@@ -5929,8 +5954,9 @@ func scene_circus(s: Vector2, stage: int) -> void:
 				draw_silhouette(Vector2(s.x * (0.16 + 0.17 * float(k)), fy + 6.0), 0.7, Color(0.05, 0.04, 0.04))
 			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
 			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(3), null, null, 1)
-			var gl := 0.6 + 0.4 * sin(float(cine_tick) * 0.2)
-			draw_knife(Vector2(s.x * 0.5, s.y * 0.34), float(cine_tick) * 0.1, 1.6)
+			var gl := 0.6 + 0.4 * sin(float(cine_tick) * 0.09)
+			# a presented blade turns slowly enough to be READ as a blade
+			draw_knife(Vector2(s.x * 0.5, s.y * 0.34), float(cine_tick) * 0.035, 1.6)
 			draw_circle(Vector2(s.x * 0.5, s.y * 0.34), 10.0, Color(1.0, 1.0, 1.0, 0.3 * gl))
 		_:
 			draw_ring_interior(s)
@@ -5938,10 +5964,11 @@ func scene_circus(s: Vector2, stage: int) -> void:
 			for k in 5:
 				draw_silhouette(Vector2(s.x * (0.14 + 0.18 * float(k)), fy + 8.0), 0.66, Color(0.05, 0.04, 0.04))
 			draw_shadow(Vector2(s.x * 0.5, fy), 76.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.15, 3)
+			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.15, 3, 92.0)
 			draw_person(Vector2(s.x * 0.5, fy), 1.15, milo_pal(3), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
-				draw_knife(b["pos"], float(cine_tick) * 0.12, 1.4)
+				# about one lazy flip per throw, real juggled-knife tumble
+				draw_knife(b["pos"], float(cine_tick) * 0.05, 1.4)
 
 
 func scene_champ(s: Vector2, stage: int) -> void:
@@ -5969,9 +5996,10 @@ func scene_champ(s: Vector2, stage: int) -> void:
 			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
 			var rh := reach_hand(Vector2(s.x * 0.5, fy), 1.2, 1.0, Vector2(66.0, -78.0))
 			draw_person(Vector2(s.x * 0.5, fy), 1.2, silvio_pal(), null, rh, -1)
-			var u := fposmod(float(cine_tick) / 66.0, 1.0)
+			var u := fposmod(float(cine_tick) / 118.0, 1.0)
 			var fp := Vector2(s.x * 0.5 + 120.0, s.y * 0.26 + u * u * 320.0)
-			draw_torch(fp, float(cine_tick) * 0.22, 1.5)
+			# the fall reads as a fall now, not a strobe: one slow second, gentle tumble
+			draw_torch(fp, float(cine_tick) * 0.08, 1.5)
 		_:
 			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
 			draw_scoreboard(s)
@@ -5997,10 +6025,10 @@ func scene_arena(s: Vector2, stage: int) -> void:
 			draw_silhouette(Vector2(s.x * 0.13, gy - 4.0), 0.6, Color(0.05, 0.04, 0.05))   # Silvio, watching
 			draw_spotlight_cone(s, s.x * 0.5, 0.17)
 			draw_shadow(Vector2(s.x * 0.5, gy), 90.0)
-			var djf := demo_juggle(Vector2(s.x * 0.5, s.y * 0.46), 1.3, 5)
+			var djf := demo_juggle(Vector2(s.x * 0.5, s.y * 0.46), 1.3, 5, 80.0)
 			draw_person(Vector2(s.x * 0.5, gy), 1.3, milo_pal(5), djf["hl"], djf["hr"], 1)
 			for b in djf["balls"]:
-				draw_torch(b["pos"], float(cine_tick) * 0.16, 1.4)
+				draw_torch(b["pos"], float(cine_tick) * 0.06, 1.4)
 			draw_circle(Vector2(s.x * 0.5, s.y * 0.46), 240.0, Color(1.0, 0.9, 0.6, 0.07))
 		_:
 			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.06, 0.04, 0.10), 18)
@@ -6013,7 +6041,7 @@ func scene_arena(s: Vector2, stage: int) -> void:
 				draw_circle(Vector2(x, y), 1.6, Color(1.0, 0.8, 0.5, clampf(a, 0.1, 0.7)))
 			draw_spotlight_cone(s, s.x * 0.5, 0.12 + (0.05 if stage == 2 else 0.0))
 			draw_shadow(Vector2(s.x * 0.5, gy), 84.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.48), 1.25, 5)
+			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.48), 1.25, 5, 80.0)
 			draw_person(Vector2(s.x * 0.5, gy), 1.25, milo_pal(5), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
 				draw_ball_shape(b["pos"], b["col"], 1.2)
