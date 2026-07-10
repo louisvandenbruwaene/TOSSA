@@ -33,6 +33,8 @@ const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
 const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
 const STRENGTH_CATCH := 0.05      # per weight-step, how much Strength eases (or, when
 								  # under-strength, hurts) the catch of a HEAVY prop
+const STRENGTH_LOFT := 0.4        # at double a heavy prop's required Strength, up to
+								  # this much extra height per held tick (times weight)
 
 # --- throw height by hold (variable 0..1.4) -----------------------------------
 # A tap throws the LOWEST, snappiest height (BASE_AIR airtime); holding THROW lifts
@@ -354,6 +356,8 @@ var cutscene_queue: Array[String] = []  # pending story beats to show
 var pending_beats: Array[String] = []   # beats earned by a set, held until the grade is seen
 var last_beats: Array[String] = []      # the beats begin_cutscene was last given, so finish_beats can route the finale to the credits
 var view_venue := -1      # cutscene/preview override of which venue palette to draw
+var ext_center := false   # exterior hero objects (house, lamp) compose mid-frame
+						  # for the day hub card; story scenes keep them offset
 var shake := 0.0          # screen-shake magnitude, decays each frame
 
 # --- cinematic layer: animated cutscenes, establishing cards, tutorials -------
@@ -377,6 +381,12 @@ var tut_flash := ""       # brief "Nice!" feedback between steps
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
+# dropped props now FALL to the stage floor as cosmetic bodies instead of
+# vanishing at arm height: eggs break where they land (Louis), other props
+# bounce once and rest. `collapsing` is the lost-set grace: the hands give up,
+# everything comes down, and only when the last prop lands does the round end.
+var falling: Array[Dictionary] = []
+var collapsing := false
 # cosmetic juice layer: particles (sparks, embers, confetti, shock rings), a short
 # hit-stop after big impacts, and the timers that drive HUD/results animation.
 # None of this touches the sim, so determinism and fairness are untouched.
@@ -609,6 +619,9 @@ func _physics_process(delta: float) -> void:
 		_read_inputs()
 	if running:
 		update_sim()
+	if collapsing and running and balls_airborne() == 0 and falling.is_empty():
+		collapsing = false
+		running = false   # the last prop has landed: only NOW may the verdict arrive
 	if _prev_running and not running and not tut_active:
 		on_round_end()   # the run just ended: bank the completion XP (never mid-lesson)
 	_prev_running = running
@@ -973,15 +986,14 @@ func day_rows() -> Array[Dictionary]:
 	var vname := String(venue_data(play_venue())["name"])
 	var out: Array[Dictionary] = []
 	var spent := segments_left() <= 0
-	var ptag := "  -  PURIST" if purist else ""
-	out.append({"id": "perform", "name": "PERFORM  at  %s%s" % [vname, ptag],
-		"cost": "1 segment", "ok": not spent,
+	out.append({"id": "perform", "name": "PERFORM  at  %s" % vname,
+		"cost": "", "ok": not spent,
 		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "gold and reputation. P books the set PURIST."})
+		"sub": "gold and reputation, one segment. P books it PURIST."})
 	out.append({"id": "practice", "name": "PRACTICE",
-		"cost": "1 segment", "ok": not spent,
+		"cost": "", "ok": not spent,
 		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "a free session, no crowd, no pay. Restart freely."})
+		"sub": "no crowd, no pay, one segment. Restart freely."})
 	var full := stamina >= stamina_max - 1.0
 	var can_eat := money >= EAT_COST and not full
 	var eat_why := ""
@@ -1588,15 +1600,12 @@ func cutscene_key(kc: int) -> void:
 
 
 func cutscene_autoadvance() -> void:
+	# shots no longer play themselves forward (Louis: the story waits for a key).
+	# The hold time still paces the Ken Burns drift, but only a key press cuts.
 	if cs_freeze:
 		return
-	var script := cur_script()
-	if script.is_empty():
+	if cur_script().is_empty():
 		finish_beats()
-		return
-	var shot: Dictionary = script[mini(cs_shot, script.size() - 1)]
-	if cine_tick - cs_shot_start >= int(shot.get("hold", 300)):
-		next_shot()
 
 
 func next_shot() -> void:
@@ -1950,9 +1959,24 @@ func beat_title(id: String) -> String:
 # Input: edge-detected presses for the four hand actions plus trick.
 # -----------------------------------------------------------------------------
 
+func seed_input_edges() -> void:
+	# prime the edge detector with the keys' REAL current state, so a key still
+	# held from the establishing card (Space especially, which would prime a
+	# trick) cannot fire a phantom edge on the first play frame
+	var dev := pad_dev()
+	_prev["lc"] = Input.is_physical_key_pressed(K_LC) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER))
+	_prev["rc"] = Input.is_physical_key_pressed(K_RC) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER))
+	_prev["lt"] = Input.is_physical_key_pressed(K_LT) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT) > 0.5)
+	_prev["rt"] = Input.is_physical_key_pressed(K_RT) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT) > 0.5)
+	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_A))
+	_prev["cycle"] = Input.is_physical_key_pressed(K_CYCLE) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_Y))
+
+
 func _read_inputs() -> void:
 	# each logical action is keyboard OR pad, combined BEFORE edge detection, so
 	# a press on either device yields exactly one edge and can never double-fire.
+	if collapsing:
+		return   # the set is lost: the hands have given up until everything lands
 	var dev := pad_dev()
 	var p_lc := false
 	var p_rc := false
@@ -2200,6 +2224,9 @@ func start_run(n: int) -> void:
 	trick_msg = ""
 	trick_msg_tick = -999
 	rng.seed = 20260705
+	seed_input_edges()   # a key still held from the previous screen must not edge-fire
+	collapsing = false
+	falling.clear()
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
 	hclose = [0.0, 0.0]
 	catch_flash = [-999, -999]
@@ -2374,6 +2401,11 @@ func do_throw(h: int, hold: int) -> void:
 	# ceiling (DEFICIT_HEIGHT), so a too-heavy prop never gets up to a clean height.
 	var base_air := float(BASE_AIR) * (1.0 - DEFICIT_BASE * deficit)
 	var gain_mult := 1.0 - DEFICIT_HEIGHT * deficit
+	# SURPLUS Strength over a heavy prop's requirement lofts it HIGHER per held
+	# tick, scaled by weight (Louis: five clubs need real height to fit in the
+	# air). Balls and eggs are untouched, and being under-strength still sags.
+	if prop_req() > 0 and weight > 1 and deficit <= 0.0:
+		gain_mult *= 1.0 + STRENGTH_LOFT * clampf(float(strength) / float(prop_req()) - 1.0, 0.0, 1.0) * float(weight - 1) / 4.0
 	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
 	# a primed trick reshapes this ONE throw before we roll its accuracy, so a High Toss
@@ -3148,6 +3180,16 @@ func save_progress() -> void:
 # Per-tick simulation and hand animation.
 # -----------------------------------------------------------------------------
 
+func spawn_falling(pos: Vector2, kind: int, col: Color) -> void:
+	# a lost prop becomes a cosmetic body that FALLS to the stage floor (eggs
+	# break where they land, not at arm height, Louis's note)
+	# cosmetic randomness only (global randf, never the sim rng, so the sim's
+	# deterministic roll sequence is untouched by how a prop happens to tumble)
+	falling.append({"pos": pos, "vel": Vector2(randf_range(-0.8, 0.8), 1.4),
+		"kind": kind, "col": col, "ang": randf_range(0.0, TAU),
+		"spin": randf_range(-0.12, 0.12), "bounced": false, "rest": -1})
+
+
 func drop_ball(b: Ball, why: String) -> void:
 	if not balls.has(b):
 		return
@@ -3161,24 +3203,29 @@ func drop_ball(b: Ball, why: String) -> void:
 		shake = 5.0
 	freeze = 8   # a short hit-stop so the loss registers before play rolls on
 	spawn_parts(flight_pos(b), Color(0.75, 0.5, 0.4), 10, 2.6, "spark")
-	var dtext := why
+	spawn_falling(flight_pos(b), b.kind, b.color)
 	if b.kind == PROP_EGGS:
 		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf). A lesson
-		# is practice, so a broken egg there is free (but still shows the mess).
+		# is practice, so a broken egg there is free (the mess shows when it LANDS).
 		if not tut_active:
 			prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
 			save_progress()
-		dtext = "SPLAT"
-		spawn_egg_break(flight_pos(b))   # shell shards fly, a yolk splats on the floor
-		play_sfx("splat", -8.0)
 	play_sfx("drop", -7.0)
 	if mode == MODE_PERFORM and not tut_active:
 		play_sfx("groan", -10.0)   # the crowd sags with the prop (ART doc stingers)
 	_duck = 1.0   # a drop briefly ducks the music, so the silence lands
-	add_popup(b.to_pos + Vector2(0, -6), dtext, Color(1.0, 0.32, 0.3))
-	# only a performance ends when the crowd is lost; training just plays on
-	if mode == MODE_PERFORM and applause <= 0.0:
-		running = false
+	add_popup(b.to_pos + Vector2(0, -6), why, Color(1.0, 0.32, 0.3))
+	# a lost crowd no longer cuts straight to the verdict: the COLLAPSE begins,
+	# the hands give up, and the round only ends once everything has hit the
+	# floor (see the collapse step in _physics_process). Training plays on.
+	if mode == MODE_PERFORM and applause <= 0.0 and not collapsing:
+		collapsing = true
+		# whatever is still held slips from the hands too: you watch it all fall
+		for h in [LEFT, RIGHT]:
+			for hb in stack(h):
+				balls.erase(hb)
+				spawn_falling(hpos[h], hb.kind, hb.color)
+			stack(h).clear()
 
 
 func update_sim() -> void:
@@ -3282,6 +3329,7 @@ func _draw() -> void:
 	draw_juggler(s)
 	draw_targets()
 	draw_balls_in_flight()
+	draw_falling()         # lost props tumbling down to the boards
 	draw_egg_shards()      # flying shell pieces read above the stage
 	draw_charge_gauges()   # the hold-to-throw height gauge beside a charging hand
 	draw_vignette(s, 0.5)  # frame the lit stage so it reads photographed, not flat
@@ -4334,7 +4382,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(tx, py + 66.0, xbw * xf, 10.0), Color(0.9, 0.7, 0.35))
 	draw_string(font, Vector2(tx, py + 92.0), "%d / %d xp to next level" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
 
-	var str_note := "heavy props steadier and easier to catch  -  %d balls now" % max_balls()
+	var str_note := "heavy props fly higher and catch easier  -  %d balls now" % max_balls()
 	if next_ball_strength() > 0:
 		str_note = "heavy props steadier and easier to catch  -  %d-ball unlock at Str %d" % [max_balls() + 1, next_ball_strength()]
 	var acc_note := "higher chance to catch off-Perfect; lands throws closer"
@@ -4439,7 +4487,9 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# the day hub: the chosen venue's exterior breathes behind a veil while the
 	# day's ledger and actions sit over it. The world is where you will play
 	# tonight, which makes choosing a stage feel like standing in front of it.
+	ext_center = true    # the stage's picture is the hub's centrepiece
 	draw_venue_exterior(s, play_venue())
+	ext_center = false
 	# the hub darkens as the day's segments burn: DAY is open, NIGHT draws in,
 	# DEEP NIGHT is nearly black and plainly the moment to sleep
 	var seg_dark: float = [0.0, 0.16, 0.32, 0.32][clampi(seg_used, 0, 3)]
@@ -4461,10 +4511,11 @@ func draw_day(font: Font, s: Vector2) -> void:
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(px, py - 7.0), Vector2(px + 7.0, py), Vector2(px, py + 7.0), Vector2(px - 7.0, py)]), c)
 
-	# the ledger card: purse, reputation, stamina, and the road to the next meal bonus
+	# the ledger card: purse, reputation, stamina, and the road to the next meal
+	# bonus. It sits high on the left so the stage picture keeps the middle.
 	var lw := 300.0
 	var lx := 40.0
-	var ly := s.y * 0.30
+	var ly := s.y * 0.175
 	hud_panel(Rect2(lx, ly, lw, 168.0))
 	draw_circle(Vector2(lx + 26.0, ly + 30.0), 7.0, Color(1.0, 0.84, 0.4))
 	draw_circle(Vector2(lx + 23.0, ly + 27.0), 2.4, Color(1.0, 0.95, 0.7))
@@ -4504,11 +4555,15 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var label := String(r["name"])
 		if String(r["id"]) == "perform":
 			# the stage picker lives ON this row: arrows show which way it can
-			# still move (left to right along the ladder, never wrapping)
+			# still move (left to right along the ladder, never wrapping). The
+			# PURIST mark sits under the cost, never inside the name (it used to
+			# run into the "1 segment" text on long venue names).
 			var pv := play_venue()
 			var lar := "<  " if pv > 0 else "   "
 			var rar := "  >" if pv < venue_index() else "   "
-			label = "%sPERFORM  at  %s%s%s" % [lar, String(venue_data(pv)["name"]), "  -  PURIST" if purist else "", rar]
+			label = "%sPERFORM  at  %s%s" % [lar, String(venue_data(pv)["name"]), rar]
+			if purist:
+				draw_string(font, Vector2(ax + aw - 118.0, ry + 15.0), "PURIST", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 11, Color(0.82, 0.72, 0.85))
 		draw_string(font, Vector2(ax, ry), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, name_c)
 		var cost := String(r["cost"])
 		if cost != "":
@@ -5183,7 +5238,9 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# the exterior drifts in a slow push, matching the cutscene camera language
 	var ez := 1.0 + 0.07 * clampf(float(cine_tick) / 340.0, 0.0, 1.0)
 	draw_set_transform(s * 0.5 * (1.0 - ez), 0.0, Vector2(ez, ez))
+	ext_center = true    # the card is a portrait of the venue: hero mid-frame
 	draw_venue_exterior(s, establish_venue)
+	ext_center = false
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var fin := clampf(float(cine_tick) / 26.0, 0.0, 1.0)
 	if fin < 1.0:
@@ -5421,11 +5478,15 @@ func arm_reach(shoulder: Vector2, hand: Vector2, l1: float, l2: float) -> Vector
 
 func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, sleeve: Color, l1: float, l2: float, w: float) -> void:
 	# clamp the target within reach so the arm never stretches into a noodle, then
-	# bend with bones scaled to the reach (matching the play figure's natural elbow)
+	# bend with bones scaled to the reach (matching the play figure's natural elbow).
+	# Of the two elbow solutions, take the LOWER one: elbows hang, they never point
+	# at the sky (a raised offering arm used to fold upward, Louis's "weird arms").
 	var h2 := arm_reach(shoulder, hand, l1, l2)
 	var reach := (h2 - shoulder).length()
 	var bone := maxf(l1 * 0.62, reach * 0.56)
-	var elbow := solve_elbow(shoulder, h2, bone, bone, bend)
+	var e1 := solve_elbow(shoulder, h2, bone, bone, bend)
+	var e2 := solve_elbow(shoulder, h2, bone, bone, -bend)
+	var elbow := e1 if e1.y >= e2.y else e2
 	var wrist := h2 + (elbow - h2).normalized() * w * 0.6
 	draw_capsule(shoulder, elbow, w * 2.6, w * 2.0, sleeve)
 	draw_capsule(elbow, wrist, w * 1.9, w * 1.4, skin)
@@ -5558,19 +5619,19 @@ func draw_simple_hand(pos: Vector2, close: float, inward: float, sc: float) -> v
 
 # --- juggle demonstration (tutorials, and juggling story figures) -------------
 
-func demo_juggle(center: Vector2, sc: float, count: int, T: float = 84.0) -> Dictionary:
+func demo_juggle(feet: Vector2, sc: float, count: int, T: float = 84.0) -> Dictionary:
 	# a small closed-form cascade: each ball rides a crossing arc, staggered in
-	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade
-	# the hands scoop at about waist height and roughly a head apart, the natural
-	# juggling posture for the eight-head figure (shoulder-high, splayed hands read
-	# as a T-pose, not a cascade).
-	# T is ticks (120/s) per throw. The default 84 is the calm story cadence from
-	# Louis's animation pass, and each half-cycle now ends with a DWELL: the ball
-	# rides IN the scooping hand for a third of the beat before it relaunches.
-	# Always-airborne balls were the "floaty loops" note, since real cascade rhythm
-	# is carry, throw, carry, never perpetual flight.
-	var hl := center + Vector2(-44.0 * sc, 74.0 * sc)
-	var hr := center + Vector2(44.0 * sc, 74.0 * sc)
+	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade.
+	# Hands are anchored to the FIGURE'S FEET on the eight-head canon: they scoop
+	# at waist height (4.4 heads up), a head apart each side, so the pattern sits
+	# in front of the belly and peaks just over the head, real cascade geometry
+	# (anchoring to a screen-centre point made the juggling read overhead, Louis).
+	# T is ticks (120/s) per throw. The default 84 is the calm story cadence, and
+	# each half-cycle ends with a DWELL: the ball rides IN the scooping hand for a
+	# third of the beat before it relaunches, real carry-throw-carry rhythm.
+	var H := 22.0 * sc
+	var hl := feet + Vector2(-2.0 * H, -4.4 * H)
+	var hr := feet + Vector2(2.0 * H, -4.4 * H)
 	var dwell := 0.32             # fraction of each beat the ball spends held
 	var peak := 104.0 * sc
 	var t := float(cine_tick)
@@ -5715,6 +5776,63 @@ func step_effects() -> void:
 		if tick - int(d["born"]) < 260:
 			keep_sp.append(d)
 	splats = keep_sp
+	# dropped props falling to the stage floor: eggs break on LANDING, everything
+	# else bounces once, rests a moment, then fades away
+	var floor_y := get_viewport_rect().size.y * 0.80
+	var keep_f: Array[Dictionary] = []
+	for d in falling:
+		if int(d["rest"]) >= 0:
+			if tick - int(d["rest"]) < 70:
+				keep_f.append(d)
+			continue
+		var v: Vector2 = d["vel"]
+		v.y += 0.28
+		var p: Vector2 = d["pos"] + v
+		d["ang"] = float(d["ang"]) + float(d["spin"])
+		if p.y >= floor_y:
+			if int(d["kind"]) == PROP_EGGS:
+				spawn_egg_break(Vector2(p.x, floor_y))
+				play_sfx("splat", -8.0)
+				add_popup(Vector2(p.x, floor_y - 14.0), "SPLAT", Color(1.0, 0.32, 0.3))
+				continue   # the egg is shards and yolk now
+			if not bool(d["bounced"]):
+				d["bounced"] = true
+				p.y = floor_y
+				v = Vector2(v.x * 0.5, -absf(v.y) * 0.35)
+				play_sfx(_catch_sound(int(d["kind"])), -22.0, 0.6)   # a dull floor knock
+			else:
+				p.y = floor_y
+				v = Vector2.ZERO
+				d["rest"] = tick
+		d["pos"] = p
+		d["vel"] = v
+		keep_f.append(d)
+	falling = keep_f
+
+
+func draw_falling() -> void:
+	# the lost props on their way down, and briefly at rest on the boards
+	for d in falling:
+		var p: Vector2 = d["pos"]
+		var a := 1.0
+		if int(d["rest"]) >= 0:
+			a = clampf(1.0 - float(tick - int(d["rest"])) / 70.0, 0.0, 1.0)
+		var col: Color = d["col"]
+		col.a *= a
+		var sc := prop_scale(int(d["kind"])) * 0.95
+		match int(d["kind"]):
+			PROP_EGGS:
+				draw_egg(p, col, sc)
+			PROP_RINGS:
+				draw_ring_prop(p, col, sc)
+			PROP_CLUBS:
+				draw_club(p, float(d["ang"]), sc)
+			PROP_KNIVES:
+				draw_knife(p, float(d["ang"]), sc)
+			PROP_TORCHES:
+				draw_torch(p, float(d["ang"]), sc)
+			_:
+				draw_ball_shape(p, col, sc)
 
 
 func draw_egg_splats() -> void:
@@ -5786,28 +5904,35 @@ func draw_venue_exterior(s: Vector2, vi: int) -> void:
 
 
 func ext_backyard(s: Vector2) -> void:
+	# ext_center puts the house mid-frame (the day hub composes around it); the
+	# story scenes keep it right of frame so the figures own the middle
+	var hx := s.x * (0.5 if ext_center else 0.74)
 	var gy := s.y * 0.66
 	draw_gradient_v(Rect2(0, 0, s.x, gy), Color(0.13, 0.15, 0.28), Color(0.72, 0.46, 0.32), 26)
-	draw_circle(Vector2(s.x * 0.70, gy - 26.0), 62.0, Color(1.0, 0.72, 0.4, 0.22))
-	draw_circle(Vector2(s.x * 0.70, gy - 26.0), 34.0, Color(1.0, 0.84, 0.52, 0.45))
+	draw_circle(Vector2(s.x * 0.78, gy - 26.0), 62.0, Color(1.0, 0.72, 0.4, 0.22))
+	draw_circle(Vector2(s.x * 0.78, gy - 26.0), 34.0, Color(1.0, 0.84, 0.52, 0.45))
 	draw_stars(s, 22, 0.3)
 	draw_gradient_v(Rect2(0, gy, s.x, s.y - gy), Color(0.22, 0.28, 0.16), Color(0.07, 0.10, 0.06), 18)
 	draw_tree(Vector2(s.x * 0.18, gy), 1.05)
-	draw_house(Vector2(s.x * 0.74, gy), 158.0, 128.0)
-	draw_fence(s, gy - 4.0, s.x * 0.30, s.x * 0.64)
+	draw_house(Vector2(hx, gy), 158.0, 128.0)
+	if ext_center:
+		draw_fence(s, gy - 4.0, s.x * 0.62, s.x * 0.92)
+	else:
+		draw_fence(s, gy - 4.0, s.x * 0.30, s.x * 0.64)
 	draw_grass(s, gy)
 	draw_dust(s, 18, Color(1.0, 0.85, 0.55))
 
 
 func ext_street(s: Vector2) -> void:
+	var lx := s.x * (0.5 if ext_center else 0.32)
 	var gy := s.y * 0.72
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.04, 0.05, 0.12), Color(0.13, 0.10, 0.15), 26)
 	draw_moon(Vector2(s.x * 0.82, s.y * 0.18), 24.0)
 	draw_stars(s, 30, 0.42)
 	draw_city_row(s, gy)
 	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.09, 0.08, 0.10))
-	draw_streetlamp(Vector2(s.x * 0.32, gy), gy)
-	draw_hat_prop(Vector2(s.x * 0.32 + 46.0, gy - 2.0))
+	draw_streetlamp(Vector2(lx, gy), gy)
+	draw_hat_prop(Vector2(lx + 46.0, gy - 2.0))
 	draw_dust(s, 16, Color(1.0, 0.8, 0.5))
 
 
@@ -5900,13 +6025,18 @@ func draw_house(base: Vector2, w: float, h: float) -> void:
 	draw_rect(Rect2(base.x - w * 0.5, base.y - h, w, h), Color(0.10, 0.09, 0.11))
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(base.x - w * 0.6, base.y - h), Vector2(base.x + w * 0.6, base.y - h), Vector2(base.x, base.y - h - h * 0.5)]), Color(0.07, 0.06, 0.08))
+	# a squarer four-pane window with a full cross muntin: the old tall two-pane
+	# version read as a giant pause icon (Louis spotted it immediately)
 	var flick := 0.7 + 0.3 * sin(atick() * 0.05)
-	var wx := base.x - w * 0.20
-	var wy := base.y - h * 0.66
-	draw_circle(Vector2(wx + w * 0.11, wy + h * 0.14), w * 0.3, Color(1.0, 0.7, 0.3, 0.12 * flick))
-	draw_rect(Rect2(wx, wy, w * 0.22, h * 0.30), Color(1.0, 0.78, 0.4, 0.92 * flick))
-	draw_rect(Rect2(wx, wy, w * 0.22, h * 0.30), Color(0.2, 0.12, 0.06), false, 2.0)
-	draw_line(Vector2(wx + w * 0.11, wy), Vector2(wx + w * 0.11, wy + h * 0.30), Color(0.2, 0.12, 0.06), 1.5)
+	var ww := w * 0.24
+	var wh := h * 0.24
+	var wx := base.x - w * 0.22
+	var wy := base.y - h * 0.62
+	draw_circle(Vector2(wx + ww * 0.5, wy + wh * 0.5), w * 0.3, Color(1.0, 0.7, 0.3, 0.12 * flick))
+	draw_rect(Rect2(wx, wy, ww, wh), Color(1.0, 0.78, 0.4, 0.92 * flick))
+	draw_rect(Rect2(wx, wy, ww, wh), Color(0.2, 0.12, 0.06), false, 2.0)
+	draw_line(Vector2(wx + ww * 0.5, wy), Vector2(wx + ww * 0.5, wy + wh), Color(0.2, 0.12, 0.06), 2.0)
+	draw_line(Vector2(wx, wy + wh * 0.5), Vector2(wx + ww, wy + wh * 0.5), Color(0.2, 0.12, 0.06), 2.0)
 
 
 func draw_tree(base: Vector2, sc: float) -> void:
@@ -6187,7 +6317,7 @@ func scene_backyard(s: Vector2, stage: int) -> void:
 			draw_person(bfeet, 0.82, bruna_pal(), null, null, 1)
 		_:
 			draw_shadow(Vector2(s.x * 0.52, fy), 80.0)
-			var dj := demo_juggle(Vector2(s.x * 0.52, s.y * 0.5), 1.2, 3)
+			var dj := demo_juggle(Vector2(s.x * 0.52, fy), 1.2, 3)
 			draw_person(Vector2(s.x * 0.52, fy), 1.2, milo_pal(0), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
 				draw_ball_shape(b["pos"], b["col"], 1.15)
@@ -6204,14 +6334,14 @@ func scene_street(s: Vector2, stage: int) -> void:
 			draw_silhouette(Vector2(s.x * 0.78, fy), 0.9, Color(0.06, 0.05, 0.07))
 		1:
 			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.1, 3)
+			var dj := demo_juggle(Vector2(s.x * 0.5, fy), 1.1, 3)
 			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(1), dj["hl"], dj["hr"], 0)
 			for b in dj["balls"]:
 				draw_ball_shape(b["pos"], b["col"], 1.1)
 			draw_silhouette(Vector2(s.x * 0.74, fy), 0.9, Color(0.06, 0.05, 0.07))
 		_:
 			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.1, 3)
+			var dj := demo_juggle(Vector2(s.x * 0.5, fy), 1.1, 3)
 			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(1), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
 				draw_ball_shape(b["pos"], b["col"], 1.1)
@@ -6269,7 +6399,7 @@ func scene_circus(s: Vector2, stage: int) -> void:
 			for k in 5:
 				draw_silhouette(Vector2(s.x * (0.14 + 0.18 * float(k)), fy + 8.0), 0.66, Color(0.05, 0.04, 0.04))
 			draw_shadow(Vector2(s.x * 0.5, fy), 76.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.5), 1.15, 3, 92.0)
+			var dj := demo_juggle(Vector2(s.x * 0.5, fy), 1.15, 3, 92.0)
 			draw_person(Vector2(s.x * 0.5, fy), 1.15, milo_pal(3), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
 				# about one lazy flip per throw, real juggled-knife tumble
@@ -6330,7 +6460,7 @@ func scene_arena(s: Vector2, stage: int) -> void:
 			draw_silhouette(Vector2(s.x * 0.13, gy - 4.0), 0.6, Color(0.05, 0.04, 0.05))   # Silvio, watching
 			draw_spotlight_cone(s, s.x * 0.5, 0.17)
 			draw_shadow(Vector2(s.x * 0.5, gy), 90.0)
-			var djf := demo_juggle(Vector2(s.x * 0.5, s.y * 0.46), 1.3, 5, 80.0)
+			var djf := demo_juggle(Vector2(s.x * 0.5, gy), 1.3, 5, 80.0)
 			draw_person(Vector2(s.x * 0.5, gy), 1.3, milo_pal(5), djf["hl"], djf["hr"], 1)
 			for b in djf["balls"]:
 				draw_torch(b["pos"], float(cine_tick) * 0.06, 1.4)
@@ -6346,7 +6476,7 @@ func scene_arena(s: Vector2, stage: int) -> void:
 				draw_circle(Vector2(x, y), 1.6, Color(1.0, 0.8, 0.5, clampf(a, 0.1, 0.7)))
 			draw_spotlight_cone(s, s.x * 0.5, 0.12 + (0.05 if stage == 2 else 0.0))
 			draw_shadow(Vector2(s.x * 0.5, gy), 84.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, s.y * 0.48), 1.25, 5, 80.0)
+			var dj := demo_juggle(Vector2(s.x * 0.5, gy), 1.25, 5, 80.0)
 			draw_person(Vector2(s.x * 0.5, gy), 1.25, milo_pal(5), dj["hl"], dj["hr"], 1)
 			for b in dj["balls"]:
 				draw_ball_shape(b["pos"], b["col"], 1.2)
