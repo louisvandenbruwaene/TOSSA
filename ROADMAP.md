@@ -60,11 +60,16 @@ bends for exactly one font file. Candidates: Nunito Sans, Inter, Outfit.
 ## 5. Audio breadth - RESCOPED 2026-07-10: Louis's own track is the music now
 
 Louis produced his own background song (Juggling Game.mp3, in the repo) and the
-procedural music generation was removed in its favour. What remains of this
-item: the record-attempt near-silence and the finale payoff are now simple
-volume states over the one track, and the gasp and groan stingers stay as
-procedural SFX work. The per-tier motif idea is superseded unless Louis makes
-more tracks, in which case a per-venue track table is trivial to add.
+procedural music generation was removed in its favour. LICENSING: the current
+file is a free-tier Suno render, non-commercial only. Louis has decided to
+re-render it under a Suno Pro subscription (which grants commercial rights to
+songs made while subscribed), ideally at a slightly slower, more relaxed tempo.
+Until then the current file is a DEV PLACEHOLDER and must not ship. Swapping
+in the re-render is just replacing the file with the same name and reimporting.
+What remains of this item: the record-attempt near-silence and the finale
+payoff are now simple volume states over the one track, and the gasp and groan
+stingers stay as procedural SFX work. Per-venue variety returns if Louis makes
+more tracks, a per-venue track table is trivial to add.
 
 The synthesis system is solid but the palette is thin: sine bells over one
 shared two-chord loop. Wanted: a distinct motif per venue tier that still

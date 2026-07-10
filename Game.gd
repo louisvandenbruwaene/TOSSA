@@ -114,6 +114,27 @@ const LEFT := 0
 const RIGHT := 1
 const CASCADE := 0
 const FOUNTAIN := 1
+const COLUMNS := 2
+const HALFSHOWER := 3
+const SHOWER := 4
+# --- patterns as learnable content (GDD economy: harder base pays more, so one
+# tamed routine is never optimal). P cycles the unlocked patterns in training.
+# "mult" scales every catch's score, the reward for the pattern's base difficulty.
+const PATTERNS := [
+	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0,
+	 "desc": "The weave. Every throw crosses to the other hand."},
+	{"id": "fountain",   "name": "Fountain",    "lvl": 1, "mult": 1.1,
+	 "desc": "Each hand juggles its own circle. Even counts feel natural."},
+	{"id": "columns",    "name": "Columns",     "lvl": 3, "mult": 1.15,
+	 "desc": "Straight up and down in fixed lanes. Clean or nothing."},
+	{"id": "halfshower", "name": "Half Shower", "lvl": 5, "mult": 1.25,
+	 "desc": "The right hand throws over the top, the left keeps the weave."},
+	{"id": "shower",     "name": "Shower",      "lvl": 8, "mult": 1.4,
+	 "desc": "The full circle. Right throws high, left feeds fast and low."},
+]
+const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
+const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
+const HALFSHOWER_MIN := 0.35  # the over-the-top side's minimum height fraction
 const STATE_FLIGHT := 0
 const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
@@ -203,6 +224,7 @@ class Ball:
 
 var tick := 0
 var pattern := CASCADE
+var pattern_sel := CASCADE  # the chosen pattern (persisted); start_run snaps it to what is unlocked
 var num_balls := 3
 var mode := MODE_TRAIN
 var balls: Array[Ball] = []
@@ -258,6 +280,12 @@ var last_pay := 0         # gold earned from the last finished performance
 var last_rep_delta := 0   # reputation change from the last performance, for the results screen
 var run_venue := 0        # which venue this run was performed at (records key off this)
 var best_scores: Array[int] = [0, 0, 0, 0, 0, 0]  # best performance score per venue tier
+# --- the Purist ladder (GDD "Purist boards"): a performance booked as PURIST
+# strips every stat comfort from the catch maths (Accuracy read as a fresh
+# juggler's, no glasses, no Focus window, no Strength steadying), so its records
+# are pure skill. Separate per-venue bests, toggled per booking in the day hub.
+var purist := false
+var best_scores_purist: Array[int] = [0, 0, 0, 0, 0, 0]
 var results_open := false # the end-of-performance results panel is showing
 var results_record := false  # this performance beat the venue's record
 var paused := false       # the in-play pause menu is up (freezes the sim)
@@ -446,6 +474,13 @@ func _ready() -> void:
 		game_state = ST_PLAY
 		if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
 			mode = MODE_PERFORM
+		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
+		if pi != -1 and pi + 1 < ua.size():
+			for pj in PATTERNS.size():
+				if String(PATTERNS[pj]["id"]) == ua[pi + 1]:
+					level = maxi(level, int(PATTERNS[pj]["lvl"]))
+					pattern_sel = pj
+					start_run(num_balls)
 		if ua.has("--trick"):   # dev: unlock every trick and let the auto-player show them off
 			_demo_trick = true
 			level = 9
@@ -682,6 +717,9 @@ func _input(event: InputEvent) -> void:
 		KEY_O:
 			if not performing:
 				cycle_prop(1)   # cycle to the next owned prop
+		KEY_P:
+			if not performing:
+				cycle_pattern()   # step the juggling pattern (training only)
 		KEY_C:
 			cycle_trick()   # rotate which trick the TRICK key (Space) is loaded with
 		KEY_F1:
@@ -866,10 +904,11 @@ func day_rows() -> Array[Dictionary]:
 	var vname := String(venue_data(play_venue())["name"])
 	var out: Array[Dictionary] = []
 	var spent := segments_left() <= 0
-	out.append({"id": "perform", "name": "PERFORM  at  %s" % vname,
+	var ptag := "  -  PURIST" if purist else ""
+	out.append({"id": "perform", "name": "PERFORM  at  %s%s" % [vname, ptag],
 		"cost": "1 segment", "ok": not spent,
 		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "earn gold and reputation. Left and Right choose the stage."})
+		"sub": "earn gold and reputation. Left and Right choose the stage. P books it PURIST: no stat help, its own record board."})
 	out.append({"id": "practice", "name": "PRACTICE",
 		"cost": "1 segment", "ok": not spent,
 		"why": "the day is spent, sleep first" if spent else "",
@@ -921,6 +960,12 @@ func day_input(kc: int) -> void:
 				var top := venue_index()
 				venue_pick = (play_venue() + dir + top + 1) % (top + 1)
 				play_sfx("ui2", -14.0)
+		KEY_P:
+			# book tonight PURIST: the pure-skill ladder with its own records
+			purist = not purist
+			set_day_msg("tonight is a PURIST set  -  no stat help, its own records" if purist else "back to the assisted board")
+			save_progress()
+			play_sfx("ui2", -13.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			day_activate(String(rows[day_sel]["id"]), bool(rows[day_sel]["ok"]), String(rows[day_sel]["why"]))
 		KEY_TAB:
@@ -1507,6 +1552,9 @@ func reset_new_game() -> void:
 	venue_seen = 0
 	story_seen = 0
 	best_scores = [0, 0, 0, 0, 0, 0]
+	best_scores_purist = [0, 0, 0, 0, 0, 0]
+	pattern_sel = CASCADE
+	purist = false
 	day = 1
 	seg_used = 0
 	venue_pick = 0
@@ -1825,7 +1873,9 @@ func shoulder_pos(h: int) -> Vector2:
 # where hand h wants to be right now: inner while carrying (to throw), else outer
 func hand_target(h: int) -> Vector2:
 	var holding := not stack(h).is_empty()
-	var p := inner_pos(h) if holding else outer_pos(h)
+	# in COLUMNS the ball comes straight back down its lane (the throw point), so
+	# the waiting hand stays under the lane instead of drifting out to the side
+	var p := inner_pos(h) if (holding or pattern == COLUMNS) else outer_pos(h)
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -1876,7 +1926,12 @@ func start_run(n: int) -> void:
 	# you cannot juggle more of a prop than you own (balls are unlimited)
 	var cap := mini(max_balls(), have(prop_type))
 	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, cap))
-	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	# the chosen pattern, snapped to what this level owns. The two beginner
+	# patterns still auto-match the count's parity (odd weaves, even fountains);
+	# an explicitly chosen exotic pattern sticks whatever the count.
+	if not pattern_unlocked(pattern_sel) or pattern_sel == CASCADE or pattern_sel == FOUNTAIN:
+		pattern_sel = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	pattern = pattern_sel
 	balls.clear()
 	_stack_l.clear()
 	_stack_r.clear()
@@ -1986,7 +2041,9 @@ func on_catch(h: int) -> void:
 		if rng.randf() > catch_chance(quality, best.height):
 			drop_ball(best, "slip")
 			return
-	# secured
+	# secured. Harder patterns pay more per catch (their base difficulty is the
+	# reward), so grinding the tamest routine is never the best money.
+	var pm := pattern_mult()
 	best.state = STATE_HAND
 	stack(h).append(best)
 	catch_flash[h] = tick
@@ -2000,7 +2057,7 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		score += 100 * streak
+		score += int(round(100.0 * float(streak) * pm))
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
@@ -2021,7 +2078,7 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		score += 50 * streak
+		score += int(round(50.0 * float(streak) * pm))
 		applause = minf(1.0, applause + 0.025)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
@@ -2031,14 +2088,15 @@ func on_catch(h: int) -> void:
 			play_sfx("streak", -8.0)
 	else:
 		streak = 0
-		score += 10
+		score += int(round(10.0 * pm))
 		applause = maxf(0.0, applause - 0.02)
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
 	# the record chase: passing your own best AT this venue mid-run is a moment
-	if mode == MODE_PERFORM and not record_broken and run_venue >= 0 and run_venue < best_scores.size() \
-			and best_scores[run_venue] > 0 and score > best_scores[run_venue]:
+	# (each board chases its own bests, so a Purist night chases Purist records)
+	if mode == MODE_PERFORM and not record_broken and run_venue >= 0 and run_venue < rec_table().size() \
+			and rec_table()[run_venue] > 0 and score > rec_table()[run_venue]:
 		record_broken = true
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.27), "NEW RECORD!", Color(1.0, 0.86, 0.42))
@@ -2116,6 +2174,16 @@ func do_throw(h: int, hold: int) -> void:
 		elif this_trick == TR_BTB:
 			tfrac = clampf(tfrac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
 		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX) * (1.0 - DEFICIT_HEIGHT * deficit)))
+	# the pattern shapes the throw: a shower's feed hand snaps a fast low pass no
+	# matter the hold, its high hand must clear the feed lane, and a half shower
+	# lifts the right hand over the top. maxi keeps a trick's height if higher.
+	if pattern == SHOWER:
+		if h == LEFT:
+			air = int(round(base_air * SHOWER_FEED))
+		else:
+			air = maxi(air, int(round(base_air + SHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
+	elif pattern == HALFSHOWER and h == RIGHT:
+		air = maxi(air, int(round(base_air + HALFSHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
 	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
 	# Applause, and it clamps to 0 when the prop is too heavy to loft at all.
@@ -2141,9 +2209,14 @@ func do_throw(h: int, hold: int) -> void:
 	b.arc = ARC_PER_AIR * float(air)
 	b.wobble = WOBBLE_MAX * spread * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
-	b.to_hand = other(h) if pattern == CASCADE else h
+	# where the throw is headed is the pattern's say: crossing patterns swap hands,
+	# columns and fountains keep each hand its own circle
+	b.to_hand = other(h) if pattern in [CASCADE, HALFSHOWER, SHOWER] else h
 	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
-	b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+	if pattern == COLUMNS:
+		b.to_pos = b.from_pos + Vector2(drift, 0.0)   # straight up and down in the lane
+	else:
+		b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
 	# Behind the Back is a flourish, drawn as a high wide sweeping loop in flight_pos
 
 	throw_kick[h] = tick
@@ -2167,6 +2240,36 @@ func do_throw(h: int, hold: int) -> void:
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
 	if tut_active:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
+
+
+func pattern_unlocked(i: int) -> bool:
+	return level >= int(PATTERNS[i]["lvl"])
+
+
+func pattern_mult() -> float:
+	return float(PATTERNS[pattern]["mult"])
+
+
+func rec_table() -> Array[int]:
+	# which record board this booking plays on: the stat-assisted one or the Purist
+	return best_scores_purist if purist else best_scores
+
+
+func cycle_pattern() -> void:
+	# P steps the pattern in training (a performance is committed to its routine).
+	# Restarts the run so the hands are re-dealt for the new choreography.
+	var un: Array = []
+	for i in PATTERNS.size():
+		if pattern_unlocked(i):
+			un.append(i)
+	if un.size() <= 2 and level < 3:
+		set_trick_msg("more patterns unlock at level %d" % int(PATTERNS[COLUMNS]["lvl"]))
+		return
+	var idx := un.find(pattern_sel)
+	pattern_sel = int(un[(idx + 1) % un.size()]) if idx >= 0 else int(un[0])
+	set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
+	play_sfx("ui2", -13.0)
+	start_run(num_balls)
 
 
 func trick_unlocked(i: int) -> bool:
@@ -2297,7 +2400,18 @@ func add_xp(amount: int) -> void:
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
 		announce_new_tricks(prev_level)   # a level that crosses a trick's gate teaches it
+		announce_new_patterns(prev_level)   # and so does one that crosses a pattern's
 		save_progress()
+
+
+func announce_new_patterns(prev_level: int) -> void:
+	# a pattern whose unlock level we just crossed announces itself on the trick
+	# feedback line, teaching the P key in the same breath
+	for i in PATTERNS.size():
+		var lv := int(PATTERNS[i]["lvl"])
+		if lv > prev_level and lv <= level:
+			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
+			play_sfx("streak", -6.0)
 
 
 func announce_new_tricks(prev_level: int) -> void:
@@ -2352,10 +2466,11 @@ func on_round_end() -> void:
 		money += last_pay
 		if last_pay > 0:
 			play_sfx("coin", -8.0)   # the pay chime at the end of a performance
-		# a new personal best at this venue is the meta hook: a target to chase
+		# a new personal best at this venue is the meta hook: a target to chase.
+		# A Purist booking writes to the Purist board and never the assisted one.
 		results_record = false
-		if run_venue >= 0 and run_venue < best_scores.size() and score > best_scores[run_venue]:
-			best_scores[run_venue] = score
+		if run_venue >= 0 and run_venue < rec_table().size() and score > rec_table()[run_venue]:
+			rec_table()[run_venue] = score
 			results_record = true
 		# the results panel takes over the end-of-run screen for performances
 		results_open = true
@@ -2387,7 +2502,15 @@ func stamina_mult() -> float:
 	return lerpf(STAM_MIN_MULT, 1.0, clampf(f / STAM_LOW, 0.0, 1.0))
 
 
+func purist_run() -> bool:
+	# a PURIST booking strips the stat comforts from the catch maths, so its
+	# records are pure skill. Training is never purist (practice is practice).
+	return purist and mode == MODE_PERFORM
+
+
 func eff_accuracy() -> float:
+	if purist_run():
+		return clampf(5.0 * stamina_mult(), 0.0, 100.0)   # a fresh juggler's hands
 	return clampf(float(accuracy) * stamina_mult(), 0.0, 100.0)
 
 
@@ -2404,10 +2527,11 @@ func catch_chance(quality: int, height: float) -> float:
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
-	p += strength_catch_mod()      # raw muscle steadies a heavy prop in the hand (and only a
+	if not purist_run():
+		p += strength_catch_mod()  # raw muscle steadies a heavy prop in the hand (and only a
 								   # too-weak grip on a heavy prop makes the catch itself shaky)
-	if has_glasses:
-		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
+		if has_glasses:
+			p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	if spinning():
 		p -= SPIN_ACC_PENALTY      # a Spin means catching blind, so off-Perfect gets riskier
 	return clampf(p, MIN_CATCH_P, 1.0)
@@ -2443,6 +2567,8 @@ func perfect_window() -> int:
 	# Stage 2: once stage 1 has bottomed out (Focus > 100), each FOCUS_WINDOW_PER
 	# of further Focus widens the Perfect band by a tick, capped so timing still
 	# rules. Never grows past the Good band, so a tier of Good always remains.
+	if purist_run():
+		return W_PERFECT           # no Focus widening on the Purist board
 	var extra := focus() - 100.0
 	var bonus := 0
 	if extra > 0.0:
@@ -2736,6 +2862,12 @@ func load_progress() -> void:
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
 				best_scores[i] = int((bs as Array)[i])
+		var bp: Variant = cf.get_value("prog", "best_scores_purist", [])
+		if bp is Array:
+			for i in mini((bp as Array).size(), best_scores_purist.size()):
+				best_scores_purist[i] = int((bp as Array)[i])
+		pattern_sel = int(cf.get_value("prog", "pattern_sel", CASCADE))
+		purist = bool(cf.get_value("day", "purist", false))
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
 		venue_pick = int(cf.get_value("day", "venue_pick", -1))
@@ -2764,6 +2896,9 @@ func save_progress() -> void:
 	cf.set_value("prog", "venue_seen", venue_seen)
 	cf.set_value("prog", "story_seen", story_seen)
 	cf.set_value("prog", "best_scores", best_scores)
+	cf.set_value("prog", "best_scores_purist", best_scores_purist)
+	cf.set_value("prog", "pattern_sel", pattern_sel)
+	cf.set_value("day", "purist", purist)
 	cf.set_value("day", "day", day)
 	cf.set_value("day", "seg_used", seg_used)
 	cf.set_value("day", "venue_pick", venue_pick)
@@ -3627,12 +3762,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	hud_panel(Rect2(18, 14, 322, 132))
 	draw_string(font, Vector2(34, 46), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
 	draw_string(font, Vector2(96, 48), str(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color(1.0, 0.92, 0.72))
-	if performing and run_venue >= 0 and run_venue < best_scores.size() and best_scores[run_venue] > 0:
+	if performing and run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
 		if record_broken:
 			var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
 			draw_string(font, Vector2(200, 42), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.86, 0.42, ra))
 		else:
-			draw_string(font, Vector2(200, 42), "best  %d" % best_scores[run_venue], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.64, 0.56))
+			draw_string(font, Vector2(200, 42), "best  %d" % rec_table()[run_venue], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.64, 0.56))
 	# streak: the multiplier IS the streak, so show it as a heat-coloured x that
 	# pops on every extension (the addictive number to protect)
 	var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
@@ -3656,6 +3791,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 
 	# ---- top centre: mode tag and the Applause meter with its high-water mark ----
 	var mlabel := "PERFORMING" if performing else "TRAINING"
+	if performing and purist:
+		mlabel = "PERFORMING  -  PURIST"
 	if debug_mode:
 		mlabel += "   -   DEBUG"
 	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
@@ -3706,7 +3843,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	# the round chrome (venue line, control hints, ROUND OVER, start prompt) is
 	# hidden during a lesson, and behind the results card, to keep those clean
 	if not tut_active and not results_open:
-		var patt := "cascade" if pattern == CASCADE else "fountain"
+		var patt := String(PATTERNS[pattern]["name"]).to_lower()
 		var propname := String(cur_prop()["name"]).to_upper()
 		var vname := String(venue_data(play_venue())["name"]).to_upper()
 		if prop_deficit() > 0.0:
@@ -3732,8 +3869,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
 					[["R"], "restart"]])
 				draw_hints_row(font, cx, s.y - 34, [
-					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["S"], "shop"],
-					[["Tab"], "sheet"], [k_pause(), "pause"]])
+					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["P"], "pattern"],
+					[["S"], "shop"], [["Tab"], "sheet"], [k_pause(), "pause"]])
 
 		if not started:
 			var verb := "perform" if performing else "practise"
@@ -3822,7 +3959,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var rowh := 40.0
 	_result_row(font, lx, rx, y, "Score", str(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
 	if age > 54:
-		var rec := "NEW VENUE RECORD" if results_record else "best here   %d" % best_scores[run_venue]
+		var rec := "NEW VENUE RECORD" if results_record else "best here   %d" % rec_table()[run_venue]
+		if purist:
+			rec = "PURIST  -  " + rec
 		var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
 		if results_record:
 			recc.a = 0.7 + 0.3 * sin(float(tick) * 0.1)
@@ -4111,7 +4250,12 @@ func draw_day(font: Font, s: Vector2) -> void:
 			var cc := Color(0.85, 0.75, 0.58, 0.9) if ok else Color(0.55, 0.5, 0.46)
 			draw_string(font, Vector2(ax + aw - 160.0, ry), cost, HORIZONTAL_ALIGNMENT_RIGHT, 130.0, 14, cc)
 		if sel and String(r["id"]) == "perform":
-			draw_string(font, Vector2(ax + 18.0, ry + 16.0), "Left / Right choose the stage", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.68, 0.58, 0.9))
+			# the live target: this venue's record on the chosen board, the chase
+			var vi := play_venue()
+			var chase := "no record here yet  -  set one"
+			if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
+				chase = "record to beat   %d" % rec_table()[vi]
+			draw_string(font, Vector2(ax + 18.0, ry + 16.0), "Left / Right choose the stage      %s" % chase, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.96, 0.83, 0.52, 0.9))
 
 	# the selected action explains itself under the list
 	var selr: Dictionary = rows[day_sel]
@@ -4633,8 +4777,9 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 78.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
 
 	# the standing record here, so the player walks on with a number to beat
-	if establish_venue >= 0 and establish_venue < best_scores.size() and best_scores[establish_venue] > 0:
-		draw_string(font, Vector2(0, s.y * 0.14 + 112.0), "your record here   %d" % best_scores[establish_venue], HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
+	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
+		var lbl := "your PURIST record here   %d" if purist else "your record here   %d"
+		draw_string(font, Vector2(0, s.y * 0.14 + 112.0), lbl % rec_table()[establish_venue], HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
 
 	var py := s.y - 70.0
 	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
