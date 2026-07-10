@@ -19,7 +19,7 @@ const W_PERFECT := 7      # within ~58 ms of arrival
 const W_GOOD := 10        # ~83 ms (tightened 30% from 15: Good must be earned)
 const W_LATE := 28        # ~233 ms, still a catch but sloppy
 const COMMIT := 52        # a CATCH press with a ball this near but outside the
-                          # allowed window fumbles it (drop). Beyond this = whiff.
+						  # allowed window fumbles it (drop). Beyond this = whiff.
 const MISS_GRACE := 20    # an uncaught ball drops this many ticks past arrival
 
 # Off-Perfect catches are a CHANCE, not a hard window. A ball within the Good or
@@ -32,7 +32,7 @@ const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
 const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
 const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
 const STRENGTH_CATCH := 0.05      # per weight-step, how much Strength eases (or, when
-                                  # under-strength, hurts) the catch of a HEAVY prop
+								  # under-strength, hurts) the catch of a HEAVY prop
 
 # --- throw height by hold (variable 0..1.4) -----------------------------------
 # A tap throws the LOWEST, snappiest height (BASE_AIR airtime); holding THROW lifts
@@ -48,10 +48,10 @@ const ARC_PER_AIR := 2.15  # arc peak (px) per airtime tick; balls crest above t
 const HEIGHT_CATCH_PENALTY := 0.35  # subtracted from the off-Perfect chance at max height
 const DEFICIT_HEIGHT := 0.5         # a full Strength deficit halves the HELD (extra) height
 const DEFICIT_BASE := 0.4           # a full Strength deficit drags the TAP floor down this much,
-                                    # so a too-heavy prop goes lower even on a plain throw
+									# so a too-heavy prop goes lower even on a plain throw
 const DEFICIT_INACC := 1.1          # a full Strength deficit roughly doubles inaccuracy
 const DEFICIT_FLOOR := 0.85         # under-strength: minimum inaccuracy "as if" this much height,
-                                    # so even a low throw of a too-heavy prop is unsteady
+									# so even a low throw of a too-heavy prop is unsteady
 
 # --- inaccuracy scale (the risk half of the risk/reward) ----------------------
 const DRIFT_MAX := 26.0   # px lateral landing drift at max height
@@ -74,7 +74,7 @@ const SAVE_PATH_DEMO := "user://juggle_demo.cfg"     # --demo/--shot autoplay: n
 const SETTINGS_PATH := "user://juggle_settings.cfg" # global options, shared by slots
 const POINTS_PER_LEVEL := 3
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
-                              # max-height throw always still demands a real catch
+							  # max-height throw always still demands a real catch
 const STAM_DRAIN_CATCH := 0.4
 const STAM_DRAIN_THROW := 0.3
 const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
@@ -332,7 +332,15 @@ var _vol := {"pad": -80.0, "bass": -80.0, "arp": -80.0, "crowd": -80.0}
 var _duck := 0.0                    # transient music dip on a drop, decays
 
 # previous-frame button states, for edge detection
-var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
+var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false, "cycle": false}
+
+# gamepad state. _trig holds the latched trigger states for hysteresis, so a
+# noisy analog trigger cannot flutter a throw release. _pad_last remembers which
+# device spoke most recently, so the on-screen hints can follow it. _joy_held
+# guards against duplicate joypad press events, which have no echo flag.
+var _trig := {"lt": false, "rt": false}
+var _pad_last := false
+var _joy_held := {}
 
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
@@ -364,6 +372,8 @@ func _ready() -> void:
 	if sa != -1 and sa + 1 < ua.size():
 		_shot_tick = int(ua[sa + 1])
 	load_settings()
+	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
+	Input.joy_connection_changed.connect(_on_joy_connection)
 	if set_fullscreen:
 		apply_fullscreen()                       # honour the remembered display mode
 	setup_audio()                                # synthesise all sound at startup
@@ -496,9 +506,29 @@ func _physics_process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey and event.pressed and not event.echo):
+	# both devices funnel into one keycode here, so every per-screen match below
+	# serves keyboard and pad identically with zero duplicated navigation code.
+	var kc: int = -1
+	if event is InputEventKey:
+		var ek := event as InputEventKey
+		if not (ek.pressed and not ek.echo):
+			return
+		kc = ek.physical_keycode
+		_pad_last = false
+	elif event is InputEventJoypadButton:
+		# joypad events carry no echo flag, so a held table drops any duplicate
+		# press a driver might deliver while the button is already down
+		var jb := event as InputEventJoypadButton
+		var held := bool(_joy_held.get(jb.button_index, false))
+		_joy_held[jb.button_index] = jb.pressed
+		if not jb.pressed or held:
+			return
+		_pad_last = true
+		kc = _pad_to_key(jb.button_index)
+		if kc == -1:
+			return
+	else:
 		return
-	var kc: int = event.physical_keycode
 	if kc == KEY_F11:
 		# fullscreen toggle, available from every screen, remembered across launches
 		set_fullscreen = not set_fullscreen
@@ -661,6 +691,31 @@ func _input(event: InputEvent) -> void:
 			open_pause()
 
 
+func _pad_to_key(btn: int) -> int:
+	# translate a recognised pad button into the keycode the per-screen matches
+	# already understand. -1 means the button has no meaning on this screen.
+	match btn:
+		JOY_BUTTON_DPAD_UP:
+			return KEY_UP
+		JOY_BUTTON_DPAD_DOWN:
+			return KEY_DOWN
+		JOY_BUTTON_A:
+			# while the sim is live, A is the polled trick button, so it must not
+			# double as Enter there or every spin attempt would finish the set
+			if game_state == ST_PLAY and not paused and not results_open and not sheet_open and not shop_open:
+				return -1
+			return KEY_ENTER
+		JOY_BUTTON_B:
+			return KEY_ESCAPE
+		JOY_BUTTON_START:
+			# Start mirrors Escape inside play, so it opens and closes the pause
+			# menu. outside play Escape can mean quit, so Start stays unmapped.
+			return KEY_ESCAPE if game_state == ST_PLAY else -1
+		JOY_BUTTON_X:
+			return KEY_X
+	return -1
+
+
 func _notification(what: int) -> void:
 	# a performance must never die to a missed alt-tab: losing window focus mid-set
 	# auto-pauses instead of letting the sim keep draining stamina unattended.
@@ -669,6 +724,19 @@ func _notification(what: int) -> void:
 			return   # unattended dev captures may lose focus; they must keep running
 		if game_state == ST_PLAY and started and running and not paused and not sheet_open and not shop_open and not results_open:
 			open_pause()
+
+
+func _on_joy_connection(_device: int, connected: bool) -> void:
+	# a set must never die to a dead pad battery. losing the pad mid-performance
+	# auto-pauses, mirroring the focus-loss guard above, and the hints fall back
+	# to the keyboard names because the pad can no longer speak.
+	if connected:
+		return
+	_pad_last = false
+	if _demo or _shot:
+		return
+	if game_state == ST_PLAY and started and running and not paused and not sheet_open and not shop_open and not results_open:
+		open_pause()
 
 
 func open_pause() -> void:
@@ -968,7 +1036,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(bx, by + 80.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.8, 0.75, 0.68))
 	# a quiet controls reminder along the bottom (the normal HUD hints are hidden)
 	draw_hints_row(font, s.x * 0.5, s.y - 42.0,
-		[[["D", "K"], "catch"], [["F", "J"], "throw, hold = higher"], [["Esc"], "pause"]])
+		[[k_catch(), "catch"], [k_throw(), "throw, hold = higher"], [k_pause(), "pause"]])
 	if tut_flash != "":
 		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
 
@@ -1393,14 +1461,68 @@ func beat_title(id: String) -> String:
 # -----------------------------------------------------------------------------
 
 func _read_inputs() -> void:
-	_edge("lc", Input.is_physical_key_pressed(K_LC), LEFT, true)
-	_edge("lt", Input.is_physical_key_pressed(K_LT), LEFT, false)
-	_edge("rc", Input.is_physical_key_pressed(K_RC), RIGHT, true)
-	_edge("rt", Input.is_physical_key_pressed(K_RT), RIGHT, false)
-	var tk := Input.is_physical_key_pressed(K_TRICK)
+	# each logical action is keyboard OR pad, combined BEFORE edge detection, so
+	# a press on either device yields exactly one edge and can never double-fire.
+	var dev := pad_dev()
+	var p_lc := false
+	var p_rc := false
+	var p_tk := false
+	var p_cy := false
+	if dev >= 0:
+		p_lc = Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER)
+		p_rc = Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER)
+		p_tk = Input.is_joy_button_pressed(dev, JOY_BUTTON_A)
+		p_cy = Input.is_joy_button_pressed(dev, JOY_BUTTON_Y)
+		_trig["lt"] = _trig_held("lt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT))
+		_trig["rt"] = _trig_held("rt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT))
+	else:
+		_trig["lt"] = false
+		_trig["rt"] = false
+	var p_lt := bool(_trig["lt"])
+	var p_rt := bool(_trig["rt"])
+	var k_lc := Input.is_physical_key_pressed(K_LC)
+	var k_lt := Input.is_physical_key_pressed(K_LT)
+	var k_rc := Input.is_physical_key_pressed(K_RC)
+	var k_rt := Input.is_physical_key_pressed(K_RT)
+	var k_tk := Input.is_physical_key_pressed(K_TRICK)
+	_note_device(k_lc or k_lt or k_rc or k_rt or k_tk, p_lc or p_lt or p_rc or p_rt or p_tk or p_cy)
+	_edge("lc", k_lc or p_lc, LEFT, true)
+	_edge("lt", k_lt or p_lt, LEFT, false)
+	_edge("rc", k_rc or p_rc, RIGHT, true)
+	_edge("rt", k_rt or p_rt, RIGHT, false)
+	var tk := k_tk or p_tk
 	if tk and not bool(_prev["trick"]):
 		on_trick()
 	_prev["trick"] = tk
+	# the top face button mirrors the C key and steps the permanent arm-trick
+	# toggle. lessons and the results card lock C, so the pad honours that too.
+	if p_cy and not bool(_prev["cycle"]) and not tut_active and not results_open:
+		cycle_trick()
+	_prev["cycle"] = p_cy
+
+
+func pad_dev() -> int:
+	# the device index of the first connected pad, or -1 when none is attached
+	var pads := Input.get_connected_joypads()
+	return pads[0] if not pads.is_empty() else -1
+
+
+func _trig_held(name: String, v: float) -> bool:
+	# analog triggers latch on above 0.5 and only let go below 0.4. the gap means
+	# a trigger sitting near the threshold cannot flutter and fire a spurious
+	# throw release, which would ruin the hold-for-height charge.
+	if bool(_trig[name]):
+		return v > 0.4
+	return v > 0.5
+
+
+func _note_device(kb: bool, pad: bool) -> void:
+	# remember which device spoke last so the hints can follow it. the keyboard
+	# wins a tie, so pad glyphs only appear from genuine pad input.
+	if kb:
+		_pad_last = false
+	elif pad:
+		_pad_last = true
 
 
 func _edge(name: String, down: bool, h: int, is_catch: bool) -> void:
@@ -2032,7 +2154,7 @@ func catch_chance(quality: int, height: float) -> float:
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
 	p += strength_catch_mod()      # raw muscle steadies a heavy prop in the hand (and only a
-	                               # too-weak grip on a heavy prop makes the catch itself shaky)
+								   # too-weak grip on a heavy prop makes the catch itself shaky)
 	if has_glasses:
 		p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	if spinning():
@@ -3168,6 +3290,43 @@ func hud_panel(r: Rect2) -> void:
 	draw_rect(r, Color(0.9, 0.6, 0.35, 0.22), false, 1.0)
 
 
+func pad_active() -> bool:
+	# hints follow whichever device spoke most recently, so a keyboard player
+	# never sees pad glyphs and a pad player never hunts for key names
+	return _pad_last and pad_dev() >= 0
+
+
+func k_catch() -> Array[String]:
+	# the catch keycap labels for whichever device is active
+	if pad_active():
+		return ["L1", "R1"]
+	return ["D", "K"]
+
+
+func k_throw() -> Array[String]:
+	if pad_active():
+		return ["L2", "R2"]
+	return ["F", "J"]
+
+
+func k_pause() -> Array[String]:
+	if pad_active():
+		return ["B"]
+	return ["Esc"]
+
+
+func k_trick() -> Array[String]:
+	if pad_active():
+		return ["A"]
+	return ["Space"]
+
+
+func k_cycle() -> Array[String]:
+	if pad_active():
+		return ["Y"]
+	return ["C"]
+
+
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
 	# a small keyboard-key box; returns its width so hints can chain
 	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0)
@@ -3295,22 +3454,25 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var cx := s.x * 0.5 + 90.0
 			if performing:
 				# a set in progress cannot be reset, only finished or dropped, so its
-				# hints lead with the finish key and drop the restart/rebuild controls
+				# hints lead with the finish key and drop the restart/rebuild controls.
+				# finish keeps the Enter cap even on pad, because A is the trick button
+				# and Start pauses, so no pad button is free to end the set.
 				draw_hints_row(font, cx, s.y - 34, [
-					[["D", "K"], "catch"], [["F", "J"], "throw, hold = higher"],
-					[["Enter"], "finish set"], [["Esc"], "pause"]])
+					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
+					[["Enter"], "finish set"], [k_pause(), "pause"]])
 			else:
 				draw_hints_row(font, cx, s.y - 58, [
-					[["D", "K"], "catch"], [["F", "J"], "throw, hold = higher"],
+					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
 					[["P"], "perform"], [["R"], "restart"]])
 				draw_hints_row(font, cx, s.y - 34, [
 					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["S"], "shop"],
-					[["Tab"], "sheet"], [["Esc"], "pause"]])
+					[["Tab"], "sheet"], [k_pause(), "pause"]])
 
 		if not started:
 			var verb := "perform" if performing else "practise"
 			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
-			draw_string(font, Vector2(0, s.y * 0.23), "press a THROW  ( F or J )  to %s" % verb,
+			var tnames := "( L2 or R2 )" if pad_active() else "( F or J )"
+			draw_string(font, Vector2(0, s.y * 0.23), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
 			draw_string(font, Vector2(0, s.y * 0.23 + 26.0), "P to %s instead" % ("train" if performing else "perform"),
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.85, 0.75, 0.6, 0.8))
@@ -3411,12 +3573,15 @@ func draw_results(font: Font, s: Vector2) -> void:
 	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
 	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%d" % run_xp, Color(0.82, 0.9, 0.7), ra.call(6)); y += rowh
 
-	# footer: how to continue, breathing gently once everything is revealed
+	# footer: how to continue, breathing gently once everything is revealed. the
+	# shop and sheet stay keyboard names even on pad, since they have no button.
 	if age > 80:
 		var fa := 0.7 + 0.3 * sin(float(tick) * 0.05)
-		var foot := "R  go again      S  shop      Esc  menu"
+		var kgo := "A" if pad_active() else "R"
+		var kmenu := "B" if pad_active() else "Esc"
+		var foot := "%s  go again      S  shop      %s  menu" % [kgo, kmenu]
 		if points > 0:
-			foot = "R  go again      Tab  +%d point%s      S  shop      Esc  menu" % [points, "" if points == 1 else "s"]
+			foot = "%s  go again      Tab  +%d point%s      S  shop      %s  menu" % [kgo, points, "" if points == 1 else "s", kmenu]
 		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
 
 
@@ -3437,7 +3602,8 @@ func draw_pause(font: Font, s: Vector2) -> void:
 		var col := Color(1.0, 0.9, 0.6) if sel else Color(0.74, 0.68, 0.62)
 		var label := ("> %s <" % opts[i]) if sel else opts[i]
 		draw_string(font, Vector2(px, oy + float(i) * 40.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw, 22, col)
-	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter  -  Esc resumes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
+	var pfoot := "up / down  -  A selects  -  B resumes" if pad_active() else "up / down  -  Enter  -  Esc resumes"
+	draw_string(font, Vector2(px, py + ph - 20.0), pfoot, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
 func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
@@ -3454,7 +3620,11 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(0.10, 0.06, 0.08, 0.9 * a))
 	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(1.0, 0.82, 0.45, 0.55 * a), false, 2.0)
 	draw_string(font, Vector2(bx, cy - 4.0), "NEW TRICK   -   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 21, Color(1.0, 0.88, 0.5, a))
-	var how := "press Space to spin while two or more are airborne" if String(t["kind"]) == "live" else "press C to toggle it on  -  it styles every throw"
+	var how := ""
+	if String(t["kind"]) == "live":
+		how = "press %s to spin while two or more are airborne" % ("A" if pad_active() else "Space")
+	else:
+		how = "press %s to toggle it on  -  it styles every throw" % ("Y" if pad_active() else "C")
 	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
 	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
 
@@ -3471,12 +3641,12 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(s.x * 0.5 - 150.0, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
 	var items: Array = []
 	if not arms.is_empty():
-		items.append([["C"], "toggle trick"])
+		items.append([k_cycle(), "toggle trick"])
 	if trick_unlocked(TR_SPIN):
 		var sp := "spin"
 		if tick < trick_ready:
 			sp = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
-		items.append([["Space"], sp])
+		items.append([k_trick(), sp])
 	if not items.is_empty():
 		draw_hints_row(font, s.x * 0.5, y + 8.0, items)
 
@@ -3633,7 +3803,8 @@ func draw_menu(font: Font, s: Vector2) -> void:
 		var txt := ("%s" % opts[i]) if not sel else (">    %s    <" % opts[i])
 		var col := Color(1.0, 0.9, 0.55) if sel else Color(0.72, 0.66, 0.6)
 		draw_string(font, Vector2(0, oy + float(i) * 44.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
-	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down to choose    Enter to select", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
+	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_string(font, Vector2(s.x - 120.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 12, Color(0.6, 0.55, 0.5, 0.7))
 
 	draw_vignette(s, 0.5)
@@ -3698,7 +3869,8 @@ func draw_slots(font: Font, s: Vector2) -> void:
 	var by := oy + float(NUM_SLOTS) * 74.0 + 16.0
 	var bsel := menu_sel == NUM_SLOTS
 	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
-	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to play    X to delete    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	var sfoot := "Up / Down    A to play    X to delete    B to go back" if pad_active() else "Up / Down    Enter to play    X to delete    Esc to go back"
+	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -3724,7 +3896,8 @@ func draw_settings(font: Font, s: Vector2) -> void:
 
 	var bsel := menu_sel == rows.size()
 	draw_string(font, Vector2(0, oy + float(rows.size()) * 52.0 + 30.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
-	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter to toggle    Esc to go back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	var tfoot := "Up / Down    A to toggle    B to go back" if pad_active() else "Up / Down    Enter to toggle    Esc to go back"
+	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
