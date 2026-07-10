@@ -77,8 +77,10 @@ const SEG_PER_DAY := 3
 const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly up
 const EAT_STAM := 14.0
 const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
-const INN_COST := 15       # a proper bed: full stamina on waking
-const ROUGH_FRAC := 0.6    # sleeping rough is free but restores only this fraction
+const INN_COST := 15       # a proper bed: full stamina on waking. The innkeeper
+						   # takes what you have when you are short, so the day
+						   # can always end (sleeping rough was cut per Louis:
+						   # a free sleep just let the days go by)
 const VENUE_PAY := 0.35    # each venue tier pays this much more than the last
 const BUSK_FLOOR := 8      # a broke juggler always earns at least this from the hat
 const BROKE_GOLD := 20     # the busking floor applies below this purse
@@ -326,9 +328,12 @@ var meals := 0            # meals eaten toward the next point of Strength
 var day_sel := 0          # cursor in the day hub
 var day_msg := ""         # transient hub feedback ("the day is spent, sleep")
 var day_msg_tick := -999  # cine_tick the message appeared
+var day_anim := ""        # a short hub vignette playing: "eat", "inn" or "shop"
+var day_anim_start := 0   # cine_tick it began; its effect applies when it ends
 var venue_seen := 0       # highest venue reached, so promotions fire once
 var story_seen := 0       # how many endgame story milestones have played (see STORY_REP)
 var cutscene_queue: Array[String] = []  # pending story beats to show
+var pending_beats: Array[String] = []   # beats earned by a set, held until the grade is seen
 var last_beats: Array[String] = []      # the beats begin_cutscene was last given, so finish_beats can route the finale to the credits
 var view_venue := -1      # cutscene/preview override of which venue palette to draw
 var shake := 0.0          # screen-shake magnitude, decays each frame
@@ -547,6 +552,8 @@ func _physics_process(delta: float) -> void:
 		cine_tick += 1           # drives cutscene / establish / menu motion
 		if game_state == ST_CUTSCENE:
 			cutscene_autoadvance()   # shots play themselves, movie-like, until skipped
+		elif game_state == ST_DAY and day_anim != "":
+			day_anim_step()          # a hub vignette is playing; its effect lands at the end
 		queue_redraw()
 		return
 	if sheet_open or shop_open or paused:
@@ -568,6 +575,10 @@ func _physics_process(delta: float) -> void:
 	step_effects()   # age the egg-break shards, yolk splats, and particles
 	if results_open:
 		results_anim_sfx()   # the card's count-up ticks, stamp, and record fanfare
+		# a story beat earned by this set also plays by ITSELF three seconds
+		# after the grade stamps, so the story never waits on a key forever
+		if not pending_beats.is_empty() and not sheet_open and not shop_open and results_age() > 424:
+			launch_pending_beats()
 	if _eggdemo and tick % 42 == 0:
 		var vp := get_viewport_rect().size
 		spawn_egg_break(Vector2(vp.x * 0.5 + randf_range(-140, 140), vp.y * 0.42))
@@ -655,12 +666,17 @@ func _input(event: InputEvent) -> void:
 		if kc == KEY_ESCAPE:
 			open_pause()
 		return
-	# the end-of-performance results panel: go again (another booking, so it costs
-	# a fresh day segment), spend/shop, or step back out into the day. It stays
-	# open behind the sheet and shop, so you can invest then continue.
+	# the end-of-performance results panel: go again with R (another booking, so
+	# it costs a fresh day segment), spend/shop, or Enter/Esc back into the day.
+	# It stays open behind the sheet and shop, so you can invest then continue.
 	if results_open and not sheet_open and not shop_open:
+		if not pending_beats.is_empty():
+			# a story beat earned by this set plays on the FIRST key after the
+			# grade, before any card action, then returns to this card
+			launch_pending_beats()
+			return
 		match kc:
-			KEY_R, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			KEY_R, KEY_SPACE:
 				if segments_left() > 0:
 					seg_used += 1
 					save_progress()
@@ -672,7 +688,7 @@ func _input(event: InputEvent) -> void:
 				sheet_open = true
 			KEY_S:
 				shop_open = true
-			KEY_ESCAPE:
+			KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE:
 				results_open = false
 				enter_day()
 		return
@@ -694,7 +710,10 @@ func _input(event: InputEvent) -> void:
 		KEY_S:
 			shop_open = true
 		KEY_ENTER, KEY_KP_ENTER:
-			finish_performance()   # end the set on a high note, no drop needed
+			if performing:
+				finish_performance()   # end the set on a high note, no drop needed
+			else:
+				enter_day()            # practice over: Enter steps back into the day
 		KEY_R:
 			if not performing:
 				start_run(num_balls)
@@ -740,6 +759,8 @@ func _input(event: InputEvent) -> void:
 			if debug_mode: debug_jump_story(1)
 		KEY_F9:
 			if debug_mode: debug_jump_story(2)
+		KEY_F10:
+			if debug_mode: begin_cutscene(["intro"])   # replay the opening, completing the debug story map
 		KEY_ESCAPE:
 			open_pause()
 
@@ -880,8 +901,18 @@ func segments_left() -> int:
 
 
 func seg_name() -> String:
-	var names := ["morning", "afternoon", "evening", "night"]
+	# the day's three beats (Louis): wake to DAY, work into NIGHT, and DEEP NIGHT
+	# is the moment to sleep. The hub darkens along with them.
+	var names := ["day", "night", "deep night", "time to sleep"]
 	return names[clampi(seg_used, 0, 3)]
+
+
+func next_venue_rep() -> int:
+	# the Reputation the NEXT stage opens at, or 0 when the arena is yours
+	# (mirrors venue_index_of's ladder)
+	var steps := [100, 300, 700, 1500, 3000]
+	var vi := venue_index()
+	return int(steps[vi]) if vi < steps.size() else 0
 
 
 func enter_day() -> void:
@@ -908,11 +939,11 @@ func day_rows() -> Array[Dictionary]:
 	out.append({"id": "perform", "name": "PERFORM  at  %s%s" % [vname, ptag],
 		"cost": "1 segment", "ok": not spent,
 		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "earn gold and reputation. Left and Right choose the stage. P books it PURIST: no stat help, its own record board."})
+		"sub": "gold and reputation. P books the set PURIST."})
 	out.append({"id": "practice", "name": "PRACTICE",
 		"cost": "1 segment", "ok": not spent,
 		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "a free session, no crowd and no pay. Restart as often as you like."})
+		"sub": "a free session, no crowd, no pay. Restart freely."})
 	var full := stamina >= stamina_max - 1.0
 	var can_eat := money >= EAT_COST and not full
 	var eat_why := ""
@@ -922,17 +953,13 @@ func day_rows() -> Array[Dictionary]:
 		eat_why = "not hungry yet"
 	out.append({"id": "eat", "name": "EAT",
 		"cost": "%d gold" % EAT_COST, "ok": can_eat, "why": eat_why,
-		"sub": "a hot meal restores stamina. Every third meal builds a point of Strength."})
+		"sub": "stamina back. Every third meal adds Strength."})
 	out.append({"id": "inn", "name": "SLEEP  at the inn",
-		"cost": "%d gold" % INN_COST, "ok": money >= INN_COST,
-		"why": "not enough gold" if money < INN_COST else "",
-		"sub": "ends the day. Wake fully rested."})
-	out.append({"id": "rough", "name": "SLEEP  rough",
-		"cost": "free", "ok": true, "why": "",
-		"sub": "ends the day. A cold doorway restores only part of your strength."})
+		"cost": "%d gold" % mini(money, INN_COST), "ok": true, "why": "",
+		"sub": "ends the day. Short on gold, they take what you have."})
 	out.append({"id": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
-		"sub": "props and gear. New props teach themselves the first time."})
+		"sub": "props and gear. New props teach themselves."})
 	return out
 
 
@@ -944,6 +971,8 @@ func day_input(kc: int) -> void:
 	if shop_open:
 		shop_input(kc)
 		return
+	if day_anim != "":
+		return   # a little vignette is playing; the hub listens again when it ends
 	var rows := day_rows()
 	var n := rows.size()
 	match kc:
@@ -954,12 +983,14 @@ func day_input(kc: int) -> void:
 			day_sel = (day_sel + 1) % n
 			play_sfx("ui", -14.0)
 		KEY_LEFT, KEY_RIGHT:
-			# choosing tonight's stage is free, any venue reputation has unlocked
+			# choosing tonight's stage is free, any venue reputation has unlocked.
+			# The picker STOPS at both ends (Louis: left to right, never wrapping).
 			if String(rows[day_sel]["id"]) == "perform":
 				var dir := 1 if kc == KEY_RIGHT else -1
-				var top := venue_index()
-				venue_pick = (play_venue() + dir + top + 1) % (top + 1)
-				play_sfx("ui2", -14.0)
+				var np := clampi(play_venue() + dir, 0, venue_index())
+				if np != play_venue():
+					venue_pick = np
+					play_sfx("ui2", -14.0)
 		KEY_P:
 			# book tonight PURIST: the pure-skill ladder with its own records
 			purist = not purist
@@ -996,6 +1027,28 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			game_state = ST_PLAY
 			start_run(num_balls)
 			play_sfx("ui2", -11.0)
+		"eat", "inn", "shop":
+			# these three open with a small vignette; the effect lands when it ends
+			day_anim = id
+			day_anim_start = cine_tick
+			play_sfx("ui2", -13.0)
+
+
+func day_anim_len(id: String) -> int:
+	match id:
+		"inn": return 220
+		"eat": return 150
+		_: return 100
+
+
+func day_anim_step() -> void:
+	# the little vignette has finished: NOW the action actually happens, so the
+	# picture always leads and the ledger follows
+	if cine_tick - day_anim_start < day_anim_len(day_anim):
+		return
+	var id := day_anim
+	day_anim = ""
+	match id:
 		"eat":
 			money -= EAT_COST
 			stamina = minf(stamina_max, stamina + EAT_STAM)
@@ -1009,10 +1062,8 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 				play_sfx("coin", -10.0)
 			save_progress()
 		"inn":
-			money -= INN_COST
+			money -= mini(money, INN_COST)   # the innkeeper takes what you have
 			sleep_day(1.0)
-		"rough":
-			sleep_day(ROUGH_FRAC)
 		"shop":
 			shop_open = true
 			play_sfx("ui2", -13.0)
@@ -1472,8 +1523,16 @@ func start_beat() -> void:
 	cs_shot_start = cine_tick
 
 
-func cutscene_key(_kc: int) -> void:
-	next_shot()   # any key cuts forward to the next shot
+func cutscene_key(kc: int) -> void:
+	# a key cuts forward to the next shot, with two guards: Space never skips (it
+	# is the trick key and gets mashed in play, so a queued story beat right after
+	# a set must survive it), and a shot's first moments swallow skips so a stray
+	# press from the round that just ended cannot eat a scene unseen.
+	if kc == KEY_SPACE:
+		return
+	if cine_tick - cs_shot_start < 30:
+		return
+	next_shot()
 
 
 func cutscene_autoadvance() -> void:
@@ -1500,6 +1559,15 @@ func next_shot() -> void:
 		finish_beats()
 	else:
 		start_beat()
+
+
+func launch_pending_beats() -> void:
+	# play the story beats a set earned, AFTER its grade has been seen. The
+	# results card stays open underneath: finish_beats routes promotion beats
+	# back to ST_PLAY, where the card waits to be dismissed into the day.
+	var beats: Array[String] = pending_beats.duplicate()
+	pending_beats.clear()
+	begin_cutscene(beats)
 
 
 func finish_beats() -> void:
@@ -2237,6 +2305,8 @@ func do_throw(h: int, hold: int) -> void:
 	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)) * (1.0 - 0.8 * deficit))
 	if set_flags and frac >= 1.0:
 		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
+	if mode == MODE_PERFORM and not tut_active and frac >= 1.1:
+		play_sfx("gasp", -13.0)   # the crowd inhales at a genuinely risky throw
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
 	if tut_active:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
@@ -2491,7 +2561,12 @@ func on_round_end() -> void:
 		story_seen += 1
 	save_progress()
 	if not beats.is_empty():
-		begin_cutscene(beats)
+		if results_open:
+			# the story waits behind the grade: the results card shows first, and
+			# the first key (or three seconds after the stamp) plays the beat
+			pending_beats = beats
+		else:
+			begin_cutscene(beats)
 
 
 func stamina_mult() -> float:
@@ -2934,6 +3009,8 @@ func drop_ball(b: Ball, why: String) -> void:
 		spawn_egg_break(flight_pos(b))   # shell shards fly, a yolk splats on the floor
 		play_sfx("splat", -8.0)
 	play_sfx("drop", -7.0)
+	if mode == MODE_PERFORM and not tut_active:
+		play_sfx("groan", -10.0)   # the crowd sags with the prop (ART doc stingers)
 	_duck = 1.0   # a drop briefly ducks the music, so the silence lands
 	add_popup(b.to_pos + Vector2(0, -6), dtext, Color(1.0, 0.32, 0.3))
 	# only a performance ends when the crowd is lost; training just plays on
@@ -3308,8 +3385,8 @@ func draw_juggler(s: Vector2) -> void:
 		Vector2(cx + 0.30 * H, shoulder_y - 0.04 * H), Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H),
 		Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
 		Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), suit)
-	draw_circle(Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)   # rounded shoulder caps
-	draw_circle(Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H), 0.16 * H, suit)
+	# (the round shoulder caps are gone: they read as epaulettes poking above the
+	# jacket line. The polygon's own sloped corner is the shoulder now.)
 	draw_circle(Vector2(cx - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
 	# front-of-body detailing (collar V and the buttoned waistcoat) only shows while the
@@ -3867,7 +3944,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			else:
 				draw_hints_row(font, cx, s.y - 58, [
 					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
-					[["R"], "restart"]])
+					[["R"], "restart"], [["Enter"], "end session"]])
 				draw_hints_row(font, cx, s.y - 34, [
 					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["P"], "pattern"],
 					[["S"], "shop"], [["Tab"], "sheet"], [k_pause(), "pause"]])
@@ -3883,7 +3960,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		elif not running and not results_open:
 			# training (or a performance with no panel) keeps the plain end-of-run line
 			draw_string(font, Vector2(0, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_CENTER, s.x, 40, Color(1.0, 0.5, 0.4))
-			draw_string(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   press R to go again" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
+			draw_string(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   R goes again, Enter ends the session" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
 
 
 func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0) -> void:
@@ -3983,11 +4060,16 @@ func draw_results(font: Font, s: Vector2) -> void:
 	# shop and sheet stay keyboard names even on pad, since they have no button.
 	if age > 80:
 		var fa := 0.7 + 0.3 * sin(float(tick) * 0.05)
-		var kgo := "A" if pad_active() else "R"
-		var kmenu := "B" if pad_active() else "Esc"
-		var foot := "%s  go again      S  shop      %s  menu" % [kgo, kmenu]
-		if points > 0:
-			foot = "%s  go again      Tab  +%d point%s      S  shop      %s  menu" % [kgo, points, "" if points == 1 else "s", kmenu]
+		var foot := ""
+		if not pending_beats.is_empty():
+			# a story beat waits: the first key (or a moment's pause) plays it
+			foot = "something is stirring  -  any key"
+		else:
+			var kgo := "A" if pad_active() else "R"
+			var kmenu := "Enter" if not pad_active() else "B"
+			foot = "%s  go again      S  shop      %s  back to the day" % [kgo, kmenu]
+			if points > 0:
+				foot = "%s  go again      Tab  +%d point%s      S  shop      %s  back to the day" % [kgo, points, "" if points == 1 else "s", kmenu]
 		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
 
 
@@ -4189,7 +4271,12 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# day's ledger and actions sit over it. The world is where you will play
 	# tonight, which makes choosing a stage feel like standing in front of it.
 	draw_venue_exterior(s, play_venue())
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.60))
+	# the hub darkens as the day's segments burn: DAY is open, NIGHT draws in,
+	# DEEP NIGHT is nearly black and plainly the moment to sleep
+	var seg_dark: float = [0.0, 0.16, 0.32, 0.32][clampi(seg_used, 0, 3)]
+	if seg_dark > 0.0:
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.01, 0.01, 0.04, seg_dark))
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.52))
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -4229,37 +4316,50 @@ func draw_day(font: Font, s: Vector2) -> void:
 	var to_str := MEALS_PER_STR - (meals % MEALS_PER_STR)
 	draw_string(font, Vector2(lx + 20.0, ly + 152.0), "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.68, 0.6))
 
-	# the actions, centred right of the ledger
+	# the actions: a compact column on the RIGHT edge, off the stage picture
+	# (they used to sprawl across the middle and covered the venue's marquee)
 	var rows := day_rows()
-	var ax := s.x * 0.42
-	var aw := s.x * 0.52
+	var aw := 348.0
+	var ax := s.x - aw - 44.0
 	var ay := s.y * 0.285
 	for i in rows.size():
 		var r: Dictionary = rows[i]
 		var sel := i == day_sel
 		var ok := bool(r["ok"])
-		var ry := ay + float(i) * 52.0
+		var ry := ay + float(i) * 44.0
 		if sel:
-			hud_panel(Rect2(ax - 16.0, ry - 24.0, aw, 46.0))
+			hud_panel(Rect2(ax - 14.0, ry - 21.0, aw, 40.0))
 		var name_c := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
 		if not ok:
 			name_c = Color(0.55, 0.5, 0.46)
-		draw_string(font, Vector2(ax, ry), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 21, name_c)
+		var label := String(r["name"])
+		if String(r["id"]) == "perform":
+			# the stage picker lives ON this row: arrows show which way it can
+			# still move (left to right along the ladder, never wrapping)
+			var pv := play_venue()
+			var lar := "<  " if pv > 0 else "   "
+			var rar := "  >" if pv < venue_index() else "   "
+			label = "%sPERFORM  at  %s%s%s" % [lar, String(venue_data(pv)["name"]), "  -  PURIST" if purist else "", rar]
+		draw_string(font, Vector2(ax, ry), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, name_c)
 		var cost := String(r["cost"])
 		if cost != "":
 			var cc := Color(0.85, 0.75, 0.58, 0.9) if ok else Color(0.55, 0.5, 0.46)
-			draw_string(font, Vector2(ax + aw - 160.0, ry), cost, HORIZONTAL_ALIGNMENT_RIGHT, 130.0, 14, cc)
-		if sel and String(r["id"]) == "perform":
-			# the live target: this venue's record on the chosen board, the chase
-			var vi := play_venue()
-			var chase := "no record here yet  -  set one"
-			if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
-				chase = "record to beat   %d" % rec_table()[vi]
-			draw_string(font, Vector2(ax + 18.0, ry + 16.0), "Left / Right choose the stage      %s" % chase, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.96, 0.83, 0.52, 0.9))
+			draw_string(font, Vector2(ax + aw - 118.0, ry), cost, HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, cc)
 
-	# the selected action explains itself under the list
+	# under the list: the selected action explains itself, and the perform row
+	# adds its live chase and how the NEXT stage opens
 	var selr: Dictionary = rows[day_sel]
-	draw_string(font, Vector2(ax, ay + float(rows.size()) * 52.0 + 8.0), String(selr["sub"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.85, 0.78, 0.66))
+	var suby := ay + float(rows.size()) * 44.0 + 4.0
+	draw_string(font, Vector2(ax - 14.0, suby), String(selr["sub"]), HORIZONTAL_ALIGNMENT_LEFT, aw + 14.0, 13, Color(0.85, 0.78, 0.66))
+	if String(selr["id"]) == "perform":
+		var vi := play_venue()
+		var chase := "no record here yet  -  set one"
+		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
+			chase = "record to beat   %d" % rec_table()[vi]
+		draw_string(font, Vector2(ax - 14.0, suby + 40.0), chase, HORIZONTAL_ALIGNMENT_LEFT, aw, 13, Color(0.96, 0.83, 0.52, 0.9))
+		var nxt := next_venue_rep()
+		if nxt > 0:
+			draw_string(font, Vector2(ax - 14.0, suby + 60.0), "the next stage opens at Rep %d  (you have %d)" % [nxt, reputation], HORIZONTAL_ALIGNMENT_LEFT, aw, 13, Color(0.82, 0.72, 0.85, 0.9))
 
 	# transient feedback (a meal eaten, a spent day) fades after a few seconds
 	if day_msg != "" and cine_tick - day_msg_tick < 300:
@@ -4268,6 +4368,60 @@ func draw_day(font: Font, s: Vector2) -> void:
 
 	draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
 		[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]])
+
+	if day_anim != "":
+		draw_day_anim(font, s)
+
+
+func draw_day_anim(font: Font, s: Vector2) -> void:
+	# the hub's little vignettes: a beat of picture before the ledger moves, so
+	# eating, sleeping and shopping feel like moments instead of button presses
+	var t := float(cine_tick - day_anim_start) / float(day_anim_len(day_anim))
+	t = clampf(t, 0.0, 1.0)
+	var ease_in := minf(t * 5.0, 1.0)
+	match day_anim:
+		"eat":
+			var c := Vector2(s.x * 0.5, s.y * 0.52)
+			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
+			# the bowl, and a spoon that dips twice
+			fill_ellipse(c + Vector2(0, 30.0), 74.0, 30.0, Color(0.55, 0.34, 0.2))
+			fill_ellipse(c + Vector2(0, 22.0), 62.0, 18.0, Color(0.93, 0.72, 0.4))
+			var dip := absf(sin(t * TAU * 2.0)) * 18.0
+			draw_capsule(c + Vector2(44.0, -34.0 + dip), c + Vector2(58.0, -2.0 + dip), 5.0, 8.0, Color(0.8, 0.78, 0.75))
+			# steam: three slow wisps climbing off the soup
+			for w in 3:
+				var wx := c.x - 30.0 + 30.0 * float(w)
+				var pts := PackedVector2Array()
+				for k in 9:
+					var f := float(k) / 8.0
+					pts.append(Vector2(wx + sin(f * 5.0 + t * 9.0 + float(w) * 2.0) * 7.0, c.y + 4.0 - f * (46.0 + 20.0 * t)))
+				draw_polyline(pts, Color(1.0, 0.97, 0.9, 0.35 * ease_in * (1.0 - t * 0.5)), 2.5)
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "a hot meal", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(1.0, 0.9, 0.65, ease_in))
+		"inn":
+			# the world dims to sleep, a lit window and drifting z's carry it
+			draw_rect(Rect2(0, 0, s.x, s.y), Color(0.01, 0.01, 0.03, 0.55 + 0.4 * t))
+			var c := Vector2(s.x * 0.5, s.y * 0.46)
+			draw_rect(Rect2(c.x - 60.0, c.y - 70.0, 120.0, 130.0), Color(0.16, 0.11, 0.08))
+			draw_rect(Rect2(c.x - 48.0, c.y - 58.0, 96.0, 106.0), Color(1.0, 0.82, 0.45, 0.28 * (1.0 - t * 0.7)))
+			draw_rect(Rect2(c.x - 3.0, c.y - 58.0, 6.0, 106.0), Color(0.16, 0.11, 0.08))
+			draw_rect(Rect2(c.x - 48.0, c.y - 8.0, 96.0, 6.0), Color(0.16, 0.11, 0.08))
+			for z in 3:
+				var zt := fposmod(t * 2.2 + float(z) * 0.33, 1.0)
+				var zp := c + Vector2(70.0 + zt * 46.0 + float(z) * 8.0, -30.0 - zt * 70.0)
+				draw_string(font, zp, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 18 + z * 4, Color(0.9, 0.88, 0.8, (1.0 - zt) * 0.8))
+			draw_string(font, Vector2(0, c.y + 110.0), "the day ends", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.85, 0.7, ease_in))
+		"shop":
+			# the awning rolls down over the counter and the shop is open
+			var c := Vector2(s.x * 0.5, s.y * 0.5)
+			hud_panel(Rect2(c.x - 190.0, c.y - 100.0, 380.0, 190.0))
+			var drop := 64.0 * minf(t * 1.6, 1.0)
+			for st in 7:
+				var sx0 := c.x - 168.0 + float(st) * 48.0
+				var scol := Color(0.75, 0.2, 0.18) if st % 2 == 0 else Color(0.92, 0.88, 0.8)
+				draw_rect(Rect2(sx0, c.y - 86.0, 48.0, drop), scol)
+			draw_rect(Rect2(c.x - 176.0, c.y - 86.0 + drop, 352.0, 5.0), Color(0.5, 0.3, 0.16))
+			draw_rect(Rect2(c.x - 150.0, c.y + 26.0, 300.0, 34.0), Color(0.42, 0.26, 0.14))
+			draw_string(font, Vector2(c.x - 190.0, c.y + 78.0), "the shop opens", HORIZONTAL_ALIGNMENT_CENTER, 380.0, 16, Color(1.0, 0.9, 0.65, ease_in))
 
 
 func draw_menu(font: Font, s: Vector2) -> void:
@@ -4454,7 +4608,15 @@ func audio_update() -> void:
 	if perf:
 		t = lerpf(-13.0, -9.0, energy)
 	if game_state == ST_CUTSCENE:
-		t = -18.0
+		# silence as a tool (ART doc): the world-record ordeal strips the music to
+		# almost nothing, and the finale brings the full theme back as the payoff
+		match cur_beat_id():
+			"record":
+				t = -34.0
+			"finale":
+				t = -9.0
+			_:
+				t = -18.0
 	if not set_music:
 		t = -80.0
 	_vol["mus"] = lerpf(_vol["mus"], t - _duck * 9.0, 0.06)
@@ -4604,6 +4766,37 @@ func _splat_sound() -> PackedFloat32Array:
 	return out
 
 
+func _gasp_sound() -> PackedFloat32Array:
+	# the room inhaling at a risky throw: a soft quick upward slide, pure tone
+	var dur := 0.28
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		ph += TAU * lerpf(320.0, 560.0, clampf(t / dur, 0.0, 1.0)) / AUDIO_SR
+		out[i] = sin(ph) * clampf(t / 0.06, 0.0, 1.0) * exp(-maxf(t - 0.14, 0.0) / 0.07) * 0.3
+	return out
+
+
+func _groan_sound() -> PackedFloat32Array:
+	# the room sagging at a drop: two low tones sliding down a third, pure tone
+	var dur := 0.5
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	var ph := 0.0
+	var ph2 := 0.0
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		var slide := lerpf(196.0, 155.6, clampf(t / 0.3, 0.0, 1.0))
+		ph += TAU * slide / AUDIO_SR
+		ph2 += TAU * slide * 1.5 / AUDIO_SR
+		out[i] = (sin(ph) + 0.4 * sin(ph2)) / 1.4 * clampf(t / 0.05, 0.0, 1.0) * exp(-maxf(t - 0.2, 0.0) / 0.14) * 0.34
+	return out
+
+
 func _cheer_sound() -> PackedFloat32Array:
 	# the room lifting: a warm major chord that swells and settles under a quick
 	# rising run of bells. All tone, no noise (the old version was a noise swell,
@@ -4670,6 +4863,8 @@ func gen_sfx() -> void:
 	sfx["streak"] = _wav(_seq_bells([784.0, 987.8, 1318.5], 0.08, 0.5), false)
 	sfx["ui"] = _wav(_tone([880.0], [1.0], 0.05, 0, 0.001, 0.02, 0.3, 0.0), false)
 	sfx["ui2"] = _wav(_tone([1174.7, 1568.0], [1.0, 0.5], 0.10, 0, 0.001, 0.05, 0.35, 0.0), false)
+	sfx["gasp"] = _wav(_gasp_sound(), false)
+	sfx["groan"] = _wav(_groan_sound(), false)
 	sfx["c_ball"] = _wav(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.15), false)
 	sfx["c_egg"] = _wav(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.2), false)
 	sfx["c_ring"] = _wav(_tone([300.0, 452.0], [1.0, 0.5], 0.34, 0, 0.004, 0.22, 0.4, 0.0), false)
@@ -4717,14 +4912,15 @@ func draw_cutscene(font: Font, s: Vector2) -> void:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
 	draw_vignette(s, 0.62)
 
-	var topbar := 70.0
+	var topbar := 92.0
 	var botbar := 122.0
 	draw_letterbox(s, topbar, botbar)
 
-	# title, centred in the top bar, with a gold ornament rule under it
+	# title, centred in the top bar, with a gold ornament rule fully BELOW it
+	# (the rule used to sit at the title's midline and struck through the text)
 	var title := beat_title(cur_beat_id())
-	draw_title_glow(font, 30.0, title, 30, Color(1.0, 0.88, 0.55), s)
-	draw_ornament(s.x * 0.5, 58.0, 150.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_title_glow(font, 22.0, title, 30, Color(1.0, 0.88, 0.55), s)
+	draw_ornament(s.x * 0.5, 76.0, 150.0, Color(0.82, 0.62, 0.34, 0.85))
 
 	# caption in the lower bar: it fades in just after the picture and TYPES itself
 	# out, an unhurried storyteller's cadence that also paces the reader's eye
@@ -5071,8 +5267,7 @@ func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand =
 		Vector2(px + 0.32 * H, sh_y - 0.16 * H), Vector2(px + 0.92 * H, sh_y + 0.10 * H),
 		Vector2(px + 0.80 * H, chest_y), Vector2(px + 0.52 * H, waist_y), Vector2(px + 0.70 * H, hip_y + 0.28 * H),
 		Vector2(px - 0.70 * H, hip_y + 0.28 * H), Vector2(px - 0.52 * H, waist_y), Vector2(px - 0.80 * H, chest_y)]), coat)
-	draw_circle(Vector2(px - 0.92 * H, sh_y + 0.10 * H), 0.16 * H, coat)   # rounded shoulder caps
-	draw_circle(Vector2(px + 0.92 * H, sh_y + 0.10 * H), 0.16 * H, coat)
+	# (no round shoulder caps: they poked above the coat line like epaulettes)
 	draw_circle(Vector2(px - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
 	# a warm accent placket down the centre line, drawn in at the waist to follow the torso
