@@ -157,20 +157,22 @@ const K_TRICK := KEY_SPACE
 # hand animation
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
 
-# --- tricks (GDD Section 3): flourishes performed with the TRICK key (Space). A
-# trick is either ARMED onto the next throw (High Toss, Behind the Back) and paid
-# off when you land its catch, or LIVE, acting on the balls already in the air
-# (Spin). Each lands for a scoring and Applause bonus and each carries real risk,
+# --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space), which
+# works like a ONE-SHOT POWERUP. C selects which trick Space is loaded with (the
+# selection persists), then every single use costs its own Space press: for an arm
+# trick (High Toss, Behind the Back) Space empowers exactly the next throw and then
+# disarms itself; for the live Spin, Space performs the spin on the balls already
+# airborne. Each lands for a scoring and Applause bonus and each carries real risk,
 # so a trick is a skill choice, never a free bonus. Tricks unlock by level, so the
-# flourishes arrive as the meta deepens. C cycles which trick the key is primed to.
+# flourishes arrive as the meta deepens.
 const TR_HIGH := 0
 const TR_BTB := 1
 const TR_SPIN := 2
 const TRICKS := [
 	{"id": "high", "name": "High Toss",        "kind": "arm",  "lvl": 2, "min_air": 0,
-	 "desc": "Arm the next throw sky high. Land the catch for a burst of applause."},
+	 "desc": "Power one throw sky high. Land the catch for a burst of applause."},
 	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",  "lvl": 4, "min_air": 0,
-	 "desc": "Arm a showy behind-the-back throw. Style the crowd loves, if you land it."},
+	 "desc": "Power one showy behind-the-back throw. Style the crowd loves, if you land it."},
 	{"id": "spin", "name": "Spin",             "kind": "live", "lvl": 7, "min_air": 2,
 	 "desc": "Spin while everything is airborne. Catches score double, you catch blind."},
 ]
@@ -261,9 +263,10 @@ var results_record := false  # this performance beat the venue's record
 var paused := false       # the in-play pause menu is up (freezes the sim)
 var pause_sel := 0        # cursor in the pause menu
 var round_scored := false
-# --- tricks: which trick the TRICK key is primed to (cycled with C), a trick
-# armed onto the next throw, the live-Spin timer, and the run's trick tally.
-var trick_armed := -1     # the arm trick permanently toggled on (TR_HIGH/TR_BTB), or -1 for OFF
+# --- tricks: which trick Space is loaded with (cycled with C, persists), whether
+# Space has primed a one-shot, the live-Spin timer, and the run's trick tally.
+var trick_sel := -1       # the selected trick (index into TRICKS), or -1 before any unlock
+var trick_primed := false # Space pressed: the very next throw becomes the selected arm trick
 var trick_ready := -999   # tick a LIVE trick may fire again (cooldown)
 var spin_until := -999    # tick the current Spin ends; catches until then score double
 var spin_scored := false  # this Spin has already been credited as landed
@@ -679,7 +682,7 @@ func _input(event: InputEvent) -> void:
 			if not performing:
 				cycle_prop(1)   # cycle to the next owned prop
 		KEY_C:
-			cycle_trick()   # rotate which trick the TRICK key (Space) is primed to
+			cycle_trick()   # rotate which trick the TRICK key (Space) is loaded with
 		KEY_F1:
 			if debug_mode: debug_jump_venue(0)   # debug story jump: F1..F6 = venues 1..6
 		KEY_F2:
@@ -1707,16 +1710,19 @@ func _read_inputs() -> void:
 	var k_rt := Input.is_physical_key_pressed(K_RT)
 	var k_tk := Input.is_physical_key_pressed(K_TRICK)
 	_note_device(k_lc or k_lt or k_rc or k_rt or k_tk, p_lc or p_lt or p_rc or p_rt or p_tk or p_cy)
-	_edge("lc", k_lc or p_lc, LEFT, true)
-	_edge("lt", k_lt or p_lt, LEFT, false)
-	_edge("rc", k_rc or p_rc, RIGHT, true)
-	_edge("rt", k_rt or p_rt, RIGHT, false)
+	# the trick press is handled BEFORE the throw edges, so Space hit in the same
+	# frame as a throw release still empowers THAT throw (the "powerup" promise:
+	# space plus catch-throw makes exactly one trick shot, never the one after).
 	var tk := k_tk or p_tk
 	if tk and not bool(_prev["trick"]):
 		on_trick()
 	_prev["trick"] = tk
-	# the top face button mirrors the C key and steps the permanent arm-trick
-	# toggle. lessons and the results card lock C, so the pad honours that too.
+	_edge("lc", k_lc or p_lc, LEFT, true)
+	_edge("lt", k_lt or p_lt, LEFT, false)
+	_edge("rc", k_rc or p_rc, RIGHT, true)
+	_edge("rt", k_rt or p_rt, RIGHT, false)
+	# the top face button mirrors the C key and steps which trick Space is loaded
+	# with. lessons and the results card lock C, so the pad honours that too.
 	if p_cy and not bool(_prev["cycle"]) and not tut_active and not results_open:
 		cycle_trick()
 	_prev["cycle"] = p_cy
@@ -1905,8 +1911,13 @@ func start_run(n: int) -> void:
 	paused = false
 	round_scored = false
 	_prev_running = false
-	# reset the trick state, and prime the key to the lowest trick this level owns
-	trick_armed = -1
+	# reset the one-shot trick state. The SELECTION survives between runs (that is
+	# the promise of the powerup model), but snap it onto a trick this level
+	# actually owns, so a debug level change can never leave a locked trick loaded.
+	trick_primed = false
+	if trick_sel < 0 or not trick_unlocked(trick_sel):
+		var un := unlocked_tricks()
+		trick_sel = int(un[0]) if not un.is_empty() else -1
 	trick_ready = -999
 	spin_until = -999
 	spin_scored = false
@@ -2087,14 +2098,16 @@ func do_throw(h: int, hold: int) -> void:
 	var gain_mult := 1.0 - DEFICIT_HEIGHT * deficit
 	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
-	# the active arm trick reshapes this throw before we roll its accuracy, so a High Toss
-	# genuinely flies (and is genuinely harder to catch). trick_armed is a PERMANENT toggle
-	# now: it is NOT cleared here, so every throw carries it until you switch off. A trick's
-	# forced height is built off the SAME lowered base and Strength penalty, so an
-	# under-strength High Toss sags too and cannot cheat the sagging rule.
+	# a primed trick reshapes this ONE throw before we roll its accuracy, so a High Toss
+	# genuinely flies (and is genuinely harder to catch). Space is a one-shot powerup:
+	# consuming the prime here disarms it, while trick_sel keeps the selection for the
+	# next Space press. A trick's forced height is built off the SAME lowered base and
+	# Strength penalty, so an under-strength High Toss sags too and cannot cheat the
+	# sagging rule.
 	var this_trick := -1
-	if trick_armed >= 0:
-		this_trick = trick_armed
+	if trick_primed and trick_sel >= 0 and String(TRICKS[trick_sel]["kind"]) == "arm":
+		this_trick = trick_sel
+		trick_primed = false
 		var tfrac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 		if this_trick == TR_HIGH:
 			tfrac = 1.35
@@ -2183,54 +2196,55 @@ func set_trick_msg(m: String) -> void:
 	trick_msg_tick = tick
 
 
-func unlocked_arm_tricks() -> Array:
-	# the tricks that style a throw (High Toss, Behind the Back), which the C toggle
-	# cycles. Spin is a live move on its own key and is not part of the toggle.
-	var out: Array = []
-	for i in TRICKS.size():
-		if trick_unlocked(i) and String(TRICKS[i]["kind"]) == "arm":
-			out.append(i)
-	return out
-
-
 func on_trick() -> void:
-	# The TRICK key (Space) fires the live Spin. The arm tricks are a PERMANENT toggle
-	# on the C key, so they are not fired from here any more.
-	if not trick_unlocked(TR_SPIN):
-		set_trick_msg("Spin unlocks at level %d  -  arm tricks are on C" % int(TRICKS[TR_SPIN]["lvl"]))
+	# The TRICK key (Space) is the one-shot powerup. With an arm trick selected it
+	# primes exactly the next throw (pressing again waves it off); with Spin selected
+	# it performs the spin right now. The selection itself lives on C (cycle_trick).
+	if unlocked_tricks().is_empty():
+		set_trick_msg("first trick unlocks at level %d" % int(TRICKS[0]["lvl"]))
 		return
-	var t: Dictionary = TRICKS[TR_SPIN]
-	if balls_airborne() < int(t["min_air"]):
-		set_trick_msg("Spin needs %d in the air" % int(t["min_air"]))
+	if trick_sel < 0 or not trick_unlocked(trick_sel):
+		trick_sel = int(unlocked_tricks()[0])
+	var t: Dictionary = TRICKS[trick_sel]
+	if String(t["kind"]) == "live":
+		if balls_airborne() < int(t["min_air"]):
+			set_trick_msg("Spin needs %d in the air" % int(t["min_air"]))
+			return
+		if tick < trick_ready:
+			return   # still cooling down; ignore the mash
+		spin_until = tick + SPIN_TICKS
+		spin_scored = false
+		trick_ready = tick + TRICK_COOLDOWN
+		set_trick_msg("SPIN")
+		play_sfx("streak", -7.0)
 		return
-	if tick < trick_ready:
-		return   # still cooling down; ignore the mash
-	spin_until = tick + SPIN_TICKS
-	spin_scored = false
-	trick_ready = tick + TRICK_COOLDOWN
-	set_trick_msg("SPIN")
-	play_sfx("streak", -7.0)
+	if trick_primed:
+		trick_primed = false
+		set_trick_msg("waved off  -  plain throw")
+		play_sfx("ui", -16.0)
+		return
+	trick_primed = true
+	set_trick_msg("%s  -  next throw" % String(t["name"]).to_upper())
+	play_sfx("ui2", -13.0)
 
 
 func cycle_trick() -> void:
-	# C is a PERMANENT toggle over the arm tricks: it steps OFF -> High Toss ->
-	# Behind the Back -> OFF, and whatever it lands on styles EVERY throw until you
-	# switch again (not one throw at a time like before).
-	var arms := unlocked_arm_tricks()
-	if arms.is_empty():
+	# C steps the SELECTION through every unlocked trick. Switching never fires
+	# anything by itself: the loaded trick just waits for its own Space press.
+	# A pending one-shot follows the switch, so prime-then-switch never fires
+	# the trick you switched away from.
+	var un := unlocked_tricks()
+	if un.is_empty():
 		set_trick_msg("no trick yet  -  keep leveling up")
 		return
-	var cyc: Array = [-1]
-	cyc.append_array(arms)
-	var idx := cyc.find(trick_armed)
-	idx = (idx + 1) % cyc.size() if idx >= 0 else 1
-	trick_armed = int(cyc[idx])
-	if trick_armed < 0:
-		set_trick_msg("tricks OFF  -  plain throws")
-		play_sfx("ui", -16.0)
+	var idx := un.find(trick_sel)
+	trick_sel = int(un[(idx + 1) % un.size()]) if idx >= 0 else int(un[0])
+	if String(TRICKS[trick_sel]["kind"]) == "live":
+		trick_primed = false   # Spin fires on Space directly; nothing stays primed
+		set_trick_msg("%s selected  -  Space performs it" % String(TRICKS[trick_sel]["name"]))
 	else:
-		set_trick_msg("%s ON  -  every throw" % String(TRICKS[trick_armed]["name"]))
-		play_sfx("ui2", -13.0)
+		set_trick_msg("%s selected  -  Space powers one throw" % String(TRICKS[trick_sel]["name"]))
+	play_sfx("ui2", -13.0)
 
 
 func reward_trick(t: int, at: Vector2) -> void:
@@ -2285,13 +2299,16 @@ func add_xp(amount: int) -> void:
 
 
 func announce_new_tricks(prev_level: int) -> void:
-	# a trick whose unlock level we just crossed gets a banner and is primed ready,
-	# so the very next TRICK press does the thing the banner just explained
+	# a trick whose unlock level we just crossed gets a banner and becomes the
+	# SELECTED trick, so the very next Space press does the thing the banner just
+	# explained (nothing fires by itself: the one-shot still wants its own press)
 	for i in TRICKS.size():
 		var lv := int(TRICKS[i]["lvl"])
 		if lv > prev_level and lv <= level:
 			trick_unlock = i
 			trick_unlock_tick = tick
+			trick_sel = i
+			trick_primed = false
 			play_sfx("streak", -5.0)
 
 
@@ -3876,31 +3893,32 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	if String(t["kind"]) == "live":
 		how = "press %s to spin while two or more are airborne" % ("A" if pad_active() else "Space")
 	else:
-		how = "press %s to toggle it on  -  it styles every throw" % ("Y" if pad_active() else "C")
+		how = "press %s to power up your next throw  -  one press, one trick" % ("A" if pad_active() else "Space")
 	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
 	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
 
 
 func draw_trick_hud(font: Font, s: Vector2) -> void:
-	# the persistent trick toggle: which arm trick styles every throw (or OFF), plus the
-	# live Spin on its own key once it is unlocked
+	# the loaded one-shot: which trick Space is carrying, and whether it is primed.
+	# READY burns gold so the player always knows the next throw is the trick shot.
 	var y := s.y - 132.0
-	var arms := unlocked_arm_tricks()
-	var on := trick_armed >= 0
-	var label := String(TRICKS[trick_armed]["name"]).to_upper() if on else "OFF"
-	var lc := Color(1.0, 0.86, 0.5) if on else Color(0.72, 0.66, 0.78, 0.85)
+	var un := unlocked_tricks()
+	var sel := trick_sel if trick_sel >= 0 and trick_unlocked(trick_sel) else int(un[0])
+	var live := String(TRICKS[sel]["kind"]) == "live"
+	var label := String(TRICKS[sel]["name"]).to_upper()
+	if trick_primed and not live:
+		label += "  -  READY"
+	var lc := Color(1.0, 0.86, 0.5) if (trick_primed and not live) else Color(0.72, 0.66, 0.78, 0.85)
 	hud_panel(Rect2(s.x * 0.5 - 160.0, y - 20.0, 320.0, 56.0))
 	draw_string(font, Vector2(s.x * 0.5 - 150.0, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
 	var items: Array = []
-	if not arms.is_empty():
-		items.append([k_cycle(), "toggle trick"])
-	if trick_unlocked(TR_SPIN):
-		var sp := "spin"
-		if tick < trick_ready:
-			sp = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
-		items.append([k_trick(), sp])
-	if not items.is_empty():
-		draw_hints_row(font, s.x * 0.5, y + 8.0, items)
+	var use := "spin" if live else ("one throw" if not trick_primed else "wave off")
+	if live and tick < trick_ready:
+		use = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
+	items.append([k_trick(), use])
+	if un.size() > 1:
+		items.append([k_cycle(), "switch trick"])
+	draw_hints_row(font, s.x * 0.5, y + 8.0, items)
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -5930,7 +5948,10 @@ func _demo_step() -> void:
 			h = other(h)
 		if not stack(h).is_empty():
 			if _demo_trick:
-				trick_armed = TR_HIGH if (tick / DEMO_BEAT) % 2 == 0 else TR_BTB
+				# mimic a real Space press per throw: select, prime, and let
+				# do_throw consume the one-shot exactly like player input would
+				trick_sel = TR_HIGH if (tick / DEMO_BEAT) % 2 == 0 else TR_BTB
+				trick_primed = true
 			do_throw(h, 7)
 			_demo_next = other(h)
 
