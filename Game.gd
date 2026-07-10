@@ -65,6 +65,7 @@ const ST_SETTINGS := 2    # options
 const ST_CUTSCENE := 3    # an illustrated story beat (now an animated mini-film)
 const ST_PLAY := 4        # the juggling itself
 const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before a set
+const ST_CREDITS := 6     # a slow, code-drawn credits roll after the grand finale
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
@@ -272,6 +273,7 @@ var save_slot := 0        # which save file is active
 var venue_seen := 0       # highest venue reached, so promotions fire once
 var story_seen := 0       # how many endgame story milestones have played (see STORY_REP)
 var cutscene_queue: Array[String] = []  # pending story beats to show
+var last_beats: Array[String] = []      # the beats begin_cutscene was last given, so finish_beats can route the finale to the credits
 var view_venue := -1      # cutscene/preview override of which venue palette to draw
 var shake := 0.0          # screen-shake magnitude, decays each frame
 
@@ -423,6 +425,9 @@ func _ready() -> void:
 		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2
 		game_state = ST_ESTABLISH
 		cine_tick = 0
+	if ua.has("--credits"):           # dev: jump straight to the credits roll for a screenshot
+		game_state = ST_CREDITS
+		cine_tick = 0
 	var ni := ua.find("--csn")        # dev: pin a specific shot index for a stable capture
 	if ni != -1 and ni + 1 < ua.size():
 		cs_shot = int(ua[ni + 1])
@@ -515,6 +520,9 @@ func _input(event: InputEvent) -> void:
 			return
 		ST_ESTABLISH:
 			establish_key()
+			return
+		ST_CREDITS:
+			credits_key()
 			return
 	# the in-play pause menu owns all input while it is up
 	if paused:
@@ -977,8 +985,37 @@ func try_buy_glasses() -> void:
 # Game flow: main menu, save slots, settings, cutscenes.
 # -----------------------------------------------------------------------------
 
+func menu_options() -> Array[String]:
+	# the live main-menu list. Credits appears only once a save has finished the
+	# finale, so a first-time player never sees it. Both menu_input and draw_menu
+	# build the list from here, so the cursor and the drawing can never disagree.
+	var opts: Array[String] = ["Play"]
+	if any_finale_seen():
+		opts.append("Credits")
+	opts.append("Settings")
+	opts.append("Quit")
+	return opts
+
+
+func any_finale_seen() -> bool:
+	# true once the finale has been reached anywhere: the currently loaded game, or
+	# any save slot on disk. Peeks the slot files the same way slot_summary does.
+	if story_seen >= STORY_REP.size():
+		return true
+	for i in NUM_SLOTS:
+		if not FileAccess.file_exists(slot_path(i)):
+			continue
+		var cf := ConfigFile.new()
+		if cf.load(slot_path(i)) != OK:
+			continue
+		if int(cf.get_value("prog", "story_seen", 0)) >= STORY_REP.size():
+			return true
+	return false
+
+
 func menu_input(kc: int) -> void:
-	var n := 3   # Play, Settings, Quit (lessons arrive on unlock, not from a menu)
+	var opts := menu_options()
+	var n := opts.size()
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -988,17 +1025,31 @@ func menu_input(kc: int) -> void:
 			play_sfx("ui", -14.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			play_sfx("ui2", -11.0)
-			match menu_sel:
-				0:
+			# dispatch on the chosen STRING, never the raw index, so an option list
+			# that grows a Credits entry can never send Play where Settings was meant
+			var choice := opts[clampi(menu_sel, 0, n - 1)]
+			match choice:
+				"Play":
 					menu_sel = 0
 					game_state = ST_SLOTS
-				1:
+				"Credits":
+					menu_sel = 0
+					game_state = ST_CREDITS
+					cine_tick = 0
+				"Settings":
 					menu_sel = 0
 					game_state = ST_SETTINGS
-				2:
+				"Quit":
 					get_tree().quit()
 		KEY_ESCAPE:
 			get_tree().quit()
+
+
+func credits_key() -> void:
+	# any key ends the roll and returns to the main menu
+	play_sfx("ui2", -12.0)
+	game_state = ST_MENU
+	menu_sel = 0
 
 
 func slots_input(kc: int) -> void:
@@ -1070,6 +1121,7 @@ func apply_fullscreen() -> void:
 
 func begin_cutscene(beats: Array) -> void:
 	cutscene_queue.assign(beats)
+	last_beats.assign(beats)   # remembered so finish_beats can send the finale on to the credits
 	game_state = ST_CUTSCENE
 	cine_tick = 0
 	start_beat()
@@ -1120,6 +1172,13 @@ func next_shot() -> void:
 
 func finish_beats() -> void:
 	view_venue = -1
+	# the grand finale rolls straight into the credits, which then return to the
+	# menu. Every other beat set (promotions, the opening story) lands back in play.
+	if last_beats.has("finale"):
+		last_beats.clear()
+		game_state = ST_CREDITS
+		cine_tick = 0
+		return
 	game_state = ST_PLAY
 	if not started:
 		# a fresh game: after the opening story, teach the basics hands-on before the
@@ -1179,7 +1238,10 @@ func slot_summary(i: int) -> String:
 	var g := int(cf.get_value("stats", "money", START_GOLD))
 	var rep := int(cf.get_value("stats", "reputation", 0))
 	var vn := String(venue_data(venue_index_of(rep))["name"])
-	return "Level %d   -   %s   -   %d gold" % [lv, vn, g]
+	var line := "Level %d   -   %s   -   %d gold" % [lv, vn, g]
+	if int(cf.get_value("prog", "story_seen", 0)) >= STORY_REP.size():
+		line += "  -  WORLD'S GREATEST JUGGLER"   # this save has finished the finale
+	return line
 
 
 func delete_slot(i: int) -> void:
@@ -2438,6 +2500,9 @@ func _draw() -> void:
 		ST_ESTABLISH:
 			draw_establish(font, s)
 			return
+		ST_CREDITS:
+			draw_credits(font, s)
+			return
 	draw_backdrop(s)
 	draw_egg_splats()      # yolk on the floor sits behind the performer
 	draw_juggler(s)
@@ -3561,7 +3626,7 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.32 + 160.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
 
-	var opts := ["Play", "Settings", "Quit"]
+	var opts := menu_options()   # the same live list menu_input drives, so cursor and drawing agree
 	var oy := s.y * 0.62
 	for i in opts.size():
 		var sel := i == menu_sel
@@ -3621,7 +3686,10 @@ func draw_slots(font: Font, s: Vector2) -> void:
 		var sum := slot_summary(i)
 		draw_rect(Rect2(px, ry, pw, 60.0), Color(0.12, 0.07, 0.08, 0.92))
 		draw_rect(Rect2(px, ry, pw, 60.0), Color(0.9, 0.6, 0.35, 0.55) if sel else Color(0.4, 0.32, 0.26, 0.5), false, 2.0)
+		var crowned := sum.find("WORLD'S GREATEST") != -1   # a finished save wears a warmer gold
 		var tcol := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
+		if crowned:
+			tcol = Color(1.0, 0.82, 0.4) if sel else Color(0.98, 0.76, 0.36)
 		draw_string(font, Vector2(px + 24.0, ry + 27.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, tcol)
 		draw_string(font, Vector2(px + 24.0, ry + 49.0), sum, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.78, 0.72, 0.62))
 		if sum != "empty":
@@ -4211,6 +4279,91 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
 	draw_string(font, Vector2(0, s.y - 34.0), "press any key to step on stage", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
+
+
+# --- the credits roll: a slow curtain call after the grand finale -------------
+
+func draw_credits(font: Font, s: Vector2) -> void:
+	var cx := s.x * 0.5
+	# the royal backdrop shared with the menu and the cutscenes
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.07), Color(0.02, 0.015, 0.025), 24)
+	draw_spotlight_cone(s, cx, 0.08)
+	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
+	# the calm cascade keeps watch up high while the names roll beneath it
+	draw_menu_cascade(Vector2(cx, s.y * 0.12), 0.8)
+
+	# assemble the roll as a stack of rows in content space. Each row sits a fixed
+	# gap below the one before it, and cine_tick scrolls the whole stack upward.
+	var gold := Color(1.0, 0.88, 0.5)
+	var rows: Array[Dictionary] = []
+	var cur := 0.0
+	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": "JUGGLE", "b": ""})
+	cur += 92.0;  rows.append({"y": cur, "kind": "sub", "a": "a juggler's climb", "b": ""})
+	cur += 62.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 88.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
+	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "code", "b": "Louis Vandenbruwaene"})
+	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "art", "b": "Louis Vandenbruwaene"})
+	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "music", "b": "Louis Vandenbruwaene"})
+	cur += 84.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 84.0;  rows.append({"y": cur, "kind": "line", "a": "made in Godot, every picture and sound", "b": "drawn and synthesised in code"})
+	cur += 90.0;  rows.append({"y": cur, "kind": "line", "a": "built with the help of Claude", "b": ""})
+	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 94.0;  rows.append({"y": cur, "kind": "quote", "a": "Bruna", "b": "\"Clean catch. Clean throw. Everything else is noise.\""})
+	cur += 118.0; rows.append({"y": cur, "kind": "thanks", "a": "thank you for playing", "b": ""})
+	var last_y := cur
+
+	# the scroll: slow enough that the whole roll takes about 100 seconds at 60 fps
+	var speed := 0.20
+	var scroll := float(cine_tick) * speed
+	var base := s.y * 0.56   # where content y 0 rests before any scrolling
+
+	for row in rows:
+		var ry := base + float(row["y"]) - scroll
+		if ry < -80.0 or ry > s.y + 80.0:
+			continue   # off the top or bottom, nothing to draw
+		# soft edge fades so a line melts in near the bottom and out near the top,
+		# which also keeps text clear of the cascade riding above
+		var a := 1.0
+		if ry > s.y - 150.0:
+			a = clampf((s.y - ry) / 150.0, 0.0, 1.0)
+		if ry < 150.0:
+			a = minf(a, clampf(ry / 150.0, 0.0, 1.0))
+		var kind := String(row["kind"])
+		var atxt := String(row["a"])
+		var btxt := String(row["b"])
+		match kind:
+			"title":
+				draw_title_glow(font, ry - 49.0, atxt, 76, Color(gold.r, gold.g, gold.b, a), s)
+			"sub":
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
+			"orn":
+				draw_ornament(cx, ry, 150.0, Color(0.82, 0.62, 0.34, 0.8 * a))
+			"role":
+				draw_string(font, Vector2(0, ry - 8.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.82, 0.7, 0.52, 0.85 * a))
+				draw_string(font, Vector2(0, ry + 22.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 27, Color(gold.r, gold.g, gold.b, a))
+			"line":
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
+				if btxt != "":
+					draw_string(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
+			"quote":
+				draw_string(font, Vector2(0, ry - 10.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(1.0, 0.82, 0.45, a))
+				draw_string(font, Vector2(0, ry + 24.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.95, 0.9, 0.82, a))
+			"thanks":
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
+
+	# once the last line has climbed past centre the roll settles into a held final
+	# JUGGLE card, which waits, unmoving, for any key. The scrolling text is above it
+	# by then, so the two never overlap.
+	var last_sy := base + last_y - scroll
+	if last_sy < s.y * 0.30:
+		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
+		var fy := s.y * 0.42
+		draw_title_glow(font, fy - 55.0, "JUGGLE", 84, Color(1.0, 0.9, 0.55, fa), s)
+		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
+		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.72, 0.6, 0.65 * fa))
+
+	draw_vignette(s, 0.55)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 # --- shared premium-look helpers ---------------------------------------------
