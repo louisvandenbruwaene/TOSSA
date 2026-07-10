@@ -69,6 +69,7 @@ const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
 const SAVE_PATH_DEBUG := "user://juggle_debug.cfg"  # debug build: separate progress
+const SAVE_PATH_DEMO := "user://juggle_demo.cfg"     # --demo/--shot autoplay: never a real career save
 const SETTINGS_PATH := "user://juggle_settings.cfg" # global options, shared by slots
 const POINTS_PER_LEVEL := 3
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
@@ -649,6 +650,16 @@ func _input(event: InputEvent) -> void:
 		KEY_F9:
 			if debug_mode: debug_jump_story(2)
 		KEY_ESCAPE:
+			open_pause()
+
+
+func _notification(what: int) -> void:
+	# a performance must never die to a missed alt-tab: losing window focus mid-set
+	# auto-pauses instead of letting the sim keep draining stamina unattended.
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		if _demo or _shot:
+			return   # unattended dev captures may lose focus; they must keep running
+		if game_state == ST_PLAY and started and running and not paused and not sheet_open and not shop_open and not results_open:
 			open_pause()
 
 
@@ -2257,7 +2268,14 @@ func _adjust(which: String, delta: int) -> void:
 
 
 func save_file() -> String:
-	return SAVE_PATH_DEBUG if debug_mode else slot_path(save_slot)
+	# debug_mode stays first so --demo --debug (used to preview venues) still lands
+	# on the debug save. Otherwise, any unattended dev autoplay writes to its own
+	# scratch file and must never touch a real career slot.
+	if debug_mode:
+		return SAVE_PATH_DEBUG
+	if _demo or _shot:
+		return SAVE_PATH_DEMO
+	return slot_path(save_slot)
 
 
 func load_progress() -> void:
