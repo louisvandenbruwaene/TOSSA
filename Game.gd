@@ -331,6 +331,11 @@ var music_theme := -99              # venue index whose layers are loaded (-99 =
 var _vol := {"pad": -80.0, "bass": -80.0, "arp": -80.0, "crowd": -80.0}
 var _duck := 0.0                    # transient music dip on a drop, decays
 
+# the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
+# and humane with clear numerals. The single .ttf in fonts/ is the one deliberate
+# exception to the code-only art rule. Falls back to the engine font if missing.
+var ui_font: Font = null
+
 # previous-frame button states, for edge detection
 var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false, "cycle": false}
 
@@ -354,6 +359,22 @@ var _demo_next := RIGHT
 const DEMO_BEAT := 28
 
 
+func setup_font() -> void:
+	# one clean humane face at semibold, set up as a FontVariation so the single
+	# variable-weight file serves every size. If the file is ever missing the
+	# engine fallback quietly takes over and nothing breaks.
+	var base: Variant = load("res://fonts/Nunito.ttf")
+	if base is Font:
+		var fv := FontVariation.new()
+		fv.base_font = base
+		fv.variation_opentype = {"wght": 600}
+		ui_font = fv
+
+
+func game_font() -> Font:
+	return ui_font if ui_font != null else ThemeDB.fallback_font
+
+
 func _ready() -> void:
 	# Dev-only flags. Normal play passes NONE of these: the game then simply waits
 	# for the player's first THROW and never auto-plays or auto-quits.
@@ -372,6 +393,7 @@ func _ready() -> void:
 	if sa != -1 and sa + 1 < ua.size():
 		_shot_tick = int(ua[sa + 1])
 	load_settings()
+	setup_font()
 	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
 	Input.joy_connection_changed.connect(_on_joy_connection)
 	if set_fullscreen:
@@ -2605,7 +2627,7 @@ func flight_pos(b: Ball) -> Vector2:
 
 func _draw() -> void:
 	var s := get_viewport_rect().size
-	var font := ThemeDB.fallback_font
+	var font := game_font()
 	match game_state:
 		ST_MENU:
 			draw_menu(font, s)
@@ -5212,7 +5234,7 @@ func draw_marquee(center: Vector2, w: float) -> void:
 		var col := Color(1.0, 0.85, 0.4) if on else Color(0.4, 0.3, 0.2)
 		draw_circle(Vector2(bx, center.y - h * 0.5 - 4.0), 2.5, col)
 		draw_circle(Vector2(bx, center.y + h * 0.5 + 4.0), 2.5, col)
-	draw_string(ThemeDB.fallback_font, Vector2(center.x - w * 0.5, center.y + 6.0), "TONIGHT", HORIZONTAL_ALIGNMENT_CENTER, w, 18, Color(1.0, 0.85, 0.45))
+	draw_string(game_font(), Vector2(center.x - w * 0.5, center.y + 6.0), "TONIGHT", HORIZONTAL_ALIGNMENT_CENTER, w, 18, Color(1.0, 0.85, 0.45))
 
 
 func draw_bigtop(base: Vector2, w: float, h: float) -> void:
@@ -5311,7 +5333,7 @@ func draw_scoreboard(s: Vector2) -> void:
 	var by := s.y * 0.14
 	draw_rect(Rect2(bx, by, bw, 70.0), Color(0.05, 0.06, 0.10))
 	draw_rect(Rect2(bx, by, bw, 70.0), Color(0.5, 0.7, 1.0, 0.5), false, 2.0)
-	var f := ThemeDB.fallback_font
+	var f := game_font()
 	draw_string(f, Vector2(bx + 20.0, by + 30.0), "SILVIO   98.4", HORIZONTAL_ALIGNMENT_LEFT, bw - 40.0, 20, Color(0.7, 0.85, 1.0))
 	draw_string(f, Vector2(bx + 20.0, by + 56.0), "MILO     97.9", HORIZONTAL_ALIGNMENT_LEFT, bw - 40.0, 20, Color(1.0, 0.88, 0.55))
 
