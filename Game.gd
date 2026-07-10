@@ -948,8 +948,8 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
 	draw_string(font, Vector2(bx, by + 80.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.8, 0.75, 0.68))
 	# a quiet controls reminder along the bottom (the normal HUD hints are hidden)
-	draw_string(font, Vector2(0, s.y - 30.0), "D / K  catch      F / J  throw  (hold to go higher)      Esc  pause",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.8, 0.72, 0.6, 0.8))
+	draw_hints_row(font, s.x * 0.5, s.y - 42.0,
+		[[["D", "K"], "catch"], [["F", "J"], "throw, hold = higher"], [["Esc"], "pause"]])
 	if tut_flash != "":
 		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
 
@@ -1574,9 +1574,11 @@ func on_catch(h: int) -> void:
 		spawn_parts(outer_pos(h), Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
 		spawn_parts(outer_pos(h), Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
 		if streak % 10 == 0:
-			# a milestone: a beat of hit-stop, a shock ring, and the crowd lifts
+			# a milestone: a beat of hit-stop, a shock ring, a toast, the crowd lifts
 			freeze = 4
 			spawn_parts(outer_pos(h), Color(1.0, 0.82, 0.4), 2, 0.0, "ring")
+			var vs := get_viewport_rect().size
+			add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
 			if mode == MODE_PERFORM:
 				play_sfx("cheer", -11.0)
 		elif streak % 5 == 0:
@@ -2631,12 +2633,22 @@ func draw_juggler(s: Vector2) -> void:
 	# at the vertical midpoint, a drawn-in waist. H is the head unit off the floor line.
 	var floor_y := s.y * 0.80
 	var H := s.y * 0.056
-	var hip_y := floor_y - 4.0 * H
+
+	# body language: the feet stay planted but the trunk BREATHES, and a fresh catch
+	# is absorbed with a soft knee-dip of the whole upper body, so the figure reads
+	# as a performer riding the rhythm instead of a stand for two arms
+	var dip := 1.2 + sin(float(tick) * 0.03) * 1.4
+	for hh in [LEFT, RIGHT]:
+		var cfd := tick - int(catch_flash[hh])
+		if cfd >= 0 and cfd < 12:
+			dip = maxf(dip, 5.0 * (1.0 - float(cfd) / 12.0))
+
+	var hip_y := floor_y - 4.0 * H + dip * 0.25
 	var knee_y := floor_y - 2.0 * H
-	var waist_y := floor_y - 5.0 * H
-	var chest_y := floor_y - 6.0 * H
-	var shoulder_y := floor_y - 6.72 * H
-	var head := Vector2(cx, floor_y - 7.5 * H)
+	var waist_y := floor_y - 5.0 * H + dip * 0.55
+	var chest_y := floor_y - 6.0 * H + dip * 0.8
+	var shoulder_y := floor_y - 6.72 * H + dip
+	var head := Vector2(cx, floor_y - 7.5 * H + dip)
 	var head_r := 0.52 * H
 
 	# a soft ground shadow so the figure stands ON the stage instead of floating (drawn
@@ -2728,8 +2740,9 @@ func draw_juggler(s: Vector2) -> void:
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
-	draw_arm(shoulder_pos(LEFT), hpos[LEFT], LEFT, skin, suit)
-	draw_arm(shoulder_pos(RIGHT), hpos[RIGHT], RIGHT, skin, suit)
+	# (their shoulder roots ride the same body dip as the trunk)
+	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit)
+	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit)
 
 	# hands (and any held balls) on top of the arms
 	draw_hand(LEFT)
@@ -3049,7 +3062,7 @@ func draw_torch(pos: Vector2, ang: float, sc: float) -> void:
 func draw_prop_icon(kind: int, pos: Vector2) -> void:
 	# a small, still version of the prop shape, for menus
 	var col := prop_color(kind)
-	var sc := minf(prop_scale(kind), 1.3)
+	var sc := minf(prop_scale(kind), 1.0)
 	match kind:
 		PROP_EGGS:
 			draw_egg(pos, col, sc)
@@ -3188,7 +3201,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var propname := String(cur_prop()["name"]).to_upper()
 		var vname := String(venue_data(venue_index())["name"]).to_upper()
 		if prop_deficit() > 0.0:
-			draw_string(font, Vector2(30, s.y - 92), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
+			draw_string(font, Vector2(30, s.y - 106), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
 		hud_panel(Rect2(18, s.y - 78, 330, 60))
 		draw_string(font, Vector2(34, s.y - 54), vname, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.8, 0.5))
 		draw_prop_icon(prop_type, Vector2(44, s.y - 34))
@@ -3366,22 +3379,23 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 func draw_trick_hud(font: Font, s: Vector2) -> void:
 	# the persistent trick toggle: which arm trick styles every throw (or OFF), plus the
 	# live Spin on its own key once it is unlocked
-	var x := s.x * 0.5 - 150.0
 	var y := s.y - 132.0
 	var arms := unlocked_arm_tricks()
 	var on := trick_armed >= 0
 	var label := String(TRICKS[trick_armed]["name"]).to_upper() if on else "OFF"
 	var lc := Color(1.0, 0.86, 0.5) if on else Color(0.72, 0.66, 0.78, 0.85)
-	draw_string(font, Vector2(x, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
-	var status := ""
+	hud_panel(Rect2(s.x * 0.5 - 160.0, y - 20.0, 320.0, 56.0))
+	draw_string(font, Vector2(s.x * 0.5 - 150.0, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
+	var items: Array = []
 	if not arms.is_empty():
-		status = "C to toggle"
+		items.append([["C"], "toggle trick"])
 	if trick_unlocked(TR_SPIN):
-		var sp := "Space to spin"
+		var sp := "spin"
 		if tick < trick_ready:
-			sp = "spin %.1fs" % (float(trick_ready - tick) / 120.0)
-		status += ("      " + sp) if status != "" else sp
-	draw_string(font, Vector2(x, y + 20.0), status, HORIZONTAL_ALIGNMENT_CENTER, 300, 13, Color(0.82, 0.74, 0.92, 0.9))
+			sp = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
+		items.append([["Space"], sp])
+	if not items.is_empty():
+		draw_hints_row(font, s.x * 0.5, y + 8.0, items)
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -4637,7 +4651,7 @@ func draw_popups(font: Font) -> void:
 		c.a = a
 		var txt := String(p["text"])
 		# the big moments land bigger, with a quick settle from oversized to rest
-		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL")
+		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL") or txt.ends_with("STREAK")
 		var size := 18
 		if big:
 			size = 23 + maxi(0, 6 - age)
