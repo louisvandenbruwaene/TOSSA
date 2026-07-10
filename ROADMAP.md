@@ -12,8 +12,12 @@ floor) and awaits Louis's playtest. Still open: item 2 (content depth), item 5
 Steamworks).
 
 Louis playtest feedback 2026-07-10 (evening) added as items 9 to 11 below.
-These are direct player notes, so they outrank the older open items: take 9,
-10 and 11 first next session.
+These are direct player notes, so they outranked the older open items. All
+three are BUILT and pushed (same night) and await Louis's next look: the
+cutscene pass by eye, the music rework by ear, the trick powerup in hand.
+Still open from the older queue: item 2 (content depth), item 5 (audio
+breadth, partly reshaped by item 10), and the rest of items 3 and 7 (remap
+screen, export presets, capsule art, Steamworks).
 
 ## 1. The day/life loop (the big missing piece) - BUILT 2026-07-10
 
@@ -85,7 +89,7 @@ The --demo auto-player plays on real save slot 0, so screenshot and test runs
 can nudge a genuine career. Point it at a scratch save the way --debug already
 uses juggle_debug.cfg.
 
-## 9. Cutscene animation pass (Louis playtest note, 2026-07-10)
+## 9. Cutscene animation pass (Louis playtest note, 2026-07-10) - BUILT 2026-07-10
 
 The cutscenes read as weirdly animated: the motion is too fast overall, and
 some shots show ugly juggling or ugly ball holding. Work to do: slow every
@@ -97,7 +101,7 @@ than floaty loops. Check every beat with windowed --cutscene <id> --csn <n>
 screenshots, shot by shot. The Ken Burns camera and typewriter captions are
 fine, it is the FIGURE motion that needs the pass.
 
-## 10. Music rework: enthusiastic, Balatro-like, less noise (Louis, 2026-07-10)
+## 10. Music rework: enthusiastic, Balatro-like, less noise (Louis, 2026-07-10) - BUILT 2026-07-10
 
 The current background music has too much white noise in it and feels a bit
 too sad. Louis wants an enthusiastic, Balatro-like melody, still tailored per
@@ -111,7 +115,7 @@ per-venue tailoring (root, tempo, brightness per tier) on top of the one
 shared hook so the climb still reads as one piece of music growing up. The
 adaptive volume-automation architecture stays, only the material changes.
 
-## 11. Trick input redesign: Space as a one-shot powerup (Louis, 2026-07-10)
+## 11. Trick input redesign: Space as a one-shot powerup (Louis, 2026-07-10) - BUILT 2026-07-10
 
 Replace the permanent arm-trick toggle. Louis wants the trick button to feel
 like a POWERUP: pressing Space empowers the throw made at the same moment, so
