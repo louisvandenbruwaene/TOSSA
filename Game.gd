@@ -351,13 +351,13 @@ var _audio_ready := false
 var sfx: Dictionary = {}            # name -> AudioStreamWAV one-shot
 var sfx_pool: Array = []            # AudioStreamPlayer round-robin for one-shots
 var _sfx_next := 0
-var mus_pad: AudioStreamPlayer      # looping music layers, volume-automated
-var mus_bass: AudioStreamPlayer
-var mus_arp: AudioStreamPlayer
-var mus_rhy: AudioStreamPlayer      # the groove layer: swings in with the crowd's energy
-var crowd_ply: AudioStreamPlayer    # looping crowd murmur, tracks Applause
-var music_theme := -99              # venue index whose layers are loaded (-99 = none)
-var _vol := {"pad": -80.0, "bass": -80.0, "arp": -80.0, "rhy": -80.0, "crowd": -80.0}
+# the game's music is Louis's own recorded track (the second deliberate exception
+# to the code-only art rule, alongside the font). One looping stream, and the game
+# rides its VOLUME per state: full while a performance cooks, easy in menus, a
+# hush under cutscenes, a dip on a drop. All in-game SFX stay procedural.
+const MUSIC_PATH := "res://Juggling Game.mp3"
+var mus: AudioStreamPlayer
+var _vol := {"mus": -80.0}
 var _duck := 0.0                    # transient music dip on a drop, decays
 
 # the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
@@ -1810,13 +1810,14 @@ func inner_pos(h: int) -> Vector2:
 
 
 func shoulder_pos(h: int) -> Vector2:
-	# where the arms leave the body. This sits at the OUTER corner of the jacket's
-	# shoulder (down and out from the old spot), so the arm springs from the edge of
-	# the shoulder and the torso no longer pokes out beside it.
+	# where the arms leave the body: the outer corner of the jacket's shoulder, one
+	# arm-root radius BELOW the shoulder line. The upper-arm capsule is ~19px thick,
+	# so an attach point ON the line let half the deltoid peak above the silhouette
+	# (Louis: shoulders belong at shoulder height, not over it).
 	var s := get_viewport_rect().size
 	var c := s.x * 0.5
 	var H := s.y * 0.056
-	var y := s.y * 0.80 - 6.62 * H
+	var y := s.y * 0.80 - 6.38 * H
 	var dx := 0.9 * H
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
@@ -3356,9 +3357,10 @@ func draw_hand(h: int) -> void:
 
 
 func draw_targets() -> void:
-	# a landing ring brightens as a catch nears, and its COLOUR teaches the timing:
-	# warm gold on approach, bright green while the press would land Good or better,
-	# with a white flash inside the Perfect band. The windows become visible skill.
+	# a landing ring brightens as a catch nears, and its COLOUR teaches the timing,
+	# all within the game's warm gold family (Louis: no green on stage): faint gold
+	# on approach, bright gold while the press would land Good, a white flash inside
+	# the Perfect band, dimming amber once the moment is slipping late.
 	var wp := perfect_window()
 	for b in balls:
 		if b.state == STATE_FLIGHT:
@@ -3371,9 +3373,9 @@ func draw_targets() -> void:
 					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
 					draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
 				elif adiff <= W_GOOD:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.65, 0.95, 0.55, 0.85), 4.0, true)
+					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
 				elif adiff <= W_LATE and dd < 0:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.95, 0.7, 0.4, 0.7), 3.0, true)
+					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.9, 0.62, 0.35, 0.7), 3.0, true)
 				else:
 					draw_arc(b.to_pos, r, 0.0, TAU, 40,
 						Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
@@ -3401,9 +3403,10 @@ func draw_trail(b: Ball) -> void:
 
 
 func draw_charge_gauges() -> void:
-	# while THROW is held, a slim gauge grows beside that hand: green is a snappy
-	# controlled throw, amber buys airtime, red is the wild top. A faint tick above
-	# the stage previews the apex, so height control is learnable by eye.
+	# while THROW is held, a slim gauge grows beside that hand: warm gold is a snappy
+	# controlled throw, amber buys airtime, red is the wild top. The old green start
+	# and the apex preview line across the stage are gone per Louis's note (the green
+	# lines on every throw); the gauge alone teaches height control.
 	for h in [LEFT, RIGHT]:
 		if not charging[h] or stack(h).is_empty():
 			continue
@@ -3414,17 +3417,11 @@ func draw_charge_gauges() -> void:
 		var gh := 52.0
 		var gy := pos.y + 10.0
 		draw_rect(Rect2(gx, gy - gh, 6.0, gh), Color(0.08, 0.05, 0.06, 0.75))
-		var col := Color(0.55, 0.9, 0.5).lerp(Color(1.0, 0.72, 0.3), clampf(f * 1.6, 0.0, 1.0))
+		var col := Color(1.0, 0.86, 0.5).lerp(Color(1.0, 0.68, 0.3), clampf(f * 1.6, 0.0, 1.0))
 		if f > 0.78:
 			col = col.lerp(Color(1.0, 0.35, 0.3), (f - 0.78) / 0.22)
 		draw_rect(Rect2(gx, gy - gh * f, 6.0, gh * f), col)
 		draw_rect(Rect2(gx - 1.0, gy - gh * 0.78, 8.0, 1.5), Color(1.0, 0.9, 0.7, 0.7))
-		# apex preview: where this throw would crest if released now
-		var deficit := prop_deficit()
-		var air := float(BASE_AIR) * (1.0 - DEFICIT_BASE * deficit) + HOLD_GAIN * (1.0 - DEFICIT_HEIGHT * deficit) * float(hold)
-		var apex_y := pos.y - ARC_PER_AIR * air
-		var cx := stage_center().x
-		draw_line(Vector2(cx - 26.0, apex_y), Vector2(cx + 26.0, apex_y), Color(col.r, col.g, col.b, 0.5), 1.5)
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
@@ -4268,13 +4265,12 @@ func setup_audio() -> void:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
 		sfx_pool.append(p)
-	mus_pad = AudioStreamPlayer.new(); add_child(mus_pad); mus_pad.volume_db = -80.0
-	mus_bass = AudioStreamPlayer.new(); add_child(mus_bass); mus_bass.volume_db = -80.0
-	mus_arp = AudioStreamPlayer.new(); add_child(mus_arp); mus_arp.volume_db = -80.0
-	mus_rhy = AudioStreamPlayer.new(); add_child(mus_rhy); mus_rhy.volume_db = -80.0
-	crowd_ply = AudioStreamPlayer.new(); add_child(crowd_ply); crowd_ply.volume_db = -80.0
-	crowd_ply.stream = gen_crowd()
-	crowd_ply.play()
+	mus = AudioStreamPlayer.new(); add_child(mus); mus.volume_db = -80.0
+	var m := load(MUSIC_PATH) as AudioStreamMP3
+	if m != null:
+		m.loop = true
+		mus.stream = m
+		mus.play()
 	_audio_ready = true
 
 
@@ -4300,75 +4296,26 @@ func _catch_sound(kind: int) -> String:
 
 
 func audio_update() -> void:
-	# runs every frame in every state: pick the theme and glide the layer volumes
+	# runs every frame in every state: glide the track's volume to fit the moment.
+	# Louis's song IS the soundtrack, so the game never changes the material, only
+	# how much room it takes: fullest while a performance is cooking, easy in the
+	# menus and the day hub, a hush under cutscene captions, a dip when a prop
+	# hits the floor (via _duck).
 	if not _audio_ready:
 		return
-	var want := 2
-	if game_state == ST_PLAY or game_state == ST_ESTABLISH or game_state == ST_DAY:
-		want = clampi(cur_venue(), 0, 5)
-	elif game_state == ST_CUTSCENE:
-		want = 0                     # the calmest, warmest theme under the story beats
-	if want != music_theme:
-		load_music_theme(want)
 	var in_play := game_state == ST_PLAY
 	var perf := in_play and mode == MODE_PERFORM and not tut_active
-	var active := in_play and running
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
-	var pad_t := -17.0                                  # a soft cushion, never a droning hum
-	var bass_t := -12.0 if active else -60.0            # the warm pulse carries the groove
-	var arp_t := lerpf(-14.0, -8.0, energy) if in_play else -14.0   # the hook leads
-	# the groove layer swings in WITH the crowd's energy: silent at a cold start,
-	# a light brushed drive when the set is cooking (Louis: enthusiasm, not noise)
-	var rhy_t := lerpf(-36.0, -12.0, energy) if active else -60.0
-	# the murmur bed is capped darker than before (-12, was -9): at high Applause it
-	# read as white noise OVER the music instead of a room UNDER it
-	var crowd_t := lerpf(-30.0, -12.0, applause) if perf else -60.0
+	var t := -14.0
+	if perf:
+		t = lerpf(-13.0, -9.0, energy)
 	if game_state == ST_CUTSCENE:
-		pad_t = -21.0                # a whisper of a cushion, so the soft bells carry
-		bass_t = -60.0
-		arp_t = -13.0
-		rhy_t = -60.0
-	elif game_state == ST_MENU:
-		pad_t = -17.0
-		bass_t = -60.0
-		arp_t = -15.0
-		rhy_t = -60.0
+		t = -18.0
 	if not set_music:
-		pad_t = -80.0
-		bass_t = -80.0
-		arp_t = -80.0
-		rhy_t = -80.0
-	if not set_music or not set_sfx:
-		crowd_t = -80.0
-	var duck := _duck * 9.0
-	_vol["pad"] = lerpf(_vol["pad"], pad_t - duck, 0.06)
-	_vol["bass"] = lerpf(_vol["bass"], bass_t - duck, 0.08)
-	_vol["arp"] = lerpf(_vol["arp"], arp_t - duck, 0.08)
-	_vol["rhy"] = lerpf(_vol["rhy"], rhy_t - duck, 0.07)
-	_vol["crowd"] = lerpf(_vol["crowd"], crowd_t, 0.05)
-	mus_pad.volume_db = _vol["pad"]
-	mus_bass.volume_db = _vol["bass"]
-	mus_arp.volume_db = _vol["arp"]
-	mus_rhy.volume_db = _vol["rhy"]
-	crowd_ply.volume_db = _vol["crowd"]
+		t = -80.0
+	_vol["mus"] = lerpf(_vol["mus"], t - _duck * 9.0, 0.06)
+	mus.volume_db = _vol["mus"]
 	_duck = maxf(0.0, _duck - 0.03)
-
-
-var _theme_cache: Dictionary = {}
-
-func load_music_theme(vi: int) -> void:
-	if not _theme_cache.has(vi):
-		_theme_cache[vi] = gen_music_layers(vi)
-	var L: Dictionary = _theme_cache[vi]
-	mus_pad.stream = L["pad"]
-	mus_bass.stream = L["bass"]
-	mus_arp.stream = L["arp"]
-	mus_rhy.stream = L["rhy"]
-	mus_pad.play()
-	mus_bass.play()
-	mus_arp.play()
-	mus_rhy.play()
-	music_theme = vi
 
 
 # --- synthesis primitives -----------------------------------------------------
@@ -4514,25 +4461,34 @@ func _splat_sound() -> PackedFloat32Array:
 
 
 func _cheer_sound() -> PackedFloat32Array:
-	# a crowd swell: the same heavy-lowpassed noise as the murmur bed, but shaped
-	# with a rise-and-fall envelope so it reads as a lift of the whole room
+	# the room lifting: a warm major chord that swells and settles under a quick
+	# rising run of bells. All tone, no noise (the old version was a noise swell,
+	# which Louis heard as static rather than a cheer).
 	var dur := 1.1
 	var n := int(AUDIO_SR * dur)
 	var out := PackedFloat32Array()
 	out.resize(n)
-	var lp := 0.0
-	var lp2 := 0.0
+	var chord := [523.25, 659.26, 783.99]   # C5 E5 G5
+	var phs := [0.0, 0.0, 0.0]
 	for i in n:
 		var t := float(i) / AUDIO_SR
-		lp = lp * 0.982 + (randf() * 2.0 - 1.0) * 0.018
-		lp2 = lp2 * 0.86 + lp * 0.14
-		var e := clampf(t / 0.28, 0.0, 1.0) * exp(-maxf(t - 0.28, 0.0) / 0.34)
-		out[i] = lp2 * e
-	var pk := 0.0001
-	for i in n:
-		pk = maxf(pk, absf(out[i]))
-	for i in n:
-		out[i] *= 0.55 / pk
+		var e := clampf(t / 0.22, 0.0, 1.0) * exp(-maxf(t - 0.22, 0.0) / 0.38)
+		var s := 0.0
+		for j in 3:
+			phs[j] += TAU * float(chord[j]) * (1.0 + 0.004 * sin(TAU * 5.0 * t + float(j))) / AUDIO_SR
+			s += sin(float(phs[j]))
+		out[i] = s / 3.0 * e * 0.4
+	# the quick bell run on top, stepping up the C major pentatonic
+	var run := [783.99, 987.77, 1174.66, 1567.98]
+	for j in run.size():
+		var start := int(AUDIO_SR * (0.05 + 0.07 * float(j)))
+		var ph := 0.0
+		for i in int(AUDIO_SR * 0.3):
+			var idx := start + i
+			if idx >= n:
+				break
+			ph += TAU * float(run[j]) / AUDIO_SR
+			out[idx] = clampf(out[idx] + sin(ph) * exp(-float(i) / AUDIO_SR / 0.09) * 0.22, -1.0, 1.0)
 	return out
 
 
@@ -4562,7 +4518,7 @@ func gen_sfx() -> void:
 	sfx["record"] = _wav(_seq_bells([659.3, 784.0, 987.8, 1318.5], 0.09, 0.5), false)
 	sfx["good"] = _wav(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0), false)
 	sfx["late"] = _wav(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03), false)
-	sfx["whiff"] = _wav(_tone([520.0], [1.0], 0.10, 0, 0.001, 0.045, 0.20, 0.4), false)
+	sfx["whiff"] = _wav(_tone([520.0, 415.0], [1.0, 0.5], 0.10, 0, 0.001, 0.045, 0.18, 0.1), false)
 	sfx["throw"] = _wav(_throw_sound(), false)
 	sfx["drop"] = _wav(_drop_sound(), false)
 	sfx["splat"] = _wav(_splat_sound(), false)
@@ -4578,230 +4534,11 @@ func gen_sfx() -> void:
 	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
 
 
-func gen_crowd() -> AudioStreamWAV:
-	# a soft, warm murmur, not a hiss. Louis's playtest heard the beds as white
-	# noise, so this is now THREE heavy lowpass poles (was two): everything above a
-	# low rumble is gone and what remains reads as a room full of people, not static.
-	# The automation ceiling in audio_update dropped alongside it (-12dB, was -9).
-	var dur := 4.0
-	var n := int(AUDIO_SR * dur)
-	var out := PackedFloat32Array()
-	out.resize(n)
-	var lp := 0.0
-	var lp2 := 0.0
-	var lp3 := 0.0
-	for i in n:
-		lp = lp * 0.988 + (randf() * 2.0 - 1.0) * 0.012   # heavy lowpass -> low murmur
-		lp2 = lp2 * 0.9 + lp * 0.1                         # a second pole, smoother still
-		lp3 = lp3 * 0.82 + lp2 * 0.18                      # a third pole: darker, rounder
-		var lfo := 0.78 + 0.22 * sin(TAU * float(i) / AUDIO_SR * 0.55)   # a slow swell
-		out[i] = lp3 * lfo
-	var pk := 0.0001
-	for i in n:
-		pk = maxf(pk, absf(out[i]))
-	var g := 0.34 / pk                                     # normalise: soft, never clipping
-	for i in n:
-		out[i] *= g
-	_fade_ends(out, 60)
-	return _wav(out, true)
-
-
-func _fade_ends(buf: PackedFloat32Array, ms: float) -> void:
-	# ramp the first and last few ms to zero, so a looped buffer never clicks
-	var f := mini(int(AUDIO_SR * ms / 1000.0), buf.size() / 2)
-	for i in f:
-		var g := float(i) / float(f)
-		buf[i] *= g
-		buf[buf.size() - 1 - i] *= g
-
-
-# --- adaptive music: pad cushion, warm bass pulse, the hook, and a brush groove.
-# One catchy major loop shared by every venue (the "one piece of music growing
-# up"), tailored per tier by root, tempo and brightness. Louis's direction:
-# enthusiastic and Balatro-like, a short hook with a relaxed swing over a warm
-# bass, energetic without being busy, and no white noise riding over it.
-
-func venue_music(vi: int) -> Dictionary:
-	vi = clampi(vi, 0, 5)
-	var roots := [196.0, 220.0, 174.61, 233.08, 261.63, 196.0]   # a colour per venue tier
-	var tempos := [96.0, 104.0, 110.0, 116.0, 120.0, 108.0]      # lifted for enthusiasm; the arena stays stately
-	var brights := [0.45, 0.6, 0.7, 0.8, 0.9, 0.95]
-	# a four-bar doo-wop turnaround (I - vi - IV - V), the warmest pop progression
-	# there is. The offsets move the BASS roots; the hook stays in the key's major
-	# pentatonic, so every melody note lands consonant while the floor moves.
-	return {"root": float(roots[vi]), "tempo": float(tempos[vi]), "bright": float(brights[vi]), "chords": [0, 9, 5, 7]}
-
-
-func _align(freq: float, dur: float) -> float:
-	# quantise to a whole number of cycles over dur, so a sustained tone loops clean
-	return maxf(1.0, round(freq * dur)) / dur
-
-
-func _bell_into(buf: PackedFloat32Array, start: int, freq: float, decay: float, vol: float) -> void:
-	# a soft bell note: gentle attack (no click), long smooth decay, a quiet octave
-	# for shimmer. The tail WRAPS the buffer (modulo), so a looping melody never clicks.
-	var n := buf.size()
-	if n <= 0:
-		return
-	var atk := 0.012
-	var total := int(AUDIO_SR * (atk + decay * 2.2))
-	var ph := 0.0
-	var ph2 := 0.0
-	for i in total:
-		var idx := (start + i) % n
-		ph += TAU * freq / AUDIO_SR
-		ph2 += TAU * freq * 2.0 / AUDIO_SR
-		var t := float(i) / AUDIO_SR
-		var e := (t / atk) if t < atk else exp(-(t - atk) / decay)
-		var s := sin(ph) + 0.28 * sin(ph2)
-		buf[idx] = clampf(buf[idx] + s / 1.28 * e * vol, -1.0, 1.0)
-
-
-func _pluck_into(buf: PackedFloat32Array, start: int, freq: float, vol: float) -> void:
-	# a warm plucked bass note: round sine body, a touch of second harmonic for
-	# definition, quick decay so the pulse bounces instead of droning. Tail wraps.
-	var n := buf.size()
-	if n <= 0:
-		return
-	var atk := 0.008
-	var decay := 0.2
-	var total := int(AUDIO_SR * (atk + decay * 2.4))
-	var ph := 0.0
-	var ph2 := 0.0
-	for i in total:
-		var idx := (start + i) % n
-		ph += TAU * freq / AUDIO_SR
-		ph2 += TAU * freq * 2.0 / AUDIO_SR
-		var t := float(i) / AUDIO_SR
-		var e := (t / atk) if t < atk else exp(-(t - atk) / decay)
-		buf[idx] = clampf(buf[idx] + (sin(ph) + 0.22 * sin(ph2)) / 1.22 * e * vol, -1.0, 1.0)
-
-
-func _thump_into(buf: PackedFloat32Array, start: int, vol: float) -> void:
-	# a muted heartbeat thump: a fast sine pitch-drop, pure tone, NO noise. This is
-	# the groove's floor, felt more than heard.
-	var n := buf.size()
-	if n <= 0:
-		return
-	var total := int(AUDIO_SR * 0.12)
-	var ph := 0.0
-	for i in total:
-		var idx := (start + i) % n
-		var t := float(i) / AUDIO_SR
-		ph += TAU * (52.0 + 105.0 * exp(-t / 0.03)) / AUDIO_SR
-		buf[idx] = clampf(buf[idx] + sin(ph) * exp(-t / 0.05) * vol, -1.0, 1.0)
-
-
-func _brush_into(buf: PackedFloat32Array, start: int, vol: float) -> void:
-	# a soft brushed tick for the swing: the ONE noise source left in the music, so
-	# it is heavily darkened (two heavy lowpass poles, like the murmur bed) and kept
-	# short and quiet. It reads as a brush on a snare skin, not as hiss.
-	var n := buf.size()
-	if n <= 0:
-		return
-	var total := int(AUDIO_SR * 0.05)
-	var lp := 0.0
-	var lp2 := 0.0
-	for i in total:
-		var idx := (start + i) % n
-		lp = lp * 0.9 + (randf() * 2.0 - 1.0) * 0.1
-		lp2 = lp2 * 0.72 + lp * 0.28
-		buf[idx] = clampf(buf[idx] + lp2 * exp(-float(i) / AUDIO_SR / 0.016) * vol * 3.2, -1.0, 1.0)
-
-
-func gen_music_floats(vi: int) -> Dictionary:
-	var p := venue_music(vi)
-	var root: float = p["root"]
-	var beat := 60.0 / float(p["tempo"])
-	var chords: Array = p["chords"]
-	var bars := chords.size()
-	var dur := float(bars * 4) * beat
-	var n := int(AUDIO_SR * dur)
-	var pad := PackedFloat32Array(); pad.resize(n)
-	var bass := PackedFloat32Array(); bass.resize(n)
-	var arp := PackedFloat32Array(); arp.resize(n)
-	var rhy := PackedFloat32Array(); rhy.resize(n)
-
-	# pad: a SOFT warm cushion (root, fifth, octave), aligned so it loops seamlessly.
-	# Kept quiet so it is a bed under the notes, never a droning hum. Align to the
-	# EXACT buffer length (n samples, not the float dur) or a fractional-sample
-	# mismatch leaves a click at the loop seam (was the tick in the backyard theme).
-	var dur_s := float(n) / float(AUDIO_SR)
-	var pf := [_align(root, dur_s), _align(root * 1.5, dur_s), _align(root * 2.0, dur_s)]
-	var lfo_cyc := maxf(1.0, round(0.15 * dur))   # whole cycles over the loop, so the tremolo never jumps
-	# weight the partials so the root leads and the bright octave is only a hint: a
-	# heavy top partial is what makes a sustained pad read as a thin electronic sheen
-	# rather than a warm cushion. compute the phase directly from i in 64-bit float
-	# (accumulating in a PackedFloat32Array drifted ~0.2rad and left a loop click).
-	var pw := [1.0, 0.7, 0.32]
-	var psum: float = float(pw[0]) + float(pw[1]) + float(pw[2])
-	for i in n:
-		var s := 0.0
-		for j in 3:
-			s += sin(TAU * float(pf[j]) * float(i) / float(AUDIO_SR)) * float(pw[j])
-		pad[i] = (s / psum) * 0.28 * (0.9 + 0.1 * sin(TAU * float(i) / float(n) * lfo_cyc))
-
-	# the bass: a warm PULSE that carries the groove, root and fifth bouncing on the
-	# beat with a swung pickup into beats 2 and 4. It planes through the doo-wop
-	# changes; the swing offset is 0.66 of a beat (a relaxed 2:1 triplet feel).
-	for bar in bars:
-		var croot := root * pow(2.0, float(chords[bar]) / 12.0)
-		var b0 := float(bar * 4)
-		for hit in [[0.0, 0.5, 0.46], [1.0, 0.75, 0.3], [1.66, 0.5, 0.2], [2.0, 0.5, 0.42], [3.0, 0.75, 0.3], [3.66, 0.5, 0.22]]:
-			_pluck_into(bass, int(AUDIO_SR * (b0 + float(hit[0])) * beat), croot * float(hit[1]), float(hit[2]))
-
-	# the hook: one short catchy melody in the KEY's major pentatonic, so it stays
-	# consonant over every chord while the bass moves under it. Four bars: a bright
-	# rising call, a falling answer, a build, and a turnaround that leans home. The
-	# off-beat notes sit at the same 0.66 swing as the bass. Tails wrap the loop.
-	var penta := [0, 2, 4, 7, 9, 12, 14, 16]
-	var hook := [
-		[0.0, 2, 1.0], [0.66, 3, 0.7], [1.0, 4, 1.0], [2.0, 3, 0.85], [2.66, 2, 0.7], [3.0, 4, 0.9],
-		[4.0, 5, 1.0], [4.66, 4, 0.7], [5.0, 3, 0.9], [6.0, 4, 0.85], [7.0, 2, 0.7],
-		[8.0, 1, 0.85], [8.66, 2, 0.7], [9.0, 3, 1.0], [10.0, 5, 1.0], [10.66, 4, 0.7], [11.0, 3, 0.85],
-		[12.0, 4, 1.0], [13.0, 3, 0.85], [13.66, 2, 0.7], [14.0, 1, 0.85], [14.66, 2, 0.7], [15.0, 3, 0.9], [15.66, 4, 0.6],
-	]   # (beat in loop, penta index, accent)
-	for note in hook:
-		var f := root * pow(2.0, float(penta[int(note[1])]) / 12.0) * 2.0
-		_bell_into(arp, int(AUDIO_SR * float(note[0]) * beat), f, 0.34, 0.36 * float(note[2]) * float(p["bright"]))
-
-	# the groove: muted thumps on 1 and 3, dark brushed ticks riding the swing.
-	# This layer is volume-automated with the crowd's energy (see audio_update),
-	# so a set that is cooking gains drive and a cold start stays gentle.
-	for bar in bars:
-		var b0 := float(bar * 4)
-		_thump_into(rhy, int(AUDIO_SR * b0 * beat), 0.5)
-		_thump_into(rhy, int(AUDIO_SR * (b0 + 2.0) * beat), 0.4)
-		for tickoff in [0.66, 1.66, 2.66, 3.66]:
-			_brush_into(rhy, int(AUDIO_SR * (b0 + float(tickoff)) * beat), 0.15)
-		for tickoff2 in [1.0, 3.0]:
-			_brush_into(rhy, int(AUDIO_SR * (b0 + float(tickoff2)) * beat), 0.09)
-	return {"pad": pad, "bass": bass, "arp": arp, "rhy": rhy}
-
-
-func gen_music_layers(vi: int) -> Dictionary:
-	var f := gen_music_floats(vi)
-	return {"pad": _wav(f["pad"], true), "bass": _wav(f["bass"], true), "arp": _wav(f["arp"], true), "rhy": _wav(f["rhy"], true)}
-
-
 func dump_audio(dir: String) -> void:
-	# dev: write every sound to <dir> as .wav, for verification and preview
+	# dev: write every sound to <dir> as .wav, for verification and preview.
+	# The music is Louis's own track now, so only the procedural SFX are dumped.
 	for name in sfx:
 		(sfx[name] as AudioStreamWAV).save_to_wav("%s/sfx_%s.wav" % [dir, name])
-	(crowd_ply.stream as AudioStreamWAV).save_to_wav("%s/crowd.wav" % dir)
-	for vi in [0, 2, 4]:
-		var f := gen_music_floats(vi)
-		var pad: PackedFloat32Array = f["pad"]
-		var bass: PackedFloat32Array = f["bass"]
-		var arp: PackedFloat32Array = f["arp"]
-		var rhy: PackedFloat32Array = f["rhy"]
-		var mix := PackedFloat32Array()
-		mix.resize(pad.size() * 2)
-		# the second repeat brings the groove in, the way energy does in play
-		for rep in 2:
-			for i in pad.size():
-				mix[rep * pad.size() + i] = clampf(pad[i] * 0.5 + bass[i] * 0.9 + arp[i] * 0.8 + rhy[i] * (0.7 * float(rep)), -1.0, 1.0)
-		_wav(mix, false).save_to_wav("%s/music%d_mix.wav" % [dir, vi])
 
 
 # =============================================================================
@@ -5200,10 +4937,12 @@ func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand =
 		Vector2(px + 0.22 * H, waist_y), Vector2(px + 0.27 * H, hip_y + 0.2 * H),
 		Vector2(px - 0.27 * H, hip_y + 0.2 * H), Vector2(px - 0.22 * H, waist_y)]), accent)
 
-	# --- arms: upper arm 1.5 heads, forearm 1.35 heads (elbow at the navel, wrist at hip)
+	# --- arms: upper arm 1.5 heads, forearm 1.35 heads (elbow at the navel, wrist at
+	# hip). The attach point sits one arm-root radius (~0.29H) below the jacket line,
+	# so the deltoid mass tops out AT shoulder height instead of peaking above it.
 	var w := 0.22 * H
-	draw_arm_s(Vector2(px - 0.74 * H, sh_y + 0.08 * H), lh, 1.0, skin, coat, 1.5 * H, 1.35 * H, w)
-	draw_arm_s(Vector2(px + 0.74 * H, sh_y + 0.08 * H), rh, -1.0, skin, coat, 1.5 * H, 1.35 * H, w)
+	draw_arm_s(Vector2(px - 0.74 * H, sh_y + 0.32 * H), lh, 1.0, skin, coat, 1.5 * H, 1.35 * H, w)
+	draw_arm_s(Vector2(px + 0.74 * H, sh_y + 0.32 * H), rh, -1.0, skin, coat, 1.5 * H, 1.35 * H, w)
 
 	# --- neck, head, hair, face
 	draw_colored_polygon(PackedVector2Array([

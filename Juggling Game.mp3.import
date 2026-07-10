@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://mb40ilkrppns"
+path="res://.godot/imported/Juggling Game.mp3-8d414372a6aacb18a6f6caa6325902e8.mp3str"
+
+[deps]
+
+source_file="res://Juggling Game.mp3"
+dest_files=["res://.godot/imported/Juggling Game.mp3-8d414372a6aacb18a6f6caa6325902e8.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
