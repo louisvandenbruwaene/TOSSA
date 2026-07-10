@@ -41,7 +41,7 @@ a live goal, a challenge or daily format built on the per-venue records that
 already exist. Reward variety per the GDD economy notes, so farming one tamed
 routine is not optimal.
 
-## 3. Controller support and key remapping - BUILT 2026-07-10 (remap screen still open)
+## 3. Controller support and key remapping - FULLY BUILT 2026-07-10 (remap screen landed same day)
 
 Keyboard only today, with hardcoded physical keycodes. Steam buyers expect a
 pad and the GDD already sketched the mapping: left catch L1, left throw L2,
@@ -87,7 +87,15 @@ finale has been seen), and a small post-finale state so the world acknowledges
 the record: a FINALE banner on the save slot, maybe a golden tint on the arena.
 Slow motion as the reward state stays deferred.
 
-## 7. Steam packaging - focus-loss pause BUILT, rest open
+## 7. Steam packaging - presets and icons BUILT 2026-07-10, Steamworks still open
+
+Landed: export_presets.cfg with macOS, Windows and Linux presets, and real
+icons at export sizes (export/icons: 1024 png, .icns, .ico, rendered from
+icon.svg). Louis still needs to install the export templates once in the
+editor (Editor menu, Manage Export Templates) before the first real export,
+since templates are not on this machine. Louis's Suno cover jpeg could seed
+the Steam capsule art. Still open: Steamworks (achievements, cloud saves,
+leaderboards for the Purist boards).
 
 Export presets for macOS, Windows and Linux. Pause when the window loses
 focus. Capsule and library art (this realistically cannot be code-only).
