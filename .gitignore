@@ -6,3 +6,6 @@
 
 # Aider working files
 .aider*
+export/macos/
+export/windows/
+export/linux/

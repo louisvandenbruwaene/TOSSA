@@ -68,6 +68,7 @@ const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before 
 const ST_CREDITS := 6     # a slow, code-drawn credits roll after the grand finale
 const ST_DAY := 7         # the day hub: a juggler's life between performances
 const ST_STATS := 8       # the career ledger: every record and lifetime number
+const ST_REMAP := 9       # the controls screen: rebind the six action keys
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -172,11 +173,21 @@ const GLASSES_COST := 5000
 const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
 
 # input map (physical keycodes; a real remap layer comes with the options menu)
-const K_LC := KEY_D
-const K_LT := KEY_F
-const K_RC := KEY_K
-const K_RT := KEY_J
-const K_TRICK := KEY_SPACE
+# the six remappable actions (physical keycodes, persisted in the settings
+# file). Defaults are the classic DFJK spread plus Space and C. The Controls
+# screen (Settings > Controls) rebinds them; a clash SWAPS the two bindings so
+# no action can ever be left keyless.
+var K_LC := KEY_D
+var K_LT := KEY_F
+var K_RC := KEY_K
+var K_RT := KEY_J
+var K_TRICK := KEY_SPACE
+var K_CYCLE := KEY_C
+const REMAP_ACTS := [
+	["lc", "Left hand  CATCH"], ["lt", "Left hand  THROW"],
+	["rc", "Right hand  CATCH"], ["rt", "Right hand  THROW"],
+	["trick", "TRICK  (the one-shot powerup)"], ["cycle", "SWITCH TRICK"],
+]
 
 # hand animation
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
@@ -324,6 +335,8 @@ var _prev_running := false
 var game_state := ST_MENU
 var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
+var remap_sel := 0        # cursor on the controls screen
+var remap_wait := false   # true while the controls screen listens for the next key
 
 # --- day-loop state (persisted per slot) ---------------------------------------
 var day := 1              # which day of the career this is
@@ -622,6 +635,14 @@ func _input(event: InputEvent) -> void:
 			return
 		kc = ek.physical_keycode
 		_pad_last = false
+		# the controls screen, while listening, captures the next KEYBOARD key as
+		# the new binding (Esc cancels, F11 stays the fullscreen toggle)
+		if game_state == ST_REMAP and remap_wait:
+			remap_wait = false
+			if kc != KEY_ESCAPE and kc != KEY_F11:
+				bind_action(String(REMAP_ACTS[remap_sel][0]), kc)
+				play_sfx("ui2", -12.0)
+			return
 	elif event is InputEventJoypadButton:
 		# joypad events carry no echo flag, so a held table drops any duplicate
 		# press a driver might deliver while the button is already down
@@ -656,6 +677,9 @@ func _input(event: InputEvent) -> void:
 			if kc == KEY_ESCAPE or kc == KEY_ENTER or kc == KEY_KP_ENTER:
 				game_state = ST_SETTINGS
 				play_sfx("ui", -12.0)
+			return
+		ST_REMAP:
+			remap_input(kc)
 			return
 		ST_CUTSCENE:
 			cutscene_key(kc)
@@ -717,6 +741,9 @@ func _input(event: InputEvent) -> void:
 	# trivial to fish for. You either FINISH cleanly (Enter) or drop out, and you
 	# only try again from the results card afterwards. Training stays freely resettable.
 	var performing := mode == MODE_PERFORM
+	if kc == K_CYCLE:
+		cycle_trick()   # which trick the TRICK key is loaded with (remappable, so not in the match)
+		return
 	match kc:
 		KEY_TAB:
 			sheet_open = true
@@ -752,8 +779,6 @@ func _input(event: InputEvent) -> void:
 		KEY_P:
 			if not performing:
 				cycle_pattern()   # step the juggling pattern (training only)
-		KEY_C:
-			cycle_trick()   # rotate which trick the TRICK key (Space) is loaded with
 		KEY_F1:
 			if debug_mode: debug_jump_venue(0)   # debug story jump: F1..F6 = venues 1..6
 		KEY_F2:
@@ -1205,16 +1230,22 @@ func tut_lesson(id: String) -> Array:
 		var need := 6 if k == PROP_TORCHES else 5
 		return [{"prop": k, "balls": 3, "hand": RIGHT, "goal": "catch", "need": need,
 			"text": "New prop: %s" % String(PROPS[k]["name"]), "sub": "%s Land %d clean catches." % [quirk, need]}]
-	# the core progression: one ball, then two, then the three-ball cascade
+	# the core progression: one ball, then two, then the three-ball cascade.
+	# Key names come from the live bindings, so a remapped player is taught
+	# THEIR keys, not the defaults.
+	var kj := OS.get_keycode_string(K_RT)
+	var kf := OS.get_keycode_string(K_LT)
+	var kd := OS.get_keycode_string(K_LC)
+	var kk := OS.get_keycode_string(K_RC)
 	return [
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "throw_r", "need": 1,
-			"text": "Throw the ball from your RIGHT hand", "sub": "Tap J. Just let it fall this time, no need to catch it yet."},
+			"text": "Throw the ball from your RIGHT hand", "sub": "Tap %s. Just let it fall this time, no need to catch it yet." % kj},
 		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "throw_l", "need": 1,
-			"text": "Now throw from your LEFT hand", "sub": "Tap F, and let it fall again. Feel that each hand has its own throw."},
+			"text": "Now throw from your LEFT hand", "sub": "Tap %s, and let it fall again. Feel that each hand has its own throw." % kf},
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 1,
-			"text": "This time, catch it", "sub": "Throw with J, then catch it in your LEFT hand with D as it comes down."},
+			"text": "This time, catch it", "sub": "Throw with %s, then catch it in your LEFT hand with %s as it comes down." % [kj, kd]},
 		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "catch", "need": 1,
-			"text": "And the other way", "sub": "Throw with F, then catch it in your RIGHT hand with K."},
+			"text": "And the other way", "sub": "Throw with %s, then catch it in your RIGHT hand with %s." % [kf, kk]},
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
 			"text": "Keep one ball going, back and forth", "sub": "Throw, catch, throw from that hand, catch. Land four in a row."},
 		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
@@ -1472,7 +1503,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 8   # music, sound, shake, hints, flags, fullscreen, records, Back
+	var n := 9   # music, sound, shake, hints, flags, fullscreen, controls, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -1496,8 +1527,12 @@ func settings_input(kc: int) -> void:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
 				6:
-					game_state = ST_STATS   # the career ledger, back with Esc
+					remap_sel = 0
+					remap_wait = false
+					game_state = ST_REMAP   # rebind the six action keys
 				7:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				8:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -1688,6 +1723,12 @@ func load_settings() -> void:
 		set_music = bool(cf.get_value("opt", "music", true))
 		set_sfx = bool(cf.get_value("opt", "sfx", true))
 		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
+		K_LC = int(cf.get_value("keys", "lc", KEY_D))
+		K_LT = int(cf.get_value("keys", "lt", KEY_F))
+		K_RC = int(cf.get_value("keys", "rc", KEY_K))
+		K_RT = int(cf.get_value("keys", "rt", KEY_J))
+		K_TRICK = int(cf.get_value("keys", "trick", KEY_SPACE))
+		K_CYCLE = int(cf.get_value("keys", "cycle", KEY_C))
 
 
 func save_settings() -> void:
@@ -1698,7 +1739,92 @@ func save_settings() -> void:
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
 	cf.set_value("opt", "fullscreen", set_fullscreen)
+	cf.set_value("keys", "lc", K_LC)
+	cf.set_value("keys", "lt", K_LT)
+	cf.set_value("keys", "rc", K_RC)
+	cf.set_value("keys", "rt", K_RT)
+	cf.set_value("keys", "trick", K_TRICK)
+	cf.set_value("keys", "cycle", K_CYCLE)
 	cf.save(SETTINGS_PATH)
+
+
+func action_key(id: String) -> int:
+	match id:
+		"lc": return K_LC
+		"lt": return K_LT
+		"rc": return K_RC
+		"rt": return K_RT
+		"trick": return K_TRICK
+		_: return K_CYCLE
+
+
+func bind_action(id: String, kc: int) -> void:
+	# assign kc to the action. If another action already holds kc, the two SWAP,
+	# so every action always keeps some key and no press can mean two things.
+	var old := action_key(id)
+	for a in REMAP_ACTS:
+		var aid := String(a[0])
+		if aid != id and action_key(aid) == kc:
+			_set_action_key(aid, old)
+	_set_action_key(id, kc)
+	save_settings()
+
+
+func _set_action_key(id: String, kc: int) -> void:
+	match id:
+		"lc": K_LC = kc
+		"lt": K_LT = kc
+		"rc": K_RC = kc
+		"rt": K_RT = kc
+		"trick": K_TRICK = kc
+		"cycle": K_CYCLE = kc
+
+
+func remap_input(kc: int) -> void:
+	# remap_wait is handled upstream in _input (it captures the raw next key)
+	var n := REMAP_ACTS.size()
+	match kc:
+		KEY_UP, KEY_W:
+			remap_sel = (remap_sel + n - 1) % n
+			play_sfx("ui", -14.0)
+		KEY_DOWN, KEY_S:
+			remap_sel = (remap_sel + 1) % n
+			play_sfx("ui", -14.0)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			remap_wait = true
+			play_sfx("ui2", -13.0)
+		KEY_ESCAPE:
+			game_state = ST_SETTINGS
+			play_sfx("ui", -12.0)
+
+
+func draw_remap(font: Font, s: Vector2) -> void:
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.68))
+	draw_title_glow(font, s.y * 0.06, "CONTROLS", 36, Color(1.0, 0.88, 0.5), s)
+	draw_ornament(s.x * 0.5, s.y * 0.06 + 62.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
+	var pw := 620.0
+	var px := s.x * 0.5 - pw * 0.5
+	var oy := s.y * 0.28
+	for i in REMAP_ACTS.size():
+		var sel := i == remap_sel
+		var ry := oy + float(i) * 52.0
+		if sel:
+			hud_panel(Rect2(px - 16.0, ry - 26.0, pw + 32.0, 46.0))
+		var nm := String(REMAP_ACTS[i][1])
+		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
+		var kname := OS.get_keycode_string(action_key(String(REMAP_ACTS[i][0])))
+		if sel and remap_wait:
+			var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
+			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 18, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
+		else:
+			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(kname.length())), ry - 15.0, kname)
+	draw_string(font, Vector2(0, oy + float(REMAP_ACTS.size()) * 52.0 + 26.0), "the pad is fixed: L1 R1 catch, L2 R2 throw, A trick, Y switch", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter rebind    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func cutscene_script(id: String) -> Array:
@@ -3128,6 +3254,9 @@ func _draw() -> void:
 		ST_STATS:
 			draw_stats(font, s)
 			return
+		ST_REMAP:
+			draw_remap(font, s)
+			return
 		ST_CUTSCENE:
 			draw_cutscene(font, s)
 			return
@@ -3812,16 +3941,16 @@ func pad_active() -> bool:
 
 
 func k_catch() -> Array[String]:
-	# the catch keycap labels for whichever device is active
+	# the catch keycap labels for whichever device is active (remap-aware)
 	if pad_active():
 		return ["L1", "R1"]
-	return ["D", "K"]
+	return [OS.get_keycode_string(K_LC), OS.get_keycode_string(K_RC)]
 
 
 func k_throw() -> Array[String]:
 	if pad_active():
 		return ["L2", "R2"]
-	return ["F", "J"]
+	return [OS.get_keycode_string(K_LT), OS.get_keycode_string(K_RT)]
 
 
 func k_pause() -> Array[String]:
@@ -3833,13 +3962,13 @@ func k_pause() -> Array[String]:
 func k_trick() -> Array[String]:
 	if pad_active():
 		return ["A"]
-	return ["Space"]
+	return [OS.get_keycode_string(K_TRICK)]
 
 
 func k_cycle() -> Array[String]:
 	if pad_active():
 		return ["Y"]
-	return ["C"]
+	return [OS.get_keycode_string(K_CYCLE)]
 
 
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
@@ -3988,7 +4117,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if not started:
 			var verb := "perform" if performing else "practise"
 			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
-			var tnames := "( L2 or R2 )" if pad_active() else "( F or J )"
+			var tnames := "( L2 or R2 )" if pad_active() else "( %s or %s )" % [OS.get_keycode_string(K_LT), OS.get_keycode_string(K_RT)]
 			draw_string(font, Vector2(0, s.y * 0.23), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
 			draw_string(font, Vector2(0, s.y * 0.23 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
@@ -4146,9 +4275,9 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(bx, cy - 4.0), "NEW TRICK   -   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 21, Color(1.0, 0.88, 0.5, a))
 	var how := ""
 	if String(t["kind"]) == "live":
-		how = "press %s to spin while two or more are airborne" % ("A" if pad_active() else "Space")
+		how = "press %s to spin while two or more are airborne" % k_trick()[0]
 	else:
-		how = "press %s to power up your next throw  -  one press, one trick" % ("A" if pad_active() else "Space")
+		how = "press %s to power up your next throw  -  one press, one trick" % k_trick()[0]
 	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
 	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
 
@@ -4577,10 +4706,13 @@ func draw_settings(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
 		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
 
-	var rsel := menu_sel == rows.size()
-	var rry := oy + float(rows.size()) * 52.0
+	var csel := menu_sel == rows.size()
+	var cry := oy + float(rows.size()) * 52.0
+	draw_string(font, Vector2(px, cry), ("> " if csel else "  ") + "Controls  (rebind the keys)", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if csel else Color(0.8, 0.74, 0.66))
+	var rsel := menu_sel == rows.size() + 1
+	var rry := cry + 52.0
 	draw_string(font, Vector2(px, rry), ("> " if rsel else "  ") + "Records and history", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if rsel else Color(0.8, 0.74, 0.66))
-	var bsel := menu_sel == rows.size() + 1
+	var bsel := menu_sel == rows.size() + 2
 	draw_string(font, Vector2(0, rry + 52.0 + 30.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	var tfoot := "Up / Down    A to toggle    B to go back" if pad_active() else "Up / Down    Enter to toggle    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
