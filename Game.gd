@@ -354,9 +354,10 @@ var _sfx_next := 0
 var mus_pad: AudioStreamPlayer      # looping music layers, volume-automated
 var mus_bass: AudioStreamPlayer
 var mus_arp: AudioStreamPlayer
+var mus_rhy: AudioStreamPlayer      # the groove layer: swings in with the crowd's energy
 var crowd_ply: AudioStreamPlayer    # looping crowd murmur, tracks Applause
 var music_theme := -99              # venue index whose layers are loaded (-99 = none)
-var _vol := {"pad": -80.0, "bass": -80.0, "arp": -80.0, "crowd": -80.0}
+var _vol := {"pad": -80.0, "bass": -80.0, "arp": -80.0, "rhy": -80.0, "crowd": -80.0}
 var _duck := 0.0                    # transient music dip on a drop, decays
 
 # the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
@@ -4270,6 +4271,7 @@ func setup_audio() -> void:
 	mus_pad = AudioStreamPlayer.new(); add_child(mus_pad); mus_pad.volume_db = -80.0
 	mus_bass = AudioStreamPlayer.new(); add_child(mus_bass); mus_bass.volume_db = -80.0
 	mus_arp = AudioStreamPlayer.new(); add_child(mus_arp); mus_arp.volume_db = -80.0
+	mus_rhy = AudioStreamPlayer.new(); add_child(mus_rhy); mus_rhy.volume_db = -80.0
 	crowd_ply = AudioStreamPlayer.new(); add_child(crowd_ply); crowd_ply.volume_db = -80.0
 	crowd_ply.stream = gen_crowd()
 	crowd_ply.play()
@@ -4313,31 +4315,41 @@ func audio_update() -> void:
 	var active := in_play and running
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
 	var pad_t := -17.0                                  # a soft cushion, never a droning hum
-	var bass_t := -13.0 if active else -60.0
-	var arp_t := lerpf(-15.0, -8.0, energy) if in_play else -14.0   # the relaxing bell notes lead
-	var crowd_t := lerpf(-30.0, -9.0, applause) if perf else -60.0
+	var bass_t := -12.0 if active else -60.0            # the warm pulse carries the groove
+	var arp_t := lerpf(-14.0, -8.0, energy) if in_play else -14.0   # the hook leads
+	# the groove layer swings in WITH the crowd's energy: silent at a cold start,
+	# a light brushed drive when the set is cooking (Louis: enthusiasm, not noise)
+	var rhy_t := lerpf(-36.0, -12.0, energy) if active else -60.0
+	# the murmur bed is capped darker than before (-12, was -9): at high Applause it
+	# read as white noise OVER the music instead of a room UNDER it
+	var crowd_t := lerpf(-30.0, -12.0, applause) if perf else -60.0
 	if game_state == ST_CUTSCENE:
 		pad_t = -21.0                # a whisper of a cushion, so the soft bells carry
 		bass_t = -60.0
 		arp_t = -13.0
+		rhy_t = -60.0
 	elif game_state == ST_MENU:
 		pad_t = -17.0
 		bass_t = -60.0
 		arp_t = -15.0
+		rhy_t = -60.0
 	if not set_music:
 		pad_t = -80.0
 		bass_t = -80.0
 		arp_t = -80.0
+		rhy_t = -80.0
 	if not set_music or not set_sfx:
 		crowd_t = -80.0
 	var duck := _duck * 9.0
 	_vol["pad"] = lerpf(_vol["pad"], pad_t - duck, 0.06)
 	_vol["bass"] = lerpf(_vol["bass"], bass_t - duck, 0.08)
 	_vol["arp"] = lerpf(_vol["arp"], arp_t - duck, 0.08)
+	_vol["rhy"] = lerpf(_vol["rhy"], rhy_t - duck, 0.07)
 	_vol["crowd"] = lerpf(_vol["crowd"], crowd_t, 0.05)
 	mus_pad.volume_db = _vol["pad"]
 	mus_bass.volume_db = _vol["bass"]
 	mus_arp.volume_db = _vol["arp"]
+	mus_rhy.volume_db = _vol["rhy"]
 	crowd_ply.volume_db = _vol["crowd"]
 	_duck = maxf(0.0, _duck - 0.03)
 
@@ -4351,9 +4363,11 @@ func load_music_theme(vi: int) -> void:
 	mus_pad.stream = L["pad"]
 	mus_bass.stream = L["bass"]
 	mus_arp.stream = L["arp"]
+	mus_rhy.stream = L["rhy"]
 	mus_pad.play()
 	mus_bass.play()
 	mus_arp.play()
+	mus_rhy.play()
 	music_theme = vi
 
 
@@ -4565,24 +4579,27 @@ func gen_sfx() -> void:
 
 
 func gen_crowd() -> AudioStreamWAV:
-	# a soft, warm murmur, not a hiss. The old single-pole lowpass at high gain read
-	# as harsh static (nearly clipping); this uses two heavy poles for a low, round
-	# rumble and then normalises to a gentle, controlled level.
+	# a soft, warm murmur, not a hiss. Louis's playtest heard the beds as white
+	# noise, so this is now THREE heavy lowpass poles (was two): everything above a
+	# low rumble is gone and what remains reads as a room full of people, not static.
+	# The automation ceiling in audio_update dropped alongside it (-12dB, was -9).
 	var dur := 4.0
 	var n := int(AUDIO_SR * dur)
 	var out := PackedFloat32Array()
 	out.resize(n)
 	var lp := 0.0
 	var lp2 := 0.0
+	var lp3 := 0.0
 	for i in n:
 		lp = lp * 0.988 + (randf() * 2.0 - 1.0) * 0.012   # heavy lowpass -> low murmur
 		lp2 = lp2 * 0.9 + lp * 0.1                         # a second pole, smoother still
+		lp3 = lp3 * 0.82 + lp2 * 0.18                      # a third pole: darker, rounder
 		var lfo := 0.78 + 0.22 * sin(TAU * float(i) / AUDIO_SR * 0.55)   # a slow swell
-		out[i] = lp2 * lfo
+		out[i] = lp3 * lfo
 	var pk := 0.0001
 	for i in n:
 		pk = maxf(pk, absf(out[i]))
-	var g := 0.4 / pk                                      # normalise: soft, never clipping
+	var g := 0.34 / pk                                     # normalise: soft, never clipping
 	for i in n:
 		out[i] *= g
 	_fade_ends(out, 60)
@@ -4598,14 +4615,21 @@ func _fade_ends(buf: PackedFloat32Array, ms: float) -> void:
 		buf[buf.size() - 1 - i] *= g
 
 
-# --- adaptive music: a static drone plus a bass and an arpeggio ---------------
+# --- adaptive music: pad cushion, warm bass pulse, the hook, and a brush groove.
+# One catchy major loop shared by every venue (the "one piece of music growing
+# up"), tailored per tier by root, tempo and brightness. Louis's direction:
+# enthusiastic and Balatro-like, a short hook with a relaxed swing over a warm
+# bass, energetic without being busy, and no white noise riding over it.
 
 func venue_music(vi: int) -> Dictionary:
 	vi = clampi(vi, 0, 5)
 	var roots := [196.0, 220.0, 174.61, 233.08, 261.63, 196.0]   # a colour per venue tier
-	var tempos := [88.0, 96.0, 100.0, 108.0, 112.0, 100.0]
+	var tempos := [96.0, 104.0, 110.0, 116.0, 120.0, 108.0]      # lifted for enthusiasm; the arena stays stately
 	var brights := [0.45, 0.6, 0.7, 0.8, 0.9, 0.95]
-	return {"root": float(roots[vi]), "tempo": float(tempos[vi]), "bright": float(brights[vi]), "chords": [0, 8]}
+	# a four-bar doo-wop turnaround (I - vi - IV - V), the warmest pop progression
+	# there is. The offsets move the BASS roots; the hook stays in the key's major
+	# pentatonic, so every melody note lands consonant while the floor moves.
+	return {"root": float(roots[vi]), "tempo": float(tempos[vi]), "bright": float(brights[vi]), "chords": [0, 9, 5, 7]}
 
 
 func _align(freq: float, dur: float) -> float:
@@ -4633,6 +4657,58 @@ func _bell_into(buf: PackedFloat32Array, start: int, freq: float, decay: float, 
 		buf[idx] = clampf(buf[idx] + s / 1.28 * e * vol, -1.0, 1.0)
 
 
+func _pluck_into(buf: PackedFloat32Array, start: int, freq: float, vol: float) -> void:
+	# a warm plucked bass note: round sine body, a touch of second harmonic for
+	# definition, quick decay so the pulse bounces instead of droning. Tail wraps.
+	var n := buf.size()
+	if n <= 0:
+		return
+	var atk := 0.008
+	var decay := 0.2
+	var total := int(AUDIO_SR * (atk + decay * 2.4))
+	var ph := 0.0
+	var ph2 := 0.0
+	for i in total:
+		var idx := (start + i) % n
+		ph += TAU * freq / AUDIO_SR
+		ph2 += TAU * freq * 2.0 / AUDIO_SR
+		var t := float(i) / AUDIO_SR
+		var e := (t / atk) if t < atk else exp(-(t - atk) / decay)
+		buf[idx] = clampf(buf[idx] + (sin(ph) + 0.22 * sin(ph2)) / 1.22 * e * vol, -1.0, 1.0)
+
+
+func _thump_into(buf: PackedFloat32Array, start: int, vol: float) -> void:
+	# a muted heartbeat thump: a fast sine pitch-drop, pure tone, NO noise. This is
+	# the groove's floor, felt more than heard.
+	var n := buf.size()
+	if n <= 0:
+		return
+	var total := int(AUDIO_SR * 0.12)
+	var ph := 0.0
+	for i in total:
+		var idx := (start + i) % n
+		var t := float(i) / AUDIO_SR
+		ph += TAU * (52.0 + 105.0 * exp(-t / 0.03)) / AUDIO_SR
+		buf[idx] = clampf(buf[idx] + sin(ph) * exp(-t / 0.05) * vol, -1.0, 1.0)
+
+
+func _brush_into(buf: PackedFloat32Array, start: int, vol: float) -> void:
+	# a soft brushed tick for the swing: the ONE noise source left in the music, so
+	# it is heavily darkened (two heavy lowpass poles, like the murmur bed) and kept
+	# short and quiet. It reads as a brush on a snare skin, not as hiss.
+	var n := buf.size()
+	if n <= 0:
+		return
+	var total := int(AUDIO_SR * 0.05)
+	var lp := 0.0
+	var lp2 := 0.0
+	for i in total:
+		var idx := (start + i) % n
+		lp = lp * 0.9 + (randf() * 2.0 - 1.0) * 0.1
+		lp2 = lp2 * 0.72 + lp * 0.28
+		buf[idx] = clampf(buf[idx] + lp2 * exp(-float(i) / AUDIO_SR / 0.016) * vol * 3.2, -1.0, 1.0)
+
+
 func gen_music_floats(vi: int) -> Dictionary:
 	var p := venue_music(vi)
 	var root: float = p["root"]
@@ -4644,6 +4720,7 @@ func gen_music_floats(vi: int) -> Dictionary:
 	var pad := PackedFloat32Array(); pad.resize(n)
 	var bass := PackedFloat32Array(); bass.resize(n)
 	var arp := PackedFloat32Array(); arp.resize(n)
+	var rhy := PackedFloat32Array(); rhy.resize(n)
 
 	# pad: a SOFT warm cushion (root, fifth, octave), aligned so it loops seamlessly.
 	# Kept quiet so it is a bed under the notes, never a droning hum. Align to the
@@ -4664,26 +4741,47 @@ func gen_music_floats(vi: int) -> Dictionary:
 			s += sin(TAU * float(pf[j]) * float(i) / float(AUDIO_SR)) * float(pw[j])
 		pad[i] = (s / psum) * 0.28 * (0.9 + 0.1 * sin(TAU * float(i) / float(n) * lfo_cyc))
 
-	# a sparse, relaxing melody of soft bells (pentatonic, so always consonant), with
-	# space between the notes so it reads as calm, not a busy arpeggio. Tails wrap.
-	var penta := [0, 2, 4, 7, 9, 12, 14, 16]
-	var phrase := [[0.0, 2], [1.0, 4], [2.0, 5], [2.5, 4], [3.5, 1]]   # (beat in bar, penta index)
+	# the bass: a warm PULSE that carries the groove, root and fifth bouncing on the
+	# beat with a swung pickup into beats 2 and 4. It planes through the doo-wop
+	# changes; the swing offset is 0.66 of a beat (a relaxed 2:1 triplet feel).
 	for bar in bars:
 		var croot := root * pow(2.0, float(chords[bar]) / 12.0)
-		# two gentle low root notes for body, not a busy bassline
-		_bell_into(bass, int(AUDIO_SR * float(bar * 4) * beat), croot * 0.5, 1.1, 0.42)
-		_bell_into(bass, int(AUDIO_SR * (float(bar * 4) + 2.0) * beat), croot * 0.5, 1.1, 0.42)
-		for note in phrase:
-			var boff: float = note[0]
-			var deg: int = penta[int(note[1])]
-			var f := croot * pow(2.0, float(deg) / 12.0) * 2.0
-			_bell_into(arp, int(AUDIO_SR * (float(bar * 4) + boff) * beat), f, 0.55, 0.42 * float(p["bright"]))
-	return {"pad": pad, "bass": bass, "arp": arp}
+		var b0 := float(bar * 4)
+		for hit in [[0.0, 0.5, 0.46], [1.0, 0.75, 0.3], [1.66, 0.5, 0.2], [2.0, 0.5, 0.42], [3.0, 0.75, 0.3], [3.66, 0.5, 0.22]]:
+			_pluck_into(bass, int(AUDIO_SR * (b0 + float(hit[0])) * beat), croot * float(hit[1]), float(hit[2]))
+
+	# the hook: one short catchy melody in the KEY's major pentatonic, so it stays
+	# consonant over every chord while the bass moves under it. Four bars: a bright
+	# rising call, a falling answer, a build, and a turnaround that leans home. The
+	# off-beat notes sit at the same 0.66 swing as the bass. Tails wrap the loop.
+	var penta := [0, 2, 4, 7, 9, 12, 14, 16]
+	var hook := [
+		[0.0, 2, 1.0], [0.66, 3, 0.7], [1.0, 4, 1.0], [2.0, 3, 0.85], [2.66, 2, 0.7], [3.0, 4, 0.9],
+		[4.0, 5, 1.0], [4.66, 4, 0.7], [5.0, 3, 0.9], [6.0, 4, 0.85], [7.0, 2, 0.7],
+		[8.0, 1, 0.85], [8.66, 2, 0.7], [9.0, 3, 1.0], [10.0, 5, 1.0], [10.66, 4, 0.7], [11.0, 3, 0.85],
+		[12.0, 4, 1.0], [13.0, 3, 0.85], [13.66, 2, 0.7], [14.0, 1, 0.85], [14.66, 2, 0.7], [15.0, 3, 0.9], [15.66, 4, 0.6],
+	]   # (beat in loop, penta index, accent)
+	for note in hook:
+		var f := root * pow(2.0, float(penta[int(note[1])]) / 12.0) * 2.0
+		_bell_into(arp, int(AUDIO_SR * float(note[0]) * beat), f, 0.34, 0.36 * float(note[2]) * float(p["bright"]))
+
+	# the groove: muted thumps on 1 and 3, dark brushed ticks riding the swing.
+	# This layer is volume-automated with the crowd's energy (see audio_update),
+	# so a set that is cooking gains drive and a cold start stays gentle.
+	for bar in bars:
+		var b0 := float(bar * 4)
+		_thump_into(rhy, int(AUDIO_SR * b0 * beat), 0.5)
+		_thump_into(rhy, int(AUDIO_SR * (b0 + 2.0) * beat), 0.4)
+		for tickoff in [0.66, 1.66, 2.66, 3.66]:
+			_brush_into(rhy, int(AUDIO_SR * (b0 + float(tickoff)) * beat), 0.15)
+		for tickoff2 in [1.0, 3.0]:
+			_brush_into(rhy, int(AUDIO_SR * (b0 + float(tickoff2)) * beat), 0.09)
+	return {"pad": pad, "bass": bass, "arp": arp, "rhy": rhy}
 
 
 func gen_music_layers(vi: int) -> Dictionary:
 	var f := gen_music_floats(vi)
-	return {"pad": _wav(f["pad"], true), "bass": _wav(f["bass"], true), "arp": _wav(f["arp"], true)}
+	return {"pad": _wav(f["pad"], true), "bass": _wav(f["bass"], true), "arp": _wav(f["arp"], true), "rhy": _wav(f["rhy"], true)}
 
 
 func dump_audio(dir: String) -> void:
@@ -4696,11 +4794,13 @@ func dump_audio(dir: String) -> void:
 		var pad: PackedFloat32Array = f["pad"]
 		var bass: PackedFloat32Array = f["bass"]
 		var arp: PackedFloat32Array = f["arp"]
+		var rhy: PackedFloat32Array = f["rhy"]
 		var mix := PackedFloat32Array()
 		mix.resize(pad.size() * 2)
+		# the second repeat brings the groove in, the way energy does in play
 		for rep in 2:
 			for i in pad.size():
-				mix[rep * pad.size() + i] = clampf(pad[i] * 0.5 + bass[i] * 0.9 + arp[i] * 0.8, -1.0, 1.0)
+				mix[rep * pad.size() + i] = clampf(pad[i] * 0.5 + bass[i] * 0.9 + arp[i] * 0.8 + rhy[i] * (0.7 * float(rep)), -1.0, 1.0)
 		_wav(mix, false).save_to_wav("%s/music%d_mix.wav" % [dir, vi])
 
 
