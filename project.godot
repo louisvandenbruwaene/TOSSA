@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="JUGGLE (Prototype)"
-config/description="Core-input feel spike: two hands, press to catch, hold to throw higher."
+config/name="JUGGLE"
+config/description="A juggler's climb: strict catches, hold-to-throw heights, and a career from backyard to world arena."
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
