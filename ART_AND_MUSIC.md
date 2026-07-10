@@ -132,9 +132,17 @@ they tumble in flight. Extend it with these rules:
 
 ## 7. Music
 
-Generated or procedural, per the code-only rule. This is the harder half of the
-constraint, so the direction leans on structure and adaptivity rather than on
-lush production.
+Update 2026-07-10: the background music is now Louis's own recorded track,
+Juggling Game.mp3 in the project root, the second deliberate exception to the
+code-only rule alongside the font. The game rides its volume per state (fullest
+while a performance cooks, easy in menus, a hush under cutscenes, a dip on a
+drop) instead of generating material. All in-game SFX remain procedural, and the
+adaptive ideas below now apply to volume automation over the one track rather
+than to layered synthesis.
+
+The original direction, kept for reference. Generated or procedural, per the
+code-only rule. This is the harder half of the constraint, so the direction
+leans on structure and adaptivity rather than on lush production.
 
 - **Adaptive layers tied to the run.** A small set of musical layers that fade in
   and out with the performance state. A calm base bed while warming up, rhythm and

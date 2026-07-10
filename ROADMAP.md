@@ -57,7 +57,14 @@ numerals (a single licensed or OFL .ttf loaded once as the theme default) would
 lift every screen more than any single drawing change. The code-only art rule
 bends for exactly one font file. Candidates: Nunito Sans, Inter, Outfit.
 
-## 5. Audio breadth
+## 5. Audio breadth - RESCOPED 2026-07-10: Louis's own track is the music now
+
+Louis produced his own background song (Juggling Game.mp3, in the repo) and the
+procedural music generation was removed in its favour. What remains of this
+item: the record-attempt near-silence and the finale payoff are now simple
+volume states over the one track, and the gasp and groan stingers stay as
+procedural SFX work. The per-tier motif idea is superseded unless Louis makes
+more tracks, in which case a per-venue track table is trivial to add.
 
 The synthesis system is solid but the palette is thin: sine bells over one
 shared two-chord loop. Wanted: a distinct motif per venue tier that still
