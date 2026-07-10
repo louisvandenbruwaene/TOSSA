@@ -176,3 +176,23 @@ itself, because the climb is the story.
 
 Writing style for any on-screen text: plain, warm, few words. The crowd cheers and
 groans. Bruna is terse. Milo is silent. Let the juggling talk.
+
+## Update 2026-07-10: the arc with teeth
+
+Louis asked for a story that grips, not a fellow making a living with fancy
+quotes. The rewrite in cutscene_script gives the climb a wound and a debt.
+
+Bruna was the Marvel of Two Hands, the best alive, until the gear circuit
+learned her hands could not be bought and every door in the country closed at
+once. The three worn balls she presses on Milo are all she kept of her act.
+Milo's climb is therefore an argument: every clean catch says she was right
+forty years ago. Silvio Grand is the gear empire's heir, and money beating
+hands is the one thing his life cannot afford to see disproved, which is why
+his barbs sting and why his fall at the internationals is quiet rather than
+funny. When his gear throws a torch a hand's width wrong and he stares at his
+own empty hands, the lie stops holding him. The record ordeal is Milo counting
+one clean catch for every year they took from her, onto pages the gear never
+printed, because the record they buried was hers. The finale seats her in the
+front row under her own name again, Silvio sends two tickets and a note that
+reads one debt paid, and in the last shot she returns the balls in the yard
+where it started. She was keeping them for whoever came to finish it.
