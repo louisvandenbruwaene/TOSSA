@@ -492,6 +492,12 @@ var ui_font: Font = null
 # previous-frame button states, for edge detection
 var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false, "cycle": false}
 
+# key-DOWN taps captured straight from the event stream (see _latch_tap). A press
+# and release that both fall inside one physics tick are invisible to the state
+# poll in _read_inputs, but the event still lands here, so the poll can never drop
+# a catch or throw. Consumed and cleared each read; seeded empty at run start.
+var _tap := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
+
 # gamepad state. _trig holds the latched trigger states for hysteresis, so a
 # noisy analog trigger cannot flutter a throw release. _pad_last remembers which
 # device spoke most recently, so the on-screen hints can follow it. _joy_held
@@ -802,6 +808,12 @@ func _input(event: InputEvent) -> void:
 		ST_DAY:
 			day_input(kc)
 			return
+	# ST_PLAY only past here. Latch a live-play action key straight from the
+	# buffered event stream, so a tap too brief for the state poll in _read_inputs
+	# still registers (see _latch_tap). Skipped while the sim is halted (paused /
+	# sheet / shop), where reads do not run and a latch would fire stale on resume.
+	if not paused and not sheet_open and not shop_open:
+		_latch_tap(kc)
 	# the in-play pause menu owns all input while it is up
 	if paused:
 		pause_input(kc)
@@ -2174,6 +2186,9 @@ func seed_input_edges() -> void:
 	_prev["rt"] = Input.is_physical_key_pressed(K_RT) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT) > 0.5)
 	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_A))
 	_prev["cycle"] = Input.is_physical_key_pressed(K_CYCLE) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_Y))
+	# drop any tap latched on a previous screen, so it cannot fire on frame one
+	for name in _tap:
+		_tap[name] = false
 
 
 func _read_inputs() -> void:
@@ -2198,11 +2213,20 @@ func _read_inputs() -> void:
 		_trig["rt"] = false
 	var p_lt := bool(_trig["lt"])
 	var p_rt := bool(_trig["rt"])
-	var k_lc := Input.is_physical_key_pressed(K_LC)
-	var k_lt := Input.is_physical_key_pressed(K_LT)
-	var k_rc := Input.is_physical_key_pressed(K_RC)
-	var k_rt := Input.is_physical_key_pressed(K_RT)
-	var k_tk := Input.is_physical_key_pressed(K_TRICK)
+	# take the event-latched taps FIRST (always clearing), then fold them into the
+	# polled held state, so a press the 120 Hz poll was too coarse to see still
+	# registers this frame. Taking them unconditionally means a held key never
+	# leaves a latch behind to delay its release by a frame (see _latch_tap).
+	var t_lc := _take_tap("lc")
+	var t_lt := _take_tap("lt")
+	var t_rc := _take_tap("rc")
+	var t_rt := _take_tap("rt")
+	var t_tk := _take_tap("trick")
+	var k_lc := Input.is_physical_key_pressed(K_LC) or t_lc
+	var k_lt := Input.is_physical_key_pressed(K_LT) or t_lt
+	var k_rc := Input.is_physical_key_pressed(K_RC) or t_rc
+	var k_rt := Input.is_physical_key_pressed(K_RT) or t_rt
+	var k_tk := Input.is_physical_key_pressed(K_TRICK) or t_tk
 	_note_device(k_lc or k_lt or k_rc or k_rt or k_tk, p_lc or p_lt or p_rc or p_rt or p_tk or p_cy)
 	# the trick press is handled BEFORE the throw edges, so Space hit in the same
 	# frame as a throw release still empowers THAT throw (the "powerup" promise:
@@ -2257,6 +2281,31 @@ func _edge(name: String, down: bool, h: int, is_catch: bool) -> void:
 		elif was and not down:
 			on_throw_release(h)
 	_prev[name] = down
+
+
+func _latch_tap(kc: int) -> void:
+	# a discrete key-DOWN pulled from the buffered event stream, mapped to its
+	# logical action. _read_inputs folds this into the polled held state, so a tap
+	# whose down and up both fall between two physics ticks (invisible to the state
+	# poll) still fires exactly one press. Never produces input on its own: only a
+	# real key-down sets a latch, so this can add a missed press but never a phantom.
+	if kc == K_LC:
+		_tap["lc"] = true
+	elif kc == K_LT:
+		_tap["lt"] = true
+	elif kc == K_RC:
+		_tap["rc"] = true
+	elif kc == K_RT:
+		_tap["rt"] = true
+	elif kc == K_TRICK:
+		_tap["trick"] = true
+
+
+func _take_tap(name: String) -> bool:
+	# read and CLEAR a latched tap, so it fires on exactly one read and never sticks
+	var v := bool(_tap[name])
+	_tap[name] = false
+	return v
 
 
 # -----------------------------------------------------------------------------

@@ -23,6 +23,14 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[input_devices]
+
+; The sim ticks at 120 Hz and polls key state inside _physics_process. Without
+; agile flushing, Godot only refreshes that state once per RENDERED frame (~60 Hz
+; with vsync), so a fast tap between two flushes is lost and held-throw release
+; times get quantised to the render rate. Flushing per physics tick fixes both.
+buffering/agile_event_flushing=true
+
 [physics]
 
 common/physics_ticks_per_second=120
