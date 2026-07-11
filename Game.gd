@@ -71,6 +71,7 @@ const ST_CREDITS := 6     # a slow, code-drawn credits roll after the grand fina
 const ST_DAY := 7         # the day hub: a juggler's life between performances
 const ST_STATS := 8       # the career ledger: every record and lifetime number
 const ST_REMAP := 9       # the controls screen: rebind the six action keys
+const ST_GAMEOVER := 10   # the road's end: too tired to earn, too poor for a bed
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -81,10 +82,11 @@ const SEG_PER_DAY := 3
 const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly up
 const EAT_STAM := 14.0
 const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
-const INN_COST := 15       # a proper bed: full stamina on waking. The innkeeper
-						   # takes what you have when you are short, so the day
-						   # can always end (sleeping rough was cut per Louis:
-						   # a free sleep just let the days go by)
+const INN_COST := 15       # a proper bed: full stamina on waking. It wants FULL
+						   # payment now (Louis): a juggler who cannot afford the
+						   # bed and cannot stand to busk has reached the end of
+						   # the road, and the game says so honestly (game over)
+const TIRED_FLOOR := 12.0  # below this stamina you cannot work, only sleep
 const VENUE_PAY := 0.35    # each venue tier pays this much more than the last
 const BUSK_FLOOR := 8      # a broke juggler always earns at least this from the hat
 const BROKE_GOLD := 20     # the busking floor applies below this purse
@@ -238,9 +240,14 @@ const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
 # bursts. Slow motion stretches the catch windows in REAL time, which is what
 # makes five clubs and seven torches humanly possible.
 const SPEED_CAP := 25          # the Speed stat's permanent ceiling (percent)
-const PIE_COST := 1000
-const PIE_TICKS := 7200        # one minute of pie clarity per slice
+const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
 const AMAZING_FRAMES := 480    # the frame-perfect reward burst (four seconds)
+const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
+const CHAIN_FRAMES := 7200     # ...which then lasts one minute, then re-earn
+const SLOW_RAMP := 0.005       # slow motion ramps LINEARLY in and out per frame
+							   # (a hard step made the player miss, Louis)
+const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
+							   # no chain or Amazing! farming with two balls
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
 const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
 
@@ -304,10 +311,11 @@ var strength := 6         # quicker high throws; gates ball count and hard trick
 var endurance := 6        # raises max Stamina; gates heavy props later
 var speed := 0            # the Speed stat: each point slows the world 1% (cap 25)
 var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
-var pie_ready := false    # a pie eaten in the hub arms the NEXT session
-var pie_ticks := 0        # frames of pie slow-motion left in this session
+var pie_active := false   # a pie eaten in the hub works until you SLEEP
 var amazing_until := -999999   # real-frame deadline of the Amazing! burst
-var perfect_chain := 0    # consecutive PERFECT catches (ten grant slow motion)
+var chain_until := -999999     # real-frame deadline of the fifty-Perfect window
+var perfect_chain := 0    # consecutive PERFECT catches toward the next window
+var _slow_cur := 0.0      # the LIVE slow amount, easing linearly toward target
 var _tick_acc := 1.0      # fractional sim-tick accumulator while slowed
 var _frames := 0          # real frames in play (the slow-mo timers run on this)
 var money := START_GOLD   # earned by performing (not training)
@@ -374,6 +382,10 @@ var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
 var remap_sel := 0        # cursor on the controls screen
 var remap_wait := false   # true while the controls screen listens for the next key
+var _confirm_id := ""     # the purchase awaiting its second, confirming press
+var _confirm_ms := 0
+var shop_msg := ""        # transient warning line inside the shop panel
+var shop_msg_ms := 0
 
 # --- day-loop state (persisted per slot) ---------------------------------------
 var day := 1              # which day of the career this is
@@ -595,6 +607,9 @@ func _ready() -> void:
 	if ua.has("--stats"):             # dev: the records-and-history screen, for a screenshot
 		game_state = ST_STATS
 		cine_tick = 0
+	if ua.has("--gameover"):          # dev: the road's-end screen, for a screenshot
+		game_state = ST_GAMEOVER
+		cine_tick = 0
 	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
 		enter_day()
 	var ni := ua.find("--csn")        # dev: pin a specific shot index for a stable capture
@@ -643,13 +658,11 @@ func _physics_process(delta: float) -> void:
 	# (Speed stat, Uncle Dan's Pie, an Amazing! catch, ten straight Perfects) and
 	# the rate floors at 0.12: near-frozen, never stopped.
 	_frames += 1
-	if pie_ticks > 0:
-		pie_ticks -= 1
 	if not _demo:
 		_read_inputs()
-	var slow := slow_amount()
-	if slow > 0.001:
-		_tick_acc += maxf(1.0 - slow, 0.12)
+	_slow_cur = move_toward(_slow_cur, slow_target(), SLOW_RAMP)
+	if _slow_cur > 0.001:
+		_tick_acc += maxf(1.0 - _slow_cur, 0.12)
 		if _tick_acc < 1.0:
 			update_hands()
 			queue_redraw()
@@ -745,6 +758,13 @@ func _input(event: InputEvent) -> void:
 		ST_REMAP:
 			remap_input(kc)
 			return
+		ST_GAMEOVER:
+			if cine_tick > 90:   # a beat of stillness before the page can turn
+				reset_new_game()   # the career is over: the slot starts fresh
+				game_state = ST_MENU
+				menu_sel = 0
+				play_sfx("ui", -12.0)
+			return
 		ST_CUTSCENE:
 			cutscene_key(kc)
 			return
@@ -778,13 +798,14 @@ func _input(event: InputEvent) -> void:
 			return
 		match kc:
 			KEY_R, KEY_SPACE:
-				if segments_left() > 0:
+				if not too_tired():
 					seg_used += 1
 					save_progress()
 					results_open = false
 					start_run(num_balls)
 				else:
-					play_sfx("whiff", -10.0)   # the day is spent, sleep first
+					play_sfx("whiff", -10.0)   # out of stamina: sleep first (the
+											   # card's footer says so in words)
 			KEY_TAB:
 				sheet_open = true
 			KEY_S:
@@ -1002,11 +1023,29 @@ func segments_left() -> int:
 	return maxi(0, SEG_PER_DAY - seg_used)
 
 
+func too_tired() -> bool:
+	# STAMINA is the day's limiter now (Louis: the day is spent when you have no
+	# strength left, not when a counter says so). Work as long as you can stand.
+	return stamina < TIRED_FLOOR
+
+
+func check_dead_end() -> void:
+	# the survival check. A meal (EAT_COST) always lifts you back over the
+	# tiredness floor, so the road only truly ends when you are too tired to
+	# work AND too poor for both the bed and the dinner that would save you.
+	# Warned about at every purchase, but if it lands, it lands.
+	if too_tired() and money < INN_COST and money < EAT_COST and game_state == ST_DAY:
+		game_state = ST_GAMEOVER
+		cine_tick = 0
+
+
 func seg_name() -> String:
-	# the day's three beats (Louis): wake to DAY, work into NIGHT, and DEEP NIGHT
-	# is the moment to sleep. The hub darkens along with them.
-	var names := ["day", "night", "deep night", "time to sleep"]
-	return names[clampi(seg_used, 0, 3)]
+	# the day's beats (Louis): wake to DAY, work into NIGHT and DEEP NIGHT. The
+	# clock is flavour; only running out of STAMINA says it is time to sleep.
+	if too_tired():
+		return "time to sleep"
+	var names := ["day", "night", "deep night"]
+	return names[clampi(seg_used, 0, 2)]
 
 
 func next_venue_rep() -> int:
@@ -1024,6 +1063,7 @@ func enter_day() -> void:
 	view_venue = -1
 	cine_tick = 0
 	save_progress()
+	check_dead_end()   # broke AND spent on arrival: the road ends here
 
 
 func set_day_msg(m: String) -> void:
@@ -1036,15 +1076,16 @@ func day_rows() -> Array[Dictionary]:
 	# built fresh every frame and every keypress so drawing and input always agree.
 	var vname := String(venue_data(play_venue())["name"])
 	var out: Array[Dictionary] = []
-	var spent := segments_left() <= 0
+	var tired := too_tired()
+	var tired_why := "too tired to work (stamina under %d)  -  sleep first" % int(TIRED_FLOOR)
 	out.append({"id": "perform", "name": "PERFORM  at  %s" % vname,
-		"cost": "", "ok": not spent,
-		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "gold and reputation, one segment. P books it PURIST."})
+		"cost": "", "ok": not tired,
+		"why": tired_why if tired else "",
+		"sub": "gold and reputation, while stamina lasts. P books it PURIST."})
 	out.append({"id": "practice", "name": "PRACTICE",
-		"cost": "", "ok": not spent,
-		"why": "the day is spent, sleep first" if spent else "",
-		"sub": "no crowd, no pay, one segment. Restart freely."})
+		"cost": "", "ok": not tired,
+		"why": tired_why if tired else "",
+		"sub": "no crowd, no pay. Work as long as you can stand."})
 	var full := stamina >= stamina_max - 1.0
 	var can_eat := money >= EAT_COST and not full
 	var eat_why := ""
@@ -1056,12 +1097,13 @@ func day_rows() -> Array[Dictionary]:
 		"cost": "%d gold" % EAT_COST, "ok": can_eat, "why": eat_why,
 		"sub": "stamina back. Every third meal adds Strength."})
 	out.append({"id": "inn", "name": "SLEEP  at the inn",
-		"cost": "%d gold" % mini(money, INN_COST), "ok": true, "why": "",
-		"sub": "ends the day. Short on gold, they take what you have."})
+		"cost": "%d gold" % INN_COST, "ok": money >= INN_COST,
+		"why": "not enough gold  -  the innkeeper does not haggle" if money < INN_COST else "",
+		"sub": "ends the day, wake fully rested. Keep %d gold aside or the road ends." % INN_COST})
 	if pie_count > 0:
 		out.append({"id": "pie", "name": "EAT  Uncle Dan's Pie",
-			"cost": "own %d" % pie_count, "ok": not pie_ready, "why": "one is already working" if pie_ready else "",
-			"sub": "a stimulant slice: the next session runs a quarter slower for a minute."})
+			"cost": "own %d" % pie_count, "ok": not pie_active, "why": "one is already working" if pie_active else "",
+			"sub": "a stimulant slice: the whole day runs a quarter slower, until you sleep."})
 	out.append({"id": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
 		"sub": "props and gear. New props teach themselves."})
@@ -1078,6 +1120,9 @@ func day_input(kc: int) -> void:
 		return
 	if day_anim != "":
 		return   # a little vignette is playing; the hub listens again when it ends
+	check_dead_end()   # a shop spree can strand you; the road ends the moment it is true
+	if game_state != ST_DAY:
+		return
 	var rows := day_rows()
 	var n := rows.size()
 	match kc:
@@ -1134,14 +1179,17 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			start_run(num_balls)
 			play_sfx("ui2", -11.0)
 		"eat", "inn", "shop":
-			# these three open with a small vignette; the effect lands when it ends
+			# these three open with a small vignette; the effect lands when it
+			# ends. Dinner that would break the bed money asks first.
+			if id == "eat" and not confirm_spend("eat", EAT_COST, false):
+				return
 			day_anim = id
 			day_anim_start = cine_tick
 			play_sfx("ui2", -13.0)
 		"pie":
 			pie_count -= 1
-			pie_ready = true
-			set_day_msg("the pie hums in your blood  -  the next session runs slow and clear")
+			pie_active = true
+			set_day_msg("the pie hums in your blood  -  the world runs slow until you sleep")
 			save_progress()
 			play_sfx("ui2", -11.0)
 
@@ -1174,7 +1222,7 @@ func day_anim_step() -> void:
 				play_sfx("coin", -10.0)
 			save_progress()
 		"inn":
-			money -= mini(money, INN_COST)   # the innkeeper takes what you have
+			money -= INN_COST   # full price, always (the row blocks when short)
 			sleep_day(1.0)
 		"shop":
 			shop_open = true
@@ -1186,6 +1234,7 @@ func sleep_day(frac: float) -> void:
 	# slept. Sleeping rough never DRAINS you, it just fails to top you up fully.
 	day += 1
 	seg_used = 0
+	pie_active = false   # the pie's clarity wears off with sleep
 	career["days"] = maxi(int(career["days"]), day)
 	stamina = maxf(stamina, stamina_max * frac)
 	set_day_msg("day %d  -  %s" % [day, "you wake rested" if frac >= 1.0 else "a stiff back, but a new day"])
@@ -1265,10 +1314,34 @@ func cycle_prop(dir: int) -> void:
 	start_run(num_balls)
 
 
+func confirm_spend(id: String, cost: int, in_shop: bool) -> bool:
+	# any purchase that would leave tonight's bed unaffordable asks ONCE before
+	# it goes through (Louis: warn anywhere the player can strand themselves,
+	# because no bed and no strength to busk is the end of the road)
+	if money - cost >= INN_COST:
+		return true
+	var now := int(Time.get_ticks_msec())
+	if _confirm_id == id and now - _confirm_ms < 4000:
+		_confirm_id = ""
+		return true
+	_confirm_id = id
+	_confirm_ms = now
+	var wtext := "careful  -  that leaves you short of the inn (%d gold). press again to spend anyway" % INN_COST
+	if in_shop:
+		shop_msg = wtext
+		shop_msg_ms = now
+	else:
+		set_day_msg(wtext)
+	play_sfx("late", -8.0)
+	return false
+
+
 func try_buy(kind: int) -> void:
 	# buy one more of a prop; you can stock as many as you can afford
 	var cost := int(PROPS[kind]["cost"])
 	if money >= cost:
+		if not confirm_spend("prop%d" % kind, cost, true):
+			return
 		var was := available(kind)
 		money -= cost
 		prop_count[kind] += 1
@@ -1346,41 +1419,63 @@ func begin_tutorial(id: String) -> void:
 func tut_setup_step() -> void:
 	var steps := tut_lesson(tut_id)
 	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
-	prop_type = int(step["prop"])
-	num_balls = int(step["balls"])
 	mode = MODE_TRAIN
-	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
-	balls.clear()
-	_stack_l.clear()
-	_stack_r.clear()
-	popups.clear()
-	charging = [false, false]
-	applause = 0.7
-	streak = 0
-	caught = 0
-	dropped = 0
-	running = false
-	stamina_max = 50.0 + float(endurance)
-	stamina = stamina_max
-	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
-	hclose = [0.0, 0.0]
-	catch_flash = [-999, -999]
-	throw_kick = [-999, -999]
-	rng.seed = 20260705
-	# deal the balls; a single-ball step starts in the exact hand it is teaching
+	var want_prop := int(step["prop"])
+	var want_n := int(step["balls"])
 	var start_hand := int(step.get("hand", RIGHT))
-	for i in num_balls:
-		var b := Ball.new()
-		b.state = STATE_HAND
-		b.kind = prop_type
-		b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
-		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
-		balls.append(b)
-		var to_left := (i % 2 == 1) if num_balls > 1 else (start_hand == LEFT)
-		if to_left:
-			_stack_l.append(b)
-		else:
-			_stack_r.append(b)
+	# a met goal flows STRAIGHT into the next step (Louis): whatever is in the
+	# hands or the air stays exactly where it is, so a player who can already
+	# juggle clears the whole lesson in one unbroken run. Only the first step,
+	# a prop change, or a step needing FEWER balls deals a fresh table.
+	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() > want_n
+	prop_type = want_prop
+	num_balls = want_n
+	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	if fresh:
+		balls.clear()
+		_stack_l.clear()
+		_stack_r.clear()
+		popups.clear()
+		charging = [false, false]
+		applause = 0.7
+		streak = 0
+		caught = 0
+		dropped = 0
+		running = false
+		stamina_max = 50.0 + float(endurance)
+		stamina = stamina_max
+		hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
+		hclose = [0.0, 0.0]
+		catch_flash = [-999, -999]
+		throw_kick = [-999, -999]
+		rng.seed = 20260705
+		# deal the balls; a single-ball step starts in the exact hand it is teaching
+		for i in num_balls:
+			var b := Ball.new()
+			b.state = STATE_HAND
+			b.kind = prop_type
+			b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
+			b.spin_dir = 1.0 if i % 2 == 0 else -1.0
+			balls.append(b)
+			var to_left := (i % 2 == 1) if num_balls > 1 else (start_hand == LEFT)
+			if to_left:
+				_stack_l.append(b)
+			else:
+				_stack_r.append(b)
+	else:
+		# top up: the new step wants more balls, so they simply appear in the
+		# emptier hand and the juggle keeps rolling
+		while balls.size() < want_n:
+			var b := Ball.new()
+			b.state = STATE_HAND
+			b.kind = prop_type
+			b.color = ball_color(balls.size()) if prop_type == PROP_BALLS else prop_color(prop_type)
+			b.spin_dir = 1.0 if balls.size() % 2 == 0 else -1.0
+			balls.append(b)
+			if _stack_l.size() < _stack_r.size():
+				_stack_l.append(b)
+			else:
+				_stack_r.append(b)
 	tut_count = 0
 	tut_threw_l = false
 	tut_threw_r = false
@@ -1487,6 +1582,8 @@ func try_buy_pie() -> void:
 	if money < PIE_COST:
 		play_sfx("whiff", -10.0)
 		return
+	if not confirm_spend("pie", PIE_COST, true):
+		return
 	money -= PIE_COST
 	pie_count += 1
 	save_progress()
@@ -1495,6 +1592,8 @@ func try_buy_pie() -> void:
 
 func try_buy_glasses() -> void:
 	if has_glasses or money < GLASSES_COST:
+		return
+	if not confirm_spend("glasses", GLASSES_COST, true):
 		return
 	money -= GLASSES_COST
 	has_glasses = true
@@ -1749,7 +1848,7 @@ func reset_new_game() -> void:
 	endurance = 6
 	speed = 0
 	pie_count = 0
-	pie_ready = false
+	pie_active = false
 	money = START_GOLD
 	reputation = 0
 	prop_count = [0, 0, 0, 0, 0, 0]
@@ -2310,14 +2409,13 @@ func start_run(n: int) -> void:
 	seed_input_edges()   # a key still held from the previous screen must not edge-fire
 	collapsing = false
 	falling.clear()
-	# slow motion: an eaten pie arms exactly one session; the earned bursts reset
+	# slow motion: the earned bursts reset per run (the pie keeps working all
+	# day, so pie_active is untouched here and only sleep clears it)
 	perfect_chain = 0
 	amazing_until = -999999
+	chain_until = -999999
+	_slow_cur = 0.0
 	_tick_acc = 1.0
-	pie_ticks = 0
-	if pie_ready:
-		pie_ready = false
-		pie_ticks = PIE_TICKS
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
 	hclose = [0.0, 0.0]
 	catch_flash = [-999, -999]
@@ -2396,14 +2494,20 @@ func on_catch(h: int) -> void:
 		score += int(round(100.0 * float(streak) * pm))
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
-		# the slow-motion earn: a FRAME-perfect catch is an Amazing! burst, and a
-		# chain of ten straight Perfects holds the world slow while it lives
-		perfect_chain += 1
-		if best_d == 0:
-			amazing_until = _frames + AMAZING_FRAMES
-			add_popup(outer_pos(h) + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
-		if perfect_chain == 10:
-			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "TEN PERFECT  -  time thickens", Color(0.75, 0.92, 1.0))
+		# the slow-motion earn, only when a REAL pattern is up (three props or
+		# more, so two lazy balls cannot farm it): a FRAME-perfect catch is an
+		# Amazing! burst, and FIFTY straight Perfects buy one minute of thick
+		# time, after which the count starts over for the next minute
+		if num_balls >= SLOW_MIN_BALLS:
+			perfect_chain += 1
+			if best_d == 0:
+				amazing_until = _frames + AMAZING_FRAMES
+				add_popup(outer_pos(h) + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
+			if perfect_chain >= CHAIN_NEED:
+				perfect_chain = 0
+				chain_until = _frames + CHAIN_FRAMES
+				add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  one minute of thick time", Color(0.75, 0.92, 1.0))
+				play_sfx("record", -8.0)
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
 		spawn_parts(outer_pos(h), Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
@@ -2916,19 +3020,23 @@ func stamina_mult() -> float:
 	return lerpf(STAM_MIN_MULT, 1.0, clampf(f / STAM_LOW, 0.0, 1.0))
 
 
-func slow_amount() -> float:
-	# how slowed the world currently is, 0..1. All sources stack linearly
-	# (ideas.rtf): the Speed stat, Uncle Dan's Pie, an Amazing! frame-perfect
-	# catch, and a live run of ten straight Perfect catches. Purist sets strip
-	# the STAT share but keep the earned bursts (they are skill, not stats).
+func slow_target() -> float:
+	# where the slow amount is HEADING, 0..1. All sources stack linearly
+	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
+	# frame-perfect catch, and an earned fifty-Perfect minute. Purist sets
+	# strip the bought shares but keep the earned bursts (those are skill).
 	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 100.0
-	if pie_ticks > 0 and not purist_run():
+	if pie_active and not purist_run():
 		a += 0.25
 	if _frames < amazing_until:
 		a += 0.25
-	if perfect_chain >= 10:
+	if _frames < chain_until:
 		a += 0.25
 	return clampf(a, 0.0, 1.0)
+
+
+func slow_amount() -> float:
+	return _slow_cur   # the live value, always easing linearly (see SLOW_RAMP)
 
 
 func purist_run() -> bool:
@@ -3286,7 +3394,7 @@ func load_progress() -> void:
 		endurance = int(cf.get_value("stats", "endurance", 6))
 		speed = int(cf.get_value("stats", "speed", 0))
 		pie_count = int(cf.get_value("stats", "pies", 0))
-		pie_ready = bool(cf.get_value("day", "pie_ready", false))
+		pie_active = bool(cf.get_value("day", "pie_active", false))
 		money = int(cf.get_value("stats", "money", START_GOLD))
 		reputation = int(cf.get_value("stats", "reputation", 0))
 		var pc: Variant = cf.get_value("stats", "prop_count", [])
@@ -3334,7 +3442,7 @@ func save_progress() -> void:
 	cf.set_value("stats", "endurance", endurance)
 	cf.set_value("stats", "speed", speed)
 	cf.set_value("stats", "pies", pie_count)
-	cf.set_value("day", "pie_ready", pie_ready)
+	cf.set_value("day", "pie_active", pie_active)
 	cf.set_value("stats", "money", money)
 	cf.set_value("stats", "reputation", reputation)
 	cf.set_value("stats", "prop_count", prop_count)
@@ -3490,6 +3598,9 @@ func _draw() -> void:
 			return
 		ST_REMAP:
 			draw_remap(font, s)
+			return
+		ST_GAMEOVER:
+			draw_gameover(font, s)
 			return
 		ST_CUTSCENE:
 			draw_cutscene(font, s)
@@ -4267,8 +4378,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if slow > 0.005:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.55, 0.72, 1.0, 0.03 + 0.09 * slow))
 		var stext := "SLOW  %d%%" % int(round(slow * 100.0))
-		if pie_ticks > 0:
-			stext += "   pie %ds" % int(ceil(float(pie_ticks) / 120.0))
+		if pie_active:
+			stext += "   (pie)"
+		if _frames < chain_until:
+			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
 		draw_string(font, Vector2(0, 92.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
 	if debug_mode:
 		mlabel += "   -   DEBUG"
@@ -4464,6 +4577,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 		if not pending_beats.is_empty():
 			# a story beat waits: the first key (or a moment's pause) plays it
 			foot = "something is stirring  -  any key"
+		elif too_tired():
+			# the reason R will not work, in words, right where the player looks
+			foot = "too tired to go again  -  Enter back to the day, then sleep"
 		else:
 			var kgo := "A" if pad_active() else "R"
 			var kmenu := "Enter" if not pad_active() else "B"
@@ -4645,6 +4761,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	ry += 50.0
 	draw_pie_row(font, tx, ry, innerw, keynum + 1)
 
+	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
+		draw_string(font, Vector2(tx, py + ph - 54.0), shop_msg, HORIZONTAL_ALIGNMENT_LEFT, innerw, 13, Color(1.0, 0.62, 0.45))
 	draw_string(font, Vector2(tx, py + ph - 30.0), "press a number to buy one   -   to juggle N of a prop you must own N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
 	draw_string(font, Vector2(px + pw - 150.0, py + ph - 30.0), "Tab / S to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
 
@@ -4694,7 +4812,7 @@ func draw_pie_row(font: Font, x: float, y: float, w: float, keynum: int) -> void
 		Vector2(x + 4.0, y + 2.0), Vector2(x + 28.0, y + 2.0), Vector2(x + 16.0, y - 14.0)]), pc)
 	draw_line(Vector2(x + 4.0, y + 2.0), Vector2(x + 28.0, y + 2.0), Color(0.6, 0.36, 0.16), 3.0)
 	draw_string(font, Vector2(x + 44.0, y), "Uncle Dan's Pie", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
-	draw_string(font, Vector2(x + 44.0, y + 16.0), "eat in the day hub: one minute of slow, clear time next session", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(x + 44.0, y + 16.0), "eat in the day hub: the whole day runs slow and clear, until you sleep", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
 	draw_string(font, Vector2(x + w - 262.0, y), "own %d" % pie_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.72, 0.88, 0.72) if pie_count > 0 else Color(0.72, 0.66, 0.58))
 	var afford := money >= PIE_COST
 	var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
@@ -4726,13 +4844,12 @@ func draw_day(font: Font, s: Vector2) -> void:
 	draw_title_glow(font, s.y * 0.055, "DAY %d" % day, 40, Color(1.0, 0.88, 0.5), s)
 	draw_string(font, Vector2(0, s.y * 0.055 + 66.0), seg_name(), HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.8, 0.62))
 	draw_ornament(s.x * 0.5, s.y * 0.055 + 86.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
-	for i in SEG_PER_DAY:
-		var px := s.x * 0.5 + (float(i) - 1.0) * 26.0
-		var py := s.y * 0.055 + 110.0
-		var left := i < segments_left()
-		var c := Color(1.0, 0.85, 0.45, 0.95) if left else Color(0.5, 0.42, 0.36, 0.5)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(px, py - 7.0), Vector2(px + 7.0, py), Vector2(px, py + 7.0), Vector2(px - 7.0, py)]), c)
+	# under the clock: what actually limits the day, said plainly (Louis: it was
+	# unclear when and why the day was spent)
+	var limit_line := "you can work while stamina lasts"
+	if too_tired():
+		limit_line = "stamina is spent  -  sleep to start tomorrow"
+	draw_string(font, Vector2(0, s.y * 0.055 + 112.0), limit_line, HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.7, 0.5, 0.95) if too_tired() else Color(0.72, 0.68, 0.6, 0.9))
 
 	# the ledger card: purse, reputation, stamina, and the road to the next meal
 	# bonus. It sits high on the left so the stage picture keeps the middle.
@@ -5002,6 +5119,30 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func draw_gameover(font: Font, s: Vector2) -> void:
+	# the road's end: no strength to earn, no gold for a bed. The career closes
+	# with its numbers and the slot starts over.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02))
+	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
+	draw_title_glow(font, s.y * 0.22, "THE ROAD ENDS HERE", 42, Color(0.9, 0.55, 0.4, fin), s)
+	draw_ornament(s.x * 0.5, s.y * 0.22 + 68.0, 220.0, Color(0.7, 0.45, 0.3, 0.8 * fin))
+	draw_string(font, Vector2(0, s.y * 0.40), "Too tired to work. Too poor for a bed. The city keeps what it takes.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.85, 0.78, 0.66, fin))
+	var lines := [
+		"%d days on the road" % int(career["days"]),
+		"%d performances,  %d catches" % [int(career["perfs"]), int(career["catches"])],
+		"best streak %d,  highest score %d" % [int(career["best_streak"]), int(career["best_score"])],
+		"%d gold earned, and all of it spent" % int(career["gold_earned"]),
+	]
+	for i in lines.size():
+		var la := clampf(float(cine_tick - 80 - i * 30) / 40.0, 0.0, 1.0)
+		draw_string(font, Vector2(0, s.y * 0.50 + float(i) * 30.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.7, 0.62, la))
+	if cine_tick > 90:
+		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
+		draw_string(font, Vector2(0, s.y * 0.80), "any key  -  a new juggler picks up the balls", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.8, 0.72, 0.6, 0.4 + 0.5 * pa))
+	draw_vignette(s, 0.7)
 
 
 func draw_stats(font: Font, s: Vector2) -> void:
@@ -5711,9 +5852,13 @@ func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, slee
 	# bones barely longer than half the reach: a soft natural bend, never the
 	# sharp folded kink Louis flagged (deep bows came from bones far over reach)
 	var bone := maxf(reach * 0.52, l1 * 0.5)
+	# of the two elbow solutions, ALWAYS take the outward one (Louis: elbows
+	# point out from the body in every pose, same as the play figure's arms).
+	# bend > 0 marks the LEFT arm, whose outward side is negative x.
+	var side := -1.0 if bend > 0.0 else 1.0
 	var e1 := solve_elbow(shoulder, h2, bone, bone, bend)
 	var e2 := solve_elbow(shoulder, h2, bone, bone, -bend)
-	var elbow := e1 if e1.y >= e2.y else e2
+	var elbow := e1 if (e1.x - shoulder.x) * side >= (e2.x - shoulder.x) * side else e2
 	var wrist := h2 + (elbow - h2).normalized() * w * 0.6
 	draw_capsule(shoulder, elbow, w * 2.6, w * 2.0, sleeve)
 	draw_capsule(elbow, wrist, w * 1.9, w * 1.4, skin)
