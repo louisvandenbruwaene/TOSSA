@@ -135,7 +135,7 @@ they tumble in flight. Extend it with these rules:
 Update 2026-07-10: the background music is now Louis's own recorded track,
 Juggling Game.mp3 in the project root, the second deliberate exception to the
 code-only rule alongside the font. The game rides its volume per state (fullest
-while a performance cooks, easy in menus, a hush under cutscenes, a dip on a
+while a performance cooks, easy in menus and on the stage card, a dip on a
 drop) instead of generating material. All in-game SFX remain procedural, and the
 adaptive ideas below now apply to volume automation over the one track rather
 than to layered synthesis.
