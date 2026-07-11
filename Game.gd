@@ -150,6 +150,14 @@ const PATTERNS := [
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
 const HALFSHOWER_MIN := 0.35  # the over-the-top side's minimum height fraction
+const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
+							   # Reverse Cascade, Tennis's marked ball)
+const WATERFALL_HIGH := 0.6   # Waterfall's over-the-top hand: minimum height fraction,
+							   # clearly higher than the generic over-the-top throws
+const WATERFALL_LOW := 0.15   # Waterfall's other hand: MAXIMUM height fraction, so it
+							   # visibly flows low under the over-the-top side rather
+							   # than drifting up to meet it (Louis: they read almost
+							   # the same height without a forced ceiling here)
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
 							   # lanes' running height (0 = pure hold-timing, 1 = locked)
 const STATE_FLIGHT := 0
@@ -2523,9 +2531,15 @@ func do_throw(h: int, hold: int) -> void:
 	var over_top := this_trick == TR_OVER
 	if toggle_on == TR_COLS:
 		this_trick = TR_COLS
-	elif toggle_on == TR_WFALL and h == RIGHT:
-		over_top = true
-		this_trick = TR_WFALL
+	elif toggle_on == TR_WFALL:
+		if h == RIGHT:
+			over_top = true
+			this_trick = TR_WFALL
+		else:
+			# the other hand keeps the weave, but forced LOW (a ceiling, not a floor),
+			# so it visibly flows under the over-the-top side instead of drifting up
+			# to meet it when the player holds both hands about the same
+			air = mini(air, int(round(base_air + WATERFALL_LOW * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	elif toggle_on == TR_RCASC:
 		over_top = true
 		this_trick = TR_RCASC
@@ -2536,7 +2550,8 @@ func do_throw(h: int, hold: int) -> void:
 			over_top = true
 			this_trick = TR_TENNIS
 	if over_top:
-		air = maxi(air, int(round(base_air + 0.5 * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
+		var high_min := WATERFALL_HIGH if this_trick == TR_WFALL else OVER_TOP_MIN
+		air = maxi(air, int(round(base_air + high_min * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# Columns (the pattern or the toggle trick) pulls this throw's airtime toward the
 	# lanes' running height, so a slightly early or late release still lands close to
 	# the others instead of drifting the apexes apart (Louis: mismatched heights made
