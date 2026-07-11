@@ -811,8 +811,9 @@ func _input(event: InputEvent) -> void:
 	# ST_PLAY only past here. Latch a live-play action key straight from the
 	# buffered event stream, so a tap too brief for the state poll in _read_inputs
 	# still registers (see _latch_tap). Skipped while the sim is halted (paused /
-	# sheet / shop), where reads do not run and a latch would fire stale on resume.
-	if not paused and not sheet_open and not shop_open:
+	# sheet / shop / results), where reads do not run (or are ignored) and a latch
+	# would otherwise fire stale on resume.
+	if not paused and not sheet_open and not shop_open and not results_open:
 		_latch_tap(kc)
 	# the in-play pause menu owns all input while it is up
 	if paused:
@@ -1054,10 +1055,6 @@ func establish_key() -> void:
 func play_venue() -> int:
 	# the stage you CHOSE to play tonight, never above what reputation unlocks
 	return clampi(venue_pick, 0, venue_index())
-
-
-func segments_left() -> int:
-	return maxi(0, SEG_PER_DAY - seg_used)
 
 
 func too_tired() -> bool:
@@ -2194,8 +2191,10 @@ func seed_input_edges() -> void:
 func _read_inputs() -> void:
 	# each logical action is keyboard OR pad, combined BEFORE edge detection, so
 	# a press on either device yields exactly one edge and can never double-fire.
-	if collapsing:
-		return   # the set is lost: the hands have given up until everything lands
+	if collapsing or results_open:
+		return   # the set is over: the hands rest until the next run. results_open
+				 # is here so a press behind the results card cannot throw or catch
+				 # the props still in hand (the card is driven by _input, not by poll)
 	var dev := pad_dev()
 	var p_lc := false
 	var p_rc := false
