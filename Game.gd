@@ -454,7 +454,6 @@ var last_streak_tick := -999  # when the streak last grew, for the multiplier pu
 
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
-var set_hints := true     # show the control hints along the bottom
 var set_flags := true     # show the TOO LOW / too high throw flags
 var set_music := true     # the procedural adaptive soundtrack
 var set_sfx := true       # catch/throw/drop sound effects and the crowd bed
@@ -1739,7 +1738,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 9   # music, sound, shake, hints, flags, fullscreen, controls, records, Back
+	var n := 8   # music, sound, shake, flags, fullscreen, controls, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -1756,19 +1755,17 @@ func settings_input(kc: int) -> void:
 				2:
 					set_shake = not set_shake
 				3:
-					set_hints = not set_hints
-				4:
 					set_flags = not set_flags
-				5:
+				4:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
-				6:
+				5:
 					remap_sel = 0
 					remap_wait = false
-					game_state = ST_REMAP   # rebind the six action keys
-				7:
+					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
+				6:
 					game_state = ST_STATS   # the career ledger, back with Esc
-				8:
+				7:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -1862,7 +1859,6 @@ func load_settings() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
-		set_hints = bool(cf.get_value("opt", "hints", true))
 		set_flags = bool(cf.get_value("opt", "flags", true))
 		set_music = bool(cf.get_value("opt", "music", true))
 		set_sfx = bool(cf.get_value("opt", "sfx", true))
@@ -1878,7 +1874,6 @@ func load_settings() -> void:
 func save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("opt", "shake", set_shake)
-	cf.set_value("opt", "hints", set_hints)
 	cf.set_value("opt", "flags", set_flags)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
@@ -1965,8 +1960,14 @@ func draw_remap(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 18, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
 		else:
 			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(kname.length())), ry - 15.0, kname)
-	draw_string(font, Vector2(0, oy + float(REMAP_ACTS.size()) * 52.0 + 26.0), "the pad is fixed: L1 R1 catch, L2 R2 throw, A trick, Y switch", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.72, 0.66, 0.6))
-	draw_string(font, Vector2(0, s.y - 42.0), "Up / Down    Enter rebind    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	var refy := oy + float(REMAP_ACTS.size()) * 52.0 + 22.0
+	draw_string(font, Vector2(0, refy), "the pad is fixed: L1 R1 catch, L2 R2 throw, A trick, Y switch", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.72, 0.66, 0.6))
+	# the other in-play keys, listed here so live play never has to show them
+	draw_ornament(s.x * 0.5, refy + 26.0, 150.0, Color(0.82, 0.62, 0.34, 0.6))
+	draw_string(font, Vector2(0, refy + 50.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(0, refy + 74.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, refy + 98.0), "practice only:    R  restart      3 to 7  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -4299,23 +4300,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(64, s.y - 28), "%d %s   -   %s   -   day %d, %s" % [num_balls, propname.to_lower(), patt, day, seg_name()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.6))
 		if not performing and next_ball_strength() > 0:
 			draw_string(font, Vector2(34, s.y - 86), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.66, 0.56, 0.85))
-		if set_hints:
-			var cx := s.x * 0.5 + 90.0
-			if performing:
-				# a set in progress cannot be reset, only finished or dropped, so its
-				# hints lead with the finish key and drop the restart/rebuild controls.
-				# finish keeps the Enter cap even on pad, because A is the trick button
-				# and Start pauses, so no pad button is free to end the set.
-				draw_hints_row(font, cx, s.y - 34, [
-					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
-					[["Enter"], "finish set"], [k_pause(), "pause"]])
-			else:
-				draw_hints_row(font, cx, s.y - 58, [
-					[k_catch(), "catch"], [k_throw(), "throw, hold = higher"],
-					[["R"], "restart"], [["Enter"], "end session"]])
-				draw_hints_row(font, cx, s.y - 34, [
-					[["3"], "..."], [["7"], "count"], [["O"], "prop"], [["P"], "pattern"],
-					[["S"], "shop"], [["Tab"], "sheet"], [k_pause(), "pause"]])
+		# the persistent control-hint rows used to sit here; the full control list now
+		# lives in Settings > Controls, so live play stays uncluttered (Louis). Only
+		# the loaded-trick HUD and the transient start / round-over prompts remain.
 
 		if not started:
 			var verb := "perform" if performing else "practise"
@@ -4677,8 +4664,8 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, lvl: i
 	# one entry in the Skills reference: name on the left, a ready / Lv-gate badge
 	# on the right, and a soft highlight when it is the selected entry.
 	if sel:
-		draw_rect(Rect2(x - 12.0, y - 19.0, w, 34.0), Color(1.0, 0.85, 0.45, 0.10))
-		draw_rect(Rect2(x - 12.0, y - 19.0, w, 34.0), Color(1.0, 0.85, 0.45, 0.35), false, 1.0)
+		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.10))
+		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.35), false, 1.0)
 	var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.86, 0.8, 0.68) if unlocked else Color(0.55, 0.5, 0.46))
 	draw_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, nc)
 	if unlocked:
@@ -4693,7 +4680,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# sends the player to learn the how, so a live run is never buried in text.
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
 	var pw := 904.0
-	var ph := 566.0
+	var ph := 626.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
@@ -4709,10 +4696,10 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var col_l := px + 40.0
 	var col_r := px + pw * 0.52
 	var colw := pw * 0.44
-	var row_h := 38.0
-	var y0 := py + 116.0
-	draw_string(font, Vector2(col_l, y0 - 20.0), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(col_r, y0 - 20.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	var row_h := 46.0
+	var y0 := py + 126.0
+	draw_string(font, Vector2(col_l, y0 - 22.0), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_r, y0 - 22.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
 	for i in nt:
 		var td: Dictionary = TRICKS[i]
 		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), int(td["lvl"]), trick_unlocked(i), i == skills_sel)
@@ -4755,8 +4742,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.9, 0.82, 0.66))
 	draw_string(font, Vector2(px + 46.0, dy + 62.0), desc, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.78, 0.72, 0.64))
 
-	draw_string(font, Vector2(px + 40.0, py + ph - 22.0), "Up / Down browse   -   Left / Right jump column", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.72, 0.66, 0.58))
-	draw_string(font, Vector2(px + pw - 172.0, py + ph - 22.0), "Tab / Esc to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
+	draw_string(font, Vector2(px, py + ph - 22.0), "arrows browse      Esc to leave", HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(0.74, 0.68, 0.6))
 
 
 # -----------------------------------------------------------------------------
@@ -5034,7 +5020,7 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
-	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Control hints", set_hints], ["Throw flags (TOO LOW / high)", set_flags], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
+	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Throw flags (TOO LOW / high)", set_flags], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var oy := s.y * 0.30
