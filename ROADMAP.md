@@ -1,5 +1,12 @@
 # JUGGLE: Roadmap to a sellable 1.0
 
+STORY CUT 2026-07-11: Louis chose to remove the narrative entirely (full
+Balatro pivot). All items below about cutscenes, the story cast, and the
+endgame chapters are now historical — that content was deleted from the game.
+The six venues remain as pure escalating stages; the win is a record at the
+World Arena. A new SKILLS hub screen and a slimmed, controls-in-Settings HUD
+landed the same day. See STORY.md (retired) and the memory log for detail.
+
 SHIP BLOCKER, checked 2026-07-11: Juggling Game.mp3's file date and its git
 history both still say 2026-07-10, the day it was added as a free-tier Suno
 NON-COMMERCIAL render (item 5). Nothing suggests the paid-tier re-render has

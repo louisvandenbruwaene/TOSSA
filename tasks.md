@@ -1,5 +1,10 @@
 # JUGGLE: handoff tasks that need a human, an account, or a stronger session
 
+NOTE 2026-07-11 (later): the story was cut from the game entirely (full Balatro
+pivot), so any cutscene item below (e.g. item 3, the mis-staged cutscene shots)
+is now moot — that code no longer exists. The Steamworks and capsule-art items
+still stand.
+
 Written 2026-07-11, after a review pass fixed everything self-contained and
 verifiable in one sitting (see git log around this date). These two items were
 deliberately left undone: not because they are technically hard in the "write

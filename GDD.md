@@ -9,9 +9,16 @@ catch-and-throw model, and it adds a juggler life-and-career meta layer (stats, 
 reputation, eat and sleep). The meta layer meaningfully expands the project. We still prove the
 core loop first (see Section 9, Sequencing) before building the meta.
 
-Companion documents: STORY.md works out the light story and the ten-venue climb
-in detail, and ART_AND_MUSIC.md sets the visual and audio direction. Both defer
-to this GDD for mechanics.
+**Update 2026-07-11 — THE STORY WAS CUT.** JUGGLE is now a pure, Balatro-style
+climb with no narrative: no cutscenes, no characters, no story beats. The six
+venues are escalating stages to clear, each with its own record. The win is
+mechanical (set a record at the top stage, the World Arena). References to a
+"light story", the mentor/rival cast, and the ten-venue dramatic arc below are
+historical and no longer describe the game. STORY.md is retired; README.md has
+the current numbers.
+
+Companion documents: ART_AND_MUSIC.md sets the visual and audio direction and
+defers to this GDD for mechanics. (STORY.md is retired — see the note above.)
 
 ---
 
@@ -19,9 +26,9 @@ to this GDD for mechanics.
 
 - Genre: highly skill-based arcade juggling, now wrapped in a light juggler life-and-career sim.
 - Player mastery is the primary progression. Stats are supportive, never decisive (Section 4.1).
-- Engine Godot 4.7, 2D, warm-theatrical aesthetic, a named performer with a light story, a
+- Engine Godot 4.7, 2D, warm-theatrical aesthetic, a named performer (no story as of 2026-07-11), a
   polished 1.0. All art and audio produced in code (procedural, shader, generated).
-- The career climbs a venue ladder from backyard to the world-record stage.
+- The career climbs a venue ladder from backyard to the world arena, won by setting a record there.
 
 ---
 
