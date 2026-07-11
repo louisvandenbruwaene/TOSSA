@@ -40,7 +40,7 @@ rolls against a probability:
 ```
 acc_norm = clamp(eff_accuracy() / 55.0, 0, 1)      # ACC_FULL = 55
 base     = 0.50 if quality == Good else 0.30        # GOOD_BASE / LATE_BASE
-p = base + acc_norm * 0.50                          # ACC_CATCH_BONUS
+p = base + acc_norm * 0.30                          # ACC_CATCH_BONUS
     - clamp(height, 0, 1.4) * 0.35                  # HEIGHT_CATCH_PENALTY
 if not Purist:
     p += strength_catch_mod()                       # Section 4, Strength
@@ -51,12 +51,14 @@ p = clamp(p, 0.06, 1.0)                              # MIN_CATCH_P floor
 ```
 
 Read this as: **a standard-height throw (height 0), at 55+ effective
-Accuracy, secures a Good catch 100% of the time and a Late catch about 80%
-of the time.** At 0 Accuracy those numbers are 50% and 30%. The `- height *
-0.35` term means a maximum-height throw (height 1.4) can subtract as much as
-0.49 from that chance, which is why a big reset throw is a real gamble even
-for a high-Accuracy player. The 0.06 floor means no throw is ever
-*truly* hopeless to catch, just very unlikely.
+Accuracy, secures a Good catch 80% of the time and a Late catch 60% of the
+time - bare-handed. Glasses (Section 7) add a flat +20 to both, which is the
+*only* way to reach 100% on a Good catch or 80% on a Late one.** At 0
+Accuracy those floors are 50% and 30% (before Glasses). The `- height * 0.35`
+term means a maximum-height throw (height 1.4) can subtract as much as 0.49
+from that chance, which is why a big reset throw is a real gamble even for a
+maxed, bespectacled juggler. The 0.06 floor means no throw is ever *truly*
+hopeless to catch, just very unlikely.
 
 Note Perfect catches skip this roll entirely: hit the window, you keep it,
 always.
@@ -187,10 +189,13 @@ caps at 250).
 - Stamina now persists across the whole day (only sleep, or a meal, restores
   it), so a third booking in one evening is genuinely harder than the first.
 
-### Speed (0 to 25, `SPEED_CAP`)
+### Speed (0 to 100, `SPEED_CAP`)
 
-- Every point is a permanent 1% of slow motion, always contributing to the
-  stack in Section 5, capped at 25% from this source alone. Stripped
+- Every 4 points is a permanent 1% of slow motion, always contributing to
+  the stack in Section 5, capped at 25% from this source alone (100 points
+  / 4). The finer scale exists so Speed has the same roughly-100-point
+  investment arc as the other stats instead of maxing out four times
+  faster. Stripped
   entirely on a Purist booking.
 
 ---
@@ -221,7 +226,7 @@ also resets your streak to 0, same as a drop).
 
 | source | amount | duration | notes |
 |---|---|---|---|
-| Speed stat | `min(speed, 25) / 100` | permanent | stripped on Purist |
+| Speed stat | `min(speed, 100) / 4 / 100` | permanent | stripped on Purist |
 | Uncle Dan's Pie | +0.25 | the whole day, until sleep | 1000g, stripped on Purist |
 | "Amazing!" (a frame-perfect catch, `d == 0`) | +0.25 | `AMAZING_FRAMES` = 480 real frames (~4s) | earned, kept on Purist |
 | 50 Perfects in a row (`CHAIN_NEED`) | +0.25 | `CHAIN_FRAMES` = 7200 real frames (~60s), then resets | earned, kept on Purist |
@@ -271,7 +276,9 @@ Being under a prop's Required Strength is what makes it sag and wobble
 a ball.
 
 Glasses (5000g) add a flat 0.20 to the off-Perfect catch chance
-(`GLASSES_CATCH_BONUS`), skipped on Purist bookings. Uncle Dan's Pie (1000g)
+(`GLASSES_CATCH_BONUS`), skipped on Purist bookings. This is the only way to
+reach a 100% Good catch or an 80% Late catch (Section 1) - without them
+those ceilings sit at 80% and 60%. Uncle Dan's Pie (1000g)
 buys 0.25 slow motion for the rest of the day, also skipped on Purist.
 
 ---

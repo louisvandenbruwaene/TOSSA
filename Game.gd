@@ -29,7 +29,9 @@ const MISS_GRACE := 20    # an uncaught ball drops this many ticks past arrival
 const ACC_FULL := 55.0            # Accuracy at which off-Perfect catches are reliable
 const GOOD_BASE := 0.50           # base chance to secure a Good-timed catch
 const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
-const ACC_CATCH_BONUS := 0.50     # added to the chance at full Accuracy
+const ACC_CATCH_BONUS := 0.30     # added to the chance at full Accuracy. Capped so a
+								  # bare-handed Good catch tops out at 80%, not 100%:
+								  # only Glasses' flat bonus below can reach 100%.
 const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
 const STRENGTH_CATCH := 0.05      # per weight-step, how much Strength eases (or, when
 								  # under-strength, hurts) the catch of a HEAVY prop
@@ -239,7 +241,8 @@ const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
 # Amazing! frame-perfect catch and a run of ten straight Perfects are earned
 # bursts. Slow motion stretches the catch windows in REAL time, which is what
 # makes five clubs and seven torches humanly possible.
-const SPEED_CAP := 25          # the Speed stat's permanent ceiling (percent)
+const SPEED_CAP := 100         # the Speed stat's permanent ceiling (points, not percent:
+								# 4 points per 1% slow motion, so the cap is still 25%)
 const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
 const AMAZING_FRAMES := 480    # the frame-perfect reward burst (four seconds)
 const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
@@ -311,7 +314,7 @@ var rng := RandomNumberGenerator.new()
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
 var endurance := 6        # raises max Stamina; gates heavy props later
-var speed := 0            # the Speed stat: each point slows the world 1% (cap 25)
+var speed := 0            # the Speed stat: every 4 points slows the world 1% (cap 100 = 25%)
 var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
 var pie_active := false   # a pie eaten in the hub works until you SLEEP
 var amazing_until := -999999   # real-frame deadline of the Amazing! burst
@@ -3031,7 +3034,7 @@ func slow_target() -> float:
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
 	# frame-perfect catch, and an earned fifty-Perfect minute. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
-	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 100.0
+	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 4.0 / 100.0
 	if pie_active and not purist_run():
 		a += 0.25
 	if _frames < amazing_until:
@@ -4721,9 +4724,10 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	ry += 52.0
 	draw_stat_row(font, tx, ry, innerw, "ENDURANCE", endurance, "raises your maximum stamina", "3")
 	ry += 52.0
-	var spd_note := "the world runs %d%% slower for you (permanent, cap %d)" % [speed, SPEED_CAP]
+	var spd_pct := speed / 4
+	var spd_note := "the world runs %d%% slower for you  -  4 points per percent, cap %d%%" % [spd_pct, SPEED_CAP / 4]
 	if speed >= SPEED_CAP:
-		spd_note = "the world runs %d%% slower for you  -  at the cap" % speed
+		spd_note = "the world runs %d%% slower for you  -  at the cap" % spd_pct
 	draw_stat_row(font, tx, ry, innerw, "SPEED", speed, spd_note, "4")
 	ry += 52.0
 	# stamina is a resource, not an investable stat
