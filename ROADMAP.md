@@ -79,7 +79,8 @@ finale payoff when the full theme returns, and a couple more stingers (gasp on
 a risky high throw, groan on a drop). Louis still needs to judge the current
 mix by ear before deep retuning.
 
-## 6. Endgame wrap - BUILT 2026-07-10 (slow motion still deferred)
+## 6. Endgame wrap - BUILT 2026-07-10 (slow motion BUILT 2026-07-11: Speed stat,
+Uncle Dan's Pie, Amazing! bursts and ten-Perfect chains, stacking per ideas.rtf)
 
 The three endgame cutscenes exist but nothing follows the finale. Build a
 credits screen (code-drawn, same royal style, reachable from the menu after the
