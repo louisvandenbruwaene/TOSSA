@@ -141,7 +141,7 @@ const PATTERNS := [
 	{"id": "fountain",   "name": "Fountain",    "lvl": 1, "mult": 1.1,
 	 "desc": "Each hand juggles its own circle. Even counts feel natural."},
 	{"id": "columns",    "name": "Columns",     "lvl": 3, "mult": 1.15,
-	 "desc": "Straight up and down in fixed lanes. Clean or nothing."},
+	 "desc": "Straight up and down in fixed lanes; an odd count feeds one ball through the middle. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 5, "mult": 1.25,
 	 "desc": "The right hand throws over the top, the left keeps the weave."},
 	{"id": "shower",     "name": "Shower",      "lvl": 8, "mult": 1.4,
@@ -150,6 +150,8 @@ const PATTERNS := [
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
 const HALFSHOWER_MIN := 0.35  # the over-the-top side's minimum height fraction
+const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
+							   # lanes' running height (0 = pure hold-timing, 1 = locked)
 const STATE_FLIGHT := 0
 const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
@@ -231,7 +233,7 @@ const TRICKS := [
 	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 3, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
 	{"id": "cols", "name": "Columns",          "kind": "toggle", "lvl": 5, "min_air": 0, "bonus": 30,  "shout": "columns",
-	 "desc": "Toggle: every ball rides straight up and down its own lane."},
+	 "desc": "Toggle: every ball rides its own straight lane - an odd count feeds one through the middle."},
 	{"id": "wfall", "name": "Waterfall",       "kind": "toggle", "lvl": 6, "min_air": 0, "bonus": 45,  "shout": "waterfall",
 	 "desc": "Toggle: the right hand keeps throwing over the top."},
 	{"id": "rcasc", "name": "Reverse Cascade", "kind": "toggle", "lvl": 9, "min_air": 0, "bonus": 60,  "shout": "reverse!",
@@ -370,6 +372,8 @@ var trick_primed := false # Space pressed: the very next throw becomes the selec
 var toggle_on := -1       # the toggle trick currently running (TR_COLS etc), or -1
 var toggle_scored := false   # this activation has already counted toward tricks_landed
 var tennis_ball: Ball = null # the marked ball that sails over the top while Tennis runs
+var col_air_ref := -1.0  # Columns: running reference airtime, so lanes bounce in sync
+var col_mid_ball: Ball = null # Columns (odd counts): the one ball fed across the middle
 var trick_ready := -999   # tick a LIVE trick may fire again (cooldown)
 var spin_until := -999    # tick the current Spin ends; catches until then score double
 var spin_scored := false  # this Spin has already been credited as landed
@@ -2268,6 +2272,8 @@ func start_run(n: int) -> void:
 	toggle_on = -1
 	toggle_scored = false
 	tennis_ball = null
+	col_air_ref = -1.0
+	col_mid_ball = null
 	if trick_sel < 0 or not trick_unlocked(trick_sel):
 		var un := unlocked_tricks()
 		trick_sel = int(un[0]) if not un.is_empty() else -1
@@ -2531,6 +2537,18 @@ func do_throw(h: int, hold: int) -> void:
 			this_trick = TR_TENNIS
 	if over_top:
 		air = maxi(air, int(round(base_air + 0.5 * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
+	# Columns (the pattern or the toggle trick) pulls this throw's airtime toward the
+	# lanes' running height, so a slightly early or late release still lands close to
+	# the others instead of drifting the apexes apart (Louis: mismatched heights made
+	# the catch timing unreadable). An over_top breakout throw is exempt: it is
+	# meant to stand out, not blend in.
+	var col_lanes := pattern == COLUMNS or toggle_on == TR_COLS
+	if col_lanes and not over_top:
+		if col_air_ref < 0.0:
+			col_air_ref = float(air)
+		else:
+			air = int(round(lerp(float(air), col_air_ref, COLUMNS_SYNC)))
+		col_air_ref = lerp(col_air_ref, float(air), 0.5)
 	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
 	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
 	# Applause, and it clamps to 0 when the prop is too heavy to loft at all.
@@ -2562,13 +2580,27 @@ func do_throw(h: int, hold: int) -> void:
 	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER]
 	if over_top:
 		cross = true
-	var lanes := pattern == COLUMNS or toggle_on == TR_COLS
+	var lanes := col_lanes
+	# an odd ball count cannot split evenly into two lanes: rather than just piling
+	# the extra ball into one side (the same look as a four-ball columns with one
+	# ball removed), one ball becomes a middle feed, fed hand-to-hand across the
+	# body, so the pattern reads as a genuinely symmetric left / middle / right.
+	var mid_ball := false
+	if lanes and num_balls % 2 == 1:
+		if col_mid_ball == null or not balls.has(col_mid_ball):
+			col_mid_ball = b   # the first ball thrown once lanes engage claims the middle
+		mid_ball = b == col_mid_ball
+		if mid_ball:
+			lanes = false
+			cross = true
 	if lanes:
 		cross = false
 	b.to_hand = other(h) if cross else h
 	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
 	if lanes:
 		b.to_pos = b.from_pos + Vector2(drift, 0.0)   # straight up and down in the lane
+	elif mid_ball:
+		b.to_pos = Vector2(stage_center().x, b.from_pos.y) + Vector2(drift, 0.0)   # flat pass through the middle
 	else:
 		var wide := (26.0 if b.to_hand == RIGHT else -26.0) if over_top else 0.0
 		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + wide, 0.0)
@@ -2694,6 +2726,9 @@ func on_trick() -> void:
 				toggle_on = trick_sel
 				toggle_scored = false
 				tennis_ball = null   # Tennis marks the next thrown ball
+				if trick_sel == TR_COLS:
+					col_air_ref = -1.0
+					col_mid_ball = null
 				set_trick_msg("%s ON" % String(t["name"]).to_upper())
 				play_sfx("ui2", -13.0)
 		_:
