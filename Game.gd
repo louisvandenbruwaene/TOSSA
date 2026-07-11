@@ -66,10 +66,10 @@ const WOBBLE_MAX := 11.0  # px of in-flight arc wobble at max height
 const ST_MENU := 0        # title / main menu
 const ST_SLOTS := 1       # pick a save file
 const ST_SETTINGS := 2    # options
-const ST_CUTSCENE := 3    # an illustrated story beat (now an animated mini-film)
+# (value 3 was the story cutscene state, cut with the narrative)
 const ST_PLAY := 4        # the juggling itself
-const ST_ESTABLISH := 5   # an exterior "establishing shot" of the venue before a set
-const ST_CREDITS := 6     # a slow, code-drawn credits roll after the grand finale
+const ST_ESTABLISH := 5   # the stage card: the venue exterior and its record before a set
+const ST_CREDITS := 6     # the victory screen shown once the top stage is conquered
 const ST_DAY := 7         # the day hub: a juggler's life between performances
 const ST_STATS := 8       # the career ledger: every record and lifetime number
 const ST_REMAP := 9       # the controls screen: rebind the six action keys
@@ -381,6 +381,8 @@ var trick_unlock := -1    # a newly unlocked trick to announce with a banner, or
 var trick_unlock_tick := -999
 var sheet_open := false
 var shop_open := false
+var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
+var skills_sel := 0        # which entry the Skills reference has expanded
 var debug_mode := false   # debug build: free stat editing in the character sheet
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -409,22 +411,16 @@ var day_msg := ""         # transient hub feedback ("the day is spent, sleep")
 var day_msg_tick := -999  # cine_tick the message appeared
 var day_anim := ""        # a short hub vignette playing: "eat", "inn" or "shop"
 var day_anim_start := 0   # cine_tick it began; its effect applies when it ends
-var venue_seen := 0       # highest venue reached, so promotions fire once
-var story_seen := 0       # how many endgame story milestones have played (see STORY_REP)
-var cutscene_queue: Array[String] = []  # pending story beats to show
-var pending_beats: Array[String] = []   # beats earned by a set, held until the grade is seen
-var last_beats: Array[String] = []      # the beats begin_cutscene was last given, so finish_beats can route the finale to the credits
-var view_venue := -1      # cutscene/preview override of which venue palette to draw
+var won := false          # the climb is complete: a record set at the top stage
+var pending_win := false  # show the victory screen once the results card is dismissed
+var view_venue := -1      # preview override of which venue palette to draw
 var ext_center := false   # exterior hero objects (house, lamp) compose mid-frame
 						  # for the day hub card; story scenes keep them offset
 var shake := 0.0          # screen-shake magnitude, decays each frame
 
-# --- cinematic layer: animated cutscenes, establishing cards, tutorials -------
-var cine_tick := 0        # cosmetic clock for cutscenes/establish/tutorial motion
-var cs_shot := 0          # index of the shot within the current beat's script
-var cs_shot_start := 0    # cine_tick at which the current shot began (for fades)
-var cs_freeze := false    # dev: pin the current shot (for stable screenshots)
-var establish_venue := 0  # which venue's exterior the establishing card shows
+# --- presentation layer: the stage card, the day hub, menus, tutorials --------
+var cine_tick := 0        # cosmetic clock for the stage card, menu, and hub motion
+var establish_venue := 0  # which venue's exterior the stage card shows
 var establish_after := 3  # ball count to start the performance with once dismissed
 var seen_tuts: Array[String] = []  # lesson ids already shown, so they fire once
 
@@ -619,10 +615,6 @@ func _ready() -> void:
 		game_state = ST_SETTINGS
 	if ua.has("--slots"):       # dev: screenshot the save-slot screen
 		game_state = ST_SLOTS
-	var ci := ua.find("--cutscene")   # dev: screenshot a story beat, e.g. --cutscene v2
-	if ci != -1:
-		var id := ua[ci + 1] if ci + 1 < ua.size() and not ua[ci + 1].begins_with("--") else "intro"
-		begin_cutscene([id])
 	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls
 	if ti != -1:
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
@@ -643,10 +635,13 @@ func _ready() -> void:
 		cine_tick = 0
 	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
 		enter_day()
-	var ni := ua.find("--csn")        # dev: pin a specific shot index for a stable capture
-	if ni != -1 and ni + 1 < ua.size():
-		cs_shot = int(ua[ni + 1])
-		cs_freeze = true
+	if ua.has("--skills"):            # dev: open the Skills reference for a screenshot
+		level = maxi(level, 7)        # enough unlocked that both ready and locked show
+		money = maxi(money, 100)
+		stamina = stamina_max
+		enter_day()
+		skills_open = true
+		skills_sel = 0
 	if ua.has("--eggbreak"):          # dev: exercise the egg-break effect on the stage
 		_eggdemo = true
 		prop_type = PROP_EGGS
@@ -661,10 +656,8 @@ func _physics_process(delta: float) -> void:
 			_capture_and_quit()
 			return
 	if game_state != ST_PLAY:
-		cine_tick += 1           # drives cutscene / establish / menu motion
-		if game_state == ST_CUTSCENE:
-			cutscene_autoadvance()   # shots play themselves, movie-like, until skipped
-		elif game_state == ST_DAY and day_anim != "":
+		cine_tick += 1           # drives the stage card, menu, and hub motion
+		if game_state == ST_DAY and day_anim != "":
 			day_anim_step()          # a hub vignette is playing; its effect lands at the end
 		queue_redraw()
 		return
@@ -703,10 +696,6 @@ func _physics_process(delta: float) -> void:
 	step_effects()   # age the egg-break shards, yolk splats, and particles
 	if results_open:
 		results_anim_sfx()   # the card's count-up ticks, stamp, and record fanfare
-		# a story beat earned by this set also plays by ITSELF three seconds
-		# after the grade stamps, so the story never waits on a key forever
-		if not pending_beats.is_empty() and not sheet_open and not shop_open and results_age() > 424:
-			launch_pending_beats()
 	if _eggdemo and tick % 42 == 0:
 		var vp := get_viewport_rect().size
 		spawn_egg_break(Vector2(vp.x * 0.5 + randf_range(-140, 140), vp.y * 0.42))
@@ -796,9 +785,6 @@ func _input(event: InputEvent) -> void:
 				menu_sel = 0
 				play_sfx("ui", -12.0)
 			return
-		ST_CUTSCENE:
-			cutscene_key(kc)
-			return
 		ST_ESTABLISH:
 			establish_key()
 			return
@@ -829,11 +815,6 @@ func _input(event: InputEvent) -> void:
 	# it costs a fresh day segment), spend/shop, or Enter/Esc back into the day.
 	# It stays open behind the sheet and shop, so you can invest then continue.
 	if results_open and not sheet_open and not shop_open:
-		if not pending_beats.is_empty():
-			# a story beat earned by this set plays on the FIRST key after the
-			# grade, before any card action, then returns to this card
-			launch_pending_beats()
-			return
 		match kc:
 			KEY_R, KEY_SPACE:
 				if not too_tired():
@@ -850,7 +831,14 @@ func _input(event: InputEvent) -> void:
 				shop_open = true
 			KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE:
 				results_open = false
-				enter_day()
+				# clearing the top stage this set rolls straight into the victory
+				# screen; otherwise the card dismisses back into the day as normal
+				if pending_win:
+					pending_win = false
+					game_state = ST_CREDITS
+					cine_tick = 0
+				else:
+					enter_day()
 		return
 	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
@@ -903,7 +891,7 @@ func _input(event: InputEvent) -> void:
 			if not performing:
 				cycle_pattern()   # step the juggling pattern (training only)
 		KEY_F1:
-			if debug_mode: debug_jump_venue(0)   # debug story jump: F1..F6 = venues 1..6
+			if debug_mode: debug_jump_venue(0)   # debug: F1..F6 jump reputation to venues 1..6
 		KEY_F2:
 			if debug_mode: debug_jump_venue(1)
 		KEY_F3:
@@ -914,14 +902,6 @@ func _input(event: InputEvent) -> void:
 			if debug_mode: debug_jump_venue(4)
 		KEY_F6:
 			if debug_mode: debug_jump_venue(5)
-		KEY_F7:
-			if debug_mode: debug_jump_story(0)   # F7..F9 = the endgame beats rival/record/finale
-		KEY_F8:
-			if debug_mode: debug_jump_story(1)
-		KEY_F9:
-			if debug_mode: debug_jump_story(2)
-		KEY_F10:
-			if debug_mode: begin_cutscene(["intro"])   # replay the opening, completing the debug story map
 		KEY_ESCAPE:
 			open_pause()
 
@@ -1141,16 +1121,22 @@ func day_rows() -> Array[Dictionary]:
 	out.append({"id": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
 		"sub": "props and gear. New props teach themselves."})
+	out.append({"id": "skills", "name": "SKILLS",
+		"cost": "", "ok": true, "why": "",
+		"sub": "every trick and pattern you know, and how to pull it off."})
 	return out
 
 
 func day_input(kc: int) -> void:
-	# the sheet and shop overlays keep their usual keys while open over the hub
+	# the sheet, shop, and skills overlays keep their usual keys while open over the hub
 	if sheet_open:
 		sheet_input(kc)
 		return
 	if shop_open:
 		shop_input(kc)
+		return
+	if skills_open:
+		skills_input(kc)
 		return
 	if day_anim != "":
 		return   # a little vignette is playing; the hub listens again when it ends
@@ -1226,6 +1212,10 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			set_day_msg("the pie hums in your blood  -  the world runs slow until you sleep")
 			save_progress()
 			play_sfx("ui2", -11.0)
+		"skills":
+			skills_open = true          # a reference card, no cost, no vignette
+			skills_sel = 0
+			play_sfx("ui2", -13.0)
 
 
 func day_anim_len(id: String) -> int:
@@ -1334,6 +1324,28 @@ func shop_input(kc: int) -> void:
 			try_buy_glasses()
 		KEY_7:
 			try_buy_pie()
+
+
+func skills_input(kc: int) -> void:
+	# the Skills reference: browse every trick and pattern. Up/Down walk the whole
+	# list (tricks then patterns), Left/Right jump between the two columns.
+	var n := TRICKS.size() + PATTERNS.size()
+	match kc:
+		KEY_UP, KEY_W:
+			skills_sel = (skills_sel + n - 1) % n
+			play_sfx("ui", -15.0)
+		KEY_DOWN, KEY_S:
+			skills_sel = (skills_sel + 1) % n
+			play_sfx("ui", -15.0)
+		KEY_LEFT, KEY_A:
+			skills_sel = mini(skills_sel, TRICKS.size() - 1)   # into the tricks column
+			play_sfx("ui", -15.0)
+		KEY_RIGHT, KEY_D:
+			skills_sel = maxi(skills_sel, TRICKS.size())        # into the patterns column
+			play_sfx("ui", -15.0)
+		KEY_TAB, KEY_ESCAPE, KEY_ENTER, KEY_KP_ENTER:
+			skills_open = false
+			play_sfx("ui", -13.0)
 
 
 func cycle_prop(dir: int) -> void:
@@ -1639,21 +1651,21 @@ func try_buy_glasses() -> void:
 # -----------------------------------------------------------------------------
 
 func menu_options() -> Array[String]:
-	# the live main-menu list. Credits appears only once a save has finished the
-	# finale, so a first-time player never sees it. Both menu_input and draw_menu
+	# the live main-menu list. Victory appears only once a save has conquered the
+	# top stage, so a first-time player never sees it. Both menu_input and draw_menu
 	# build the list from here, so the cursor and the drawing can never disagree.
 	var opts: Array[String] = ["Play"]
-	if any_finale_seen():
-		opts.append("Credits")
+	if has_won():
+		opts.append("Victory")
 	opts.append("Settings")
 	opts.append("Quit")
 	return opts
 
 
-func any_finale_seen() -> bool:
-	# true once the finale has been reached anywhere: the currently loaded game, or
-	# any save slot on disk. Peeks the slot files the same way slot_summary does.
-	if story_seen >= STORY_REP.size():
+func has_won() -> bool:
+	# true once the climb has been completed anywhere: the currently loaded game,
+	# or any save slot on disk. Peeks the slot files the same way slot_summary does.
+	if won:
 		return true
 	for i in NUM_SLOTS:
 		if not FileAccess.file_exists(slot_path(i)):
@@ -1661,7 +1673,7 @@ func any_finale_seen() -> bool:
 		var cf := ConfigFile.new()
 		if cf.load(slot_path(i)) != OK:
 			continue
-		if int(cf.get_value("prog", "story_seen", 0)) >= STORY_REP.size():
+		if bool(cf.get_value("prog", "won", false)):
 			return true
 	return false
 
@@ -1685,7 +1697,7 @@ func menu_input(kc: int) -> void:
 				"Play":
 					menu_sel = 0
 					game_state = ST_SLOTS
-				"Credits":
+				"Victory":
 					menu_sel = 0
 					game_state = ST_CREDITS
 					cine_tick = 0
@@ -1772,104 +1784,15 @@ func apply_fullscreen() -> void:
 		DisplayServer.WINDOW_MODE_FULLSCREEN if set_fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
 
 
-# --- cinematic beat engine (shared by story cutscenes and tutorials) ----------
-# A "beat" (a story milestone, or one lesson) is a list of SHOTS. Each shot draws
-# an animated tableau and holds for a while, then cuts to the next with a fade,
-# so a beat plays like a short film. A key press skips forward. cine_tick drives
-# all the motion; cs_shot / cs_shot_start track the cut and the fade.
-
-func begin_cutscene(beats: Array) -> void:
-	cutscene_queue.assign(beats)
-	last_beats.assign(beats)   # remembered so finish_beats can send the finale on to the credits
-	game_state = ST_CUTSCENE
-	cine_tick = 0
-	start_beat()
-
-
-func cur_beat_id() -> String:
-	return String(cutscene_queue[0]) if cutscene_queue.size() > 0 else ""
-
-
-func cur_script() -> Array:
-	return cutscene_script(cur_beat_id())
-
-
-func start_beat() -> void:
-	cs_shot = 0
-	cs_shot_start = cine_tick
-
-
-func cutscene_key(_kc: int) -> void:
-	# any key (Space very much included, Louis) cuts forward to the next shot. A
-	# shot's first moments still swallow skips, so a stray press from the round
-	# that just ended cannot eat a scene unseen. The trick can no longer fire
-	# from a held Space anyway: play seeds its input edges on entry.
-	if cine_tick - cs_shot_start < 30:
-		return
-	next_shot()
-
-
-func cutscene_autoadvance() -> void:
-	# shots no longer play themselves forward (Louis: the story waits for a key).
-	# The hold time still paces the Ken Burns drift, but only a key press cuts.
-	if cs_freeze:
-		return
-	if cur_script().is_empty():
-		finish_beats()
-
-
-func next_shot() -> void:
-	var script := cur_script()
-	if cs_shot + 1 < script.size():
-		cs_shot += 1
-		cs_shot_start = cine_tick
-		return
-	if cutscene_queue.size() > 0:
-		cutscene_queue.pop_front()
-	if cutscene_queue.is_empty():
-		finish_beats()
-	else:
-		start_beat()
-
-
-func launch_pending_beats() -> void:
-	# play the story beats a set earned, AFTER its grade has been seen. The
-	# results card stays open underneath: finish_beats routes promotion beats
-	# back to ST_PLAY, where the card waits to be dismissed into the day.
-	var beats: Array[String] = pending_beats.duplicate()
-	pending_beats.clear()
-	begin_cutscene(beats)
-
-
-func finish_beats() -> void:
-	view_venue = -1
-	# the grand finale rolls straight into the credits, which then return to the
-	# menu. Every other beat set (promotions, the opening story) lands back in play.
-	if last_beats.has("finale"):
-		last_beats.clear()
-		game_state = ST_CREDITS
-		cine_tick = 0
-		return
-	if not started:
-		# a fresh game: after the opening story, teach the basics hands-on before
-		# the day begins (one ball, then two, then the cascade)
-		if not seen_tuts.has("balls"):
-			seen_tuts.append("balls")
-			begin_tutorial("balls")
-		else:
-			enter_day()
-		return
-	# a promotion beat fired mid-career: return to the frozen stage, where the
-	# results card is still waiting to be dismissed into the day
-	game_state = ST_PLAY
-
-
 func start_slot(i: int) -> void:
 	save_slot = i
 	var fresh := not FileAccess.file_exists(slot_path(i))
 	if fresh:
 		reset_new_game()
-		begin_cutscene(["intro"])
+		# a brand new career opens straight into the hands-on basics (one ball, then
+		# two, then the cascade); tut_finish drops into the day when they are done
+		seen_tuts.append("balls")
+		begin_tutorial("balls")
 	else:
 		load_progress()
 		enter_day()   # an existing career resumes at its day, not mid-juggle
@@ -1891,8 +1814,7 @@ func reset_new_game() -> void:
 	level = 1
 	xp = 0
 	points = 0
-	venue_seen = 0
-	story_seen = 0
+	won = false
 	best_scores = [0, 0, 0, 0, 0, 0]
 	best_scores_purist = [0, 0, 0, 0, 0, 0]
 	pattern_sel = CASCADE
@@ -1924,8 +1846,8 @@ func slot_summary(i: int) -> String:
 	var rep := int(cf.get_value("stats", "reputation", 0))
 	var vn := String(venue_data(venue_index_of(rep))["name"])
 	var line := "Level %d   -   %s   -   %d gold" % [lv, vn, g]
-	if int(cf.get_value("prog", "story_seen", 0)) >= STORY_REP.size():
-		line += "  -  WORLD'S GREATEST JUGGLER"   # this save has finished the finale
+	if bool(cf.get_value("prog", "won", false)):
+		line += "  -  WORLD'S GREATEST JUGGLER"   # this save has conquered the top stage
 	return line
 
 
@@ -2048,129 +1970,6 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
-
-func cutscene_script(id: String) -> Array:
-	# Each story beat is a short film: a list of animated SHOTS. "scene" picks the
-	# tableau, "stage" the moment inside it, "who" names a speaker (gold), "cap" is
-	# the line, "hold" is how long it plays before it auto-cuts. The arc (STORY.md):
-	# Bruna was the Marvel of Two Hands until the gear circuit shut her out for
-	# refusing to buy her act. Milo carries her three balls, and her unfinished
-	# fight, all the way to the arena. Silvio is the gear empire's heir, and money
-	# beating hands is the one thing his life cannot afford to see disproved.
-	# Prose stays warm and spare, free of dashes and semicolons.
-	match id:
-		"intro":
-			return [
-				{"scene": "backyard", "stage": 0, "who": "", "hold": 380,
-					"cap": "The yard behind the boarding house, dusk. Chalk on the door reads three days, and Milo has already sold everything worth selling. When a dropped coin skips off the step, a hand closes on it before the thought does. Old Bruna, watching from her window, is the only one who sees it happen."},
-				{"scene": "backyard", "stage": 1, "who": "Bruna", "hold": 420,
-					"cap": "\"Forty years ago they called me the Marvel of Two Hands. Then the circuit learned my hands could not be bought, and every door in the country closed at once. I have gone hungry on principle more winters than I care to count. These three are all I kept.\""},
-				{"scene": "backyard", "stage": 2, "who": "Bruna", "hold": 420,
-					"cap": "\"You could pawn these for less than a week of what you owe, and be exactly as broke next month. Or you could learn what they are actually worth, which is not a number I can write on a coin. The gear men own every stage from here to the arena, and two clean hands cannot buy a door any more. So you will not buy your way up. You will take it. Now throw.\""},
-				{"scene": "backyard", "stage": 3, "who": "", "hold": 380,
-					"cap": "You are nobody, you are three days from the street, and she is old. Every throw you land from this yard on is an argument that she was right."},
-			]
-		"v1":
-			return [
-				{"scene": "street", "stage": 0, "who": "", "hold": 340,
-					"cap": "A cold corner under one lamp. The hat on the cobbles is hers, from the old act, and it has held nothing all day."},
-				{"scene": "street", "stage": 1, "who": "", "hold": 360,
-					"cap": "You find the rhythm and a stranger stops. Then two more. Rent is due in six days, and nobody watching knows that, which is exactly why it works."},
-				{"scene": "street", "stage": 2, "who": "Bruna", "hold": 400,
-					"cap": "The first coin rings in the hat. Bruna does not smile. \"Coins are noise, kid. Make them remember the name. The name is the wage.\""},
-			]
-		"v2":
-			return [
-				{"scene": "theatre", "stage": 0, "who": "", "hold": 340,
-					"cap": "A ticketed house, and your name printed at the very bottom of the bill. Bottom is still ON the bill."},
-				{"scene": "theatre", "stage": 1, "who": "Silvio", "hold": 430,
-					"cap": "\"So you are Bruna's boy. Real hands, I can tell from here. She had real hands too, and look where honest got her. My family sells certainty, kid. Yours sells sweat.\""},
-				{"scene": "theatre", "stage": 2, "who": "", "hold": 400,
-					"cap": "Silvio Grand headlines with torches that balance themselves. From the seats nobody can tell. From the wings you can, and you stand there every night, memorising the difference."},
-			]
-		"v3":
-			return [
-				{"scene": "circus", "stage": 0, "who": "", "hold": 340,
-					"cap": "A travelling troupe pitches its tent at the edge of town. No bill, no bottom line, no Silvio. They saw the street show, and left a knife and a note. Come learn."},
-				{"scene": "circus", "stage": 1, "who": "", "hold": 380,
-					"cap": "Sawdust, lantern light, and people who do not lie for a living. Here a blade is a blade. It weighs what it weighs and it forgives nothing."},
-				{"scene": "circus", "stage": 2, "who": "", "hold": 400,
-					"cap": "\"Bruna sent us students before,\" the knife thrower says. \"Every one of them switched to the easy gear by winter.\" She watches you wave away the catching net, and nods once."},
-			]
-		"v4":
-			return [
-				{"scene": "champ", "stage": 0, "who": "", "hold": 340,
-					"cap": "The nationals. A scoreboard instead of a hat, judges instead of a crowd, and the number they write down outlives the applause."},
-				{"scene": "champ", "stage": 1, "who": "Silvio", "hold": 420,
-					"cap": "\"Second place. Genuinely close. Do you know the difference between us? About four thousand in equipment. Talent was never going to be enough. Ask your teacher how that ends.\""},
-				{"scene": "champ", "stage": 2, "who": "", "hold": 420,
-					"cap": "He wins on paper. You walk home counting the two catches you gave away, and Bruna says nothing at all, and the silence says the gap is yours, and that it can close."},
-			]
-		"rival":
-			return [
-				{"scene": "champ", "stage": 0, "who": "", "hold": 340,
-					"cap": "The internationals. The finest hands alive, and the first room where his family's money buys no judge."},
-				{"scene": "champ", "stage": 3, "who": "", "hold": 430,
-					"cap": "Mid-routine, a torch his gear threw a hand's width wrong comes down. Silvio lunges, misses, and for one long second stares at his own empty hands. The room goes quiet the way a debt goes quiet."},
-				{"scene": "champ", "stage": 4, "who": "Silvio", "hold": 430,
-					"cap": "You keep your set clean past where nerve should break. On the way out he stops you. \"She really never dropped, did she.\" It is not a question, and you do not answer it."},
-			]
-		"record":
-			return [
-				{"scene": "arena", "stage": 0, "who": "", "hold": 360,
-					"cap": "Not a show. An ordeal with your name on it. One routine, impossibly long, and a single drop ends everything in front of everyone."},
-				{"scene": "arena", "stage": 1, "who": "", "hold": 420,
-					"cap": "The music thins to your own breath. Somewhere past four hundred you stop counting for the judges and start counting for her, one clean catch for every year they took."},
-				{"scene": "arena", "stage": 2, "who": "", "hold": 460,
-					"cap": "You hold past the point where hands become argument, and the number climbs onto pages no gear has ever printed. It was her record they buried. You raise it, and the first face you look for is hers."},
-			]
-		"finale":
-			return [
-				{"scene": "arena", "stage": 3, "who": "", "hold": 420,
-					"cap": "Five torches, the largest crowd there is, and one seat in the front row held under a name no poster has printed in forty years. Bruna. The Marvel of Two Hands."},
-				{"scene": "arena", "stage": 3, "who": "", "hold": 420,
-					"cap": "Silvio watches from the stands, retired, lighter somehow. The empire sells catching nets now. He sent two tickets and a note. One debt paid."},
-				{"scene": "arena", "stage": 3, "who": "", "hold": 400,
-					"cap": "Clean catch. Clean throw. The two things she taught you in a backyard, carried all the way here. You land the last torch, the roof comes off, and you point one hand at the front row."},
-				{"scene": "backyard", "stage": 0, "who": "Bruna", "hold": 500,
-					"cap": "\"There it is,\" she says, in the yard where it started, pressing the three worn balls back into your hands. \"They were never mine, kid. I was keeping them for whoever came to finish it.\" The circle closes."},
-			]
-		_:
-			return [
-				{"scene": "arena", "stage": 0, "who": "", "hold": 360,
-					"cap": "The World Arena. A bowl of small warm lights, and every light is a person who paid to see whether the story they heard about you is true."},
-				{"scene": "arena", "stage": 1, "who": "", "hold": 400,
-					"cap": "Silvio's seats are good ones now. No gear on earth carries this stage. Only hands, and everything they cost."},
-				{"scene": "arena", "stage": 2, "who": "", "hold": 420,
-					"cap": "So you throw the way she taught you, a lifetime of yards and corners ago. Clean catch. Clean throw. The whole world holds its breath with you."},
-			]
-
-
-func beat_title(id: String) -> String:
-	match id:
-		"intro": return "The Backyard"
-		"v1": return "Street Corner"
-		"v2": return "The Small Theatre"
-		"v3": return "The Circus"
-		"v4": return "The Championship"
-		"v5", "v6", "v7", "v8", "v9": return "The World Arena"
-		"rival": return "The Turn"
-		"record": return "The World Record"
-		"finale": return "The World's Greatest Juggler"
-		"one": return "Lesson  -  One Ball"
-		"two": return "Lesson  -  Two Balls"
-		"cascade": return "Lesson  -  The Cascade"
-		"prop_1": return "New Prop  -  Eggs"
-		"prop_2": return "New Prop  -  Rings"
-		"prop_3": return "New Prop  -  Clubs"
-		"prop_4": return "New Prop  -  Knives"
-		"prop_5": return "New Prop  -  Torches"
-		_: return ""
-
-
-# -----------------------------------------------------------------------------
-# Input: edge-detected presses for the four hand actions plus trick.
-# -----------------------------------------------------------------------------
 
 func seed_input_edges() -> void:
 	# prime the edge detector with the keys' REAL current state, so a key still
@@ -3065,27 +2864,14 @@ func on_round_end() -> void:
 		results_tick = tick
 		results_stamped = false
 	career["best_streak"] = maxi(int(career["best_streak"]), best_streak)
-	# story beats fire on reputation milestones, once each: first the venue
-	# promotions (tiers 1..5), then the endgame chapters past the arena (the
-	# rivalry turning, the record ordeal, the finale). Both accumulate into one
-	# cutscene so a big set can play its whole run of beats in order.
-	var beats: Array[String] = []
-	var vi := venue_index()
-	if vi > venue_seen:
-		for k in range(venue_seen + 1, vi + 1):
-			beats.append("v%d" % k)
-		venue_seen = vi
-	while story_seen < STORY_REP.size() and reputation >= int(STORY_REP[story_seen]["rep"]):
-		beats.append(String(STORY_REP[story_seen]["id"]))
-		story_seen += 1
+	# THE WIN (Balatro-style): the top stage is the summit of the climb. Setting a
+	# record at the World Arena clears the game and shows the victory screen once,
+	# the first time, after the results card is dismissed. The career then plays on
+	# freely, so records and higher scores are still there to chase.
+	if mode == MODE_PERFORM and run_venue >= TOP_VENUE and results_record and not won:
+		won = true
+		pending_win = true
 	save_progress()
-	if not beats.is_empty():
-		if results_open:
-			# the story waits behind the grade: the results card shows first, and
-			# the first key (or three seconds after the stamp) plays the beat
-			pending_beats = beats
-		else:
-			begin_cutscene(beats)
 
 
 func stamina_mult() -> float:
@@ -3256,36 +3042,17 @@ func rep_tier() -> String:
 
 
 const VENUE_REP := [0, 100, 300, 700, 1500, 3000]   # reputation at each venue's door
-
-# endgame story chapters, past the arena, keyed to reputation. These are the
-# climax beats STORY.md builds toward: the rivalry finally turning, the record
-# ordeal, and the finale where only your hands can win. They play once each.
-const STORY_REP := [
-	{"rep": 4000, "id": "rival"},
-	{"rep": 5200, "id": "record"},
-	{"rep": 6500, "id": "finale"},
-]
+const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the game is won
 
 
 func debug_jump_venue(i: int) -> void:
-	# debug: leap anywhere in the story. Sets Reputation to that venue's threshold,
-	# marks it seen (so promotions do not re-fire), plays its beat, and lands there.
-	i = clampi(i, 0, 5)
-	reputation = VENUE_REP[i]
-	venue_seen = i
+	# debug: leap up the ladder by setting Reputation to a venue's door, then land
+	# in the day so the higher stages can be played at once (no story to replay).
+	i = clampi(i, 0, TOP_VENUE)
+	reputation = maxi(reputation, VENUE_REP[i])
+	venue_pick = i
 	save_progress()
-	begin_cutscene(["intro" if i == 0 else "v%d" % i])
-
-
-func debug_jump_story(i: int) -> void:
-	# debug: preview the endgame story beats (rival/record/finale) without grinding
-	# to their reputation gates. Marks them seen so they do not re-fire in play.
-	i = clampi(i, 0, STORY_REP.size() - 1)
-	reputation = maxi(reputation, int(STORY_REP[i]["rep"]))
-	venue_seen = maxi(venue_seen, 5)
-	story_seen = maxi(story_seen, i + 1)
-	save_progress()
-	begin_cutscene([String(STORY_REP[i]["id"])])
+	enter_day()
 
 
 func venue_index() -> int:
@@ -3293,7 +3060,7 @@ func venue_index() -> int:
 
 
 func venue_index_of(rep: int) -> int:
-	# the stage you play grows as Reputation climbs (the STORY.md venue ladder)
+	# the stage you play grows as Reputation climbs, six rungs to the World Arena
 	if rep >= 3000:
 		return 5
 	if rep >= 1500:
@@ -3497,8 +3264,7 @@ func load_progress() -> void:
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
-		venue_seen = int(cf.get_value("prog", "venue_seen", venue_index()))
-		story_seen = int(cf.get_value("prog", "story_seen", 0))
+		won = bool(cf.get_value("prog", "won", false))
 		var bs: Variant = cf.get_value("prog", "best_scores", [])
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
@@ -3542,8 +3308,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
-	cf.set_value("prog", "venue_seen", venue_seen)
-	cf.set_value("prog", "story_seen", story_seen)
+	cf.set_value("prog", "won", won)
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
@@ -3693,9 +3458,6 @@ func _draw() -> void:
 		ST_GAMEOVER:
 			draw_gameover(font, s)
 			return
-		ST_CUTSCENE:
-			draw_cutscene(font, s)
-			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
 			return
@@ -3708,6 +3470,8 @@ func _draw() -> void:
 				draw_sheet(font, s)
 			if shop_open:
 				draw_shop(font, s)
+			if skills_open:
+				draw_skills(font, s)
 			return
 	draw_backdrop(s)
 	draw_egg_splats()      # yolk on the floor sits behind the performer
@@ -3918,8 +3682,8 @@ func draw_juggler(s: Vector2) -> void:
 	var collar: Color = v["collar"]
 	var button := Color(0.34, 0.20, 0.11)
 
-	# the eight-head canon (same as the cutscene figure draw_person), so the in-play
-	# juggler reads as the same adult person: head one eighth of the height, the crotch
+	# the eight-head canon, so the in-play juggler reads as a real adult person:
+	# head one eighth of the height, the crotch
 	# at the vertical midpoint, a drawn-in waist. H is the head unit off the floor line.
 	var floor_y := s.y * 0.80
 	var H := s.y * 0.056
@@ -4511,7 +4275,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	# a freshly unlocked trick announces itself, non-blocking so a live run is never
 	# frozen. Only while actually juggling, so it never overlaps the round-over text
 	# or the results card (both of which sit centre-screen with the run stopped).
-	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 600:
+	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360:
 		draw_trick_unlock_banner(font, s)
 	# trick feedback line, centred (works even before any trick is unlocked)
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
@@ -4665,9 +4429,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 	if age > 80:
 		var fa := 0.7 + 0.3 * sin(float(tick) * 0.05)
 		var foot := ""
-		if not pending_beats.is_empty():
-			# a story beat waits: the first key (or a moment's pause) plays it
-			foot = "something is stirring  -  any key"
+		if pending_win:
+			# the top stage just fell: the first key rolls into the victory screen
+			foot = "you have conquered the final stage  -  any key"
 		elif too_tired():
 			# the reason R will not work, in words, right where the player looks
 			foot = "too tired to go again  -  Enter back to the day, then sleep"
@@ -4702,29 +4466,26 @@ func draw_pause(font: Font, s: Vector2) -> void:
 
 
 func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
+	# a small, non-intrusive toast: it names the skill and points to the SKILLS
+	# screen for how to use it, instead of the old page-wide how-to card. The
+	# loaded skill also appears in the trick HUD at the foot of the stage.
 	var age := tick - trick_unlock_tick
 	var a := 1.0
-	if age < 18:
-		a = float(age) / 18.0
-	elif age > 540:
-		a = clampf(float(600 - age) / 60.0, 0.0, 1.0)
+	if age < 16:
+		a = float(age) / 16.0
+	elif age > 300:
+		a = clampf(float(360 - age) / 60.0, 0.0, 1.0)
+	if a <= 0.0:
+		return
 	var t: Dictionary = TRICKS[trick_unlock]
-	var bw := 620.0
+	var bw := 336.0
 	var bx := s.x * 0.5 - bw * 0.5
-	var cy := s.y * 0.19
-	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(0.10, 0.06, 0.08, 0.9 * a))
-	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(1.0, 0.82, 0.45, 0.55 * a), false, 2.0)
-	draw_string(font, Vector2(bx, cy - 4.0), "NEW TRICK   -   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 21, Color(1.0, 0.88, 0.5, a))
-	var how := ""
-	match String(t["kind"]):
-		"live":
-			how = "press %s to spin while two or more are airborne" % k_trick()[0]
-		"toggle":
-			how = "press %s to switch it on and off  -  it shapes every throw between" % k_trick()[0]
-		_:
-			how = "press %s to power up your next throw  -  one press, one trick" % k_trick()[0]
-	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
-	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
+	var by := s.y * 0.17
+	var glow := 0.5 + 0.5 * sin(float(tick) * 0.11)
+	draw_rect(Rect2(bx, by, bw, 40.0), Color(0.10, 0.06, 0.08, 0.86 * a))
+	draw_rect(Rect2(bx, by, bw, 40.0), Color(1.0, 0.82, 0.45, (0.34 + 0.28 * glow) * a), false, 1.5)
+	draw_string(font, Vector2(bx, by + 18.0), "NEW SKILL   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 16, Color(1.0, 0.88, 0.52, a))
+	draw_string(font, Vector2(bx, by + 33.0), "how to use it lives in  SKILLS", HORIZONTAL_ALIGNMENT_CENTER, bw, 11, Color(0.82, 0.76, 0.66, 0.85 * a))
 
 
 func draw_trick_hud(font: Font, s: Vector2) -> void:
@@ -4910,6 +4671,92 @@ func draw_pie_row(font: Font, x: float, y: float, w: float, keynum: int) -> void
 	var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
 	draw_string(font, Vector2(x + w - 168.0, y), "%d g" % PIE_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 	draw_string(font, Vector2(x + w - 48.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+
+
+func _skills_row(font: Font, x: float, y: float, w: float, ename: String, lvl: int, unlocked: bool, sel: bool) -> void:
+	# one entry in the Skills reference: name on the left, a ready / Lv-gate badge
+	# on the right, and a soft highlight when it is the selected entry.
+	if sel:
+		draw_rect(Rect2(x - 12.0, y - 19.0, w, 34.0), Color(1.0, 0.85, 0.45, 0.10))
+		draw_rect(Rect2(x - 12.0, y - 19.0, w, 34.0), Color(1.0, 0.85, 0.45, 0.35), false, 1.0)
+	var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.86, 0.8, 0.68) if unlocked else Color(0.55, 0.5, 0.46))
+	draw_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, nc)
+	if unlocked:
+		draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
+	else:
+		draw_string(font, Vector2(x + w - 76.0, y), "Lv %d" % lvl, HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
+
+
+func draw_skills(font: Font, s: Vector2) -> void:
+	# the Skills reference: every trick and pattern, whether it is yours yet, and
+	# the exact keys that pull it off. This is where the trimmed unlock toast now
+	# sends the player to learn the how, so a live run is never buried in text.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
+	var pw := 904.0
+	var ph := 566.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+
+	var kc_use := k_trick()[0]
+	var kc_sel := k_cycle()[0]
+	draw_string(font, Vector2(px + 40.0, py + 48.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(px + 40.0, py + 74.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
+	draw_string(font, Vector2(px + pw - 210.0, py + 48.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
+
+	var nt := TRICKS.size()
+	var col_l := px + 40.0
+	var col_r := px + pw * 0.52
+	var colw := pw * 0.44
+	var row_h := 38.0
+	var y0 := py + 116.0
+	draw_string(font, Vector2(col_l, y0 - 20.0), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_r, y0 - 20.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	for i in nt:
+		var td: Dictionary = TRICKS[i]
+		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), int(td["lvl"]), trick_unlocked(i), i == skills_sel)
+	for j in PATTERNS.size():
+		var pd: Dictionary = PATTERNS[j]
+		_skills_row(font, col_r, y0 + float(j) * row_h, colw, String(pd["name"]), int(pd["lvl"]), pattern_unlocked(j), (nt + j) == skills_sel)
+
+	# the detail strip: the selected entry explained, with its exact controls
+	var dy := py + ph - 118.0
+	draw_rect(Rect2(px + 30.0, dy - 6.0, pw - 60.0, 80.0), Color(0.08, 0.05, 0.06, 0.7))
+	draw_rect(Rect2(px + 30.0, dy - 6.0, pw - 60.0, 80.0), Color(0.9, 0.6, 0.35, 0.28), false, 1.0)
+	var ename := ""
+	var how := ""
+	var desc := ""
+	var locked_at := 0
+	var is_unlocked := true
+	if skills_sel < nt:
+		var td2: Dictionary = TRICKS[skills_sel]
+		ename = String(td2["name"])
+		desc = String(td2["desc"])
+		locked_at = int(td2["lvl"])
+		is_unlocked = trick_unlocked(skills_sel)
+		match String(td2["kind"]):
+			"live":
+				how = "%s loads it, then %s spins while %d or more are airborne. Catches score double while you spin blind." % [kc_sel, kc_use, int(td2["min_air"])]
+			"toggle":
+				how = "%s loads it, then %s switches it on, %s again switches it off. It reshapes every throw between." % [kc_sel, kc_use, kc_use]
+			_:
+				how = "%s loads it, then %s powers your NEXT throw. One press, one trick." % [kc_sel, kc_use]
+	else:
+		var pd2: Dictionary = PATTERNS[skills_sel - nt]
+		ename = String(pd2["name"])
+		desc = String(pd2["desc"])
+		locked_at = int(pd2["lvl"])
+		is_unlocked = pattern_unlocked(skills_sel - nt)
+		how = "In practice, press P to switch patterns. Score multiplier x%.2f. Cascade and Fountain also match the ball count." % float(pd2["mult"])
+	draw_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
+	if not is_unlocked:
+		draw_string(font, Vector2(px + pw - 230.0, dy + 18.0), "unlocks at level %d" % locked_at, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.85, 0.62, 0.5))
+	draw_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.9, 0.82, 0.66))
+	draw_string(font, Vector2(px + 46.0, dy + 62.0), desc, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.78, 0.72, 0.64))
+
+	draw_string(font, Vector2(px + 40.0, py + ph - 22.0), "Up / Down browse   -   Left / Right jump column", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.72, 0.66, 0.58))
+	draw_string(font, Vector2(px + pw - 172.0, py + ph - 22.0), "Tab / Esc to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
 
 
 # -----------------------------------------------------------------------------
@@ -5346,16 +5193,6 @@ func audio_update() -> void:
 	var t := -14.0
 	if perf:
 		t = lerpf(-13.0, -9.0, energy)
-	if game_state == ST_CUTSCENE:
-		# silence as a tool (ART doc): the world-record ordeal strips the music to
-		# almost nothing, and the finale brings the full theme back as the payoff
-		match cur_beat_id():
-			"record":
-				t = -34.0
-			"finale":
-				t = -9.0
-			_:
-				t = -18.0
 	if not set_music:
 		t = -80.0
 	_vol["mus"] = lerpf(_vol["mus"], t - _duck * 9.0, 0.06)
@@ -5620,80 +5457,27 @@ func dump_audio(dir: String) -> void:
 
 
 # =============================================================================
-# Cinematic layer. Everything below is procedural (the code-only art rule,
-# ART_AND_MUSIC.md): the film-style cutscenes, the establishing cards, the
-# tutorial demos, and the shared "royal" polish (gradients, vignette, letterbox,
-# gold frames, drifting dust). cine_tick drives all the motion.
+# Presentation layer. Everything below is procedural (the code-only art rule,
+# ART_AND_MUSIC.md): the stage card, the victory screen, the tutorial demos, and
+# the shared "royal" polish (gradients, vignette, gold frames, drifting dust).
+# cine_tick drives all the motion.
 # =============================================================================
 
-func draw_cutscene(font: Font, s: Vector2) -> void:
-	var script := cur_script()
-	if script.is_empty():
-		return
-	var shot: Dictionary = script[clampi(cs_shot, 0, script.size() - 1)]
-	var age := cine_tick - cs_shot_start
+func venue_blurb(i: int) -> String:
+	# one line on the crowd you are about to face, so each stage reads distinct
+	match i:
+		0: return "a quiet yard  -  a forgiving place to find your hands"
+		1: return "a street corner  -  passers-by you keep only by playing clean"
+		2: return "a ticketed house  -  quiet, paying, and quietly exacting"
+		3: return "the big top  -  loud, vast, and hungry for spectacle"
+		4: return "a scored floor  -  judged on precision, never on flash"
+		_: return "the summit  -  no help left but your own two hands"
 
-	# a slow Ken Burns camera: each shot drifts through a gentle zoom (alternating
-	# push-in and pull-back) with a whisper of lateral pan, so a held tableau reads
-	# as a filmed scene rather than a still. The scene always overfills the frame
-	# (zoom stays above 1), so no edge is ever exposed.
-	var hold := maxi(1, int(shot.get("hold", 300)))
-	var prog := clampf(float(age) / float(hold), 0.0, 1.0)
-	var z := lerpf(1.03, 1.10, prog) if cs_shot % 2 == 0 else lerpf(1.10, 1.03, prog)
-	var pan := sin(float(cs_shot) * 1.7) * 16.0 * (prog - 0.5)
-	draw_set_transform(s * 0.5 * (1.0 - z) + Vector2(pan, 0.0), 0.0, Vector2(z, z))
-	draw_shot(shot, s)
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-	# each cut dissolves in from black, so the shots read as a film, not a slideshow
-	var fin := clampf(float(age) / 22.0, 0.0, 1.0)
-	if fin < 1.0:
-		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
-	draw_vignette(s, 0.62)
-
-	var topbar := 92.0
-	var botbar := 122.0
-	draw_letterbox(s, topbar, botbar)
-
-	# title, centred in the top bar, with a gold ornament rule fully BELOW it
-	# (the rule used to sit at the title's midline and struck through the text)
-	var title := beat_title(cur_beat_id())
-	draw_title_glow(font, 22.0, title, 30, Color(1.0, 0.88, 0.55), s)
-	draw_ornament(s.x * 0.5, 76.0, 150.0, Color(0.82, 0.62, 0.34, 0.85))
-
-	# caption in the lower bar: it fades in just after the picture and TYPES itself
-	# out, an unhurried storyteller's cadence that also paces the reader's eye
-	var capA := clampf(float(age - 8) / 20.0, 0.0, 1.0)
-	var who := String(shot.get("who", ""))
-	var cap := String(shot.get("cap", ""))
-	var chars := maxi(0, int(float(age - 12) * 1.15))
-	var shown := cap.substr(0, mini(chars, cap.length()))
-	var mx := 96.0
-	var cy := s.y - botbar + 32.0
-	if who != "":
-		draw_string(font, Vector2(mx, cy), who, HORIZONTAL_ALIGNMENT_LEFT, -1, 21, Color(1.0, 0.82, 0.42, capA))
-		cy += 27.0
-	draw_multiline_string(font, Vector2(mx, cy), shown, HORIZONTAL_ALIGNMENT_LEFT, s.x - 2.0 * mx, 20, -1, Color(0.95, 0.9, 0.82, capA))
-
-	draw_shot_dots(script.size(), cs_shot, s.x * 0.5, s.y - 20.0)
-	draw_string(font, Vector2(s.x - 220.0, s.y - 14.0), "any key:  next", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.72, 0.67, 0.6))
-
-
-func draw_shot(shot: Dictionary, s: Vector2) -> void:
-	match String(shot.get("scene", "")):
-		"backyard": scene_backyard(s, int(shot.get("stage", 0)))
-		"street": scene_street(s, int(shot.get("stage", 0)))
-		"theatre": scene_theatre(s, int(shot.get("stage", 0)))
-		"circus": scene_circus(s, int(shot.get("stage", 0)))
-		"champ": scene_champ(s, int(shot.get("stage", 0)))
-		"arena": scene_arena(s, int(shot.get("stage", 0)))
-		_: draw_venue_exterior(s, 0)
-
-
-# --- the establishing card: WHERE you are about to perform --------------------
 
 func draw_establish(font: Font, s: Vector2) -> void:
-	# the exterior drifts in a slow push, matching the cutscene camera language
+	# the STAGE CARD: a portrait of the venue you are about to play, its rung on the
+	# ladder, the record to beat, and how the next stage opens. The exterior drifts
+	# in a slow push so the card feels composed rather than static.
 	var ez := 1.0 + 0.07 * clampf(float(cine_tick) / 340.0, 0.0, 1.0)
 	draw_set_transform(s * 0.5 * (1.0 - ez), 0.0, Vector2(ez, ez))
 	ext_center = true    # the card is a portrait of the venue: hero mid-frame
@@ -5706,52 +5490,60 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_vignette(s, 0.6)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
 
-	# a small tag up top, then the venue name and a warm prompt, all in the light
 	var tagA := clampf(float(cine_tick - 10) / 20.0, 0.0, 1.0)
-	draw_string(font, Vector2(0, s.y * 0.12), "TONIGHT  YOU  PERFORM  AT", HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.78, 0.55, 0.85 * tagA))
+	# STAGE n of 6, then the name in lights, then the crowd blurb
+	draw_string(font, Vector2(0, s.y * 0.12), "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1], HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.78, 0.55, 0.85 * tagA))
 	var vn := String(venue_data(establish_venue)["name"]).to_upper()
 	draw_title_glow(font, s.y * 0.14 + 12.0, vn, 56, Color(1.0, 0.9, 0.55), s)
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 78.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, s.y * 0.14 + 104.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.86, 0.78, 0.66, 0.8 * tagA))
 
-	# the standing record here, so the player walks on with a number to beat
+	# the record to beat here (its own board on a purist night), plus a purist tag
+	var recy := s.y * 0.14 + 140.0
+	if purist:
+		draw_string(font, Vector2(0, recy), "PURIST BOOKING  -  no stat help, its own record board", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.82, 0.72, 0.85, 0.85 * tagA))
+		recy += 24.0
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
-		var lbl := "your PURIST record here   %d" if purist else "your record here   %d"
-		draw_string(font, Vector2(0, s.y * 0.14 + 112.0), lbl % rec_table()[establish_venue], HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
+		draw_string(font, Vector2(0, recy), "record to beat   %d" % rec_table()[establish_venue], HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
+	else:
+		draw_string(font, Vector2(0, recy), "no record here yet  -  set one", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.82, 0.6, 0.7 * tagA))
 
 	var py := s.y - 70.0
 	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
-	draw_string(font, Vector2(0, s.y - 34.0), "press any key to step on stage", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
+	draw_string(font, Vector2(0, s.y - 34.0), "press any key to begin", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
 
 
-# --- the credits roll: a slow curtain call after the grand finale -------------
+# --- the victory screen: shown once the top stage is conquered ----------------
 
 func draw_credits(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
-	# the royal backdrop shared with the menu and the cutscenes
+	# the royal backdrop shared with the menu
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.07), Color(0.02, 0.015, 0.025), 24)
 	draw_spotlight_cone(s, cx, 0.08)
 	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
-	# the calm cascade keeps watch up high while the names roll beneath it
+	# the calm cascade keeps watch up high while the roll climbs beneath it
 	draw_menu_cascade(Vector2(cx, s.y * 0.12), 0.8)
 
 	# assemble the roll as a stack of rows in content space. Each row sits a fixed
-	# gap below the one before it, and cine_tick scrolls the whole stack upward.
+	# gap below the one before it, and cine_tick scrolls the whole stack upward. It
+	# opens on the win, then rolls the credits and a line of your own career.
 	var gold := Color(1.0, 0.88, 0.5)
 	var rows: Array[Dictionary] = []
 	var cur := 0.0
 	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": "JUGGLE", "b": ""})
-	cur += 92.0;  rows.append({"y": cur, "kind": "sub", "a": "a juggler's climb", "b": ""})
-	cur += 62.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
-	cur += 88.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
+	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
+	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
+	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %d" % int(career["best_score"]), "b": "%d days on the road" % day})
+	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 82.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "code", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "art", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "music", "b": "Louis Vandenbruwaene"})
 	cur += 84.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
 	cur += 84.0;  rows.append({"y": cur, "kind": "line", "a": "made in Godot, every picture and sound", "b": "drawn and synthesised in code"})
 	cur += 90.0;  rows.append({"y": cur, "kind": "line", "a": "built with the help of Claude", "b": ""})
-	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
-	cur += 94.0;  rows.append({"y": cur, "kind": "quote", "a": "Bruna", "b": "\"Clean catch. Clean throw. Everything else is noise.\""})
 	cur += 118.0; rows.append({"y": cur, "kind": "thanks", "a": "thank you for playing", "b": ""})
 	var last_y := cur
 
@@ -5788,9 +5580,8 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
 				if btxt != "":
 					draw_string(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
-			"quote":
-				draw_string(font, Vector2(0, ry - 10.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(1.0, 0.82, 0.45, a))
-				draw_string(font, Vector2(0, ry + 24.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.95, 0.9, 0.82, a))
+			"win":
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.86, 0.42, a))
 			"thanks":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
 
@@ -5897,226 +5688,6 @@ func draw_dust(s: Vector2, n: int, glow: Color) -> void:
 		var a := 0.10 + 0.10 * sin(atick() * 0.03 + seed)
 		draw_circle(Vector2(px, py), 1.4, Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
 
-
-func draw_shot_dots(n: int, cur: int, cx: float, y: float) -> void:
-	var gap := 14.0
-	var x0 := cx - gap * float(n - 1) * 0.5
-	for i in n:
-		var on := i <= cur
-		draw_circle(Vector2(x0 + gap * float(i), y), 3.5 if on else 2.5,
-			Color(1.0, 0.85, 0.5, 0.95) if on else Color(0.6, 0.55, 0.5, 0.6))
-
-
-# --- procedural characters (Milo, Bruna, Silvio, the troupe) ------------------
-
-func milo_pal(vi: int) -> Dictionary:
-	var v := venue_data(vi)
-	return {"skin": Color(0.87, 0.64, 0.45), "coat": v["suit"], "coat_dk": v["suit_dk"],
-		"trouser": v["suit_dk"], "accent": v["vest"], "hair": Color(0.28, 0.16, 0.11), "hat": "none"}
-
-
-func bruna_pal() -> Dictionary:
-	return {"skin": Color(0.82, 0.62, 0.46), "coat": Color(0.46, 0.30, 0.34), "coat_dk": Color(0.32, 0.21, 0.24),
-		"trouser": Color(0.30, 0.24, 0.24), "accent": Color(0.80, 0.55, 0.45), "hair": Color(0.82, 0.80, 0.76), "shawl": true, "hat": "none"}
-
-
-func silvio_pal() -> Dictionary:
-	return {"skin": Color(0.90, 0.70, 0.55), "coat": Color(0.16, 0.15, 0.22), "coat_dk": Color(0.09, 0.08, 0.13),
-		"trouser": Color(0.10, 0.09, 0.13), "accent": Color(0.95, 0.82, 0.40), "hair": Color(0.14, 0.11, 0.09), "hat": "top"}
-
-
-func arm_reach(shoulder: Vector2, hand: Vector2, l1: float, l2: float) -> Vector2:
-	# the actual hand position after clamping the target to the arm's length, so a
-	# scene can place a held prop exactly where the clamped hand ends up (no drift)
-	var to := hand - shoulder
-	var d := to.length()
-	var maxr := (l1 + l2) * 0.97
-	return shoulder + to / d * maxr if d > maxr else hand
-
-
-func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, sleeve: Color, l1: float, l2: float, w: float) -> void:
-	# clamp the target within reach so the arm never stretches into a noodle, then
-	# bend with bones scaled to the reach (matching the play figure's natural elbow).
-	# Of the two elbow solutions, take the LOWER one: elbows hang, they never point
-	# at the sky (a raised offering arm used to fold upward, Louis's "weird arms").
-	var h2 := arm_reach(shoulder, hand, l1, l2)
-	var reach := (h2 - shoulder).length()
-	# bones barely longer than half the reach: a soft natural bend, never the
-	# sharp folded kink Louis flagged (deep bows came from bones far over reach)
-	var bone := maxf(reach * 0.52, l1 * 0.5)
-	# of the two elbow solutions, ALWAYS take the outward one (Louis: elbows
-	# point out from the body in every pose, same as the play figure's arms).
-	# bend > 0 marks the LEFT arm, whose outward side is negative x.
-	var side := -1.0 if bend > 0.0 else 1.0
-	var e1 := solve_elbow(shoulder, h2, bone, bone, bend)
-	var e2 := solve_elbow(shoulder, h2, bone, bone, -bend)
-	var elbow := e1 if (e1.x - shoulder.x) * side >= (e2.x - shoulder.x) * side else e2
-	var wrist := h2 + (elbow - h2).normalized() * w * 0.6
-	draw_capsule(shoulder, elbow, w * 2.6, w * 2.0, sleeve)
-	draw_capsule(elbow, wrist, w * 1.9, w * 1.4, skin)
-	draw_circle(elbow, w * 1.0, sleeve)
-	draw_circle(h2, w * 1.2, skin)
-
-
-func reach_hand(feet: Vector2, sc: float, side: float, off: Vector2) -> Vector2:
-	# a hand position guaranteed within a draw_person figure's arm reach (eight-head
-	# canon: shoulder at 6.55 heads, arm 2.85 heads long), so a held prop placed at the
-	# same point stays in the hand. side +1 right, -1 left. off is relative to the shoulder.
-	var H := 22.0 * sc
-	var sh := Vector2(feet.x + side * 0.74 * H, feet.y - 6.55 * H)
-	var maxr := 2.7 * H
-	if off.length() > maxr:
-		off = off.normalized() * maxr
-	return sh + off
-
-
-func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand = null, mood: int = 0) -> void:
-	# A repositionable figure on the classical EIGHT-HEAD canon (Da Vinci's Vitruvian
-	# proportions): the whole body is eight head-heights tall, the crotch sits at the
-	# exact vertical midpoint, the elbow falls at the navel and the wrist at the hip, so
-	# a relaxed arm's fingertips reach mid-thigh. Everything is expressed off one head
-	# unit H, which is what makes the proportions read as human rather than childish.
-	# pos is the FEET; the figure grows upward from it.
-	var H := 22.0 * sc                 # one head-height: the unit of the whole canon
-	var px := pos.x
-	# cine_tick runs at 120/s, so 0.016 is a calm ~3.3 second breath. The old 0.05
-	# panted at once a second, which read as jittery on every figure at once.
-	var breathe := sin(float(cine_tick) * 0.016 + pos.x * 0.02) * 0.055 * H
-	var skin: Color = pal.get("skin", Color(0.87, 0.64, 0.45))
-	var coat: Color = pal["coat"]
-	var coat_dk: Color = pal["coat_dk"]
-	var trouser: Color = pal.get("trouser", coat_dk)
-	var hair: Color = pal.get("hair", Color(0.25, 0.15, 0.1))
-
-	# vertical stations, measured UP from the feet in head-heights (0 feet .. 8 crown)
-	var hip_y := pos.y - 4.0 * H       # crotch: the midpoint of the whole figure
-	var knee_y := pos.y - 2.0 * H
-	var waist_y := pos.y - 5.0 * H + breathe    # navel
-	var chest_y := pos.y - 6.0 * H + breathe
-	var sh_y := pos.y - 6.72 * H + breathe      # shoulders ride ~1.3 heads below the crown
-	var head_c := Vector2(px, pos.y - 7.5 * H + breathe)
-	var hr := 0.52 * H                 # head just over one unit, so it does not read as a pinhead
-
-	# a relaxed arm hangs so the wrist is at the hip (fingertips at mid-thigh),
-	# slightly out from the body so the hang reads loose rather than pinned
-	var lh: Vector2 = lhand if lhand != null else Vector2(px - 0.72 * H, hip_y + 0.35 * H)
-	var rh: Vector2 = rhand if rhand != null else Vector2(px + 0.72 * H, hip_y + 0.35 * H)
-
-	# --- legs: thighs taper to the knee, calves to the ankle, then shoes
-	var shoe := Color(0.18, 0.11, 0.08)
-	draw_capsule(Vector2(px - 0.40 * H, hip_y - 0.1 * H), Vector2(px - 0.34 * H, knee_y), 0.46 * H, 0.30 * H, trouser)
-	draw_capsule(Vector2(px - 0.34 * H, knee_y), Vector2(px - 0.32 * H, pos.y - 0.14 * H), 0.30 * H, 0.20 * H, trouser)
-	draw_capsule(Vector2(px + 0.40 * H, hip_y - 0.1 * H), Vector2(px + 0.34 * H, knee_y), 0.46 * H, 0.30 * H, trouser)
-	draw_capsule(Vector2(px + 0.34 * H, knee_y), Vector2(px + 0.32 * H, pos.y - 0.14 * H), 0.30 * H, 0.20 * H, trouser)
-	fill_ellipse(Vector2(px - 0.32 * H, pos.y - 0.1 * H), 0.5 * H, 0.2 * H, shoe)
-	fill_ellipse(Vector2(px + 0.32 * H, pos.y - 0.1 * H), 0.5 * H, 0.2 * H, shoe)
-
-	# --- torso: one tapered silhouette, shoulders about two heads wide, a drawn-in
-	# waist at the navel and a slight hip flare, so the trunk reads as a ribcage over a
-	# pelvis rather than a box. The jacket hem falls just past the hip.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 0.92 * H, sh_y + 0.10 * H), Vector2(px - 0.32 * H, sh_y - 0.16 * H),
-		Vector2(px + 0.32 * H, sh_y - 0.16 * H), Vector2(px + 0.92 * H, sh_y + 0.10 * H),
-		Vector2(px + 0.80 * H, chest_y), Vector2(px + 0.52 * H, waist_y), Vector2(px + 0.70 * H, hip_y + 0.28 * H),
-		Vector2(px - 0.70 * H, hip_y + 0.28 * H), Vector2(px - 0.52 * H, waist_y), Vector2(px - 0.80 * H, chest_y)]), coat)
-	# (no round shoulder caps: they poked above the coat line like epaulettes)
-	draw_circle(Vector2(px - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
-
-	# a warm accent placket down the centre line, drawn in at the waist to follow the torso
-	var accent: Color = pal.get("accent", coat_dk)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 0.17 * H, sh_y + 0.06 * H), Vector2(px + 0.17 * H, sh_y + 0.06 * H),
-		Vector2(px + 0.22 * H, waist_y), Vector2(px + 0.27 * H, hip_y + 0.2 * H),
-		Vector2(px - 0.27 * H, hip_y + 0.2 * H), Vector2(px - 0.22 * H, waist_y)]), accent)
-
-	# --- arms: upper arm 1.5 heads, forearm 1.35 heads (elbow at the navel, wrist at
-	# hip). The attach point sits one arm-root radius (~0.29H) below the jacket line,
-	# so the deltoid mass tops out AT shoulder height instead of peaking above it.
-	var w := 0.22 * H
-	draw_arm_s(Vector2(px - 0.74 * H, sh_y + 0.32 * H), lh, 1.0, skin, coat, 1.5 * H, 1.35 * H, w)
-	draw_arm_s(Vector2(px + 0.74 * H, sh_y + 0.32 * H), rh, -1.0, skin, coat, 1.5 * H, 1.35 * H, w)
-
-	# --- neck, head, hair, face
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 0.19 * H, head_c.y + hr - 0.12 * H), Vector2(px + 0.19 * H, head_c.y + hr - 0.12 * H),
-		Vector2(px + 0.26 * H, sh_y + 0.02 * H), Vector2(px - 0.26 * H, sh_y + 0.02 * H)]), skin)
-	draw_circle(head_c, hr, skin)
-	if pal.get("shawl", false):
-		# an old street juggler's shawl and hood
-		draw_circle(head_c + Vector2(0, -0.1 * H), hr + 0.14 * H, hair)
-		draw_circle(head_c, hr, skin)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(px - 0.44 * H, sh_y - 0.04 * H), Vector2(px + 0.44 * H, sh_y - 0.04 * H),
-			Vector2(px + 0.32 * H, sh_y + 0.5 * H), Vector2(px - 0.32 * H, sh_y + 0.5 * H)]), pal["coat_dk"])
-	else:
-		draw_circle(head_c + Vector2(0, -hr * 0.5), hr, hair)   # hair cap
-		draw_circle(head_c + Vector2(0, hr * 0.35), hr, skin)   # face lower half back over
-	if String(pal.get("hat", "none")) == "top":
-		draw_rect(Rect2(head_c.x - hr - 0.14 * H, head_c.y - hr - H, (hr + 0.14 * H) * 2.0, 0.28 * H), Color(0.08, 0.07, 0.1))
-		draw_rect(Rect2(head_c.x - hr * 0.8, head_c.y - hr - H, hr * 1.6, H), Color(0.10, 0.09, 0.12))
-		draw_rect(Rect2(head_c.x - hr * 0.8, head_c.y - hr - 0.36 * H, hr * 1.6, 0.14 * H), accent)
-	draw_person_face(head_c, hr, mood)
-
-
-func draw_person_face(headC: Vector2, hr: float, mood: int) -> void:
-	var eye := Color(0.16, 0.10, 0.08)
-	draw_circle(headC + Vector2(-hr * 0.35, -hr * 0.05), hr * 0.15, eye)
-	draw_circle(headC + Vector2(hr * 0.35, -hr * 0.05), hr * 0.15, eye)
-	var my := headC.y + hr * 0.45
-	var w := hr * 0.4
-	var mouth := PackedVector2Array([Vector2(headC.x - w, my), Vector2(headC.x + w, my)])
-	if mood == 1:
-		mouth = PackedVector2Array([Vector2(headC.x - w, my - 1.5), Vector2(headC.x, my + 3.0), Vector2(headC.x + w, my - 1.5)])
-	elif mood == -1:
-		mouth = PackedVector2Array([Vector2(headC.x - w, my + 2.0), Vector2(headC.x, my - 2.0), Vector2(headC.x + w, my + 2.0)])
-	draw_polyline(mouth, Color(0.45, 0.20, 0.16), 2.0)
-
-
-# --- juggle demonstration (tutorials, and juggling story figures) -------------
-
-func demo_juggle(feet: Vector2, sc: float, count: int, T: float = 84.0) -> Dictionary:
-	# a small closed-form cascade: each ball rides a crossing arc, staggered in
-	# phase, so 1 ball ping-pongs, 2 balls exchange, 3+ weave a real cascade.
-	# Hands are anchored to the FIGURE'S FEET on the eight-head canon: they scoop
-	# at waist height (4.4 heads up), a head apart each side, so the pattern sits
-	# in front of the belly and peaks just over the head, real cascade geometry
-	# (anchoring to a screen-centre point made the juggling read overhead, Louis).
-	# T is ticks (120/s) per throw. The default 84 is the calm story cadence, and
-	# each half-cycle ends with a DWELL: the ball rides IN the scooping hand for a
-	# third of the beat before it relaunches, real carry-throw-carry rhythm.
-	var H := 22.0 * sc
-	var hl := feet + Vector2(-2.0 * H, -4.4 * H)
-	var hr := feet + Vector2(2.0 * H, -4.4 * H)
-	var dwell := 0.32             # fraction of each beat the ball spends held
-	var peak := 104.0 * sc
-	var t := float(cine_tick)
-	# a gentle scoop so the hands are never frozen: they dip and lift in counterpoint,
-	# the way real juggling hands carry and release the props
-	var scoop := sin(TAU * t / (T * 2.0))
-	hl.y += scoop * 7.0 * sc
-	hr.y += -scoop * 7.0 * sc
-	var out: Array = []
-	for i in count:
-		var phase := fposmod(t + float(i) * (T * 2.0 / float(maxi(1, count))), T * 2.0)
-		var seg := 0 if phase < T else 1
-		var u := (phase - float(seg) * T) / T
-		var frm := hl if seg == 0 else hr
-		var to := hr if seg == 0 else hl
-		var p: Vector2
-		if u < 1.0 - dwell:
-			var uf := u / (1.0 - dwell)   # in flight: launch to landing
-			p = frm.lerp(to, uf)
-			# left-hand throws fly a touch higher than right-hand ones, so the two
-			# crossing arcs weave at different heights instead of eclipsing each
-			# other dead centre (which made a 5-ball pattern read as 3 balls)
-			p.y -= peak * 4.0 * uf * (1.0 - uf) * (1.06 if seg == 0 else 0.92)
-		else:
-			p = to                        # carried: the ball sits in the scooping hand
-		out.append({"pos": p, "col": ball_color(i)})
-	return {"balls": out, "hl": hl, "hr": hr, "peak": peak}
-
-
-# --- the egg-break effect (shell shards fly, a yolk splats and spreads) --------
 
 func spawn_egg_break(at: Vector2) -> void:
 	var floor_y := get_viewport_rect().size.y * 0.80
@@ -6628,331 +6199,6 @@ func draw_spotlight_cone(s: Vector2, cx: float, strength: float) -> void:
 func draw_shadow(feet: Vector2, w: float) -> void:
 	fill_ellipse(feet, w * 0.5, w * 0.16, Color(0, 0, 0, 0.3))
 
-
-func draw_silhouette(feet: Vector2, sc: float, col: Color) -> void:
-	# a background onlooker: the same eight-head proportion as the real figures, but
-	# rendered as one flat silhouette (only a suggestion of a person at the light's edge)
-	var H := 17.0 * sc
-	var px := feet.x
-	var hip_y := feet.y - 4.0 * H
-	var knee_y := feet.y - 2.0 * H
-	var sh_y := feet.y - 6.72 * H
-	draw_capsule(Vector2(px - 0.36 * H, hip_y), Vector2(px - 0.32 * H, knee_y), 0.42 * H, 0.28 * H, col)
-	draw_capsule(Vector2(px - 0.32 * H, knee_y), Vector2(px - 0.3 * H, feet.y - 0.1 * H), 0.28 * H, 0.2 * H, col)
-	draw_capsule(Vector2(px + 0.36 * H, hip_y), Vector2(px + 0.32 * H, knee_y), 0.42 * H, 0.28 * H, col)
-	draw_capsule(Vector2(px + 0.32 * H, knee_y), Vector2(px + 0.3 * H, feet.y - 0.1 * H), 0.28 * H, 0.2 * H, col)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(px - 0.85 * H, sh_y), Vector2(px + 0.85 * H, sh_y),
-		Vector2(px + 0.55 * H, hip_y + 0.2 * H), Vector2(px - 0.55 * H, hip_y + 0.2 * H)]), col)
-	draw_circle(Vector2(px - 0.85 * H, sh_y), 0.16 * H, col)
-	draw_circle(Vector2(px + 0.85 * H, sh_y), 0.16 * H, col)
-	draw_circle(Vector2(px, feet.y - 7.5 * H), 0.52 * H, col)
-
-
-func draw_curtain(s: Vector2) -> void:
-	draw_gradient_v(Rect2(0, 0, s.x, s.y * 0.64), Color(0.16, 0.03, 0.05), Color(0.07, 0.01, 0.02), 18)
-	var n := 14
-	for i in n:
-		var x := s.x * float(i) / float(n)
-		var shade := 0.15 + 0.06 * sin(float(i) * 1.7)
-		draw_rect(Rect2(x, 0, s.x / float(n) * 0.6, s.y * 0.62), Color(shade + 0.06, 0.03, 0.05))
-		draw_rect(Rect2(x + s.x / float(n) * 0.6, 0, s.x / float(n) * 0.4, s.y * 0.62), Color(shade, 0.02, 0.04))
-	draw_rect(Rect2(0, 0, s.x, 40.0), Color(0.30, 0.06, 0.08))
-	draw_line(Vector2(0, 40.0), Vector2(s.x, 40.0), Color(0.85, 0.65, 0.3), 2.0)
-
-
-func draw_scoreboard(s: Vector2) -> void:
-	var bw := s.x * 0.42
-	var bx := s.x * 0.5 - bw * 0.5
-	var by := s.y * 0.14
-	draw_rect(Rect2(bx, by, bw, 70.0), Color(0.05, 0.06, 0.10))
-	draw_rect(Rect2(bx, by, bw, 70.0), Color(0.5, 0.7, 1.0, 0.5), false, 2.0)
-	var f := game_font()
-	draw_string(f, Vector2(bx + 20.0, by + 30.0), "SILVIO   98.4", HORIZONTAL_ALIGNMENT_LEFT, bw - 40.0, 20, Color(0.7, 0.85, 1.0))
-	draw_string(f, Vector2(bx + 20.0, by + 56.0), "MILO     97.9", HORIZONTAL_ALIGNMENT_LEFT, bw - 40.0, 20, Color(1.0, 0.88, 0.55))
-
-
-func draw_ring_interior(s: Vector2) -> void:
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.14, 0.07, 0.05), Color(0.05, 0.03, 0.03), 20)
-	var gy := s.y * 0.80
-	fill_ellipse(Vector2(s.x * 0.5, gy), s.x * 0.42, 46.0, Color(0.55, 0.34, 0.18, 0.5))
-	fill_ellipse(Vector2(s.x * 0.5, gy), s.x * 0.30, 32.0, Color(0.8, 0.55, 0.28, 0.4))
-	draw_lantern_string(Vector2(s.x * 0.06, s.y * 0.22), Vector2(s.x * 0.94, s.y * 0.24))
-
-
-# --- story scene tableaux -----------------------------------------------------
-
-func scene_backyard(s: Vector2, stage: int) -> void:
-	draw_venue_exterior(s, 0)
-	var fy := s.y * 0.80
-	var ct := float(cine_tick)
-	match stage:
-		0:
-			# Bruna offers the three balls in a slow, gentle presenting motion; Milo
-			# stands close and lifts a hand to receive. A slow weight-shift keeps both
-			# figures alive rather than posed. Hands are placed at body stations in head
-			# units (H) so they read correctly against the eight-head figure.
-			var sway := sin(ct * 0.014) * 2.0
-			var bfeet := Vector2(s.x * 0.42 + sway, fy)
-			var mfeet := Vector2(s.x * 0.60 - sway, fy)
-			draw_shadow(bfeet, 70.0)
-			draw_shadow(mfeet, 66.0)
-			var offer := 0.5 + 0.5 * sin(ct * 0.013)   # a slow, deliberate presenting gesture
-			var hb := 22.0 * 1.05
-			var hm := 22.0 * 1.0
-			var bhand := bfeet + Vector2((2.2 + offer * 0.4) * hb, (-6.1 + offer * 0.35) * hb)
-			var mhand := mfeet + Vector2(-1.7 * hm, (-5.2 + offer * 0.25) * hm)
-			draw_person(bfeet, 1.05, bruna_pal(), null, bhand, 1)
-			draw_person(mfeet, 1.0, milo_pal(0), mhand, null, 0)
-			# the three balls sit cradled in the offering palm as a nested pyramid,
-			# two resting on the hand and one in their groove, not a floating ladder
-			var cradle: Array[Vector2] = [Vector2(-10.0, -5.0), Vector2(10.0, -5.0), Vector2(0.0, -22.0)]
-			for i in 3:
-				draw_ball_shape(bhand + cradle[i], ball_color(i), 0.95)
-		1:
-			# the balls are in Milo's hand now, cradled near his chest; Bruna stands
-			# beside him with a slow approving lift of the hand, both on a gentle sway
-			var sway := sin(ct * 0.014) * 2.0
-			var bfeet := Vector2(s.x * 0.40 + sway, fy)
-			var mfeet := Vector2(s.x * 0.58 - sway, fy)
-			draw_shadow(bfeet, 76.0)
-			draw_shadow(mfeet, 76.0)
-			var nod := 0.5 + 0.5 * sin(ct * 0.018)   # a slow approving lift, not a wave
-			var hb := 22.0 * 1.1
-			var hm := 22.0 * 1.15
-			var mhand := mfeet + Vector2(-1.4 * hm, (-5.15 + sin(ct * 0.02) * 0.12) * hm)
-			var bhand := bfeet + Vector2(2.0 * hb, (-6.0 - nod * 0.3) * hb)
-			draw_person(bfeet, 1.1, bruna_pal(), null, bhand, 1)
-			draw_person(mfeet, 1.15, milo_pal(0), mhand, null, 0)
-			# cradled against the chest: the same nested pyramid, riding the hand's bob
-			var cradle2: Array[Vector2] = [Vector2(-11.0, -5.0), Vector2(11.0, -5.0), Vector2(0.0, -23.0)]
-			for i in 3:
-				draw_ball_shape(mhand + cradle2[i], ball_color(i), 1.0)
-		2:
-			# the first throw: one ball passed slowly hand to hand, the simplest juggle.
-			# Hands rest at the waist and the throw sweeps up and ACROSS the body to the
-			# release, the catching hand rising out to meet the ball, so it reads as a
-			# real throw. All positions are in head units off the eight-head figure.
-			var mfeet := Vector2(s.x * 0.5, fy)
-			draw_shadow(mfeet, 80.0)
-			var hm := 22.0 * 1.2
-			var T := 168.0   # one unhurried pass every 1.4 seconds: this is the FIRST throw
-			var u := fposmod(ct / T, 1.0)
-			var right_first := int(floor(ct / T)) % 2 == 0
-			var restL := mfeet + Vector2(-1.5 * hm, -4.6 * hm)
-			var restR := mfeet + Vector2(1.5 * hm, -4.6 * hm)
-			var throwL := mfeet + Vector2(-0.7 * hm, -6.5 * hm)   # up and in, across the body
-			var throwR := mfeet + Vector2(0.7 * hm, -6.5 * hm)
-			var catchL := mfeet + Vector2(-1.35 * hm, -5.7 * hm)  # out and up to receive
-			var catchR := mfeet + Vector2(1.35 * hm, -5.7 * hm)
-			var throw_lift := clampf(1.0 - u * 2.6, 0.0, 1.0)      # settles back after release
-			var catch_lift := clampf((u - 0.5) * 2.8, 0.0, 1.0)    # fully out when the ball lands
-			# after the catch (u = 0.86) the catching hand CARRIES the ball up and
-			# across into its own windup, so the loop wraps with no teleport and the
-			# ball is visibly held between passes rather than flying forever
-			var carry := clampf((u - 0.86) / 0.14, 0.0, 1.0)
-			var handL: Vector2
-			var handR: Vector2
-			if right_first:
-				handR = restR.lerp(throwR, throw_lift)
-				handL = restL.lerp(catchL, catch_lift).lerp(throwL, carry)
-			else:
-				handL = restL.lerp(throwL, throw_lift)
-				handR = restR.lerp(catchR, catch_lift).lerp(throwR, carry)
-			draw_person(mfeet, 1.2, milo_pal(0), handL, handR, 0)
-			var frm := handR if right_first else handL
-			var to := handL if right_first else handR
-			var uf := minf(u / 0.86, 1.0)
-			var bp := frm.lerp(to, uf)
-			bp.y -= 150.0 * 4.0 * uf * (1.0 - uf)
-			draw_ball_shape(bp, ball_color(0), 1.1)
-			# Bruna watches from the shadowed edge, small and dim, no longer a black blob
-			var bfeet := Vector2(s.x * 0.15, fy)
-			draw_shadow(bfeet, 52.0)
-			draw_person(bfeet, 0.82, bruna_pal(), null, null, 1)
-		_:
-			draw_shadow(Vector2(s.x * 0.52, fy), 80.0)
-			var dj := demo_juggle(Vector2(s.x * 0.52, fy), 1.2, 3)
-			draw_person(Vector2(s.x * 0.52, fy), 1.2, milo_pal(0), dj["hl"], dj["hr"], 1)
-			for b in dj["balls"]:
-				draw_ball_shape(b["pos"], b["col"], 1.15)
-			var bfeet := Vector2(s.x * 0.16 + sin(ct * 0.02) * 2.0, fy)
-			draw_shadow(bfeet, 58.0)
-			draw_person(bfeet, 0.9, bruna_pal(), null, null, 1)
-
-
-func scene_street(s: Vector2, stage: int) -> void:
-	draw_venue_exterior(s, 1)
-	var fy := s.y * 0.80
-	match stage:
-		0:
-			draw_silhouette(Vector2(s.x * 0.78, fy), 0.9, Color(0.06, 0.05, 0.07))
-		1:
-			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, fy), 1.1, 3)
-			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(1), dj["hl"], dj["hr"], 0)
-			for b in dj["balls"]:
-				draw_ball_shape(b["pos"], b["col"], 1.1)
-			draw_silhouette(Vector2(s.x * 0.74, fy), 0.9, Color(0.06, 0.05, 0.07))
-		_:
-			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, fy), 1.1, 3)
-			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(1), dj["hl"], dj["hr"], 1)
-			for b in dj["balls"]:
-				draw_ball_shape(b["pos"], b["col"], 1.1)
-			draw_silhouette(Vector2(s.x * 0.72, fy), 0.9, Color(0.06, 0.05, 0.07))
-			# a coin arcs down into the hat by the lamp
-			var u := fposmod(float(cine_tick) / 132.0, 1.0)
-			var frm := Vector2(s.x * 0.72, fy - 120.0)
-			var to := Vector2(s.x * 0.32 + 46.0, fy - 2.0)
-			var cp := frm.lerp(to, u)
-			cp.y -= 120.0 * 4.0 * u * (1.0 - u)
-			fill_ellipse(cp, 6.0, 6.0, Color(1.0, 0.84, 0.4))
-			draw_circle(cp + Vector2(-2, -2), 2.0, Color(1.0, 0.95, 0.7))
-
-
-func scene_theatre(s: Vector2, stage: int) -> void:
-	match stage:
-		0:
-			draw_venue_exterior(s, 2)
-		1:
-			draw_curtain(s)
-			var fy := s.y * 0.82
-			draw_rect(Rect2(0, s.y * 0.62, s.x, s.y - s.y * 0.62), Color(0.14, 0.08, 0.06))
-			draw_spotlight_cone(s, s.x * 0.55, 0.14)
-			draw_shadow(Vector2(s.x * 0.55, fy), 80.0)
-			draw_person(Vector2(s.x * 0.55, fy), 1.15, silvio_pal(), Vector2(s.x * 0.55 - 20.0, fy - 90.0), Vector2(s.x * 0.55 + 78.0, fy - 60.0), 1)
-			draw_silhouette(Vector2(s.x * 0.08, fy - 6.0), 0.85, Color(0.04, 0.03, 0.04))
-			draw_rect(Rect2(0, 0, s.x * 0.10, s.y), Color(0.10, 0.02, 0.03))
-		_:
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.04, 0.05), Color(0.02, 0.01, 0.02), 18)
-			var fy := s.y * 0.82
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(s.x * 0.72, 0), Vector2(s.x, 0), Vector2(s.x, s.y), Vector2(s.x * 0.80, s.y)]), Color(1.0, 0.82, 0.45, 0.10))
-			draw_shadow(Vector2(s.x * 0.4, fy), 78.0)
-			draw_person(Vector2(s.x * 0.4, fy), 1.2, milo_pal(2), null, null, 0)
-
-
-func scene_circus(s: Vector2, stage: int) -> void:
-	match stage:
-		0:
-			draw_venue_exterior(s, 3)
-		1:
-			draw_ring_interior(s)
-			var fy := s.y * 0.82
-			for k in 5:
-				draw_silhouette(Vector2(s.x * (0.16 + 0.17 * float(k)), fy + 6.0), 0.7, Color(0.05, 0.04, 0.04))
-			draw_shadow(Vector2(s.x * 0.5, fy), 74.0)
-			draw_person(Vector2(s.x * 0.5, fy), 1.1, milo_pal(3), null, null, 1)
-			var gl := 0.6 + 0.4 * sin(float(cine_tick) * 0.09)
-			# a presented blade turns slowly enough to be READ as a blade
-			draw_knife(Vector2(s.x * 0.5, s.y * 0.34), float(cine_tick) * 0.035, 1.6)
-			draw_circle(Vector2(s.x * 0.5, s.y * 0.34), 10.0, Color(1.0, 1.0, 1.0, 0.3 * gl))
-		_:
-			draw_ring_interior(s)
-			var fy := s.y * 0.82
-			for k in 5:
-				draw_silhouette(Vector2(s.x * (0.14 + 0.18 * float(k)), fy + 8.0), 0.66, Color(0.05, 0.04, 0.04))
-			draw_shadow(Vector2(s.x * 0.5, fy), 76.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, fy), 1.15, 3, 92.0)
-			draw_person(Vector2(s.x * 0.5, fy), 1.15, milo_pal(3), dj["hl"], dj["hr"], 1)
-			for b in dj["balls"]:
-				# about one lazy flip per throw, real juggled-knife tumble
-				draw_knife(b["pos"], float(cine_tick) * 0.05, 1.4)
-
-
-func scene_champ(s: Vector2, stage: int) -> void:
-	match stage:
-		0:
-			draw_venue_exterior(s, 4)
-		1:
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
-			draw_scoreboard(s)
-			var fy := s.y * 0.84
-			draw_shadow(Vector2(s.x * 0.56, fy), 80.0)
-			# Silvio hoists the trophy
-			draw_person(Vector2(s.x * 0.56, fy), 1.15, silvio_pal(), Vector2(s.x * 0.56 - 40.0, fy - 168.0), Vector2(s.x * 0.56 + 40.0, fy - 168.0), 1)
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(s.x * 0.56 - 12.0, fy - 176.0), Vector2(s.x * 0.56 + 12.0, fy - 176.0),
-				Vector2(s.x * 0.56 + 6.0, fy - 196.0), Vector2(s.x * 0.56 - 6.0, fy - 196.0)]), Color(1.0, 0.85, 0.4))
-			draw_rect(Rect2(s.x * 0.56 - 4.0, fy - 176.0, 8.0, 10.0), Color(1.0, 0.85, 0.4))
-			draw_shadow(Vector2(s.x * 0.3, fy), 66.0)
-			draw_person(Vector2(s.x * 0.3, fy), 0.95, milo_pal(4), null, null, 0)
-		3:
-			# Silvio's fall: he lunges after a torch his gear threw wrong, and misses
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
-			draw_scoreboard(s)
-			var fy := s.y * 0.84
-			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
-			var rh := reach_hand(Vector2(s.x * 0.5, fy), 1.2, 1.0, Vector2(66.0, -78.0))
-			draw_person(Vector2(s.x * 0.5, fy), 1.2, silvio_pal(), null, rh, -1)
-			var u := fposmod(float(cine_tick) / 118.0, 1.0)
-			var fp := Vector2(s.x * 0.5 + 120.0, s.y * 0.26 + u * u * 320.0)
-			# the fall reads as a fall now, not a strobe: one slow second, gentle tumble
-			draw_torch(fp, float(cine_tick) * 0.08, 1.5)
-		4:
-			# Silvio stops Milo on the way out. No trophy, no boast this time: he
-			# stands close and quiet, the lie he has told himself finally cracked.
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
-			draw_scoreboard(s)
-			var fy := s.y * 0.84
-			draw_shadow(Vector2(s.x * 0.42, fy), 74.0)
-			draw_shadow(Vector2(s.x * 0.58, fy), 74.0)
-			draw_person(Vector2(s.x * 0.42, fy), 1.1, milo_pal(4), null, null, 0)
-			draw_person(Vector2(s.x * 0.58, fy), 1.1, silvio_pal(), null, null, -1)
-		_:
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
-			draw_scoreboard(s)
-			var fy := s.y * 0.84
-			draw_shadow(Vector2(s.x * 0.5, fy), 80.0)
-			draw_person(Vector2(s.x * 0.5, fy), 1.2, milo_pal(4), null, null, 0)
-
-
-func scene_arena(s: Vector2, stage: int) -> void:
-	match stage:
-		0:
-			draw_venue_exterior(s, 5)
-		3:
-			# the finale: five torches, the biggest crowd, Silvio seated in the stands
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.06, 0.04, 0.10), 18)
-			var gy := s.y * 0.84
-			for i in 130:
-				var seed := float(i) * 13.7
-				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.94
-				var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.34 - 18.0
-				var a := 0.35 + 0.45 * sin(float(cine_tick) * 0.05 + seed)
-				draw_circle(Vector2(x, y), 1.7, Color(1.0, 0.82, 0.52, clampf(a, 0.12, 0.8)))
-			draw_silhouette(Vector2(s.x * 0.13, gy - 4.0), 0.6, Color(0.05, 0.04, 0.05))   # Silvio, watching
-			draw_spotlight_cone(s, s.x * 0.5, 0.17)
-			draw_shadow(Vector2(s.x * 0.5, gy), 90.0)
-			var djf := demo_juggle(Vector2(s.x * 0.5, gy), 1.3, 5, 80.0)
-			draw_person(Vector2(s.x * 0.5, gy), 1.3, milo_pal(5), djf["hl"], djf["hr"], 1)
-			for b in djf["balls"]:
-				draw_torch(b["pos"], float(cine_tick) * 0.06, 1.4)
-			draw_circle(Vector2(s.x * 0.5, s.y * 0.46), 240.0, Color(1.0, 0.9, 0.6, 0.07))
-		_:
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.06, 0.04, 0.10), 18)
-			var gy := s.y * 0.84
-			for i in 90:
-				var seed := float(i) * 13.7
-				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.9
-				var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.30 - 20.0
-				var a := 0.3 + 0.4 * sin(float(cine_tick) * 0.05 + seed)
-				draw_circle(Vector2(x, y), 1.6, Color(1.0, 0.8, 0.5, clampf(a, 0.1, 0.7)))
-			draw_spotlight_cone(s, s.x * 0.5, 0.12 + (0.05 if stage == 2 else 0.0))
-			draw_shadow(Vector2(s.x * 0.5, gy), 84.0)
-			var dj := demo_juggle(Vector2(s.x * 0.5, gy), 1.25, 5, 80.0)
-			draw_person(Vector2(s.x * 0.5, gy), 1.25, milo_pal(5), dj["hl"], dj["hr"], 1)
-			for b in dj["balls"]:
-				draw_ball_shape(b["pos"], b["col"], 1.2)
-			if stage == 2:
-				draw_circle(Vector2(s.x * 0.5, s.y * 0.48), 200.0, Color(1.0, 0.9, 0.6, 0.05))
-
-
-# -----------------------------------------------------------------------------
-# Dev-only auto-player. Drives a scripted opening so headless runs and the
-# --shot capture show real juggling (real arcs, real choreography) to verify.
-# -----------------------------------------------------------------------------
 
 func _demo_step() -> void:
 	# auto-catch: secure any ball arriving at an empty hand
