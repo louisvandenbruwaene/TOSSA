@@ -110,6 +110,11 @@ const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
 # or catching, so it stays on the comfort axis and never touches the skill floor.
 const REP_PAY_DIV := 400.0    # pay multiplier = 1 + reputation / REP_PAY_DIV
 const REP_SWING := 60         # reputation gained by a great set, lost by a poor one
+const PURIST_BONUS := 1.4     # Purist pay and reputation both get this multiplier: a
+							   # Purist set is objectively harder to run clean (catch
+							   # chance capped as if Accuracy were 5), so without a real
+							   # reward there was no reason to ever book one over an
+							   # assisted set. High risk should mean high reward.
 const START_GOLD := 100       # a fresh juggler starts with a small purse (ideas.rtf)
 
 # --- Focus: Accuracy trained past 100 (GDD "Focus"). The overflow eases the
@@ -175,7 +180,9 @@ const PROPS := [
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
 
 # --- shop: spend gold on props and gear (ideas.rtf shop) ----------------------
-const GLASSES_COST := 5000
+const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling (Section 1
+								# of README.md): priced as the capstone purchase it now
+								# functionally is, not a minor bonus on an already-full curve
 const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
 
 # input map (physical keycodes; a real remap layer comes with the options menu)
@@ -527,6 +534,23 @@ func _ready() -> void:
 	#   --demo         run the headless auto-player (for verifying choreography)
 	#   --shot <path>  capture one frame to <path> then quit
 	var ua := OS.get_cmdline_user_args()
+	load_settings()
+	setup_font()
+	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
+	Input.joy_connection_changed.connect(_on_joy_connection)
+	if set_fullscreen:
+		apply_fullscreen()                       # honour the remembered display mode
+	setup_audio()                                # synthesise all sound at startup
+	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
+	if not OS.is_debug_build():
+		# a real release export (what ships to players): none of the dev flags
+		# below can ever parse, no matter what a player passes on the command
+		# line. --debug in particular grants free stat editing and story-jump
+		# shortcuts, which must never be reachable in a shipped build. Editor
+		# runs and debug-template exports (this project's own screenshot and
+		# test workflow) are unaffected, since is_debug_build() is true there.
+		game_state = ST_MENU
+		return
 	if ua.has("--demo"):
 		_demo = true
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
@@ -538,19 +562,11 @@ func _ready() -> void:
 	var sa := ua.find("--shotat")   # dev: capture at frame N (to test late transitions)
 	if sa != -1 and sa + 1 < ua.size():
 		_shot_tick = int(ua[sa + 1])
-	load_settings()
-	setup_font()
-	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
-	Input.joy_connection_changed.connect(_on_joy_connection)
-	if set_fullscreen:
-		apply_fullscreen()                       # honour the remembered display mode
-	setup_audio()                                # synthesise all sound at startup
 	var da := ua.find("--dumpaudio")             # dev: write every sound to <dir>, then quit
 	if da != -1 and da + 1 < ua.size():
 		dump_audio(ua[da + 1])
 		get_tree().quit()
 		return
-	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
 	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
@@ -2619,7 +2635,7 @@ func do_throw(h: int, hold: int) -> void:
 	# tick, scaled by weight (Louis: five clubs need real height to fit in the
 	# air). Balls and eggs are untouched, and being under-strength still sags.
 	if prop_req() > 0 and weight > 1 and deficit <= 0.0:
-		gain_mult *= 1.0 + STRENGTH_LOFT * clampf(float(strength) / float(prop_req()) - 1.0, 0.0, 1.0) * float(weight - 1) / 4.0
+		gain_mult *= 1.0 + STRENGTH_LOFT * strength_surplus() * float(weight - 1) / 4.0
 	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
 	# a primed trick reshapes this ONE throw before we roll its accuracy, so a High Toss
@@ -2969,14 +2985,17 @@ func on_round_end() -> void:
 		# reputation swings on the show's quality: clean play carries it, the
 		# crowd's high point tops it up. A sloppy set drags it down.
 		var quality := clampf(0.7 * clean + 0.3 * peak_applause, 0.0, 1.0)
-		var rep_delta := int(round((quality - 0.5) * float(REP_SWING)))
+		var purist_mult := PURIST_BONUS if purist else 1.0
+		var rep_delta := int(round((quality - 0.5) * float(REP_SWING) * purist_mult))
 		reputation = maxi(0, reputation + rep_delta)
 		last_rep_delta = rep_delta
 		# a grander stage pays more for the same set (the climb is worth money),
 		# and a broke juggler always leaves with SOMETHING in the hat, so debt is
-		# tension rather than a dead end (GDD 4.4 busking floor)
+		# tension rather than a dead end (GDD 4.4 busking floor). A Purist set
+		# pays a real premium (PURIST_BONUS): it is only worth it if the skill
+		# is really there to back it up, since the catch odds are brutal.
 		var venue_mult := 1.0 + VENUE_PAY * float(run_venue)
-		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult() * venue_mult))
+		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult() * venue_mult * purist_mult))
 		if money < BROKE_GOLD and caught > 0:
 			last_pay = maxi(last_pay, BUSK_FLOOR)
 		money += last_pay
@@ -3083,6 +3102,19 @@ func catch_chance(quality: int, height: float) -> float:
 	return clampf(p, MIN_CATCH_P, 1.0)
 
 
+func strength_surplus() -> float:
+	# how far Strength exceeds the CURRENT prop's requirement, as a fraction of
+	# the remaining room up to the stat's own cap (100), not a fixed multiple
+	# of the requirement. A fixed multiple (the old 2x-req rule) meant every
+	# point of Strength past 96 (double a Torch's 48) did nothing at all;
+	# scaling against the stat's real ceiling instead means surplus Strength
+	# keeps paying out, however slightly, all the way to 100, for every prop.
+	var req := prop_req()
+	if req <= 0 or strength <= req:
+		return 0.0
+	return clampf((float(strength) - float(req)) / maxf(1.0, 100.0 - float(req)), 0.0, 1.0)
+
+
 func strength_catch_mod() -> float:
 	# How Strength changes the catch of the CURRENT prop. Light props (balls, eggs) are
 	# unaffected. For a heavy prop, being well OVER its Required Strength steadies it and
@@ -3093,7 +3125,9 @@ func strength_catch_mod() -> float:
 	var req := prop_req()
 	if w <= 0 or req <= 0:
 		return 0.0
-	var ratio := clampf(float(strength) / float(req) - 1.0, -1.0, 1.0)   # -1 hopeless, 0 just enough, +1 double
+	if strength > req:
+		return strength_surplus() * float(w) * STRENGTH_CATCH
+	var ratio := clampf(float(strength) / float(req) - 1.0, -1.0, 0.0)   # -1 hopeless, 0 just enough
 	return ratio * float(w) * STRENGTH_CATCH
 
 

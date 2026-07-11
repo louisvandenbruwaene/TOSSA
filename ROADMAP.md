@@ -105,15 +105,33 @@ finale has been seen), and a small post-finale state so the world acknowledges
 the record: a FINALE banner on the save slot, maybe a golden tint on the arena.
 Slow motion as the reward state stays deferred.
 
-## 7. Steam packaging - presets and icons BUILT 2026-07-10, Steamworks still open
+## 7. Steam packaging - export pipeline verified end to end 2026-07-11, Steamworks still open
 
-Landed: export_presets.cfg with macOS, Windows and Linux presets, and real
-icons at export sizes (export/icons: 1024 png, .icns, .ico, rendered from
-icon.svg). Louis still needs to install the export templates once in the
-editor (Editor menu, Manage Export Templates) before the first real export,
-since templates are not on this machine. Louis's Suno cover jpeg could seed
-the Steam capsule art. Still open: Steamworks (achievements, cloud saves,
-leaderboards for the Purist boards).
+Landed: export_presets.cfg with macOS, Windows and Linux presets, real icons
+at export sizes (export/icons: 1024 png, .icns, a properly multi-resolution
+.ico), the 4.7 export templates installed, and the ETC2/ASTC project setting
+the macOS universal build needs. All three platforms now export cleanly with
+zero warnings, verified by actually running the exports, not just reading
+the presets. Checked what actually ships: only compiled bytecode (Game.gdc)
+is packed, never the readable .gd source, and none of GDD/STORY/ROADMAP/
+tasks.md/ideas.rtf get bundled in either - confirmed by inspecting the real
+pack file listing.
+
+One real fix landed here too: every `--demo`/`--debug`/`--sheet`/`--shop`/
+etc. dev flag is now gated behind `OS.is_debug_build()` in `_ready()`, so a
+release export (what actually ships) ignores all of them unconditionally -
+before this, `--debug` on the shipped game would have granted free stat
+editing and F1-F10 story-jump shortcuts to anyone who tried it. Editor runs
+and debug-template exports (Louis's own screenshot/testing workflow) are
+unaffected, since `is_debug_build()` is true there.
+
+macOS is not code-signed or notarized (needs an Apple Developer account,
+$99/year) and Windows is unsigned too (SmartScreen will warn on first run,
+self-resolving with enough downloads or fixable with a paid cert) - neither
+blocks export or Louis's own testing, both are packaging polish for public
+distribution. Louis's Suno cover jpeg could seed the Steam capsule art.
+Still open: Steamworks (achievements, cloud saves, leaderboards for the
+Purist boards).
 
 Export presets for macOS, Windows and Linux. Pause when the window loses
 focus. Capsule and library art (this realistically cannot be code-only).
