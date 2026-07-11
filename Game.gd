@@ -4478,7 +4478,8 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 func draw_trick_hud(font: Font, s: Vector2) -> void:
 	# the loaded one-shot: which trick Space is carrying, and whether it is primed.
 	# READY burns gold so the player always knows the next throw is the trick shot.
-	var y := s.y - 132.0
+	# Sits bottom-RIGHT, mirroring the venue/prop card bottom-left, so the two share
+	# the foot of the stage evenly instead of the trick card floating mid-screen.
 	var un := unlocked_tricks()
 	var sel := trick_sel if trick_sel >= 0 and trick_unlocked(trick_sel) else int(un[0])
 	var kind := String(TRICKS[sel]["kind"])
@@ -4494,8 +4495,11 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 		# some other toggle keeps running while a different trick is selected
 		label += "   (%s on)" % String(TRICKS[toggle_on]["name"]).to_lower()
 	var lc := Color(1.0, 0.86, 0.5) if hot else Color(0.72, 0.66, 0.78, 0.85)
-	hud_panel(Rect2(s.x * 0.5 - 160.0, y - 20.0, 320.0, 56.0))
-	draw_string(font, Vector2(s.x * 0.5 - 150.0, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
+	var pw := 330.0
+	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
+	var cx := px + pw * 0.5
+	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0))
+	draw_string(font, Vector2(px + 10.0, s.y - 52.0), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, pw - 20.0, 16, lc)
 	var items: Array = []
 	var use := ""
 	match kind:
@@ -4510,7 +4514,7 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	items.append([k_trick(), use])
 	if un.size() > 1:
 		items.append([k_cycle(), "switch trick"])
-	draw_hints_row(font, s.x * 0.5, y + 8.0, items)
+	draw_hints_row(font, cx, s.y - 40.0, items)
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -4697,9 +4701,11 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var col_r := px + pw * 0.52
 	var colw := pw * 0.44
 	var row_h := 46.0
-	var y0 := py + 126.0
-	draw_string(font, Vector2(col_l, y0 - 22.0), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(col_r, y0 - 22.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	var y0 := py + 132.0
+	# the headers sit well ABOVE the first row so the selection highlight (which
+	# reaches ~23px above a row's baseline) never touches the TRICKS / PATTERNS label
+	draw_string(font, Vector2(col_l, y0 - 42.0), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_r, y0 - 42.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
 	for i in nt:
 		var td: Dictionary = TRICKS[i]
 		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), int(td["lvl"]), trick_unlocked(i), i == skills_sel)
