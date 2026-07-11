@@ -1,5 +1,12 @@
 # JUGGLE: Roadmap to a sellable 1.0
 
+SHIP BLOCKER, checked 2026-07-11: Juggling Game.mp3's file date and its git
+history both still say 2026-07-10, the day it was added as a free-tier Suno
+NON-COMMERCIAL render (item 5). Nothing suggests the paid-tier re-render has
+happened yet. Do not export a build for anyone outside Louis's own testing
+until that file has been replaced. Game.gd carries the same warning next to
+MUSIC_PATH.
+
 Work queue agreed 2026-07-10, ordered by how much each item matters to a ten
 dollar Steam release. Each item is meant to be a self-contained session or less.
 Strike items through as they land on main.
@@ -31,15 +38,25 @@ rather than a dead end. Keep it light and forgiving per the GDD guardrails: a
 rhythm and a set of stakes, never a spreadsheet chore. This is the one item the
 game should not ship without.
 
-## 2. Content depth
+## 2. Content depth - MOSTLY BUILT, one piece still open (checked 2026-07-11)
 
-Three tricks, six venues, six props: a paying player sees everything in a few
-hours. Wanted: more patterns as learnable content (columns, shower, half
-shower, Mills Mess as a short learned sequence), the Purist boards from the GDD
-(stat mitigation stripped, pure skill ladder), and something that makes records
-a live goal, a challenge or daily format built on the per-venue records that
-already exist. Reward variety per the GDD economy notes, so farming one tamed
-routine is not optimal.
+Most of what this item asked for is already in Game.gd and this entry was
+stale: five learnable patterns (cascade, fountain, columns, half shower,
+shower, unlocking by level, PATTERNS table), eight tricks across three input
+grammars (arm one-shots, the live Spin, and toggles like Columns/Waterfall/
+Reverse Cascade/Tennis), the Purist boards (a separate best_scores_purist
+table, stat mitigation stripped in eff_accuracy/catch_chance/perfect_window),
+and per-venue records that flash NEW RECORD mid-run. Six playable venue tiers
+(Backyard through World Arena), each with its own palette and costume, plus
+three endgame story chapters (rival, record, finale) layered on top by
+reputation once the arena is reached.
+
+Still genuinely open: no repeatable challenge format exists yet (no daily
+seed, no rotating routine-of-the-day) to make the per-venue records a LIVE
+goal rather than a personal best you set once and rarely revisit. This is the
+real remaining ask from this item. Mills Mess, sketched as an example trick in
+GDD 6.3, was never built either, if a learned multi-throw sequence still
+sounds worth adding.
 
 ## 3. Controller support and key remapping - FULLY BUILT 2026-07-10 (remap screen landed same day)
 
