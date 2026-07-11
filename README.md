@@ -162,9 +162,15 @@ caps at 250).
 - Being well **over** a heavy prop's requirement helps in two ways: it lofts
   height a little higher per held tick (`STRENGTH_LOFT`, scaled by the
   prop's weight), and it eases the off-Perfect catch chance directly via
-  `strength_catch_mod()`: `ratio = clamp(strength/req - 1, -1, 1)`, effect =
+  `strength_catch_mod()`, both scaled by `strength_surplus()`:
+  `ratio = clamp((strength - req) / (100 - req), 0, 1)`, effect =
   `ratio * (weight - 1) * 0.05` (`STRENGTH_CATCH`) added to `catch_chance()`.
-  Balls and eggs (weight 1) are untouched either way.
+  Balls and eggs (weight 1) are untouched either way. This ratio is scaled
+  against the stat's real ceiling (100), not a fixed multiple of the prop's
+  requirement, specifically so no prop makes Strength go fully dead before
+  the stat itself caps - a Torch (req 48) still saturates sooner in absolute
+  terms than a Ring (req 12), but every point up to 100 keeps paying out
+  something for whatever you're carrying.
 
 ### Endurance (1 to 100)
 
@@ -255,6 +261,13 @@ Toggle with P in the day hub before you book a performance. A Purist set:
   those come from skill in the moment, not from a stat you leveled once.
 - Writes to a separate `best_scores_purist` record table per venue, shown
   alongside the assisted board on the Records and History screen.
+- **Pays a real premium**: both pay and reputation gain are multiplied by
+  `PURIST_BONUS` (1.4). Without this a Purist set paid exactly the same as
+  an assisted one for objectively harder execution, which meant there was
+  no economic reason to ever book one. Because the catch odds are so much
+  worse under Purist rules, the bonus is only actually profitable once your
+  raw skill is good enough to keep the set clean anyway - it rewards
+  mastery, it doesn't substitute for it.
 
 ---
 
@@ -275,9 +288,10 @@ Being under a prop's Required Strength is what makes it sag and wobble
 (Section 3); being at or over it, a heavy prop throws exactly as cleanly as
 a ball.
 
-Glasses (5000g) add a flat 0.20 to the off-Perfect catch chance
-(`GLASSES_CATCH_BONUS`), skipped on Purist bookings. This is the only way to
-reach a 100% Good catch or an 80% Late catch (Section 1) - without them
+Glasses (8000g, the single most expensive item in the shop) add a flat 0.20
+to the off-Perfect catch chance (`GLASSES_CATCH_BONUS`), skipped on Purist
+bookings. This is the only way to reach a 100% Good catch or an 80% Late
+catch (Section 1) - without them
 those ceilings sit at 80% and 60%. Uncle Dan's Pie (1000g)
 buys 0.25 slow motion for the rest of the day, also skipped on Purist.
 
@@ -288,21 +302,23 @@ buys 0.25 slow motion for the rest of the day, also skipped on Purist.
 ### Pay
 
 ```
-diff       = 1 + 0.25 * (num_balls - 3)
-venue_mult = 1 + 0.35 * run_venue                # VENUE_PAY, venue index 0-5
+diff        = 1 + 0.25 * (num_balls - 3)
+venue_mult  = 1 + 0.35 * run_venue               # VENUE_PAY, venue index 0-5
+purist_mult = 1.4 if purist else 1.0             # PURIST_BONUS
 last_pay = round((caught * 1.2 + best_streak * 2.0) * run_clean() * diff
-                 * pay_mult() * venue_mult)
+                 * pay_mult() * venue_mult * purist_mult)
 pay_mult() = 1 + reputation / 400                # REP_PAY_DIV
 ```
 If your purse is under 20 gold (`BROKE_GOLD`) and you caught at least one
 prop, pay is floored at 8 gold (`BUSK_FLOOR`) - the busking floor that keeps
-debt as tension rather than a dead end.
+debt as tension rather than a dead end. That floor is not scaled by the
+Purist bonus, so busking never becomes a Purist-farming exploit.
 
 ### Reputation
 
 ```
 quality   = 0.7 * run_clean() + 0.3 * peak_applause
-rep_delta = round((quality - 0.5) * 60)          # REP_SWING
+rep_delta = round((quality - 0.5) * 60 * purist_mult)   # REP_SWING, PURIST_BONUS
 reputation = max(0, reputation + rep_delta)
 ```
 A quality of exactly 0.5 (middling) is a wash. Above it you gain, below it
