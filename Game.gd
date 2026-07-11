@@ -2586,7 +2586,9 @@ func do_throw(h: int, hold: int) -> void:
 	# ball removed), one ball renders as a middle lane, so the pattern reads as a
 	# genuinely symmetric left / middle / right instead of a lopsided double lane.
 	var mid_ball := false
+	var was_mid := false   # already the marked middle ball BEFORE this throw (its 2nd+ throw)
 	if lanes and num_balls % 2 == 1:
+		was_mid = col_mid_ball == b
 		if col_mid_ball == null or not balls.has(col_mid_ball):
 			col_mid_ball = b   # the first ball thrown once lanes engage claims the middle
 		mid_ball = b == col_mid_ball
@@ -2602,11 +2604,16 @@ func do_throw(h: int, hold: int) -> void:
 	if mid_ball:
 		cross = false
 	b.to_hand = other(h) if cross else h
-	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
+	# always launch from wherever the ball is actually sitting: a lane or normal
+	# ball rests pulled in at inner_pos while held, but the middle ball rests at
+	# stage center (see draw_hand) - EXCEPT on the very throw that first marks it
+	# as the middle ball, when it has only ever been held at the normal inner_pos
+	# and has no center position yet to launch from.
+	b.from_pos = stage_center() if (mid_ball and was_mid) else inner_pos(h)
 	if lanes:
 		b.to_pos = b.from_pos + Vector2(drift, 0.0)   # straight up and down in the lane
 	elif mid_ball:
-		b.to_pos = Vector2(stage_center().x, b.from_pos.y) + Vector2(drift, 0.0)   # flat pass through the middle
+		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	else:
 		var wide := (26.0 if b.to_hand == RIGHT else -26.0) if over_top else 0.0
 		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + wide, 0.0)
@@ -3961,10 +3968,13 @@ func draw_hand(h: int) -> void:
 	fill_ellipse(pos + Vector2(inward * openf * 1.5, -stretch * 0.5), 11.5, 11.5 + stretch, sk)
 	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
 
-	# held ball(s) rest in the palm
+	# held ball(s) rest in the palm - except the Columns middle ball, which rests
+	# at stage center even while held, so it never hops between its held spot and
+	# where it actually lands/launches (see the from_pos comment in do_throw)
 	var st := stack(h)
 	for i in st.size():
-		draw_prop(st[i], pos + Vector2(0, -3 - float(i) * 6.0))
+		var bp := stage_center() if st[i] == col_mid_ball else pos
+		draw_prop(st[i], bp + Vector2(0, -3 - float(i) * 6.0))
 
 
 func draw_targets() -> void:
