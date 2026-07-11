@@ -463,6 +463,10 @@ var _sfx_next := 0
 # to the code-only art rule, alongside the font). One looping stream, and the game
 # rides its VOLUME per state: full while a performance cooks, easy in menus, a
 # hush under cutscenes, a dip on a drop. All in-game SFX stay procedural.
+# SHIP BLOCKER (see ART_AND_MUSIC.md Section 7): this file is a free-tier Suno
+# render, non-commercial only, until Louis re-renders it under a paid Suno
+# subscription and replaces this file under the same name. Do not release a
+# build to anyone outside personal testing while this warning is still here.
 const MUSIC_PATH := "res://Juggling Game.mp3"
 var mus: AudioStreamPlayer
 var _vol := {"mus": -80.0}
@@ -1223,21 +1227,21 @@ func day_anim_step() -> void:
 			save_progress()
 		"inn":
 			money -= INN_COST   # full price, always (the row blocks when short)
-			sleep_day(1.0)
+			sleep_day()
 		"shop":
 			shop_open = true
 			play_sfx("ui2", -13.0)
 
 
-func sleep_day(frac: float) -> void:
-	# the day turns over: segments refill and stamina comes back by how well you
-	# slept. Sleeping rough never DRAINS you, it just fails to top you up fully.
+func sleep_day() -> void:
+	# the day turns over: segments refill and stamina comes back full. Sleeping
+	# rough was cut (Louis): the inn is the only bed, full price, full rest.
 	day += 1
 	seg_used = 0
 	pie_active = false   # the pie's clarity wears off with sleep
 	career["days"] = maxi(int(career["days"]), day)
-	stamina = maxf(stamina, stamina_max * frac)
-	set_day_msg("day %d  -  %s" % [day, "you wake rested" if frac >= 1.0 else "a stiff back, but a new day"])
+	stamina = stamina_max
+	set_day_msg("day %d  -  you wake rested" % day)
 	play_sfx("streak", -9.0)
 	save_progress()
 
