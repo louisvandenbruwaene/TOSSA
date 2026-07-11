@@ -120,52 +120,26 @@ neighbors.
 
 ---
 
-## 3. Two cutscene shots stage the wrong (or no) character for their dialogue
+## 3. Two cutscene shots stage the wrong (or no) character for their dialogue - FIXED 2026-07-11, not screenshot-verified
 
-Found during a full read-through of Game.gd on 2026-07-11 (every function has
-now been read at least once; nothing else turned up a correctness bug). Not
-blocked on an account or Louis's taste, just left undone because fixing a
-figure's pose blind, without the windowed screenshot loop this project always
-uses to verify character staging, risks producing something that reads worse
-than the placeholder it replaces — every prior pose fix in this file's history
-took a few iterate-and-screenshot passes to land.
+Found during a full read-through of Game.gd on 2026-07-11. `cutscene_script(
+"rival")`'s third shot put a line in Silvio's mouth on a stage where
+`scene_champ` drew nobody but Milo (no case 2, wildcard fallback); the
+`"finale")` beat's closing shot described Bruna handing back the balls but
+played a generic juggling wildcard instead. Fixed by giving the rival line
+its own stage (`scene_champ` case 4: both figures present, Silvio subdued,
+mood -1) and pointing the finale's closing shot at the intro's own opening
+offering pose (`scene_backyard` stage 0) rather than inventing a new one, so
+the last shot is deliberately the same gesture as the first.
 
-### The two shots
-1. **`cutscene_script("rival")`, third shot** (Game.gd, `cutscene_script`
-   around the `"rival"` case): `"who": "Silvio"`, and the caption has him
-   physically stopping Milo on the way out to say "She really never dropped,
-   did she." The shot plays on `scene_champ(s, 2)`. `scene_champ` (Game.gd)
-   has explicit cases for stage 0, 1, and 3, but no case 2 — it falls through
-   to the `_:` wildcard, which draws `milo_pal(4)` alone with no second figure
-   at all. Silvio is speaking a line on an empty stage.
-2. **`cutscene_script("finale")`, fourth shot**: Bruna's caption describes her
-   physically pressing the three balls back into Milo's hands ("in the yard
-   where it started"). The shot plays on `scene_backyard(s, 3)`, which has no
-   explicit case 3 either and falls to the same `_:` wildcard used at the
-   close of the `"intro"` beat: Milo demo-juggling while Bruna watches from
-   the side. It's a fine shot for "Bruna proudly watching," which is what the
-   intro needed, but it does not stage the handoff the finale's line describes.
-
-### Why this slipped past the earlier audit
-ROADMAP item 9's cutscene pass audited shots for motion quality (arm angles,
-ball placement, cadence) by looking at each tableau on its own. Both of these
-tableaux look fine in isolation — the bug only shows up when you cross-check
-the shot's `"who"`/caption against which characters are actually drawn, which
-a visual-only pass naturally skips.
-
-### Suggested fix
-Give `scene_champ` an explicit `2:` case that stages Silvio (use the
-`silvio_pal()` + a `reach_hand`-style pose already used in `scene_champ`
-stage 1 and `scene_theatre` stage 1 as reference) actually facing Milo, mood
--1 or a tired/resigned expression rather than his usual smug one. For the
-finale, give `scene_backyard` an explicit `3:` case where Bruna's hand
-extends toward Milo's with the three balls between them (the intro's stage 0
-"offering" pose, with `bruna_pal()` and the cradled-ball drawing from that
-same shot, is the closest existing reference — this is closing the same
-gesture the story opened with).
-
-Verify with the project's own established loop, windowed (not headless,
-which cannot grab the framebuffer): `godot --path . --cutscene rival --csn 2
---shotat 200 --shot /tmp/rival2.png` and `godot --path . --cutscene finale
---csn 3 --shotat 200 --shot /tmp/finale3.png`, then look at the PNGs before
-committing.
+**Not verified by screenshot**: this session's sandbox could not reliably
+run Godot's windowed capture (the `--cutscene <id> --csn <n> --shotat <frame>
+--shot <path>` loop this project normally uses) - two attempts exited
+instantly with no file, a third hung indefinitely and was killed. The fix
+was reasoned through code only: no new stage index collides with an existing
+beat's use of the same `scene_champ`/`scene_backyard` function, and the new
+Silvio pose reuses the exact `silvio_pal()` + null-hand relaxed stance
+pattern already proven in `scene_champ` stage 1, just repositioned. Worth a
+quick look next time Louis is at the game (`--cutscene rival --csn 2` and
+`--cutscene finale --csn 3`), same as any other pose change in this file's
+history.
