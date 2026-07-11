@@ -141,7 +141,7 @@ const PATTERNS := [
 	{"id": "fountain",   "name": "Fountain",    "lvl": 1, "mult": 1.1,
 	 "desc": "Each hand juggles its own circle. Even counts feel natural."},
 	{"id": "columns",    "name": "Columns",     "lvl": 3, "mult": 1.15,
-	 "desc": "Straight up and down in fixed lanes; an odd count feeds one ball through the middle. Clean or nothing."},
+	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 5, "mult": 1.25,
 	 "desc": "The right hand throws over the top, the left keeps the weave."},
 	{"id": "shower",     "name": "Shower",      "lvl": 8, "mult": 1.4,
@@ -233,7 +233,7 @@ const TRICKS := [
 	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 3, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
 	{"id": "cols", "name": "Columns",          "kind": "toggle", "lvl": 5, "min_air": 0, "bonus": 30,  "shout": "columns",
-	 "desc": "Toggle: every ball rides its own straight lane - an odd count feeds one through the middle."},
+	 "desc": "Toggle: every ball rides its own straight lane - an odd count opens a middle lane too."},
 	{"id": "wfall", "name": "Waterfall",       "kind": "toggle", "lvl": 6, "min_air": 0, "bonus": 45,  "shout": "waterfall",
 	 "desc": "Toggle: the right hand keeps throwing over the top."},
 	{"id": "rcasc", "name": "Reverse Cascade", "kind": "toggle", "lvl": 9, "min_air": 0, "bonus": 60,  "shout": "reverse!",
@@ -2583,8 +2583,8 @@ func do_throw(h: int, hold: int) -> void:
 	var lanes := col_lanes
 	# an odd ball count cannot split evenly into two lanes: rather than just piling
 	# the extra ball into one side (the same look as a four-ball columns with one
-	# ball removed), one ball becomes a middle feed, fed hand-to-hand across the
-	# body, so the pattern reads as a genuinely symmetric left / middle / right.
+	# ball removed), one ball renders as a middle lane, so the pattern reads as a
+	# genuinely symmetric left / middle / right instead of a lopsided double lane.
 	var mid_ball := false
 	if lanes and num_balls % 2 == 1:
 		if col_mid_ball == null or not balls.has(col_mid_ball):
@@ -2592,8 +2592,14 @@ func do_throw(h: int, hold: int) -> void:
 		mid_ball = b == col_mid_ball
 		if mid_ball:
 			lanes = false
-			cross = true
 	if lanes:
+		cross = false
+	# the middle ball still never crosses hands: it stays with whichever hand first
+	# threw it (same as a lane ball), just rendered at center. Crossing it to the
+	# OTHER hand would race it against that hand's own permanent lane ball for the
+	# same catch slot, and a hand can only ever catch into an empty stack, so
+	# whichever of the two landed second became literally uncatchable.
+	if mid_ball:
 		cross = false
 	b.to_hand = other(h) if cross else h
 	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
