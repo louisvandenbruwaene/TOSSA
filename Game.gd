@@ -194,29 +194,53 @@ const REMAP_ACTS := [
 # hand animation
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
 
-# --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space), which
-# works like a ONE-SHOT POWERUP. C selects which trick Space is loaded with (the
-# selection persists), then every single use costs its own Space press: for an arm
-# trick (High Toss, Behind the Back) Space empowers exactly the next throw and then
-# disarms itself; for the live Spin, Space performs the spin on the balls already
-# airborne. Each lands for a scoring and Applause bonus and each carries real risk,
-# so a trick is a skill choice, never a free bonus. Tricks unlock by level, so the
-# flourishes arrive as the meta deepens.
+# --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space). C
+# selects which trick Space is loaded with (the selection persists). THREE
+# grammars now (Louis): "arm" is the one-shot powerup, one press empowers exactly
+# the next throw; "live" acts on the balls already airborne (Spin); "toggle"
+# switches ON with one press and OFF with the next, smoothly reshaping every
+# throw in between (columns lanes, over-the-top arcs). Each landed shaped catch
+# pays its bonus, so a trick is a skill choice, never a free bonus. Tricks
+# unlock by level, so the flourishes arrive as the meta deepens.
 const TR_HIGH := 0
 const TR_BTB := 1
 const TR_SPIN := 2
+const TR_OVER := 3
+const TR_COLS := 4
+const TR_WFALL := 5
+const TR_RCASC := 6
+const TR_TENNIS := 7
 const TRICKS := [
-	{"id": "high", "name": "High Toss",        "kind": "arm",  "lvl": 2, "min_air": 0,
+	{"id": "high", "name": "High Toss",        "kind": "arm",    "lvl": 2, "min_air": 0, "bonus": 260, "shout": "HIGH TOSS!",
 	 "desc": "Power one throw sky high. Land the catch for a burst of applause."},
-	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",  "lvl": 4, "min_air": 0,
+	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",    "lvl": 4, "min_air": 0, "bonus": 150, "shout": "BEHIND THE BACK!",
 	 "desc": "Power one showy behind-the-back throw. Style the crowd loves, if you land it."},
-	{"id": "spin", "name": "Spin",             "kind": "live", "lvl": 7, "min_air": 2,
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 7, "min_air": 2, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin while everything is airborne. Catches score double, you catch blind."},
+	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 3, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
+	 "desc": "Power one throw up and OVER the top of the pattern."},
+	{"id": "cols", "name": "Columns",          "kind": "toggle", "lvl": 5, "min_air": 0, "bonus": 30,  "shout": "columns",
+	 "desc": "Toggle: every ball rides straight up and down its own lane."},
+	{"id": "wfall", "name": "Waterfall",       "kind": "toggle", "lvl": 6, "min_air": 0, "bonus": 45,  "shout": "waterfall",
+	 "desc": "Toggle: the right hand keeps throwing over the top."},
+	{"id": "rcasc", "name": "Reverse Cascade", "kind": "toggle", "lvl": 9, "min_air": 0, "bonus": 60,  "shout": "reverse!",
+	 "desc": "Toggle: BOTH hands throw over the top, the weave runs backward."},
+	{"id": "tennis", "name": "Tennis",         "kind": "toggle", "lvl": 10, "min_air": 0, "bonus": 50, "shout": "tennis",
+	 "desc": "Toggle: one marked ball sails over the top, back and forth."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
 const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
-const HIGH_BONUS := 260            # score for landing a High Toss cleanly
-const BTB_BONUS := 150             # score for landing a Behind the Back cleanly
+# (per-trick score bonuses live in the TRICKS table's "bonus" field)
+
+# --- slow motion (ideas.rtf): every source adds its share, stacking linearly.
+# The Speed stat is permanent and capped, the Pie is a bought minute, the
+# Amazing! frame-perfect catch and a run of ten straight Perfects are earned
+# bursts. Slow motion stretches the catch windows in REAL time, which is what
+# makes five clubs and seven torches humanly possible.
+const SPEED_CAP := 25          # the Speed stat's permanent ceiling (percent)
+const PIE_COST := 1000
+const PIE_TICKS := 7200        # one minute of pie clarity per slice
+const AMAZING_FRAMES := 480    # the frame-perfect reward burst (four seconds)
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
 const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
 
@@ -278,6 +302,14 @@ var rng := RandomNumberGenerator.new()
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
 var endurance := 6        # raises max Stamina; gates heavy props later
+var speed := 0            # the Speed stat: each point slows the world 1% (cap 25)
+var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
+var pie_ready := false    # a pie eaten in the hub arms the NEXT session
+var pie_ticks := 0        # frames of pie slow-motion left in this session
+var amazing_until := -999999   # real-frame deadline of the Amazing! burst
+var perfect_chain := 0    # consecutive PERFECT catches (ten grant slow motion)
+var _tick_acc := 1.0      # fractional sim-tick accumulator while slowed
+var _frames := 0          # real frames in play (the slow-mo timers run on this)
 var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
 var prop_type := PROP_BALLS  # the object being juggled this run
@@ -315,6 +347,9 @@ var round_scored := false
 # Space has primed a one-shot, the live-Spin timer, and the run's trick tally.
 var trick_sel := -1       # the selected trick (index into TRICKS), or -1 before any unlock
 var trick_primed := false # Space pressed: the very next throw becomes the selected arm trick
+var toggle_on := -1       # the toggle trick currently running (TR_COLS etc), or -1
+var toggle_scored := false   # this activation has already counted toward tricks_landed
+var tennis_ball: Ball = null # the marked ball that sails over the top while Tennis runs
 var trick_ready := -999   # tick a LIVE trick may fire again (cooldown)
 var spin_until := -999    # tick the current Spin ends; catches until then score double
 var spin_scored := false  # this Spin has already been credited as landed
@@ -602,6 +637,24 @@ func _physics_process(delta: float) -> void:
 		update_hands()
 		queue_redraw()
 		return
+	# SLOW MOTION (ideas.rtf): the sim advances by FRACTIONAL ticks while real
+	# time flows on, so every catch window stretches in the player's hands. Input
+	# polls every real frame so slow motion can never eat a press. Sources stack
+	# (Speed stat, Uncle Dan's Pie, an Amazing! catch, ten straight Perfects) and
+	# the rate floors at 0.12: near-frozen, never stopped.
+	_frames += 1
+	if pie_ticks > 0:
+		pie_ticks -= 1
+	if not _demo:
+		_read_inputs()
+	var slow := slow_amount()
+	if slow > 0.001:
+		_tick_acc += maxf(1.0 - slow, 0.12)
+		if _tick_acc < 1.0:
+			update_hands()
+			queue_redraw()
+			return
+		_tick_acc -= 1.0
 	tick += 1
 	step_effects()   # age the egg-break shards, yolk splats, and particles
 	if results_open:
@@ -615,8 +668,6 @@ func _physics_process(delta: float) -> void:
 		spawn_egg_break(Vector2(vp.x * 0.5 + randf_range(-140, 140), vp.y * 0.42))
 	if _demo:
 		_demo_step()
-	else:
-		_read_inputs()
 	if running:
 		update_sim()
 	if collapsing and running and balls_airborne() == 0 and falling.is_empty():
@@ -1007,6 +1058,10 @@ func day_rows() -> Array[Dictionary]:
 	out.append({"id": "inn", "name": "SLEEP  at the inn",
 		"cost": "%d gold" % mini(money, INN_COST), "ok": true, "why": "",
 		"sub": "ends the day. Short on gold, they take what you have."})
+	if pie_count > 0:
+		out.append({"id": "pie", "name": "EAT  Uncle Dan's Pie",
+			"cost": "own %d" % pie_count, "ok": not pie_ready, "why": "one is already working" if pie_ready else "",
+			"sub": "a stimulant slice: the next session runs a quarter slower for a minute."})
 	out.append({"id": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
 		"sub": "props and gear. New props teach themselves."})
@@ -1083,6 +1138,12 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			day_anim = id
 			day_anim_start = cine_tick
 			play_sfx("ui2", -13.0)
+		"pie":
+			pie_count -= 1
+			pie_ready = true
+			set_day_msg("the pie hums in your blood  -  the next session runs slow and clear")
+			save_progress()
+			play_sfx("ui2", -11.0)
 
 
 func day_anim_len(id: String) -> int:
@@ -1143,12 +1204,16 @@ func sheet_input(kc: int) -> void:
 			_sheet_invest("str")
 		KEY_3:
 			_sheet_invest("end")
+		KEY_4:
+			_sheet_invest("spd")
 		KEY_Q:
 			if debug_mode: _adjust("acc", -1)
 		KEY_W:
 			if debug_mode: _adjust("str", -1)
 		KEY_E:
 			if debug_mode: _adjust("end", -1)
+		KEY_R:
+			if debug_mode: _adjust("spd", -1)
 		KEY_M:
 			if debug_mode:
 				money += 50
@@ -1184,6 +1249,8 @@ func shop_input(kc: int) -> void:
 			try_buy(PROP_TORCHES)
 		KEY_6:
 			try_buy_glasses()
+		KEY_7:
+			try_buy_pie()
 
 
 func cycle_prop(dir: int) -> void:
@@ -1414,6 +1481,18 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
 
 
+func try_buy_pie() -> void:
+	# Uncle Dan's Pie: a bought minute of slow-motion clarity, eaten in the day
+	# hub to arm the next session (ideas.rtf: a temporary stimulant)
+	if money < PIE_COST:
+		play_sfx("whiff", -10.0)
+		return
+	money -= PIE_COST
+	pie_count += 1
+	save_progress()
+	play_sfx("coin", -8.0)
+
+
 func try_buy_glasses() -> void:
 	if has_glasses or money < GLASSES_COST:
 		return
@@ -1587,13 +1666,11 @@ func start_beat() -> void:
 	cs_shot_start = cine_tick
 
 
-func cutscene_key(kc: int) -> void:
-	# a key cuts forward to the next shot, with two guards: Space never skips (it
-	# is the trick key and gets mashed in play, so a queued story beat right after
-	# a set must survive it), and a shot's first moments swallow skips so a stray
-	# press from the round that just ended cannot eat a scene unseen.
-	if kc == KEY_SPACE:
-		return
+func cutscene_key(_kc: int) -> void:
+	# any key (Space very much included, Louis) cuts forward to the next shot. A
+	# shot's first moments still swallow skips, so a stray press from the round
+	# that just ended cannot eat a scene unseen. The trick can no longer fire
+	# from a held Space anyway: play seeds its input edges on entry.
 	if cine_tick - cs_shot_start < 30:
 		return
 	next_shot()
@@ -1670,6 +1747,9 @@ func reset_new_game() -> void:
 	accuracy = 5
 	strength = 6
 	endurance = 6
+	speed = 0
+	pie_count = 0
+	pie_ready = false
 	money = START_GOLD
 	reputation = 0
 	prop_count = [0, 0, 0, 0, 0, 0]
@@ -2213,6 +2293,9 @@ func start_run(n: int) -> void:
 	# the promise of the powerup model), but snap it onto a trick this level
 	# actually owns, so a debug level change can never leave a locked trick loaded.
 	trick_primed = false
+	toggle_on = -1
+	toggle_scored = false
+	tennis_ball = null
 	if trick_sel < 0 or not trick_unlocked(trick_sel):
 		var un := unlocked_tricks()
 		trick_sel = int(un[0]) if not un.is_empty() else -1
@@ -2227,6 +2310,14 @@ func start_run(n: int) -> void:
 	seed_input_edges()   # a key still held from the previous screen must not edge-fire
 	collapsing = false
 	falling.clear()
+	# slow motion: an eaten pie arms exactly one session; the earned bursts reset
+	perfect_chain = 0
+	amazing_until = -999999
+	_tick_acc = 1.0
+	pie_ticks = 0
+	if pie_ready:
+		pie_ready = false
+		pie_ticks = PIE_TICKS
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
 	hclose = [0.0, 0.0]
 	catch_flash = [-999, -999]
@@ -2305,6 +2396,14 @@ func on_catch(h: int) -> void:
 		score += int(round(100.0 * float(streak) * pm))
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
+		# the slow-motion earn: a FRAME-perfect catch is an Amazing! burst, and a
+		# chain of ten straight Perfects holds the world slow while it lives
+		perfect_chain += 1
+		if best_d == 0:
+			amazing_until = _frames + AMAZING_FRAMES
+			add_popup(outer_pos(h) + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
+		if perfect_chain == 10:
+			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "TEN PERFECT  -  time thickens", Color(0.75, 0.92, 1.0))
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
 		spawn_parts(outer_pos(h), Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
@@ -2320,6 +2419,7 @@ func on_catch(h: int) -> void:
 		elif streak % 5 == 0:
 			play_sfx("streak", -7.0)   # a rising flourish at every fifth in a row
 	elif best_d <= W_GOOD:
+		perfect_chain = 0
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
@@ -2333,6 +2433,7 @@ func on_catch(h: int) -> void:
 			play_sfx("streak", -8.0)
 	else:
 		streak = 0
+		perfect_chain = 0
 		score += int(round(10.0 * pm))
 		applause = maxf(0.0, applause - 0.02)
 		add_xp(1)
@@ -2434,6 +2535,25 @@ func do_throw(h: int, hold: int) -> void:
 			air = maxi(air, int(round(base_air + SHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	elif pattern == HALFSHOWER and h == RIGHT:
 		air = maxi(air, int(round(base_air + HALFSHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
+	# an active TOGGLE trick reshapes every throw while it runs, and Overthrow
+	# (a one-shot) sends this single throw up and over the top of the pattern
+	var over_top := this_trick == TR_OVER
+	if toggle_on == TR_COLS:
+		this_trick = TR_COLS
+	elif toggle_on == TR_WFALL and h == RIGHT:
+		over_top = true
+		this_trick = TR_WFALL
+	elif toggle_on == TR_RCASC:
+		over_top = true
+		this_trick = TR_RCASC
+	elif toggle_on == TR_TENNIS:
+		if tennis_ball == null or not balls.has(tennis_ball):
+			tennis_ball = b   # the marked ball: the first one thrown after the toggle
+		if b == tennis_ball:
+			over_top = true
+			this_trick = TR_TENNIS
+	if over_top:
+		air = maxi(air, int(round(base_air + 0.5 * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
 	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
 	# Applause, and it clamps to 0 when the prop is too heavy to loft at all.
@@ -2459,14 +2579,22 @@ func do_throw(h: int, hold: int) -> void:
 	b.arc = ARC_PER_AIR * float(air)
 	b.wobble = WOBBLE_MAX * spread * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
-	# where the throw is headed is the pattern's say: crossing patterns swap hands,
-	# columns and fountains keep each hand its own circle
-	b.to_hand = other(h) if pattern in [CASCADE, HALFSHOWER, SHOWER] else h
+	# where the throw is headed: crossing patterns swap hands, columns (pattern or
+	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
+	# landing a touch wide of the usual catch point
+	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER]
+	if over_top:
+		cross = true
+	var lanes := pattern == COLUMNS or toggle_on == TR_COLS
+	if lanes:
+		cross = false
+	b.to_hand = other(h) if cross else h
 	b.from_pos = inner_pos(h)   # always from the real throwing hand (no teleport)
-	if pattern == COLUMNS:
+	if lanes:
 		b.to_pos = b.from_pos + Vector2(drift, 0.0)   # straight up and down in the lane
 	else:
-		b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+		var wide := (26.0 if b.to_hand == RIGHT else -26.0) if over_top else 0.0
+		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + wide, 0.0)
 	# Behind the Back is a flourish, drawn as a high wide sweeping loop in flight_pos
 
 	throw_kick[h] = tick
@@ -2529,10 +2657,12 @@ func trick_unlocked(i: int) -> bool:
 
 
 func unlocked_tricks() -> Array:
+	# in unlock order (by level), so C cycles the way the player learned them
 	var out: Array = []
 	for i in TRICKS.size():
 		if trick_unlocked(i):
 			out.append(i)
+	out.sort_custom(func(a, b): return int(TRICKS[a]["lvl"]) < int(TRICKS[b]["lvl"]))
 	return out
 
 
@@ -2563,26 +2693,41 @@ func on_trick() -> void:
 	if trick_sel < 0 or not trick_unlocked(trick_sel):
 		trick_sel = int(unlocked_tricks()[0])
 	var t: Dictionary = TRICKS[trick_sel]
-	if String(t["kind"]) == "live":
-		if balls_airborne() < int(t["min_air"]):
-			set_trick_msg("Spin needs %d in the air" % int(t["min_air"]))
-			return
-		if tick < trick_ready:
-			return   # still cooling down; ignore the mash
-		spin_until = tick + SPIN_TICKS
-		spin_scored = false
-		trick_ready = tick + TRICK_COOLDOWN
-		set_trick_msg("SPIN")
-		play_sfx("streak", -7.0)
-		return
-	if trick_primed:
-		trick_primed = false
-		set_trick_msg("waved off  -  plain throw")
-		play_sfx("ui", -16.0)
-		return
-	trick_primed = true
-	set_trick_msg("%s  -  next throw" % String(t["name"]).to_upper())
-	play_sfx("ui2", -13.0)
+	match String(t["kind"]):
+		"live":
+			if balls_airborne() < int(t["min_air"]):
+				set_trick_msg("Spin needs %d in the air" % int(t["min_air"]))
+				return
+			if tick < trick_ready:
+				return   # still cooling down; ignore the mash
+			spin_until = tick + SPIN_TICKS
+			spin_scored = false
+			trick_ready = tick + TRICK_COOLDOWN
+			set_trick_msg("SPIN")
+			play_sfx("streak", -7.0)
+		"toggle":
+			# one press ON, the next press OFF, smoothly mid-pattern (Louis).
+			# Only one toggle runs at a time; switching replaces the old one.
+			if toggle_on == trick_sel:
+				toggle_on = -1
+				tennis_ball = null
+				set_trick_msg("%s OFF" % String(t["name"]).to_upper())
+				play_sfx("ui", -16.0)
+			else:
+				toggle_on = trick_sel
+				toggle_scored = false
+				tennis_ball = null   # Tennis marks the next thrown ball
+				set_trick_msg("%s ON" % String(t["name"]).to_upper())
+				play_sfx("ui2", -13.0)
+		_:
+			if trick_primed:
+				trick_primed = false
+				set_trick_msg("waved off  -  plain throw")
+				play_sfx("ui", -16.0)
+				return
+			trick_primed = true
+			set_trick_msg("%s  -  next throw" % String(t["name"]).to_upper())
+			play_sfx("ui2", -13.0)
 
 
 func cycle_trick() -> void:
@@ -2605,25 +2750,31 @@ func cycle_trick() -> void:
 
 
 func reward_trick(t: int, at: Vector2) -> void:
-	# a landed ARM trick pays a flourish bonus on a clean (Perfect or Good) catch
-	var bonus := 0
-	var label := ""
-	match t:
-		TR_HIGH:
-			bonus = HIGH_BONUS
-			label = "HIGH TOSS!"
-		TR_BTB:
-			bonus = BTB_BONUS
-			label = "BEHIND THE BACK!"
-		_:
-			return
+	# a landed shaped catch pays the trick's bonus. One-shots celebrate loudly.
+	# A running toggle pays a smaller bonus on every shaped catch it lands, and
+	# counts toward the trick tally only once per activation.
+	if t < 0 or t >= TRICKS.size():
+		return
+	var td: Dictionary = TRICKS[t]
+	var bonus := int(td["bonus"])
+	if bonus <= 0:
+		return
+	var tog := String(td["kind"]) == "toggle"
 	score += bonus
 	trick_score += bonus
-	tricks_landed += 1
-	applause = minf(1.0, applause + 0.09)
-	add_xp(4)
-	add_popup(at + Vector2(0, -34), label, Color(1.0, 0.85, 0.45))
-	play_sfx("streak", -6.0)
+	applause = minf(1.0, applause + (0.03 if tog else 0.09))
+	if tog:
+		if not toggle_scored:
+			toggle_scored = true
+			tricks_landed += 1
+			add_xp(3)
+		add_xp(1)
+		add_popup(at + Vector2(0, -34), String(td["shout"]), Color(1.0, 0.85, 0.45, 0.8))
+	else:
+		tricks_landed += 1
+		add_xp(4)
+		add_popup(at + Vector2(0, -34), String(td["shout"]), Color(1.0, 0.85, 0.45))
+		play_sfx("streak", -6.0)
 
 
 # -----------------------------------------------------------------------------
@@ -2763,6 +2914,21 @@ func stamina_mult() -> float:
 	if f >= STAM_LOW:
 		return 1.0
 	return lerpf(STAM_MIN_MULT, 1.0, clampf(f / STAM_LOW, 0.0, 1.0))
+
+
+func slow_amount() -> float:
+	# how slowed the world currently is, 0..1. All sources stack linearly
+	# (ideas.rtf): the Speed stat, Uncle Dan's Pie, an Amazing! frame-perfect
+	# catch, and a live run of ten straight Perfect catches. Purist sets strip
+	# the STAT share but keep the earned bursts (they are skill, not stats).
+	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 100.0
+	if pie_ticks > 0 and not purist_run():
+		a += 0.25
+	if _frames < amazing_until:
+		a += 0.25
+	if perfect_chain >= 10:
+		a += 0.25
+	return clampf(a, 0.0, 1.0)
 
 
 func purist_run() -> bool:
@@ -3034,6 +3200,10 @@ func invest(which: String) -> void:
 		"end":
 			endurance = mini(100, endurance + 1)
 			stamina_max = 50.0 + float(endurance)
+		"spd":
+			if speed >= SPEED_CAP:
+				return   # the permanent slow tops out (ideas.rtf): no point wasted
+			speed += 1
 	points -= 1
 	save_progress()
 
@@ -3059,6 +3229,10 @@ func sheet_repeat(dt: float) -> void:
 		key = KEY_2; which = "str"; delta = 1
 	elif Input.is_physical_key_pressed(KEY_3):
 		key = KEY_3; which = "end"; delta = 1
+	elif Input.is_physical_key_pressed(KEY_4):
+		key = KEY_4; which = "spd"; delta = 1
+	elif Input.is_physical_key_pressed(KEY_R):
+		key = KEY_R; which = "spd"; delta = -1
 	elif Input.is_physical_key_pressed(KEY_Q):
 		key = KEY_Q; which = "acc"; delta = -1
 	elif Input.is_physical_key_pressed(KEY_W):
@@ -3088,6 +3262,8 @@ func _adjust(which: String, delta: int) -> void:
 			endurance = clampi(endurance + delta, 1, 100)
 			stamina_max = 50.0 + float(endurance)
 			stamina = minf(stamina, stamina_max)
+		"spd":
+			speed = clampi(speed + delta, 0, SPEED_CAP)
 	save_progress()
 
 
@@ -3108,6 +3284,9 @@ func load_progress() -> void:
 		accuracy = int(cf.get_value("stats", "accuracy", 5))
 		strength = int(cf.get_value("stats", "strength", 6))
 		endurance = int(cf.get_value("stats", "endurance", 6))
+		speed = int(cf.get_value("stats", "speed", 0))
+		pie_count = int(cf.get_value("stats", "pies", 0))
+		pie_ready = bool(cf.get_value("day", "pie_ready", false))
 		money = int(cf.get_value("stats", "money", START_GOLD))
 		reputation = int(cf.get_value("stats", "reputation", 0))
 		var pc: Variant = cf.get_value("stats", "prop_count", [])
@@ -3153,6 +3332,9 @@ func save_progress() -> void:
 	cf.set_value("stats", "accuracy", accuracy)
 	cf.set_value("stats", "strength", strength)
 	cf.set_value("stats", "endurance", endurance)
+	cf.set_value("stats", "speed", speed)
+	cf.set_value("stats", "pies", pie_count)
+	cf.set_value("day", "pie_ready", pie_ready)
 	cf.set_value("stats", "money", money)
 	cf.set_value("stats", "reputation", reputation)
 	cf.set_value("stats", "prop_count", prop_count)
@@ -3197,6 +3379,7 @@ func drop_ball(b: Ball, why: String) -> void:
 	dropped += 1
 	career["drops"] = int(career["drops"]) + 1
 	streak = 0
+	perfect_chain = 0
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
 	if set_shake:
@@ -3761,22 +3944,13 @@ func draw_hand(h: int) -> void:
 	if g > 0.0:
 		draw_circle(pos, 20.0 + g * 12.0, Color(1.0, 0.82, 0.45, 0.35 * g))
 
-	# a clean mitt: a palm, a rounded finger group that extends to receive when open
-	# and curls to a fist when closed, and a thumb toward the inside. Reads as a hand
-	# catching, not a splayed claw.
+	# a clean rounded mitt with NO fingers (Louis: they looked bad and are not
+	# needed): a palm disc with a soft cup that stretches up a little to receive
+	# when open and settles round when closed
 	var sk := Color(0.87, 0.63, 0.43)
-	var dk := Color(0.80, 0.56, 0.38)
 	var openf := 1.0 - close
-	# fingers point up and a touch inward, reaching further when open to catch
-	var fdir := Vector2(inward * 0.22, -1.0).normalized()
-	var reach := lerpf(7.0, 15.0, openf)
-	var ftip := pos + fdir * reach
-	draw_capsule(pos, ftip, 17.0, 13.0, sk)            # the four fingers, held together
-	# thumb, a shorter capsule toward the centre line
-	var tdir := Vector2(inward, -0.2).normalized()
-	draw_capsule(pos, pos + tdir * lerpf(8.0, 11.0, openf), 8.0, 6.0, dk)
-	# palm over the wrist join, drawn last so the hand reads as one solid shape
-	draw_circle(pos, 11.5, sk)
+	var stretch := lerpf(0.0, 6.0, openf)
+	fill_ellipse(pos + Vector2(inward * openf * 1.5, -stretch * 0.5), 11.5, 11.5 + stretch, sk)
 	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
 
 	# held ball(s) rest in the palm
@@ -4087,6 +4261,15 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	var mlabel := "PERFORMING" if performing else "TRAINING"
 	if performing and purist:
 		mlabel = "PERFORMING  -  PURIST"
+	# slow motion reads on screen: a cool veil over the stage and a quiet label,
+	# so thickened time is legible the moment it begins
+	var slow := slow_amount()
+	if slow > 0.005:
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.55, 0.72, 1.0, 0.03 + 0.09 * slow))
+		var stext := "SLOW  %d%%" % int(round(slow * 100.0))
+		if pie_ticks > 0:
+			stext += "   pie %ds" % int(ceil(float(pie_ticks) / 120.0))
+		draw_string(font, Vector2(0, 92.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
 	if debug_mode:
 		mlabel += "   -   DEBUG"
 	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
@@ -4326,10 +4509,13 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(bx, cy - 28.0, bw, 88.0), Color(1.0, 0.82, 0.45, 0.55 * a), false, 2.0)
 	draw_string(font, Vector2(bx, cy - 4.0), "NEW TRICK   -   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 21, Color(1.0, 0.88, 0.5, a))
 	var how := ""
-	if String(t["kind"]) == "live":
-		how = "press %s to spin while two or more are airborne" % k_trick()[0]
-	else:
-		how = "press %s to power up your next throw  -  one press, one trick" % k_trick()[0]
+	match String(t["kind"]):
+		"live":
+			how = "press %s to spin while two or more are airborne" % k_trick()[0]
+		"toggle":
+			how = "press %s to switch it on and off  -  it shapes every throw between" % k_trick()[0]
+		_:
+			how = "press %s to power up your next throw  -  one press, one trick" % k_trick()[0]
 	draw_string(font, Vector2(bx, cy + 22.0), how, HORIZONTAL_ALIGNMENT_CENTER, bw, 15, Color(1.0, 0.9, 0.65, a))
 	draw_string(font, Vector2(bx + 16.0, cy + 44.0), String(t["desc"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 32.0, 13, Color(0.86, 0.8, 0.72, 0.85 * a))
 
@@ -4340,17 +4526,32 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	var y := s.y - 132.0
 	var un := unlocked_tricks()
 	var sel := trick_sel if trick_sel >= 0 and trick_unlocked(trick_sel) else int(un[0])
-	var live := String(TRICKS[sel]["kind"]) == "live"
+	var kind := String(TRICKS[sel]["kind"])
 	var label := String(TRICKS[sel]["name"]).to_upper()
-	if trick_primed and not live:
+	var hot := false
+	if kind == "arm" and trick_primed:
 		label += "  -  READY"
-	var lc := Color(1.0, 0.86, 0.5) if (trick_primed and not live) else Color(0.72, 0.66, 0.78, 0.85)
+		hot = true
+	elif kind == "toggle" and toggle_on == sel:
+		label += "  -  ON"
+		hot = true
+	elif toggle_on >= 0:
+		# some other toggle keeps running while a different trick is selected
+		label += "   (%s on)" % String(TRICKS[toggle_on]["name"]).to_lower()
+	var lc := Color(1.0, 0.86, 0.5) if hot else Color(0.72, 0.66, 0.78, 0.85)
 	hud_panel(Rect2(s.x * 0.5 - 160.0, y - 20.0, 320.0, 56.0))
 	draw_string(font, Vector2(s.x * 0.5 - 150.0, y), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, 300, 16, lc)
 	var items: Array = []
-	var use := "spin" if live else ("one throw" if not trick_primed else "wave off")
-	if live and tick < trick_ready:
-		use = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
+	var use := ""
+	match kind:
+		"live":
+			use = "spin"
+			if tick < trick_ready:
+				use = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
+		"toggle":
+			use = "switch off" if toggle_on == sel else "switch on"
+		_:
+			use = "wave off" if trick_primed else "one throw"
 	items.append([k_trick(), use])
 	if un.size() > 1:
 		items.append([k_cycle(), "switch trick"])
@@ -4360,7 +4561,7 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 func draw_sheet(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82))
 	var pw := 580.0
-	var ph := 388.0
+	var ph := 440.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
@@ -4398,6 +4599,11 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	ry += 52.0
 	draw_stat_row(font, tx, ry, innerw, "ENDURANCE", endurance, "raises your maximum stamina", "3")
 	ry += 52.0
+	var spd_note := "the world runs %d%% slower for you (permanent, cap %d)" % [speed, SPEED_CAP]
+	if speed >= SPEED_CAP:
+		spd_note = "the world runs %d%% slower for you  -  at the cap" % speed
+	draw_stat_row(font, tx, ry, innerw, "SPEED", speed, spd_note, "4")
+	ry += 52.0
 	# stamina is a resource, not an investable stat
 	draw_string(font, Vector2(tx, ry), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.8, 0.9, 0.85))
 	draw_rect(Rect2(tx + 130.0, ry - 13.0, innerw - 260.0, 12.0), Color(0.2, 0.14, 0.11, 0.8))
@@ -4407,9 +4613,9 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 
 	var by := py + ph - 46.0
 	if debug_mode:
-		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3 up  Q/W/E dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 1.0))
+		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 1.0))
 	elif points > 0:
-		draw_string(font, Vector2(tx, by), "%d point%s to spend  -  press 1 / 2 / 3" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
+		draw_string(font, Vector2(tx, by), "%d point%s to spend  -  press 1 / 2 / 3 / 4" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
 	else:
 		draw_string(font, Vector2(tx, by), "Skill sets your score. Stats only ease the climb.", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.75, 0.7, 0.62))
 	draw_string(font, Vector2(px + pw - 150.0, by), "Tab to resume", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
@@ -4418,7 +4624,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 func draw_shop(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.85))
 	var pw := 640.0
-	var ph := 452.0
+	var ph := 502.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
@@ -4436,6 +4642,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		ry += 50.0
 		keynum += 1
 	draw_glasses_row(font, tx, ry, innerw, keynum)
+	ry += 50.0
+	draw_pie_row(font, tx, ry, innerw, keynum + 1)
 
 	draw_string(font, Vector2(tx, py + ph - 30.0), "press a number to buy one   -   to juggle N of a prop you must own N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
 	draw_string(font, Vector2(px + pw - 150.0, py + ph - 30.0), "Tab / S to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
@@ -4477,6 +4685,21 @@ func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> 
 		var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
 		draw_string(font, Vector2(x + w - 160.0, y), "%d g" % GLASSES_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 		draw_string(font, Vector2(x + w - 44.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+
+
+func draw_pie_row(font: Font, x: float, y: float, w: float, keynum: int) -> void:
+	# Uncle Dan's Pie: a warm slice with a steam curl for an icon
+	var pc := Color(0.9, 0.62, 0.3)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(x + 4.0, y + 2.0), Vector2(x + 28.0, y + 2.0), Vector2(x + 16.0, y - 14.0)]), pc)
+	draw_line(Vector2(x + 4.0, y + 2.0), Vector2(x + 28.0, y + 2.0), Color(0.6, 0.36, 0.16), 3.0)
+	draw_string(font, Vector2(x + 44.0, y), "Uncle Dan's Pie", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
+	draw_string(font, Vector2(x + 44.0, y + 16.0), "eat in the day hub: one minute of slow, clear time next session", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(x + w - 262.0, y), "own %d" % pie_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.72, 0.88, 0.72) if pie_count > 0 else Color(0.72, 0.66, 0.58))
+	var afford := money >= PIE_COST
+	var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
+	draw_string(font, Vector2(x + w - 168.0, y), "%d g" % PIE_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+	draw_string(font, Vector2(x + w - 48.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 
 
 # -----------------------------------------------------------------------------
@@ -4558,10 +4781,12 @@ func draw_day(font: Font, s: Vector2) -> void:
 			# still move (left to right along the ladder, never wrapping). The
 			# PURIST mark sits under the cost, never inside the name (it used to
 			# run into the "1 segment" text on long venue names).
+			# arrows wrap the venue NAME, so PERFORM always starts flush with the
+			# other rows (a leading arrow pad used to indent the whole row)
 			var pv := play_venue()
-			var lar := "<  " if pv > 0 else "   "
-			var rar := "  >" if pv < venue_index() else "   "
-			label = "%sPERFORM  at  %s%s" % [lar, String(venue_data(pv)["name"]), rar]
+			var lar := "<  " if pv > 0 else ""
+			var rar := "  >" if pv < venue_index() else ""
+			label = "PERFORM  at  %s%s%s" % [lar, String(venue_data(pv)["name"]), rar]
 			if purist:
 				draw_string(font, Vector2(ax + aw - 118.0, ry + 15.0), "PURIST", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 11, Color(0.82, 0.72, 0.85))
 		draw_string(font, Vector2(ax, ry), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, name_c)
@@ -5483,7 +5708,9 @@ func draw_arm_s(shoulder: Vector2, hand: Vector2, bend: float, skin: Color, slee
 	# at the sky (a raised offering arm used to fold upward, Louis's "weird arms").
 	var h2 := arm_reach(shoulder, hand, l1, l2)
 	var reach := (h2 - shoulder).length()
-	var bone := maxf(l1 * 0.62, reach * 0.56)
+	# bones barely longer than half the reach: a soft natural bend, never the
+	# sharp folded kink Louis flagged (deep bows came from bones far over reach)
+	var bone := maxf(reach * 0.52, l1 * 0.5)
 	var e1 := solve_elbow(shoulder, h2, bone, bone, bend)
 	var e2 := solve_elbow(shoulder, h2, bone, bone, -bend)
 	var elbow := e1 if e1.y >= e2.y else e2
@@ -5533,9 +5760,10 @@ func draw_person(pos: Vector2, sc: float, pal: Dictionary, lhand = null, rhand =
 	var head_c := Vector2(px, pos.y - 7.5 * H + breathe)
 	var hr := 0.52 * H                 # head just over one unit, so it does not read as a pinhead
 
-	# a relaxed arm hangs so the wrist is at the hip (fingertips at mid-thigh)
-	var lh: Vector2 = lhand if lhand != null else Vector2(px - 0.62 * H, hip_y + 0.2 * H)
-	var rh: Vector2 = rhand if rhand != null else Vector2(px + 0.62 * H, hip_y + 0.2 * H)
+	# a relaxed arm hangs so the wrist is at the hip (fingertips at mid-thigh),
+	# slightly out from the body so the hang reads loose rather than pinned
+	var lh: Vector2 = lhand if lhand != null else Vector2(px - 0.72 * H, hip_y + 0.35 * H)
+	var rh: Vector2 = rhand if rhand != null else Vector2(px + 0.72 * H, hip_y + 0.35 * H)
 
 	# --- legs: thighs taper to the knee, calves to the ankle, then shoes
 	var shoe := Color(0.18, 0.11, 0.08)
@@ -5605,16 +5833,6 @@ func draw_person_face(headC: Vector2, hr: float, mood: int) -> void:
 	elif mood == -1:
 		mouth = PackedVector2Array([Vector2(headC.x - w, my + 2.0), Vector2(headC.x, my - 2.0), Vector2(headC.x + w, my + 2.0)])
 	draw_polyline(mouth, Color(0.45, 0.20, 0.16), 2.0)
-
-
-func draw_simple_hand(pos: Vector2, close: float, inward: float, sc: float) -> void:
-	draw_circle(pos, 10.0 * sc, Color(0.86, 0.62, 0.42))
-	var spread := lerpf(0.5, 0.12, close)
-	var flen := lerpf(13.0, 7.0, close) * sc
-	var base_ang := -PI / 2.0 + close * inward * 0.6
-	for f in 4:
-		var ang := base_ang + (float(f) - 1.5) * spread
-		draw_line(pos, pos + Vector2(cos(ang), sin(ang)) * flen, Color(0.84, 0.60, 0.40), 3.8 * sc)
 
 
 # --- juggle demonstration (tutorials, and juggling story figures) -------------
