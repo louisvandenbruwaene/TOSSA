@@ -244,8 +244,10 @@ const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
 const AMAZING_FRAMES := 480    # the frame-perfect reward burst (four seconds)
 const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
 const CHAIN_FRAMES := 7200     # ...which then lasts one minute, then re-earn
-const SLOW_RAMP := 0.005       # slow motion ramps LINEARLY in and out per frame
-							   # (a hard step made the player miss, Louis)
+const SLOW_RAMP := 0.0025      # slow motion ramps LINEARLY in and out per frame
+							   # (a hard step made the player miss, Louis; slowed
+							   # further so both easing in and out give real
+							   # reaction time instead of a sudden gear change)
 const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
 							   # no chain or Amazing! farming with two balls
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
@@ -2031,14 +2033,14 @@ func cutscene_script(id: String) -> Array:
 	match id:
 		"intro":
 			return [
-				{"scene": "backyard", "stage": 0, "who": "", "hold": 360,
-					"cap": "The yard behind the boarding house, dusk. Old Bruna watches you fumble a pear and catch it without looking. She goes inside, and comes back holding three worn leather balls."},
-				{"scene": "backyard", "stage": 1, "who": "Bruna", "hold": 400,
-					"cap": "\"Forty years ago they called me the Marvel of Two Hands. Then the circuit learned my hands could not be bought, and every door in the country closed at once. These three are all I kept.\""},
-				{"scene": "backyard", "stage": 2, "who": "Bruna", "hold": 400,
-					"cap": "\"The gear men own every stage from here to the arena. Two clean hands cannot buy a door any more. So you will not buy it. You will take it. Now throw.\""},
+				{"scene": "backyard", "stage": 0, "who": "", "hold": 380,
+					"cap": "The yard behind the boarding house, dusk. Chalk on the door reads three days, and Milo has already sold everything worth selling. When a dropped coin skips off the step, a hand closes on it before the thought does. Old Bruna, watching from her window, is the only one who sees it happen."},
+				{"scene": "backyard", "stage": 1, "who": "Bruna", "hold": 420,
+					"cap": "\"Forty years ago they called me the Marvel of Two Hands. Then the circuit learned my hands could not be bought, and every door in the country closed at once. I have gone hungry on principle more winters than I care to count. These three are all I kept.\""},
+				{"scene": "backyard", "stage": 2, "who": "Bruna", "hold": 420,
+					"cap": "\"You could pawn these for less than a week of what you owe, and be exactly as broke next month. Or you could learn what they are actually worth, which is not a number I can write on a coin. The gear men own every stage from here to the arena, and two clean hands cannot buy a door any more. So you will not buy your way up. You will take it. Now throw.\""},
 				{"scene": "backyard", "stage": 3, "who": "", "hold": 380,
-					"cap": "You are nobody, and it is late, and she is old. Every throw you land from this yard on is an argument that she was right."},
+					"cap": "You are nobody, you are three days from the street, and she is old. Every throw you land from this yard on is an argument that she was right."},
 			]
 		"v1":
 			return [
@@ -2082,7 +2084,7 @@ func cutscene_script(id: String) -> Array:
 					"cap": "The internationals. The finest hands alive, and the first room where his family's money buys no judge."},
 				{"scene": "champ", "stage": 3, "who": "", "hold": 430,
 					"cap": "Mid-routine, a torch his gear threw a hand's width wrong comes down. Silvio lunges, misses, and for one long second stares at his own empty hands. The room goes quiet the way a debt goes quiet."},
-				{"scene": "champ", "stage": 2, "who": "Silvio", "hold": 430,
+				{"scene": "champ", "stage": 4, "who": "Silvio", "hold": 430,
 					"cap": "You keep your set clean past where nerve should break. On the way out he stops you. \"She really never dropped, did she.\" It is not a question, and you do not answer it."},
 			]
 		"record":
@@ -2102,7 +2104,7 @@ func cutscene_script(id: String) -> Array:
 					"cap": "Silvio watches from the stands, retired, lighter somehow. The empire sells catching nets now. He sent two tickets and a note. One debt paid."},
 				{"scene": "arena", "stage": 3, "who": "", "hold": 400,
 					"cap": "Clean catch. Clean throw. The two things she taught you in a backyard, carried all the way here. You land the last torch, the roof comes off, and you point one hand at the front row."},
-				{"scene": "backyard", "stage": 3, "who": "Bruna", "hold": 500,
+				{"scene": "backyard", "stage": 0, "who": "Bruna", "hold": 500,
 					"cap": "\"There it is,\" she says, in the yard where it started, pressing the three worn balls back into your hands. \"They were never mine, kid. I was keeping them for whoever came to finish it.\" The circle closes."},
 			]
 		_:
@@ -6802,6 +6804,16 @@ func scene_champ(s: Vector2, stage: int) -> void:
 			var fp := Vector2(s.x * 0.5 + 120.0, s.y * 0.26 + u * u * 320.0)
 			# the fall reads as a fall now, not a strobe: one slow second, gentle tumble
 			draw_torch(fp, float(cine_tick) * 0.08, 1.5)
+		4:
+			# Silvio stops Milo on the way out. No trophy, no boast this time: he
+			# stands close and quiet, the lie he has told himself finally cracked.
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
+			draw_scoreboard(s)
+			var fy := s.y * 0.84
+			draw_shadow(Vector2(s.x * 0.42, fy), 74.0)
+			draw_shadow(Vector2(s.x * 0.58, fy), 74.0)
+			draw_person(Vector2(s.x * 0.42, fy), 1.1, milo_pal(4), null, null, 0)
+			draw_person(Vector2(s.x * 0.58, fy), 1.1, silvio_pal(), null, null, -1)
 		_:
 			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.06, 0.08, 0.14), Color(0.03, 0.04, 0.07), 18)
 			draw_scoreboard(s)

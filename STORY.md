@@ -73,9 +73,11 @@ Each stage lists its setting, its story beat, the crowd it teaches you to read,
 and what it introduces mechanically, so the story and the systems unlock in step.
 
 **1. The Practice Room (backyard).**
-Bruna teaches the first throw. No money, no crowd, no stakes. This is the
-tutorial: three balls, catch and throw, the no-crossing hands. The story beat is
-small and human, an old juggler handing a kid three balls and saying start.
+Bruna teaches the first throw. No crowd yet, but the stakes are already real:
+Milo is three days from being put out of the boarding house and has nothing
+left to sell. This is the tutorial: three balls, catch and throw, the
+no-crossing hands. The story beat is small and human, an old juggler pressing
+three worn balls into a desperate kid's hands and saying take it, not buy it.
 Introduces: balls, catch and throw, POISE. Cutscene: the first lesson.
 
 **2. The Street Corner.**
@@ -196,3 +198,14 @@ printed, because the record they buried was hers. The finale seats her in the
 front row under her own name again, Silvio sends two tickets and a note that
 reads one debt paid, and in the last shot she returns the balls in the yard
 where it started. She was keeping them for whoever came to finish it.
+
+## Update 2026-07-11: the opening earns its stakes
+
+Louis felt the intro read as whimsy (an old woman watches a kid catch a pear
+and rewards him with balls) rather than the deeper hook the rest of the story
+already promises. The cutscene now opens on Milo three days from eviction,
+already sold out of anything pawnable, and Bruna's gift is reframed as a real
+choice rather than a charming reflex test: pawn the balls for a fraction of
+the rent and stay exactly as broke, or learn what they are actually worth.
+This also stops v1's "rent is due in six days" from being the first the
+player hears of Milo's money trouble, since it now opens the whole game.
