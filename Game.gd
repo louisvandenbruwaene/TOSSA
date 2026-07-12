@@ -162,6 +162,12 @@ const WATERFALL_LOW := 0.15   # Waterfall's other hand: MAXIMUM height fraction,
 							   # the same height without a forced ceiling here)
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
 							   # lanes' running height (0 = pure hold-timing, 1 = locked)
+# --- object load (ideas.rtf comments): more balls in the air and heavier props
+# both raise the score multiplier, ON TOP OF the pattern's own "mult" above, so
+# climbing to five clubs or three torches always outpays grinding an easy three-
+# ball routine forever, however long the streak. See object_mult().
+const OBJ_BALL_BONUS := 0.12    # per ball above MIN_BALLS
+const OBJ_WEIGHT_BONUS := 0.15  # per weight step above a ball/egg's weight of 1
 const STATE_FLIGHT := 0
 const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
@@ -214,8 +220,15 @@ const REMAP_ACTS := [
 	["trick", "TRICK  (the one-shot powerup)"], ["cycle", "SWITCH TRICK"],
 ]
 
-# hand animation
+# hand animation. Every hand rests at exactly one of three fixed points - never a
+# predicted, in-between spot - and moves to a DIFFERENT one only in direct response
+# to a throw or catch (Louis): no drifting ahead of the ball to meet it.
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
+const HAND_OUTER := 0        # the catch point, standard
+const HAND_INNER := 1        # the throw point, standard (and the catch point for
+							  # anything riding the over-the-top road, or Columns)
+const HAND_VERY_INNER := 2   # Columns' own throw point: the pair shifted one notch
+							  # further in, almost to the midline
 
 # --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space). C
 # selects which trick Space is loaded with (the selection persists). THREE
@@ -267,7 +280,7 @@ const SPEED_CAP := 100         # the Speed stat's permanent ceiling (points, not
 const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
 const AMAZING_FRAMES := 480    # the frame-perfect reward burst (four seconds)
 const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
-const CHAIN_FRAMES := 7200     # ...which then lasts one minute, then re-earn
+const CHAIN_FRAMES := 3600     # ...which then lasts thirty seconds, then re-earn
 const SLOW_RAMP := 0.0025      # slow motion ramps LINEARLY in and out per frame
 							   # (a hard step made the player miss, Louis; slowed
 							   # further so both easing in and out give real
@@ -324,6 +337,10 @@ var charge_start := [0, 0]
 # per-hand animation state
 var hpos := [Vector2.ZERO, Vector2.ZERO]  # smoothed current hand position
 var hclose := [0.0, 0.0]                  # 0 open (ready), 1 closed (holding)
+# an EMPTY hand's fixed waiting point (HAND_OUTER/HAND_INNER). Set exactly once
+# per incoming ball, the instant it is thrown (see do_throw), and held there
+# untouched until the catch resolves - it never creeps toward a predicted landing.
+var hand_catch_rest := [HAND_OUTER, HAND_OUTER]
 var catch_flash := [-999, -999]
 var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
 var last_drop_tick := -999               # for the juggler's wince expression
@@ -1599,6 +1616,7 @@ func tut_setup_step() -> void:
 		stamina_max = 50.0 + float(endurance)
 		stamina = stamina_max
 		hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
+		hand_catch_rest = [catch_slot(LEFT), catch_slot(RIGHT)]
 		hclose = [0.0, 0.0]
 		catch_flash = [-999, -999]
 		throw_kick = [-999, -999]
@@ -2263,6 +2281,25 @@ func inner_pos(h: int) -> Vector2:
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
+func very_inner_pos(h: int) -> Vector2:
+	# Columns' own throw point (Louis): the pair shifts one notch further in from
+	# the standard {outer, inner}, almost to the midline, so a lane throw never
+	# needs the wide outer reach - a straight, short lob up its own column.
+	var c := stage_center()
+	var dx := 24.0
+	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
+
+
+func slot_pos(h: int, slot: int) -> Vector2:
+	match slot:
+		HAND_VERY_INNER:
+			return very_inner_pos(h)
+		HAND_INNER:
+			return inner_pos(h)
+		_:
+			return outer_pos(h)
+
+
 func shoulder_pos(h: int) -> Vector2:
 	# where the arms leave the body: the outer corner of the jacket's shoulder, one
 	# arm-root radius BELOW the shoulder line. The upper-arm capsule is ~19px thick,
@@ -2340,56 +2377,29 @@ func next_throw_over_top(h: int) -> bool:
 	return h == RIGHT and pattern in [SHOWER, HALFSHOWER]
 
 
-# where hand h wants to be right now: inner while carrying (to throw), else outer
+# the STRUCTURAL throw/catch point for hand h under the current pattern/trick -
+# always safe to read live, since it reflects what the player has already
+# committed to (the pattern, an active toggle), never a guess about a ball in
+# flight. throw_slot is read every tick while h is holding (see hand_target);
+# catch_slot only seeds the initial hand_catch_rest, since after that the actual
+# CATCH point is locked in per-ball at throw time (do_throw), not re-derived here.
+func throw_slot(h: int) -> int:
+	if pattern == COLUMNS or toggle_on == TR_COLS:
+		return HAND_VERY_INNER
+	return HAND_OUTER if next_throw_over_top(h) else HAND_INNER
+
+
+func catch_slot(h: int) -> int:
+	if pattern == COLUMNS or toggle_on == TR_COLS:
+		return HAND_INNER
+	return HAND_INNER if next_throw_over_top(other(h)) else HAND_OUTER
+
+
+# where hand h wants to be right now (Louis): while holding, wherever ITS OWN
+# next throw departs from; once empty, exactly where the ball just thrown its
+# way was aimed, and nowhere else until that catch (or a whiff) resolves.
 func hand_target(h: int) -> Vector2:
-	var holding := not stack(h).is_empty()
-	# in COLUMNS the ball comes straight back down its lane (the throw point), so
-	# the waiting hand stays under the lane instead of drifting out to the side
-	var p := inner_pos(h) if (holding or pattern == COLUMNS) else outer_pos(h)
-	# COLUMNS lanes: the hand rides its OWN column, not a shared inner point, so a
-	# held lane ball throws straight up its line and a free hand waits under the
-	# column of the lane ball it is about to catch
-	var in_cols := pattern == COLUMNS or toggle_on == TR_COLS
-	if in_cols:
-		var cy := stage_center().y
-		if holding:
-			var hb: Ball = stack(h).back()
-			if hb.lane_x >= 0.0:
-				p = Vector2(hb.lane_x, cy)
-		else:
-			var soon := 1000000
-			for b in balls:
-				if b.state == STATE_FLIGHT and b.to_hand == h and b.lane_x >= 0.0:
-					var l := b.land_tick - tick
-					if l > -MISS_GRACE and l < soon:
-						soon = l
-						p = Vector2(b.to_pos.x, cy)
-	# an over-the-top throw never carries inward: the hand winds up wide and lobs
-	# from the outer catch point itself (20px wider still when low traffic is
-	# dropping into this corner, matching the throw's wide wind-up in do_throw)
-	if holding and next_throw_over_top(h):
-		p = outer_pos(h)
-		if incoming_low(h):
-			p.x += 20.0 if h == RIGHT else -20.0
-	# an over-the-top ball lands WIDE of the usual catch point, so the empty hand
-	# drifts out to meet the soonest such arrival instead of waiting inside it
-	if not holding:
-		var soonest := 1000000
-		for b in balls:
-			if b.state == STATE_FLIGHT and b.to_hand == h and b.over_top:
-				var left := b.land_tick - tick
-				if left > -MISS_GRACE and left < 70 and left < soonest:
-					soonest = left
-					p.x = b.to_pos.x
-		# the odd-columns middle ball comes down dead centre for either hand: one
-		# free hand reaches in to scoop it so the throw-catch motion reads. If the
-		# other hand is busy this is the natural catcher; if both are free the LEFT
-		# takes it (a stable tiebreak, never both hands piling onto centre)
-		if col_mid_ball != null and col_mid_ball.state == STATE_FLIGHT:
-			var i_take := not stack(other(h)).is_empty() or h == LEFT
-			var mleft := col_mid_ball.land_tick - tick
-			if i_take and mleft > -MISS_GRACE and mleft < 44 and mleft < soonest:
-				p.x = col_mid_ball.to_pos.x
+	var p := slot_pos(h, throw_slot(h)) if not stack(h).is_empty() else slot_pos(h, hand_catch_rest[h])
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -2517,6 +2527,7 @@ func start_run(n: int) -> void:
 	_slow_cur = 0.0
 	_tick_acc = 1.0
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
+	hand_catch_rest = [catch_slot(LEFT), catch_slot(RIGHT)]
 	hclose = [0.0, 0.0]
 	catch_flash = [-999, -999]
 	throw_kick = [-999, -999]
@@ -2584,9 +2595,9 @@ func on_catch(h: int) -> void:
 		if rng.randf() > catch_chance(quality, best.height):
 			drop_ball(best, "slip")
 			return
-	# secured. Harder patterns pay more per catch (their base difficulty is the
-	# reward), so grinding the tamest routine is never the best money.
-	var pm := pattern_mult()
+	# secured. Harder patterns AND harder loads pay more per catch (their base
+	# difficulty is the reward), so grinding the tamest routine is never the best.
+	var pm := pattern_mult() * object_mult()
 	best.state = STATE_HAND
 	stack(h).append(best)
 	catch_flash[h] = tick
@@ -2601,13 +2612,13 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		score += int(round(100.0 * float(streak) * pm))
+		score += int(round(100.0 * streak_mult() * pm))
 		applause = minf(1.0, applause + 0.05)
 		add_xp(3)
 		# the slow-motion earn, only when a REAL pattern is up (three props or
 		# more, so two lazy balls cannot farm it): a FRAME-perfect catch is an
-		# Amazing! burst, and FIFTY straight Perfects buy one minute of thick
-		# time, after which the count starts over for the next minute
+		# Amazing! burst, and FIFTY straight Perfects buy thirty seconds of thick
+		# time, after which the count starts over for the next thirty
 		if num_balls >= SLOW_MIN_BALLS:
 			perfect_chain += 1
 			if best_d == 0:
@@ -2616,7 +2627,7 @@ func on_catch(h: int) -> void:
 			if perfect_chain >= CHAIN_NEED:
 				perfect_chain = 0
 				chain_until = _frames + CHAIN_FRAMES
-				add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  one minute of thick time", Color(0.75, 0.92, 1.0))
+				add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  thirty seconds of thick time", Color(0.75, 0.92, 1.0))
 				play_sfx("record", -8.0)
 		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
@@ -2637,7 +2648,7 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		score += int(round(50.0 * float(streak) * pm))
+		score += int(round(50.0 * streak_mult() * pm))
 		applause = minf(1.0, applause + 0.025)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
@@ -2878,6 +2889,12 @@ func do_throw(h: int, hold: int) -> void:
 	if mid_ball:
 		cross = false
 	b.to_hand = other(h) if cross else h
+	# lock the receiving hand's waiting point in RIGHT NOW, for exactly this ball
+	# (Louis): over-the-top and Columns/lane/mid-ball throws all land INNER, a
+	# plain throw lands OUTER. This is the one and only place hand_catch_rest
+	# changes, so the empty hand never has to guess where a future throw goes -
+	# it already knows, the instant this one leaves the hand.
+	hand_catch_rest[b.to_hand] = HAND_INNER if (over_top or lanes or mid_ball) else HAND_OUTER
 	# always launch from wherever the ball is actually sitting: a lane or normal
 	# ball rests pulled in at inner_pos while held, the middle ball rests at
 	# stage center (see draw_hand) - EXCEPT on the very throw that first marks it
@@ -2911,13 +2928,12 @@ func do_throw(h: int, hold: int) -> void:
 		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	elif over_top:
 		# the wide wind-up: with low traffic incoming, the lob leaves from 20px
-		# outside the catch point (hand_target holds the hand out there too), and
-		# lands WIDE of the usual catch point so the high road never shares air
-		# with the low weave (the empty hand drifts out to meet it, see hand_target)
+		# outside the catch point. It lands INNER (Louis: the over-the-top road
+		# comes down close, crossing the low weave closely but never touching it),
+		# which the receiving hand is already waiting at (hand_catch_rest, set above).
 		var windup := (20.0 if h == RIGHT else -20.0) if b.bulge > 0.0 else 0.0
 		b.from_pos = outer_pos(h) + Vector2(windup, 0.0)
-		var wide := 40.0 if b.to_hand == RIGHT else -40.0
-		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + wide, 0.0)
+		b.to_pos = inner_pos(b.to_hand) + Vector2(drift, 0.0)
 	else:
 		# a plain cascade/fountain throw: inner launch, outer catch. A FOUNTAIN is
 		# same-hand, so its two balls (half a cycle apart) trace the same arc and
@@ -2961,6 +2977,33 @@ func pattern_unlocked(i: int) -> bool:
 
 func pattern_mult() -> float:
 	return float(PATTERNS[pattern]["mult"])
+
+
+func object_mult() -> float:
+	# harder LOADS pay more, independent of which pattern they are juggled in
+	# (ideas.rtf: using more objects should give score a good boost compared to
+	# just spamming three balls). Balls and weight compound, so five clubs and
+	# three torches land in the same neighbourhood - both genuinely harder than
+	# an easy three-ball routine, whatever pattern it is run in.
+	var ball_step := float(num_balls - MIN_BALLS)
+	var weight_step := float(prop_weight() - 1)
+	return (1.0 + OBJ_BALL_BONUS * ball_step) * (1.0 + OBJ_WEIGHT_BONUS * weight_step)
+
+
+const STREAK_LINEAR := 30   # streak bonus is plain linear up to this length
+const STREAK_TAPER := 4.0   # then grows with the square root, scaled by this
+
+
+func streak_mult() -> float:
+	# ideas.rtf: the consecutive-perfect multiplier was too strong for easy three-
+	# ball play, which alone can sustain a streak far longer than a genuinely hard
+	# load ever will. Linear up to STREAK_LINEAR catches (an ordinary good run is
+	# untouched), then square-root beyond it, so grinding one streak to absurd
+	# length stops being the top strategy - object_mult() above is.
+	var s := float(streak)
+	if s <= float(STREAK_LINEAR):
+		return s
+	return float(STREAK_LINEAR) + sqrt(s - float(STREAK_LINEAR)) * STREAK_TAPER
 
 
 func rec_table() -> Array[int]:
@@ -3190,16 +3233,34 @@ func on_round_end() -> void:
 	var clean := 1.0
 	if caught + dropped > 0:
 		clean = float(caught) / float(caught + dropped)
-	# harder routines (more balls) are worth more XP and pay more
-	var diff := 1.0 + 0.25 * float(num_balls - MIN_BALLS)
+	# harder routines (more balls, heavier props) are worth more XP and pay more
+	var diff := 1.0 + 0.25 * float(num_balls - MIN_BALLS) + 0.25 * float(prop_weight() - 1)
 	var bonus := int(round((float(best_streak) * 4.0 + float(caught) * 1.5) * clean * diff))
 	add_xp(bonus)
 	if mode == MODE_PERFORM:
-		# reputation swings on the show's quality: clean play carries it, the
-		# crowd's high point tops it up. A sloppy set drags it down.
+		# reputation swings mostly on the SCORE you put up (ideas.rtf: venues expect
+		# better juggling, not just a clean set), with clean play and the crowd's
+		# high point as a smaller modifier on top. Score is judged against your OWN
+		# best at this venue (pattern_mult/object_mult already make a harder load
+		# post a bigger number, so this stays fair across routines): 0 = barely
+		# showed up, 1 = matched your best, 2 = doubled it, the cap. With no record
+		# yet at this venue, fall back to quality alone so a first set is not
+		# unfairly starved or inflated.
 		var quality := clampf(0.7 * clean + 0.3 * peak_applause, 0.0, 1.0)
+		var rec := 0
+		if run_venue >= 0 and run_venue < rec_table().size():
+			rec = rec_table()[run_venue]
+		var score_factor := clampf(float(score) / float(rec), 0.0, 2.0) if rec > 0 else quality
 		var purist_mult := PURIST_BONUS if purist else 1.0
-		var rep_delta := int(round((quality - 0.5) * float(REP_SWING) * purist_mult))
+		# a low score earns little reputation even with a lively crowd, and a
+		# genuinely poor set (low score AND low applause) now drags reputation DOWN
+		# instead of merely drifting up, the way it used to.
+		var rep_delta := int(round((0.75 * (score_factor - 0.6) + 0.25 * (quality - 0.5)) * float(REP_SWING) * purist_mult))
+		# never more than one venue's worth of Reputation from a single set, however
+		# huge the score: the next stage still takes more than one great night
+		var cur_tier := venue_index_of(reputation)
+		if cur_tier + 2 < VENUE_REP.size():
+			rep_delta = mini(rep_delta, VENUE_REP[cur_tier + 2] - 1 - reputation)
 		reputation = maxi(0, reputation + rep_delta)
 		last_rep_delta = rep_delta
 		# a grander stage pays more for the same set (the climb is worth money),
@@ -3251,7 +3312,7 @@ func stamina_mult() -> float:
 func slow_target() -> float:
 	# where the slow amount is HEADING, 0..1. All sources stack linearly
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
-	# frame-perfect catch, and an earned fifty-Perfect minute. Purist sets
+	# frame-perfect catch, and an earned fifty-Perfect thirty-second window. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
 	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 4.0 / 100.0
 	if pie_active and not purist_run():
@@ -5182,7 +5243,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		desc = String(pd2["desc"])
 		locked_at = int(pd2["lvl"])
 		is_unlocked = pattern_unlocked(skills_sel - nt)
-		how = "In practice, press P to switch patterns. Score multiplier x%.2f. Cascade and Fountain also match the ball count." % float(pd2["mult"])
+		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still). Cascade and Fountain also match the ball count." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
 	draw_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
 	if not is_unlocked:
 		draw_string(font, Vector2(px + pw - 230.0, dy + 18.0), "unlocks at level %d" % locked_at, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.85, 0.62, 0.5))
