@@ -233,7 +233,7 @@ const TR_RCASC := 6
 const TR_TENNIS := 7
 const TRICKS := [
 	{"id": "high", "name": "High Toss",        "kind": "arm",    "lvl": 2, "min_air": 0, "bonus": 260, "shout": "HIGH TOSS!",
-	 "desc": "Power one throw sky high. Land the catch for a burst of applause."},
+	 "desc": "Power one throw sky high - hold the throw and it climbs clean out of the frame, for a bigger burst of applause."},
 	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",    "lvl": 4, "min_air": 0, "bonus": 150, "shout": "BEHIND THE BACK!",
 	 "desc": "Power one showy behind-the-back throw. Style the crowd loves, if you land it."},
 	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 7, "min_air": 2, "bonus": 0,   "shout": "SPIN!",
@@ -516,6 +516,9 @@ var _joy_held := {}
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
 var _demo_trick := false  # dev: the auto-player also performs tricks, to screenshot them
+var _demo_trick_pin := -1 # dev: --trick <id> pins ONE trick (so toggles and held arm
+						  # tricks can be watched); -1 alternates High Toss / BTB + Spin
+var _demo_hold := 7       # dev: --hold <n> sets the auto-player's throw hold (0..44)
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 var _shot := false
 var _shot_path := ""
@@ -599,12 +602,20 @@ func _ready() -> void:
 					level = maxi(level, int(PATTERNS[pj]["lvl"]))
 					pattern_sel = pj
 					start_run(num_balls)
-		if ua.has("--trick"):   # dev: unlock every trick and let the auto-player show them off
-			_demo_trick = true
-			level = 9
+		var tri := ua.find("--trick")   # dev: unlock every trick and let the auto-player
+		if tri != -1:                   # show them off. An optional id (--trick wfall)
+			_demo_trick = true          # pins that one trick, so toggles can be watched
+			level = 10
+			if tri + 1 < ua.size() and not ua[tri + 1].begins_with("--"):
+				for tj in TRICKS.size():
+					if String(TRICKS[tj]["id"]) == ua[tri + 1]:
+						_demo_trick_pin = tj
 			if ua.has("--unlock"):   # dev: also show the new-trick banner
 				trick_unlock = TR_SPIN
 				trick_unlock_tick = 0
+		var hoi := ua.find("--hold")    # dev: the auto-player's hold per throw (0..44),
+		if hoi != -1 and hoi + 1 < ua.size():   # to verify held heights on screenshots
+			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -1065,11 +1076,12 @@ func check_dead_end() -> void:
 
 
 func seg_name() -> String:
-	# the day's beats (Louis): wake to DAY, work into NIGHT and DEEP NIGHT. The
-	# clock is flavour; only running out of STAMINA says it is time to sleep.
+	# the day's beats (Louis): wake to DAYLIGHT, work into NIGHT and DEEP NIGHT.
+	# ("daylight" not "day": next to the day NUMBER it read as a stutter, "day 1,
+	# day".) The clock is flavour; only running out of STAMINA says sleep.
 	if too_tired():
 		return "time to sleep"
-	var names := ["day", "night", "deep night"]
+	var names := ["daylight", "night", "deep night"]
 	return names[clampi(seg_used, 0, 2)]
 
 
@@ -2453,7 +2465,7 @@ func on_catch(h: int) -> void:
 			add_xp(3)
 	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
 	if best.trick >= 0 and best_d <= W_GOOD:
-		reward_trick(best.trick, outer_pos(h))
+		reward_trick(best.trick, outer_pos(h), best.height)
 
 
 # -----------------------------------------------------------------------------
@@ -2512,53 +2524,71 @@ func do_throw(h: int, hold: int) -> void:
 		trick_primed = false
 		var tfrac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 		if this_trick == TR_HIGH:
-			tfrac = 1.35
+			# a TAP already powers the toss sky high; HOLDING the throw powers it
+			# further, up to 1.8 at a full hold - high enough to leave the frame for
+			# a beat (a top-edge marker tracks it, see draw_balls_in_flight). The
+			# extra height keeps its honest cost: the landing spreads wider and the
+			# arrival gets less certain (height feeds drift/wobble/jitter below),
+			# while the catch-chance penalty saturates at the 1.4 cap.
+			tfrac = 1.35 + 0.45 * minf(tfrac, 1.0)
 		elif this_trick == TR_BTB:
 			tfrac = clampf(tfrac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
 		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX) * (1.0 - DEFICIT_HEIGHT * deficit)))
 	# the pattern shapes the throw: a shower's feed hand snaps a fast low pass no
 	# matter the hold, its high hand must clear the feed lane, and a half shower
 	# lifts the right hand over the top. maxi keeps a trick's height if higher.
+	# An ARMED ONE-SHOT (this_trick >= 0 here) always wins its one throw: the
+	# player paid a press for it, so no pattern may flatten it into a low pass
+	# that would still collect the trick's full bonus on the catch (the shower
+	# feed used to do exactly that, a quiet 260-a-catch exploit).
 	if pattern == SHOWER:
-		if h == LEFT:
+		if h == LEFT and this_trick < 0:
 			air = int(round(base_air * SHOWER_FEED))
-		else:
+		elif h == RIGHT:
 			air = maxi(air, int(round(base_air + SHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	elif pattern == HALFSHOWER and h == RIGHT:
 		air = maxi(air, int(round(base_air + HALFSHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# an active TOGGLE trick reshapes every throw while it runs, and Overthrow
-	# (a one-shot) sends this single throw up and over the top of the pattern
+	# (a one-shot) sends this single throw up and over the top of the pattern.
+	# A toggle only TAGS a throw the one-shot has not already claimed: the tag
+	# decides which trick the catch pays, and the loud one-shot must never be
+	# paid out as the toggle's small per-catch bonus.
 	var over_top := this_trick == TR_OVER
 	if toggle_on == TR_COLS:
-		this_trick = TR_COLS
+		if this_trick < 0:
+			this_trick = TR_COLS
 	elif toggle_on == TR_WFALL:
 		if h == RIGHT:
 			over_top = true
-			this_trick = TR_WFALL
-		else:
+			if this_trick < 0:
+				this_trick = TR_WFALL
+		elif this_trick < 0:
 			# the other hand keeps the weave, but forced LOW (a ceiling, not a floor),
 			# so it visibly flows under the over-the-top side instead of drifting up
 			# to meet it when the player holds both hands about the same
 			air = mini(air, int(round(base_air + WATERFALL_LOW * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	elif toggle_on == TR_RCASC:
 		over_top = true
-		this_trick = TR_RCASC
+		if this_trick < 0:
+			this_trick = TR_RCASC
 	elif toggle_on == TR_TENNIS:
 		if tennis_ball == null or not balls.has(tennis_ball):
 			tennis_ball = b   # the marked ball: the first one thrown after the toggle
 		if b == tennis_ball:
 			over_top = true
-			this_trick = TR_TENNIS
+			if this_trick < 0:
+				this_trick = TR_TENNIS
 	if over_top:
 		var high_min := WATERFALL_HIGH if this_trick == TR_WFALL else OVER_TOP_MIN
 		air = maxi(air, int(round(base_air + high_min * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# Columns (the pattern or the toggle trick) pulls this throw's airtime toward the
 	# lanes' running height, so a slightly early or late release still lands close to
 	# the others instead of drifting the apexes apart (Louis: mismatched heights made
-	# the catch timing unreadable). An over_top breakout throw is exempt: it is
-	# meant to stand out, not blend in.
+	# the catch timing unreadable). Breakout throws are exempt: an over_top throw and
+	# an armed one-shot (High Toss, Behind the Back) are meant to stand out, not blend
+	# in - and neither may drag the lanes' reference height up after itself.
 	var col_lanes := pattern == COLUMNS or toggle_on == TR_COLS
-	if col_lanes and not over_top:
+	if col_lanes and not over_top and this_trick != TR_HIGH and this_trick != TR_BTB:
 		if col_air_ref < 0.0:
 			col_air_ref = float(air)
 		else:
@@ -2566,8 +2596,10 @@ func do_throw(h: int, hold: int) -> void:
 		col_air_ref = lerp(col_air_ref, float(air), 0.5)
 	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
 	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
-	# Applause, and it clamps to 0 when the prop is too heavy to loft at all.
-	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
+	# Applause, and it clamps to 0 when the prop is too heavy to loft at all. The ceiling is
+	# 1.8, which only a HELD High Toss reaches (plain throws top out at 1.4): every consumer
+	# of height that must not scale past the design cap clamps itself at 1.4 internally.
+	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.8)
 	b.height = frac
 	b.trick = this_trick
 
@@ -2789,7 +2821,7 @@ func cycle_trick() -> void:
 	play_sfx("ui2", -13.0)
 
 
-func reward_trick(t: int, at: Vector2) -> void:
+func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 	# a landed shaped catch pays the trick's bonus. One-shots celebrate loudly.
 	# A running toggle pays a smaller bonus on every shaped catch it lands, and
 	# counts toward the trick tally only once per activation.
@@ -2797,6 +2829,12 @@ func reward_trick(t: int, at: Vector2) -> void:
 		return
 	var td: Dictionary = TRICKS[t]
 	var bonus := int(td["bonus"])
+	if t == TR_HIGH and height > 1.35:
+		# a HELD High Toss climbs past the tap's 1.35 toward 1.8, and the climb
+		# pays: up to half again the flourish at the full frame-leaving height.
+		# Higher risk (wider drift, a beat out of sight) earns a higher reward,
+		# the same bargain the Purist bonus makes.
+		bonus = int(round(float(bonus) * (1.0 + 0.5 * clampf((height - 1.35) / 0.45, 0.0, 1.0))))
 	if bonus <= 0:
 		return
 	var tog := String(td["kind"]) == "toggle"
@@ -3467,7 +3505,22 @@ func update_hands() -> void:
 
 
 func add_popup(pos: Vector2, text: String, col: Color) -> void:
-	popups.append({"pos": pos + Vector2(0, -40), "text": text, "col": col, "born": tick})
+	# a newcomer that would land on a still-living popup (same neighbourhood: a
+	# trick shout, its PERFECT, and a Spin's x2 all fire from one catch) slides up
+	# above it, so a busy moment stacks into a readable little column instead of
+	# three lines of text printed through each other
+	var p := pos + Vector2(0, -40)
+	var moved := true
+	var guard := 0
+	while moved and guard < 8:
+		moved = false
+		guard += 1
+		for q in popups:
+			var qpos: Vector2 = q["pos"] + Vector2(0, -float(tick - int(q["born"])) * 0.6)
+			if absf(qpos.x - p.x) < 120.0 and absf(qpos.y - p.y) < 26.0:
+				p.y = qpos.y - 26.0
+				moved = true
+	popups.append({"pos": p, "text": text, "col": col, "born": tick})
 
 
 func age_popups() -> void:
@@ -4021,7 +4074,22 @@ func draw_balls_in_flight() -> void:
 	for b in balls:
 		if b.state == STATE_FLIGHT:
 			draw_trail(b)
-			draw_prop(b, flight_pos(b))
+			var pos := flight_pos(b)
+			draw_prop(b, pos)
+			if pos.y < -8.0:
+				# a fully HELD High Toss climbs clean out of the frame for a beat: a
+				# small chevron pointing up tracks the ball's x so the player never
+				# loses the prop, only sees it leave. It sits just BELOW the top-centre
+				# HUD (the mode title and Applause meter live on the frame edge itself,
+				# and a crossing toss spends its apex right over them). Fades in with
+				# how far above the frame the ball is, so a barely-cresting throw
+				# does not flicker it.
+				var above := clampf((-8.0 - pos.y) / 40.0, 0.0, 1.0)
+				var mc := Color(b.color.r, b.color.g, b.color.b, 0.35 + 0.5 * above)
+				var mx := pos.x
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(mx - 7.0, 67.0), Vector2(mx + 7.0, 67.0), Vector2(mx, 58.0)]), mc)
+				draw_rect(Rect2(mx - 1.0, 70.0, 2.0, 9.0), Color(mc.r, mc.g, mc.b, mc.a * 0.45))
 
 
 func draw_trail(b: Ball) -> void:
@@ -4422,7 +4490,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var card_a := clampf(float(age) / 14.0, 0.0, 1.0)
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82 * card_a))
 	var pw := 580.0
-	var ph := 460.0
+	var ph := 500.0   # tall enough that the footer hints breathe below the XP row
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5 + (1.0 - card_a) * 24.0
 	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98 * card_a))
@@ -4910,19 +4978,32 @@ func draw_day(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(ax + aw - 118.0, ry), cost, HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, cc)
 
 	# under the list: the selected action explains itself, and the perform row
-	# adds its live chase and how the NEXT stage opens
+	# adds its live chase and how the NEXT stage opens. The block sits on its own
+	# card (same footprint as the row highlight): drawn bare it fought the fence
+	# pickets and the sun glow of the exterior behind it. Long subs (the inn's,
+	# the pie's) wrap inside the card instead of clipping at its edge.
 	var selr: Dictionary = rows[day_sel]
-	var suby := ay + float(rows.size()) * 44.0 + 4.0
-	draw_string(font, Vector2(ax - 14.0, suby), String(selr["sub"]), HORIZONTAL_ALIGNMENT_LEFT, aw + 14.0, 13, Color(0.85, 0.78, 0.66))
-	if String(selr["id"]) == "perform":
+	var suby := ay + float(rows.size()) * 44.0 + 2.0
+	var sub_text := String(selr["sub"])
+	var sub_w := aw - 28.0
+	var sub_h := font.get_multiline_string_size(sub_text, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, 2).y
+	var is_perf := String(selr["id"]) == "perform"
+	var nxt := next_venue_rep()
+	var block_h := 8.0 + sub_h + 10.0
+	if is_perf:
+		block_h += 26.0 + (20.0 if nxt > 0 else 0.0)
+	hud_panel(Rect2(ax - 14.0, suby, aw, block_h))
+	draw_multiline_string(font, Vector2(ax, suby + 8.0 + font.get_ascent(13)), sub_text,
+		HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, 2, Color(0.85, 0.78, 0.66))
+	if is_perf:
 		var vi := play_venue()
 		var chase := "no record here yet  -  set one"
 		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
 			chase = "record to beat   %d" % rec_table()[vi]
-		draw_string(font, Vector2(ax - 14.0, suby + 40.0), chase, HORIZONTAL_ALIGNMENT_LEFT, aw, 13, Color(0.96, 0.83, 0.52, 0.9))
-		var nxt := next_venue_rep()
+		var cy := suby + 8.0 + sub_h + 24.0
+		draw_string(font, Vector2(ax, cy), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, Color(0.96, 0.83, 0.52, 0.9))
 		if nxt > 0:
-			draw_string(font, Vector2(ax - 14.0, suby + 60.0), "the next stage opens at Rep %d  (you have %d)" % [nxt, reputation], HORIZONTAL_ALIGNMENT_LEFT, aw, 13, Color(0.82, 0.72, 0.85, 0.9))
+			draw_string(font, Vector2(ax, cy + 20.0), "the next stage opens at Rep %d  (you have %d)" % [nxt, reputation], HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, Color(0.82, 0.72, 0.85, 0.9))
 
 	# transient feedback (a meal eaten, a spent day) fades after a few seconds
 	if day_msg != "" and cine_tick - day_msg_tick < 300:
@@ -5128,7 +5209,7 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(0, s.y * 0.40), "Too tired to work. Too poor for a bed. The city keeps what it takes.",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.85, 0.78, 0.66, fin))
 	var lines := [
-		"%d days on the road" % int(career["days"]),
+		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%d performances,  %d catches" % [int(career["perfs"]), int(career["catches"])],
 		"best streak %d,  highest score %d" % [int(career["best_streak"]), int(career["best_score"])],
 		"%d gold earned, and all of it spent" % int(career["gold_earned"]),
@@ -5593,7 +5674,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
-	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %d" % int(career["best_score"]), "b": "%d days on the road" % day})
+	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %d" % int(career["best_score"]), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
 	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
 	cur += 82.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "code", "b": "Louis Vandenbruwaene"})
@@ -5972,7 +6053,9 @@ func draw_popups(font: Font) -> void:
 		var size := 18
 		if big:
 			size = 23 + maxi(0, 6 - age)
-		draw_string(font, pos - Vector2(60.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
+		# the box is 240 wide, so its LEFT edge sits half that from the anchor: the
+		# old -60 offset centred every popup 60px right of the hand it belonged to
+		draw_string(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
 
 
 # --- venue exteriors: the "where", shared by establishing cards and wide shots -
@@ -6268,10 +6351,21 @@ func _demo_step() -> void:
 				on_catch(h)
 				break
 	# dev trick preview: kick off a Spin whenever the pattern is full and cooled down
-	if _demo_trick and balls_airborne() >= 2 and tick >= trick_ready and tick >= 40:
+	# (in unpinned mode, or when Spin itself is the pinned trick)
+	var pin_kind := String(TRICKS[_demo_trick_pin]["kind"]) if _demo_trick_pin >= 0 else ""
+	if _demo_trick and (_demo_trick_pin == -1 or _demo_trick_pin == TR_SPIN) \
+			and balls_airborne() >= 2 and tick >= trick_ready and tick >= 40:
 		spin_until = tick + SPIN_TICKS
 		spin_scored = false
 		trick_ready = tick + TRICK_COOLDOWN
+	# a pinned TOGGLE switches on once (one mimed Space press) and stays running
+	if _demo_trick and pin_kind == "toggle" and toggle_on != _demo_trick_pin and tick >= 24:
+		toggle_on = _demo_trick_pin
+		toggle_scored = false
+		tennis_ball = null
+		if _demo_trick_pin == TR_COLS:
+			col_air_ref = -1.0
+			col_mid_ball = null
 	# metronome: every beat, release one ball from a hand that actually holds one.
 	# This can never desync because it only throws real held balls.
 	if tick >= 24 and tick % DEMO_BEAT == 0:
@@ -6282,9 +6376,13 @@ func _demo_step() -> void:
 			if _demo_trick:
 				# mimic a real Space press per throw: select, prime, and let
 				# do_throw consume the one-shot exactly like player input would
-				trick_sel = TR_HIGH if (tick / DEMO_BEAT) % 2 == 0 else TR_BTB
-				trick_primed = true
-			do_throw(h, 7)
+				if pin_kind == "arm":
+					trick_sel = _demo_trick_pin
+					trick_primed = true
+				elif _demo_trick_pin == -1:
+					trick_sel = TR_HIGH if (tick / DEMO_BEAT) % 2 == 0 else TR_BTB
+					trick_primed = true
+			do_throw(h, _demo_hold)
 			_demo_next = other(h)
 
 

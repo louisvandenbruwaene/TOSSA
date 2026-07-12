@@ -75,10 +75,14 @@ air = BASE_AIR + HOLD_GAIN * hold_ticks        # BASE_AIR 84, HOLD_GAIN 1.9
 hold_ticks caps at HOLD_MAX (44 ticks, ~0.37s of holding)
 ```
 
-`height` (called `frac` in code, 0.0 to 1.4) is how far past the tap floor
-the throw actually reached, normalized so 1.0 is a full HOLD_MAX hold. Some
-tricks (High Toss, Overthrow, the toggle tricks) force a specific `frac`
-regardless of how long you actually held THROW.
+`height` (called `frac` in code, 0.0 to 1.8) is how far past the tap floor
+the throw actually reached, normalized so 1.0 is a full HOLD_MAX hold. Plain
+throws top out at 1.4 (only heavy props with surplus Strength get there);
+tricks reshape `frac`: Overthrow and the toggle tricks force minimums, and
+High Toss starts at 1.35 on a tap and climbs with the hold to 1.8 at a full
+one, high enough to leave the frame for a beat (a chevron under the Applause
+meter tracks it). Catch difficulty saturates at 1.4; only the placement
+spread below keeps growing, and the trick's bonus grows with the climb.
 
 ### What height costs you
 
@@ -93,7 +97,7 @@ wobble (in-flight arc wiggle)     = up to WOBBLE_MAX   (11 px)
 ```
 
 All three scale by `spread * inacc_factor()`, where `spread` is normally just
-the throw's height (0 to 1.4), floored by Strength deficit (Section 4).
+the throw's height (0 to 1.8), floored by Strength deficit (Section 4).
 
 `inacc_factor()` is what Accuracy actually buys on the throwing side:
 
