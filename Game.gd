@@ -149,7 +149,9 @@ const PATTERNS := [
 ]
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
-const HALFSHOWER_MIN := 0.35  # the over-the-top side's minimum height fraction
+const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction (0.35
+							   # left its arc only ~34px above the weave where they
+							   # cross; 0.5 keeps clear air between the two roads)
 const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
 							   # Reverse Cascade, Tennis's marked ball)
 const WATERFALL_HIGH := 0.6   # Waterfall's over-the-top hand: minimum height fraction,
@@ -288,6 +290,13 @@ class Ball:
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
 	var trick := -1           # which trick shaped this throw (TR_HIGH/TR_BTB), or -1 for a plain throw
+	var over_top := false     # an over-the-top lob: launched at the OUTER point, lands wide
+	var bulge := 0.0          # px of early sideways bow, SIGNED: positive bows outward (an
+							  # over-the-top lob swinging around low traffic dropping into
+							  # its corner), negative bows inward (a shower's high throw
+							  # dodging the feed that descends outside its launch)
+	var bumped := false       # hard mode: this ball clacked another mid-air; only a
+							  # half-Perfect-window catch can still save it
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
 
 
@@ -467,6 +476,10 @@ var last_streak_tick := -999  # when the streak last grew, for the multiplier pu
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
 var set_flags := true     # show the TOO LOW / too high throw flags
+var set_collide := false  # hard mode: props that clack mid-air become nearly
+						  # uncatchable (half the Perfect window, no chance roll).
+						  # A PERFECT pattern never collides, so this only ever
+						  # punishes sloppy heights that share air.
 var set_music := true     # the procedural adaptive soundtrack
 var set_sfx := true       # catch/throw/drop sound effects and the crowd bed
 var set_fullscreen := false  # borderless fullscreen (also toggled live with F11)
@@ -519,6 +532,11 @@ var _demo_trick := false  # dev: the auto-player also performs tricks, to screen
 var _demo_trick_pin := -1 # dev: --trick <id> pins ONE trick (so toggles and held arm
 						  # tricks can be watched); -1 alternates High Toss / BTB + Spin
 var _demo_hold := 7       # dev: --hold <n> sets the auto-player's throw hold (0..44)
+var _collcheck := false   # dev: --collcheck measures the tightest mid-air clearance
+						  # of the session (throw inaccuracy zeroed, so it audits the
+						  # IDEAL pattern geometry), printed on the --shot capture
+var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
+var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 var _shot := false
 var _shot_path := ""
@@ -616,6 +634,10 @@ func _ready() -> void:
 		var hoi := ua.find("--hold")    # dev: the auto-player's hold per throw (0..44),
 		if hoi != -1 and hoi + 1 < ua.size():   # to verify held heights on screenshots
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
+		if ua.has("--collcheck"):   # dev: audit the ideal pattern for mid-air overlap
+			_collcheck = true
+		if ua.has("--collide"):     # dev: force the hard-collisions toggle ON this session
+			set_collide = true
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -1762,7 +1784,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 8   # music, sound, shake, flags, fullscreen, controls, records, Back
+	var n := 9   # music, sound, shake, flags, collisions, fullscreen, controls, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -1781,15 +1803,17 @@ func settings_input(kc: int) -> void:
 				3:
 					set_flags = not set_flags
 				4:
+					set_collide = not set_collide
+				5:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
-				5:
+				6:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				6:
-					game_state = ST_STATS   # the career ledger, back with Esc
 				7:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				8:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -1884,6 +1908,7 @@ func load_settings() -> void:
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
 		set_flags = bool(cf.get_value("opt", "flags", true))
+		set_collide = bool(cf.get_value("opt", "collide", false))
 		set_music = bool(cf.get_value("opt", "music", true))
 		set_sfx = bool(cf.get_value("opt", "sfx", true))
 		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
@@ -1899,6 +1924,7 @@ func save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("opt", "shake", set_shake)
 	cf.set_value("opt", "flags", set_flags)
+	cf.set_value("opt", "collide", set_collide)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
 	cf.set_value("opt", "fullscreen", set_fullscreen)
@@ -2187,12 +2213,60 @@ func shoulder_pos(h: int) -> Vector2:
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
+func incoming_low(h: int) -> bool:
+	# is any NON-over-the-top ball airborne toward hand h's catch point right now?
+	# The corner between an outgoing throw and this incoming ball is where every
+	# mid-air overlap lived, so throws made over it dodge sideways (see do_throw)
+	for b in balls:
+		if b.state == STATE_FLIGHT and b.to_hand == h and not b.over_top:
+			return true
+	return false
+
+
+func next_throw_over_top(h: int) -> bool:
+	# whether hand h's NEXT throw is an over-the-top launch. This is its own KIND
+	# of throw (Louis): no inward carry, the hand lobs straight from the OUTER
+	# catch point, which is what keeps the high road clear of the low weave. Used
+	# always (Reverse Cascade), on one hand (Waterfall's right, the other stays
+	# low), for one throw (Overthrow), or back and forth (Tennis's marked ball).
+	# Mirrors the over_top decision in do_throw, read BEFORE the ball is popped.
+	if trick_primed and trick_sel == TR_OVER:
+		return true
+	if toggle_on == TR_RCASC:
+		return true
+	if toggle_on == TR_WFALL and h == RIGHT:
+		return true
+	if toggle_on == TR_TENNIS:
+		if tennis_ball == null or not balls.has(tennis_ball):
+			return true   # nothing marked yet: the very NEXT throw claims the mark
+		return stack(h).has(tennis_ball)
+	# the shower's and half shower's high hand ride the over-the-top road too
+	return h == RIGHT and pattern in [SHOWER, HALFSHOWER]
+
+
 # where hand h wants to be right now: inner while carrying (to throw), else outer
 func hand_target(h: int) -> Vector2:
 	var holding := not stack(h).is_empty()
 	# in COLUMNS the ball comes straight back down its lane (the throw point), so
 	# the waiting hand stays under the lane instead of drifting out to the side
 	var p := inner_pos(h) if (holding or pattern == COLUMNS) else outer_pos(h)
+	# an over-the-top throw never carries inward: the hand winds up wide and lobs
+	# from the outer catch point itself (20px wider still when low traffic is
+	# dropping into this corner, matching the throw's wide wind-up in do_throw)
+	if holding and next_throw_over_top(h):
+		p = outer_pos(h)
+		if incoming_low(h):
+			p.x += 20.0 if h == RIGHT else -20.0
+	# an over-the-top ball lands WIDE of the usual catch point, so the empty hand
+	# drifts out to meet the soonest such arrival instead of waiting inside it
+	if not holding:
+		var soonest := 1000000
+		for b in balls:
+			if b.state == STATE_FLIGHT and b.to_hand == h and b.over_top:
+				var left := b.land_tick - tick
+				if left > -MISS_GRACE and left < 70 and left < soonest:
+					soonest = left
+					p.x = b.to_pos.x
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -2363,6 +2437,13 @@ func on_catch(h: int) -> void:
 		# way off the arrival: a genuine mistime, the ball drops
 		drop_ball(best, "MISTIME")
 		return
+	# hard mode (set_collide): a ball that clacked another mid-air is barely
+	# catchable - only HALF the Perfect window secures it, and the Good/Late
+	# chance roll never applies. Saving one is a genuine feat (and still counts
+	# as the Perfect it timing-wise is).
+	if best.bumped and best_d > maxi(1, perfect_window() / 2):
+		drop_ball(best, "collided")
+		return
 	# Perfect timing always secures. A Good or Late catch is a chance that rises
 	# with Accuracy and falls with how far off the standard height the throw was.
 	# The Perfect window itself shrinks for off-standard throws (Focus widens it),
@@ -2495,6 +2576,7 @@ func do_throw(h: int, hold: int) -> void:
 		return
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
+	b.bumped = false   # a fresh throw starts clean; only a NEW mid-air clack marks it
 	var weight := prop_weight()
 	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
 	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Height is set by
@@ -2535,25 +2617,23 @@ func do_throw(h: int, hold: int) -> void:
 			tfrac = clampf(tfrac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
 		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX) * (1.0 - DEFICIT_HEIGHT * deficit)))
 	# the pattern shapes the throw: a shower's feed hand snaps a fast low pass no
-	# matter the hold, its high hand must clear the feed lane, and a half shower
-	# lifts the right hand over the top. maxi keeps a trick's height if higher.
-	# An ARMED ONE-SHOT (this_trick >= 0 here) always wins its one throw: the
-	# player paid a press for it, so no pattern may flatten it into a low pass
-	# that would still collect the trick's full bonus on the catch (the shower
-	# feed used to do exactly that, a quiet 260-a-catch exploit).
-	if pattern == SHOWER:
-		if h == LEFT and this_trick < 0:
-			air = int(round(base_air * SHOWER_FEED))
-		elif h == RIGHT:
-			air = maxi(air, int(round(base_air + SHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
-	elif pattern == HALFSHOWER and h == RIGHT:
-		air = maxi(air, int(round(base_air + HALFSHOWER_MIN * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
+	# matter the hold. An ARMED ONE-SHOT (this_trick >= 0 here) always wins its
+	# one throw: the player paid a press for it, so no pattern may flatten it
+	# into a low pass that would still collect the trick's full bonus on the
+	# catch (the shower feed used to do exactly that, a quiet 260-a-catch exploit).
+	if pattern == SHOWER and h == LEFT and this_trick < 0:
+		air = int(round(base_air * SHOWER_FEED))
 	# an active TOGGLE trick reshapes every throw while it runs, and Overthrow
 	# (a one-shot) sends this single throw up and over the top of the pattern.
 	# A toggle only TAGS a throw the one-shot has not already claimed: the tag
 	# decides which trick the catch pays, and the loud one-shot must never be
 	# paid out as the toggle's small per-catch bonus.
+	# The SHOWER's and HALF SHOWER's high hand ride the same over-the-top road
+	# as the toggles (that is what those patterns ARE), so they inherit the
+	# outer launch, the wide landing, and the corner dodge in one mechanic.
 	var over_top := this_trick == TR_OVER
+	if h == RIGHT and pattern in [SHOWER, HALFSHOWER]:
+		over_top = true
 	if toggle_on == TR_COLS:
 		if this_trick < 0:
 			this_trick = TR_COLS
@@ -2579,7 +2659,13 @@ func do_throw(h: int, hold: int) -> void:
 			if this_trick < 0:
 				this_trick = TR_TENNIS
 	if over_top:
-		var high_min := WATERFALL_HIGH if this_trick == TR_WFALL else OVER_TOP_MIN
+		var high_min := OVER_TOP_MIN
+		if this_trick == TR_WFALL:
+			high_min = maxf(high_min, WATERFALL_HIGH)
+		if h == RIGHT and pattern == SHOWER:
+			high_min = maxf(high_min, SHOWER_MIN)
+		elif h == RIGHT and pattern == HALFSHOWER:
+			high_min = maxf(high_min, HALFSHOWER_MIN)
 		air = maxi(air, int(round(base_air + high_min * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# Columns (the pattern or the toggle trick) pulls this throw's airtime toward the
 	# lanes' running height, so a slightly early or late release still lands close to
@@ -2614,12 +2700,17 @@ func do_throw(h: int, hold: int) -> void:
 	var spread := maxf(frac, deficit * DEFICIT_FLOOR)
 	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * spread * inacc))
 	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * spread * inacc
+	if _collcheck:
+		# the overlap audit judges the IDEAL pattern: geometry must be clean
+		# before inaccuracy gets a say, so the noise terms are zeroed here
+		jitter = 0
+		drift = 0.0
 
 	b.state = STATE_FLIGHT
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
-	b.wobble = WOBBLE_MAX * spread * inacc
+	b.wobble = 0.0 if _collcheck else WOBBLE_MAX * spread * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
@@ -2627,7 +2718,9 @@ func do_throw(h: int, hold: int) -> void:
 	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER]
 	if over_top:
 		cross = true
-	var lanes := col_lanes
+	# an over-the-top throw never joins the lane bookkeeping (it is the breakout,
+	# and letting it claim the middle-ball mark or a lane made it un-over-the-top)
+	var lanes := col_lanes and not over_top
 	# an odd ball count cannot split evenly into two lanes: rather than just piling
 	# the extra ball into one side (the same look as a four-ball columns with one
 	# ball removed), one ball renders as a middle lane, so the pattern reads as a
@@ -2652,17 +2745,41 @@ func do_throw(h: int, hold: int) -> void:
 		cross = false
 	b.to_hand = other(h) if cross else h
 	# always launch from wherever the ball is actually sitting: a lane or normal
-	# ball rests pulled in at inner_pos while held, but the middle ball rests at
+	# ball rests pulled in at inner_pos while held, the middle ball rests at
 	# stage center (see draw_hand) - EXCEPT on the very throw that first marks it
 	# as the middle ball, when it has only ever been held at the normal inner_pos
-	# and has no center position yet to launch from.
-	b.from_pos = stage_center() if (mid_ball and was_mid) else inner_pos(h)
+	# and has no center position yet to launch from. An over-the-top throw is its
+	# own kind of throw (Louis): NO inward carry, it lobs straight from the OUTER
+	# catch point (hand_target holds the hand out there while it waits), so the
+	# high road starts wide and never shares air with the low weave.
+	b.over_top = over_top
+	b.bulge = 0.0
+	if over_top and incoming_low(h):
+		# something low is dropping into this same corner (the launch-side catch
+		# point): the lob winds up a touch WIDE (from_pos below) and its early
+		# flight bows outward (flight_pos), swinging around the incoming ball even
+		# when the throw happens a beat before the catch. With no low traffic (a
+		# reverse cascade, where everything rides the high road) it climbs straight,
+		# staying clear of the WIDE lane the high balls land in.
+		b.bulge = 34.0
+	if mid_ball and was_mid:
+		b.from_pos = stage_center()
+	elif over_top:
+		# the wide wind-up: with low traffic incoming, the lob leaves from 20px
+		# outside the catch point (hand_target holds the hand out there too)
+		var windup := (20.0 if h == RIGHT else -20.0) if b.bulge > 0.0 else 0.0
+		b.from_pos = outer_pos(h) + Vector2(windup, 0.0)
+	else:
+		b.from_pos = inner_pos(h)
 	if lanes:
 		b.to_pos = b.from_pos + Vector2(drift, 0.0)   # straight up and down in the lane
 	elif mid_ball:
 		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	else:
-		var wide := (26.0 if b.to_hand == RIGHT else -26.0) if over_top else 0.0
+		# an over-the-top ball lands WIDE of the usual catch point (the hand drifts
+		# out to meet it, see hand_target): the high road's landing lane must sit
+		# clearly outside the weave's, or the corner traffic shares air
+		var wide := (40.0 if b.to_hand == RIGHT else -40.0) if over_top else 0.0
 		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + wide, 0.0)
 	# Behind the Back is a flourish, drawn as a high wide sweeping loop in flight_pos
 
@@ -3489,6 +3606,34 @@ func update_sim() -> void:
 			var maxlen := 5 + int(clampf(b.height, 0.0, 1.4) * 8.0)
 			while b.trail.size() > maxlen:
 				b.trail.remove_at(0)
+	# mid-air contact. With the hard-mode toggle on, two props that visibly clack
+	# both become nearly uncatchable (see on_catch); a PERFECT pattern never
+	# collides, so this only ever punishes sloppy heights that share air. The
+	# dev --collcheck harness rides the same loop to audit the ideal geometry.
+	if set_collide or _collcheck:
+		var fly: Array[Ball] = []
+		var fpos: Array[Vector2] = []
+		for b in balls:
+			if b.state == STATE_FLIGHT:
+				fly.append(b)
+				fpos.append(flight_pos(b))
+		for i in fly.size():
+			for j in range(i + 1, fly.size()):
+				var d := fpos[i].distance_to(fpos[j])
+				var rr := 11.0 * (prop_scale(fly[i].kind) + prop_scale(fly[j].kind))
+				if _collcheck and d - rr < _coll_min:
+					_coll_min = d - rr
+					_coll_at = "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
+						tick, fpos[i].x, fpos[i].y, str(fly[i].over_top), fly[i].height,
+						clampf(float(tick - fly[i].launch_tick) / float(maxi(1, fly[i].land_tick - fly[i].launch_tick)), 0.0, 1.0),
+						fpos[j].x, fpos[j].y, str(fly[j].over_top), fly[j].height,
+						clampf(float(tick - fly[j].launch_tick) / float(maxi(1, fly[j].land_tick - fly[j].launch_tick)), 0.0, 1.0)]
+				if set_collide and d < rr and not (fly[i].bumped and fly[j].bumped):
+					fly[i].bumped = true
+					fly[j].bumped = true
+					var mid := (fpos[i] + fpos[j]) * 0.5
+					spawn_parts(mid, Color(1.0, 0.55, 0.4), 7, 3.0, "spark")
+					play_sfx("whiff", -14.0, 1.6)   # a soft airy knock
 	for b in lost:
 		drop_ball(b, "DROP")
 	peak_applause = maxf(peak_applause, applause)
@@ -3537,6 +3682,12 @@ func flight_pos(b: Ball) -> Vector2:
 	var pos := b.from_pos.lerp(b.to_pos, p)
 	pos.y -= 4.0 * b.arc * p * (1.0 - p)                 # parabolic arc
 	pos.x += b.wobble * sin(p * PI) * sin(p * 9.0)       # high-throw arc wobble
+	if b.bulge != 0.0:
+		# the early sideways dodge (see do_throw): positive bows outward around
+		# the ball dropping into the launch corner, negative bows in toward the
+		# centre. Gone by mid-flight either way.
+		var dir_out := 1.0 if b.from_pos.x >= get_viewport_rect().size.x * 0.5 else -1.0
+		pos.x += b.bulge * dir_out * sin(clampf(p * 2.0, 0.0, 1.0) * PI)
 	if b.trick == TR_BTB:
 		# a showy behind-the-back loop: the ball bows back toward the throwing side and
 		# lifts high over the mid-flight, then settles cleanly onto the catch point
@@ -4058,9 +4209,15 @@ func draw_targets() -> void:
 				var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
 				var adiff := absi(dd)
 				var r := 22.0 * prop_scale(b.kind)
-				if adiff <= wp:
+				# a clacked ball (hard mode) catches only inside HALF the Perfect
+				# window: its ring stays warning-hot until that true window, so
+				# the taught timing never lies about what will actually catch
+				var wpb := maxi(1, wp / 2) if b.bumped else wp
+				if adiff <= wpb:
 					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
 					draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
+				elif b.bumped:
+					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.4, 0.3, 0.2 + 0.5 * t), 3.0, true)
 				elif adiff <= W_GOOD:
 					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
 				elif adiff <= W_LATE and dd < 0:
@@ -4133,6 +4290,10 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
+	if b.bumped:
+		# hard mode: a clacked prop glows warning-hot, so the player knows only
+		# a frame-tight catch can still save it
+		halo = Color(1.0, 0.4, 0.3, 0.24 + 0.1 * sin(float(tick) * 0.5))
 	draw_circle(pos, 20.0 * sc, halo)
 	if b.trick >= 0:
 		# a trick throw carries a warm glowing ring so the crowd (and player) reads it as special
@@ -5173,26 +5334,26 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
-	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Throw flags (TOO LOW / high)", set_flags], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
+	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Throw flags (TOO LOW / high)", set_flags], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
-	var oy := s.y * 0.30
+	var oy := s.y * 0.28
 	for i in rows.size():
 		var sel := i == menu_sel
-		var ry := oy + float(i) * 52.0
+		var ry := oy + float(i) * 48.0
 		var nm := String(rows[i][0])
 		var on := bool(rows[i][1])
 		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
 		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
 
 	var csel := menu_sel == rows.size()
-	var cry := oy + float(rows.size()) * 52.0
+	var cry := oy + float(rows.size()) * 48.0
 	draw_string(font, Vector2(px, cry), ("> " if csel else "  ") + "Controls  (rebind the keys)", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if csel else Color(0.8, 0.74, 0.66))
 	var rsel := menu_sel == rows.size() + 1
-	var rry := cry + 52.0
+	var rry := cry + 48.0
 	draw_string(font, Vector2(px, rry), ("> " if rsel else "  ") + "Records and history", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if rsel else Color(0.8, 0.74, 0.66))
 	var bsel := menu_sel == rows.size() + 2
-	draw_string(font, Vector2(0, rry + 52.0 + 30.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(0, rry + 48.0 + 28.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	var tfoot := "Up / Down    A to toggle    B to go back" if pad_active() else "Up / Down    Enter to toggle    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
@@ -6387,6 +6548,11 @@ func _demo_step() -> void:
 
 
 func _capture_and_quit() -> void:
+	if _collcheck:
+		# the overlap audit's verdict: the tightest edge-to-edge clearance any two
+		# airborne props reached this session (negative would be a visual overlap)
+		print("collcheck min clearance: %.1f px" % _coll_min)
+		print("collcheck at: %s" % _coll_at)
 	var img := get_viewport().get_texture().get_image()
 	if img != null and _shot_path != "":
 		img.save_png(_shot_path)
