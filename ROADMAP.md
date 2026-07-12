@@ -14,6 +14,13 @@ happened yet. Do not export a build for anyone outside Louis's own testing
 until that file has been replaced. Game.gd carries the same warning next to
 MUSIC_PATH.
 
+REGRESSION FLAGGED 2026-07-13, not yet fixed: Louis's playtest after commit
+ddbd706 found real physical/visual collisions on over-the-top throws (Half
+Shower and Shower confirmed broken with the game's own --collcheck audit),
+jittery Columns hands, and C appearing to cancel a running trick toggle. Full
+investigation and concrete fix directions are in item 12 below. Fix this
+before any further feature work.
+
 Work queue agreed 2026-07-10, ordered by how much each item matters to a ten
 dollar Steam release. Each item is meant to be a self-contained session or less.
 Strike items through as they land on main.
@@ -190,3 +197,241 @@ disarms itself while remembering the selection. Spin fits the same grammar:
 with Spin selected, Space performs the spin. Update the trick HUD, the
 trick-unlock banner text, and the tutorialised hints to teach the new model,
 and make sure the demo auto-player (--demo --trick) still exercises it.
+
+## 12. URGENT REGRESSION: over-the-top landings collide, Columns hands jitter, C cancels a running toggle (Louis, 2026-07-13)
+
+Three bugs reported after the fifth-batch session (commit ddbd706, see the memory
+log and this file's history) that reworked hand choreography and scoring. Do
+this session BEFORE any further feature work - it is a regression, not new
+content, and item 2's remaining "content depth" ask can wait another round.
+
+### 12a. Over-the-top throws now visually and physically collide with the low weave
+
+**Root cause, confirmed empirically.** ddbd706 changed an over-the-top throw's
+landing point (`b.to_pos` in `do_throw`'s `elif over_top:` branch) from
+`outer_pos(to_hand) + wide(40px)` to plain `inner_pos(to_hand)`, to satisfy
+Louis's ask that reverse cascade "cross closely." That succeeded at closing the
+gap, but it also means the over-the-top ball now lands at EXACTLY the same x
+as `inner_pos(h)`, which is also where a NORMAL (non-over-top) throw on that
+same hand launches from (`b.from_pos = inner_pos(h)` in the `else` plain
+branch) and where a normal throw's OWN catch carries the held ball while
+waiting to throw (`throw_slot(h)` resolves to `HAND_INNER` there too). Any
+pattern/trick where ONE hand does over-the-top catches while that SAME hand
+ALSO does normal low throws now has two independent things wanting to occupy
+`inner_pos(h)` at arbitrary, uncoordinated moments - the incoming high ball's
+landing and the outgoing low ball's release. There is no dodge/offset logic
+protecting this the way `incoming_low()`/`bulge`/`windup` already protects the
+OUTER launch corner for the mirror-image case.
+
+**Verified with the game's own `--collcheck` audit** (`godot --path . --
+--demo --pattern <id>|--trick <id> --collcheck --shot <tmp.png> --shotat
+6000`, then read stdout for `collcheck min clearance`). A NEGATIVE number
+means real overlap. Needs a shotat of several thousand (1600 was too short to
+reliably hit the bad-timing window even when it exists - use 6000+, it takes
+real wall-clock time in windowed mode, don't headless it, get_viewport().
+get_texture() is null under `--headless`):
+
+| Pattern/trick | Result |
+|---|---|
+| Cascade | clean, 16.2px (matches the pre-existing historical number, unaffected) |
+| Fountain | clean (no over-the-top throws at all) |
+| Columns (3-ball, 5-ball) | clean (lanes never route through `inner_pos`/`outer_pos`) |
+| Reverse Cascade | clean - BOTH hands are over-top on every throw, so neither hand ever does a normal low throw to conflict with |
+| **Half Shower** | **-14.0px overlap**, tick 190: a normal ball (h=0.16) and an over-top ball (h=0.50) essentially coincide near (615, 312) |
+| **Shower** | **-22.0px overlap**, tick 252: a fresh low-feed throw (p=0.00, just launched) and an arriving over-top ball (p=1.00, just landing) sit at the EXACT same point (582, 458) - the smoking gun, launch and landing coinciding |
+| Waterfall, Tennis, Overthrow, Columns-as-toggle | all clean in this run, full 6000-tick sweep - but read the caveat below before trusting that as proof, especially for Waterfall |
+
+So confirmed broken: **Half Shower and Shower only**, both base patterns
+(not toggle tricks). Every toggle-driven trick (Reverse Cascade, Waterfall,
+Tennis, Overthrow, Columns-as-toggle) came back clean at this cadence. That
+narrows the fix, but read the Waterfall caveat below before treating it as
+provably safe - the geometry is the same shape as the two confirmed failures.
+
+**Caveat on the "clean" results, read before trusting them:** `--collcheck`
+zeroes jitter/drift/wobble (see `_collcheck` branches in `do_throw`), so it
+tests one fully deterministic geometry, but that geometry is driven by the
+`_demo_step` metronome's FIXED 28-tick (`DEMO_BEAT`) cadence. A pattern that
+looks clean under that one rhythm is not proven clean under every rhythm a
+real player's hands can produce - Half Shower and Shower's failures ARE at
+this same fixed cadence, so the underlying spatial conflict is real and not a
+timing fluke. A "clean" result for Waterfall or the untested tricks just means
+this one cadence didn't happen to line up the two events on the same tick,
+not that it structurally can't. Reason about the GEOMETRY (does hand h do
+both an over-top catch and a normal-inner throw?), don't just trust one
+audit run.
+
+**Where the same risk structurally exists, work it out with pen and paper
+first, `--collcheck` second:**
+- **Half Shower / Shower**: the LEFT hand (Half Shower) or the LEFT feed hand
+  (Shower) catches the RIGHT hand's over-top ball at `inner_pos(LEFT)` AND
+  launches its own normal throws from `inner_pos(LEFT)`. Confirmed broken.
+- **Waterfall**: same shape, LEFT catches RIGHT's over-top ball at
+  `inner_pos(LEFT)` and throws its own (WATERFALL_LOW-capped, short/low)
+  throws from `inner_pos(LEFT)` too. Audited clean at the demo's default
+  cadence. The geometry says it shouldn't necessarily stay clean under a
+  different one (the LOW cap on the non-over-top hand may be what saves it in
+  practice, by making that hand's throws short enough to rarely coincide - if
+  so that's a lucky side effect of an unrelated tuning knob, not a guarantee).
+  Retest with `--hold` set to a few different values (dev flag, forces the
+  demo's throw-hold ticks) to sample other rhythms before trusting this.
+- **Tennis**: only the ONE marked ball rides over-top at a time, alternating
+  hands via `stack(h).has(tennis_ball)` in `next_throw_over_top`, so the
+  conflict window is rarer. Audited clean this session at the default cadence,
+  same "don't fully trust one cadence" caveat applies, lower priority than
+  Waterfall since the conflict window is inherently smaller.
+- **Overthrow**: a rare one-shot, over-top only for the single primed throw.
+  Audited clean this session. Lowest priority - rare by construction.
+- **Columns-as-toggle** (`--trick cols`, `TR_COLS` layered on a non-Columns
+  base pattern): the columns branch in `throw_slot`/`catch_slot` takes
+  precedence over the over-top branch, so this is unaffected the same way the
+  Columns base pattern is. Audited clean this session, matches the reasoning.
+
+**Concrete fix directions to try, in order of how well they fit the existing
+architecture** (pick one, verify with `--collcheck` across EVERY pattern/trick
+at 3, 4, 5 balls before calling it done - the fifth-batch session's mistake
+was shipping the landing-point change without rerunning this audit at all):
+
+1. **Give the over-the-top landing a small standoff, not the old 40px, not
+   zero.** Change `b.to_pos = inner_pos(b.to_hand) + Vector2(drift, 0.0)` in
+   the `elif over_top:` branch to add a modest fixed offset (signed toward
+   whichever side keeps it clear of that hand's own launch corner - probably
+   outward, same sign convention as the deleted `wide` variable, just much
+   smaller). The measured failures were -14.0px (Half Shower) and -22.0px
+   (Shower), so a real fix needs to close at least a ~25px gap to turn the
+   worst case positive with some margin - start around 20-25px (roughly half
+   the old 40px) and iterate against `--collcheck` at 3/4/5 balls on EVERY
+   pattern/trick, not just the two that failed, until all report positive
+   clearance again, ideally in the same rough neighbourhood as the historical
+   numbers noted in the table above (single digits to low twenties). This
+   keeps Louis's "cross closely" ask (a small standoff still reads as close)
+   while restoring a hard geometric guarantee instead of hoping timings don't
+   collide.
+2. **Reuse the existing `incoming_low()`/`bulge` dodge pattern but mirrored
+   onto the LANDING side.** The launch side already has exactly this
+   protection (`if over_top and incoming_low(h): b.bulge = 34.0`, bowing the
+   flight path outward early). Add the mirror check on landing: if the
+   receiving hand is about to (or just did) launch a normal throw around the
+   same tick, bow or offset the incoming ball's final approach so it doesn't
+   share the exact pixel with the departing one. More surgical, more code,
+   fits the existing "read BEFORE popping the ball" style used elsewhere in
+   `do_throw`.
+3. If neither is enough on its own, combine both: a small fixed standoff
+   (option 1) as the baseline guarantee, plus the dodge (option 2) only for
+   the genuinely tight, coincident-tick cases the fixed offset alone doesn't
+   cover.
+
+Do NOT just revert wholesale to the pre-ddbd706 `outer_pos + wide(40)`
+landing - that is what caused the ORIGINAL "arms too long" complaint this
+whole rework was for. The fix needs BOTH properties at once: close/crossing
+AND non-overlapping, which is exactly why it needs a small deliberate offset
+or a dodge, not either extreme.
+
+### 12b. Columns hands are jittery, not settled at their two fixed points
+
+Reported after the same session. Not yet root-caused with certainty, since it
+needs to be SEEN moving (a single screenshot cannot show jitter) and this
+session only had static captures + the automated demo, whose fixed 28-tick
+metronome is not how a real player's hands move either. Two candidate causes,
+investigate both before touching code:
+
+1. **Hand rest position doesn't match the ball's actual flight geometry.**
+   `throw_slot`/`catch_slot` collapse EVERY lane ball on a hand to the same
+   two fixed x's (`HAND_INNER` dx 58 catching, `HAND_VERY_INNER` dx 24
+   throwing, see `slot_pos`), but the ball itself still flies to/from its own
+   `lane_x` (`assign_lane`/`columns_x`, up to ~130px from centre for a wide
+   columns spread) - `do_throw`'s `if lanes:` branch was deliberately left
+   using `b.lane_x`, not the fixed hand slot, when ddbd706 was written (see
+   that commit's reasoning in the memory log). For a hand juggling TWO lanes
+   at once (5+ ball columns), the ball can be visibly 60-100px from where the
+   hand sprite is sitting, and the hand may look like it's "reaching" or
+   mismatched rather than parked - especially right at the catch/throw
+   instant, which is exactly when a jitter would be most visible.
+2. **The two fixed points are only 34px apart (58 - 24) and every single
+   catch and throw retargets between them**, unlike other patterns where a
+   catch and a throw can be much further apart (Cascade: 104 to 58, 46px, and
+   the hand ALSO gets `HAND_SMOOTH` = 0.22 lerp ticks to settle before the
+   next flip). At a normal juggling cadence this might read as a persistent
+   small tremor rather than two calm, held poses, especially compounded with
+   the post-throw "kick" (`hand_target`'s `-22px Y over 14 ticks`) firing on
+   the same rapid cycle.
+
+**How to actually diagnose it next session:** don't rely on `--demo` (the
+28-tick metronome is not representative and may itself be part of what looks
+"jittery" if that's even faster than intended) or single screenshots. Either
+(a) run the game interactively with a keyboard and WATCH columns being
+juggled at a natural cadence, or (b) take a burst of `--shotat` screenshots a
+few ticks apart (e.g. every 3-4 ticks across one throw-catch cycle, several
+in a row) and diff the hand's x position frame to frame to see whether it's
+actually oscillating or just visually disconnected from the ball's lane. If
+(1) is the cause, the fix is probably making the ball's OWN lane-based flight
+geometry match the fixed hand slots too (i.e. have `lanes` throws also launch
+from/land at the fixed `HAND_VERY_INNER`/`HAND_INNER` x instead of `lane_x`,
+sacrificing the "each ball visibly owns its own vertical line" look in favour
+of the fixed-hand promise Louis explicitly asked for) rather than trying to
+chase the hand to match the ball. If (2) is the cause (or a real contributor
+even when (1) is also fixed), consider whether Columns genuinely needs two
+distinct rest points at all, versus a single point that just barely opens and
+closes hclose-style without translating - that would be a further
+simplification beyond what Louis originally asked for, so confirm with him
+before doing it rather than assuming.
+
+### 12c. Pressing C to cycle the trick selection appears to deactivate a running toggle
+
+Traced as far as static reading gets you. **Not reproduced interactively this
+session**, and the code does not show an obvious cause, which itself is worth
+recording so the next session doesn't re-derive it from scratch:
+
+- `cycle_trick()` (bound to the `K_CYCLE`/`C` key at the `if kc == K_CYCLE:`
+  check in the play input handler) only ever writes `trick_sel`. It never
+  touches `toggle_on`.
+- `toggle_on` is written in exactly two places: `on_trick()`'s toggle branch
+  (Space explicitly turns the CURRENTLY SELECTED toggle on or off, comparing
+  `toggle_on == trick_sel`), and `start_run()`'s reset (only clears it if the
+  trick got re-locked, `not trick_unlocked(toggle_on)`, which shouldn't
+  happen mid-session). Neither fires from a C press alone.
+- The trick HUD (`draw_trick_hud`) DOES already correctly distinguish the two:
+  if a different toggle is running than the one currently selected, it shows
+  `"<selected name>   (<running name> on)"` in a dimmer colour rather than
+  the bright "- ON" label. So by the code, cycling should leave the old
+  toggle mechanically running (do_throw's shaping and the hand-choreography
+  slot functions all key off `toggle_on`, never `trick_sel`, for toggle
+  behaviour) and only change what the BIG label says.
+
+Two live hypotheses, most likely first:
+1. **Legibility, not a logic bug.** After C, the big "TRICK - X" label swaps
+   to the newly selected trick's bare name (no "ON" suffix, since
+   `toggle_on != trick_sel` now) and the still-running toggle only shows in
+   the small "(Y on)" qualifier. If that's easy to miss at a glance during
+   live play, it would read exactly as "my skill turned off" even though
+   `toggle_on` never changed. If this is confirmed, the fix is a HUD change
+   (make the qualifier louder, e.g. its own colour/position, or don't shrink
+   the running toggle's name at all when it differs from the selection) not
+   a state-management change.
+2. **A genuine bug not yet found.** Possible if there's a path where pressing
+   Space AFTER cycling (which a player instinctively does right after C, to
+   see what the new selection feels like) reads as "turn on trick_sel" and,
+   per `on_trick()`'s own documented behaviour ("Only one toggle runs at a
+   time, switching replaces the old one"), REPLACES the running toggle. This
+   is real, intentional, documented behaviour, but might be what Louis is
+   actually describing if his test sequence was C then Space rather than C
+   alone. Confirm which sequence he means before assuming it's a bug at all.
+
+**Next step: reproduce interactively.** Turn a toggle on (Space), press C
+ONLY (no Space), and read `toggle_on`'s actual value (add a temporary debug
+print, or watch the HUD's small qualifier text closely) before concluding
+anything. This cannot be verified through the `--demo` flag as-is - the demo's
+own trick-priming logic in `_demo_step` doesn't replicate a manual C-then-
+watch sequence, it drives its own toggle-selection choices.
+
+### Suggested split
+
+12a is the most urgent (it's a visible, physical gameplay bug affecting real
+scoring/catching, not just cosmetics) and the most concrete to fix (a
+--collcheck-driven numeric target, and the full pattern/trick sweep is
+already done - just Half Shower and Shower need a code change, everything
+else needs only a confirming retest after that change). Budget most of the
+session there. 12b needs real interactive observation before any code
+changes - don't guess at a fix without confirming which hypothesis is right
+first. 12c needs five minutes of interactive reproduction to even confirm
+it's a bug before deciding whether it's a HUD text change or something
+deeper.
