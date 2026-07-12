@@ -84,6 +84,28 @@ one, high enough to leave the frame for a beat (a chevron under the Applause
 meter tracks it). Catch difficulty saturates at 1.4; only the placement
 spread below keeps growing, and the trick's bonus grows with the climb.
 
+### The over-the-top throw (a second kind of throw)
+
+Normal throws catch OUTER, carry INWARD, and launch from the inner point.
+An OVER-THE-TOP throw skips the carry entirely: the hand lobs straight from
+the outer catch point, the ball rides a high road over the whole pattern,
+and it lands 40px WIDE of the usual catch point (the empty hand drifts out
+to meet it). Overthrow does this for one throw, Waterfall for the right
+hand every throw (the left is forced low beneath it), Reverse Cascade for
+every throw, Tennis for its one marked ball back and forth, and the Shower
+and Half Shower patterns for their high hand. When low traffic is dropping
+into the launch corner, the lob winds up 20px wider still and its early
+flight bows outward around the incoming ball (`Ball.bulge`).
+
+This geometry is what makes a PERFECT pattern collision-free: the dev
+`--collcheck` flag (inaccuracy zeroed) measures the tightest edge-to-edge
+clearance any two airborne props ever reach, and every pattern and trick
+holds a positive margin. Sloppy heights are another story, which is what
+the optional "Hard collisions" setting is for: two props that touch mid-air
+are both marked `bumped` (warning halo, sparks), and a bumped ball is only
+caught inside HALF the Perfect window, no Good/Late chance roll. A clean
+juggler never meets the rule; a messy one drops what they clacked.
+
 ### What height costs you
 
 Height buys airtime (more time before that hand needs to catch again, which
