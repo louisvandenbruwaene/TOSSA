@@ -78,8 +78,8 @@ hold_ticks caps at HOLD_MAX (44 ticks, ~0.37s of holding)
 `height` (called `frac` in code, 0.0 to 1.8) is how far past the tap floor
 the throw actually reached, normalized so 1.0 is a full HOLD_MAX hold. Plain
 throws top out at 1.4 (only heavy props with surplus Strength get there);
-tricks reshape `frac`: Overthrow and the toggle tricks force minimums, and
-High Toss starts at 1.35 on a tap and climbs with the hold to 1.8 at a full
+tricks reshape `frac`: Overthrow and the other toggle tricks force minimums,
+and High Toss (a toggle) starts at 1.35 on a tap and climbs with the hold to 1.8 at a full
 one, high enough to leave the frame for a beat (a chevron under the Applause
 meter tracks it). Catch difficulty saturates at 1.4; only the placement
 spread below keeps growing, and the trick's bonus grows with the climb.
@@ -97,14 +97,35 @@ and Half Shower patterns for their high hand. When low traffic is dropping
 into the launch corner, the lob winds up 20px wider still and its early
 flight bows outward around the incoming ball (`Ball.bulge`).
 
+Same-hand throws get their own separation too. A FOUNTAIN's two balls per
+hand trace the same arc half a cycle apart and used to clear by only 5px;
+the landing is widened outward so the up-leg and down-leg never share air.
+A COLUMNS pattern gives every ball its OWN vertical column (`Ball.lane_x`,
+spread symmetric about centre) instead of stacking a hand's balls on one
+line; the odd-count middle ball comes straight down dead centre and EITHER
+hand may scoop and re-throw it.
+
 This geometry is what makes a PERFECT pattern collision-free: the dev
 `--collcheck` flag (inaccuracy zeroed) measures the tightest edge-to-edge
-clearance any two airborne props ever reach, and every pattern and trick
-holds a positive margin. Sloppy heights are another story, which is what
-the optional "Hard collisions" setting is for: two props that touch mid-air
-are both marked `bumped` (warning halo, sparks), and a bumped ball is only
-caught inside HALF the Perfect window, no Good/Late chance roll. A clean
-juggler never meets the rule; a messy one drops what they clacked.
+clearance any two airborne props ever reach, and every pattern and trick at
+every ball count (audit with `--balls N`) holds a positive margin. Sloppy
+heights are another story, which is what the optional "Hard collisions"
+setting is for: two props that touch mid-air are both marked `bumped`
+(warning halo, sparks), and a bumped ball then catches ONLY on Perfect
+timing (the full Perfect window, no Good/Late chance roll). A clean juggler
+never meets the rule; a messy one drops what they clacked.
+
+### Trick grammar
+
+Tricks come in three grammars, all fired from the TRICK key with the loaded
+trick chosen by the cycle key. **Toggle** tricks (High Toss, Behind the
+Back, Columns, Waterfall, Reverse Cascade, Tennis) switch ON with one press
+and OFF with the next, reshaping every throw between; for a single flourish
+you switch on, throw, and switch off. A running toggle SURVIVES an R restart
+in training, so a trick can be drilled run after run, and pressing Enter on
+any Skills-screen entry drops straight into a practice with it already on.
+**Arm** (Overthrow, the lone one-shot) primes exactly the next throw.
+**Live** (Spin) acts on the balls already airborne.
 
 ### What height costs you
 
