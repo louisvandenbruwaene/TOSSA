@@ -219,12 +219,14 @@ const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
 
 # --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space). C
 # selects which trick Space is loaded with (the selection persists). THREE
-# grammars now (Louis): "arm" is the one-shot powerup, one press empowers exactly
-# the next throw; "live" acts on the balls already airborne (Spin); "toggle"
-# switches ON with one press and OFF with the next, smoothly reshaping every
-# throw in between (columns lanes, over-the-top arcs). Each landed shaped catch
-# pays its bonus, so a trick is a skill choice, never a free bonus. Tricks
-# unlock by level, so the flourishes arrive as the meta deepens.
+# grammars (Louis): "toggle" switches ON with one press and OFF with the next,
+# smoothly reshaping every throw in between (High Toss, Behind the Back, the
+# columns lanes and over-the-top arcs) - for a single flourish you switch on,
+# throw, and switch off; "arm" is the one-shot powerup (Overthrow only), one
+# press empowers exactly the next throw; "live" acts on the balls already
+# airborne (Spin). Each landed shaped catch pays its bonus, so a trick is a
+# skill choice, never a free bonus. A running toggle SURVIVES an R restart in
+# training, so a trick can be drilled run after run. Tricks unlock by level.
 const TR_HIGH := 0
 const TR_BTB := 1
 const TR_SPIN := 2
@@ -234,10 +236,10 @@ const TR_WFALL := 5
 const TR_RCASC := 6
 const TR_TENNIS := 7
 const TRICKS := [
-	{"id": "high", "name": "High Toss",        "kind": "arm",    "lvl": 2, "min_air": 0, "bonus": 260, "shout": "HIGH TOSS!",
-	 "desc": "Power one throw sky high - hold the throw and it climbs clean out of the frame, for a bigger burst of applause."},
-	{"id": "btb",  "name": "Behind the Back",  "kind": "arm",    "lvl": 4, "min_air": 0, "bonus": 150, "shout": "BEHIND THE BACK!",
-	 "desc": "Power one showy behind-the-back throw. Style the crowd loves, if you land it."},
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 2, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
+	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 4, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
+	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
 	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 7, "min_air": 2, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin while everything is airborne. Catches score double, you catch blind."},
 	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 3, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
@@ -291,6 +293,8 @@ class Ball:
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
 	var trick := -1           # which trick shaped this throw (TR_HIGH/TR_BTB), or -1 for a plain throw
 	var over_top := false     # an over-the-top lob: launched at the OUTER point, lands wide
+	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
+							  # balls in one hand never stack on the same line (-1 = unset)
 	var bulge := 0.0          # px of early sideways bow, SIGNED: positive bows outward (an
 							  # over-the-top lob swinging around low traffic dropping into
 							  # its corner), negative bows inward (a shower's high throw
@@ -609,7 +613,12 @@ func _ready() -> void:
 	if skip_menu:
 		save_slot = 0
 		load_progress()
-		start_run(3)
+		var start_n := 3
+		var bi := ua.find("--balls")   # dev: force the ball count (audit 4- and 6-ball fountains)
+		if bi != -1 and bi + 1 < ua.size():
+			strength = maxi(strength, 30)   # so max_balls() allows up to 7
+			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
+		start_run(start_n)
 		game_state = ST_PLAY
 		if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
 			mode = MODE_PERFORM
@@ -1388,9 +1397,63 @@ func skills_input(kc: int) -> void:
 		KEY_RIGHT, KEY_D:
 			skills_sel = maxi(skills_sel, TRICKS.size())        # into the patterns column
 			play_sfx("ui", -15.0)
-		KEY_TAB, KEY_ESCAPE, KEY_ENTER, KEY_KP_ENTER:
+		KEY_ENTER, KEY_KP_ENTER:
+			practice_skill(skills_sel)   # drop into a practice with this skill on
+		KEY_TAB, KEY_ESCAPE:
 			skills_open = false
 			play_sfx("ui", -13.0)
+
+
+func practice_skill(idx: int) -> void:
+	# Enter on a Skills entry books a PRACTICE with that skill already engaged, so a
+	# trick (or pattern) can be drilled straight from where it is explained (Louis).
+	# Costs a day segment like any practice; a locked skill or an empty tank refuses.
+	var is_trick := idx < TRICKS.size()
+	if is_trick and not trick_unlocked(idx):
+		set_day_msg("that trick unlocks at level %d" % int(TRICKS[idx]["lvl"]))
+		play_sfx("whiff", -10.0)
+		return
+	if not is_trick and not pattern_unlocked(idx - TRICKS.size()):
+		set_day_msg("that pattern unlocks at level %d" % int(PATTERNS[idx - TRICKS.size()]["lvl"]))
+		play_sfx("whiff", -10.0)
+		return
+	if too_tired():
+		set_day_msg("too tired to practise  -  sleep first")
+		play_sfx("whiff", -10.0)
+		return
+	# a pattern needs a matching ball count (an even fountain, odd cascade); a trick
+	# keeps the current count. Set the pattern BEFORE start_run so it deals right.
+	if not is_trick:
+		pattern_sel = idx - TRICKS.size()
+	skills_open = false
+	seg_used += 1
+	career["practices"] = int(career["practices"]) + 1
+	save_progress()
+	mode = MODE_TRAIN
+	game_state = ST_PLAY
+	start_run(num_balls)
+	# now engage the chosen trick (start_run has cleared the per-run trick state):
+	# a toggle switches ON and stays, an arm trick primes the next throw, Spin just
+	# loads. The player still throws to begin, so nothing fires unbidden.
+	if is_trick:
+		trick_sel = idx
+		var kind := String(TRICKS[idx]["kind"])
+		if kind == "toggle":
+			toggle_on = idx
+			toggle_scored = false
+			tennis_ball = null
+			if idx == TR_COLS:
+				col_air_ref = -1.0
+				col_mid_ball = null
+			set_trick_msg("%s ON  -  practising" % String(TRICKS[idx]["name"]).to_upper())
+		elif kind == "arm":
+			trick_primed = true
+			set_trick_msg("%s  -  next throw" % String(TRICKS[idx]["name"]).to_upper())
+		else:
+			set_trick_msg("%s selected  -  %s performs it" % [String(TRICKS[idx]["name"]), k_trick()[0]])
+	else:
+		set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
+	play_sfx("ui2", -11.0)
 
 
 func cycle_prop(dir: int) -> void:
@@ -2213,6 +2276,39 @@ func shoulder_pos(h: int) -> Vector2:
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
+func columns_x(slot: int) -> float:
+	# the x of vertical column `slot` (0..num_balls-1) in a Columns pattern, spread
+	# symmetric about centre so every ball owns its own line and no two share air
+	var sp := 44.0 if num_balls <= 5 else 40.0
+	return stage_center().x + (float(slot) - float(num_balls - 1) * 0.5) * sp
+
+
+func assign_lane(b: Ball, h: int) -> void:
+	# give a lane ball its own column: the nearest free slot on its hand's side.
+	# Left hand owns the left columns, right the right, the centre column (odd
+	# counts) is the middle ball and is never assigned here. Persists on the ball.
+	if b.lane_x >= 0.0:
+		return
+	var mid_slot := (num_balls / 2) if num_balls % 2 == 1 else -1
+	var lo := 0
+	var hi := num_balls / 2 - 1
+	if h == RIGHT:
+		lo = (mid_slot + 1) if mid_slot >= 0 else num_balls / 2
+		hi = num_balls - 1
+	elif mid_slot >= 0:
+		hi = mid_slot - 1
+	var taken := {}
+	for o in balls:
+		if o != b and o.lane_x >= 0.0:
+			taken[int(round(o.lane_x))] = true
+	for slot in range(lo, hi + 1):
+		var x := columns_x(slot)
+		if not taken.has(int(round(x))):
+			b.lane_x = x
+			return
+	b.lane_x = columns_x(clampi(lo, 0, num_balls - 1))   # fallback: never leave it unset
+
+
 func incoming_low(h: int) -> bool:
 	# is any NON-over-the-top ball airborne toward hand h's catch point right now?
 	# The corner between an outgoing throw and this incoming ball is where every
@@ -2250,6 +2346,24 @@ func hand_target(h: int) -> Vector2:
 	# in COLUMNS the ball comes straight back down its lane (the throw point), so
 	# the waiting hand stays under the lane instead of drifting out to the side
 	var p := inner_pos(h) if (holding or pattern == COLUMNS) else outer_pos(h)
+	# COLUMNS lanes: the hand rides its OWN column, not a shared inner point, so a
+	# held lane ball throws straight up its line and a free hand waits under the
+	# column of the lane ball it is about to catch
+	var in_cols := pattern == COLUMNS or toggle_on == TR_COLS
+	if in_cols:
+		var cy := stage_center().y
+		if holding:
+			var hb: Ball = stack(h).back()
+			if hb.lane_x >= 0.0:
+				p = Vector2(hb.lane_x, cy)
+		else:
+			var soon := 1000000
+			for b in balls:
+				if b.state == STATE_FLIGHT and b.to_hand == h and b.lane_x >= 0.0:
+					var l := b.land_tick - tick
+					if l > -MISS_GRACE and l < soon:
+						soon = l
+						p = Vector2(b.to_pos.x, cy)
 	# an over-the-top throw never carries inward: the hand winds up wide and lobs
 	# from the outer catch point itself (20px wider still when low traffic is
 	# dropping into this corner, matching the throw's wide wind-up in do_throw)
@@ -2267,6 +2381,15 @@ func hand_target(h: int) -> Vector2:
 				if left > -MISS_GRACE and left < 70 and left < soonest:
 					soonest = left
 					p.x = b.to_pos.x
+		# the odd-columns middle ball comes down dead centre for either hand: one
+		# free hand reaches in to scoop it so the throw-catch motion reads. If the
+		# other hand is busy this is the natural catcher; if both are free the LEFT
+		# takes it (a stable tiebreak, never both hands piling onto centre)
+		if col_mid_ball != null and col_mid_ball.state == STATE_FLIGHT:
+			var i_take := not stack(other(h)).is_empty() or h == LEFT
+			var mleft := col_mid_ball.land_tick - tick
+			if i_take and mleft > -MISS_GRACE and mleft < 44 and mleft < soonest:
+				p.x = col_mid_ball.to_pos.x
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -2359,11 +2482,15 @@ func start_run(n: int) -> void:
 	paused = false
 	round_scored = false
 	_prev_running = false
-	# reset the one-shot trick state. The SELECTION survives between runs (that is
-	# the promise of the powerup model), but snap it onto a trick this level
-	# actually owns, so a debug level change can never leave a locked trick loaded.
+	# reset the per-run trick state. The SELECTION survives between runs (that is
+	# the promise of the powerup model), and so does a RUNNING TOGGLE (Louis: an R
+	# retry keeps the trick on, so it can be drilled run after run) - only its
+	# per-run bookkeeping (the marked tennis ball, the lane reference) re-arms.
+	# Snap both onto tricks this level actually owns, so a debug level change can
+	# never leave a locked trick loaded or running.
 	trick_primed = false
-	toggle_on = -1
+	if toggle_on >= 0 and not trick_unlocked(toggle_on):
+		toggle_on = -1
 	toggle_scored = false
 	tennis_ball = null
 	col_air_ref = -1.0
@@ -2420,7 +2547,10 @@ func on_catch(h: int) -> void:
 	var best: Ball = null
 	var best_d := 1000000
 	for b in balls:
-		if b.state == STATE_FLIGHT and b.to_hand == h:
+		# the odd-columns middle ball comes straight down dead centre and EITHER
+		# hand may scoop it (Louis), so it counts for whichever catch fires first;
+		# every other ball is claimed only by the hand it is actually flying to
+		if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball):
 			var d := absi(b.land_tick - tick)
 			if d < best_d:
 				best = b
@@ -2437,11 +2567,11 @@ func on_catch(h: int) -> void:
 		# way off the arrival: a genuine mistime, the ball drops
 		drop_ball(best, "MISTIME")
 		return
-	# hard mode (set_collide): a ball that clacked another mid-air is barely
-	# catchable - only HALF the Perfect window secures it, and the Good/Late
-	# chance roll never applies. Saving one is a genuine feat (and still counts
-	# as the Perfect it timing-wise is).
-	if best.bumped and best_d > maxi(1, perfect_window() / 2):
+	# hard mode (set_collide): a ball that clacked another mid-air only catches
+	# on PERFECT timing - the full Perfect window (Louis: same frames as normal,
+	# not halved), but the Good/Late chance roll never applies. Saving one still
+	# counts as the Perfect it timing-wise is.
+	if best.bumped and best_d > perfect_window():
 		drop_ball(best, "collided")
 		return
 	# Perfect timing always secures. A Good or Late catch is a chance that rises
@@ -2594,16 +2724,20 @@ func do_throw(h: int, hold: int) -> void:
 		gain_mult *= 1.0 + STRENGTH_LOFT * strength_surplus() * float(weight - 1) / 4.0
 	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
-	# a primed trick reshapes this ONE throw before we roll its accuracy, so a High Toss
-	# genuinely flies (and is genuinely harder to catch). Space is a one-shot powerup:
-	# consuming the prime here disarms it, while trick_sel keeps the selection for the
-	# next Space press. A trick's forced height is built off the SAME lowered base and
-	# Strength penalty, so an under-strength High Toss sags too and cannot cheat the
-	# sagging rule.
+	# a primed one-shot (Overthrow) reshapes this ONE throw; consuming the prime here
+	# disarms it, while trick_sel keeps the selection for the next Space press. The
+	# FLOURISH TOGGLES (High Toss, Behind the Back) shape EVERY throw while they run
+	# (Louis: switch on, throw, switch off for a single one - that way the trick can
+	# be trained continuously). A trick's forced height is built off the SAME lowered
+	# base and Strength penalty, so an under-strength High Toss sags too and cannot
+	# cheat the sagging rule.
 	var this_trick := -1
 	if trick_primed and trick_sel >= 0 and String(TRICKS[trick_sel]["kind"]) == "arm":
 		this_trick = trick_sel
 		trick_primed = false
+	elif toggle_on == TR_HIGH or toggle_on == TR_BTB:
+		this_trick = toggle_on
+	if this_trick == TR_HIGH or this_trick == TR_BTB:
 		var tfrac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 		if this_trick == TR_HIGH:
 			# a TAP already powers the toss sky high; HOLDING the throw powers it
@@ -2613,7 +2747,7 @@ func do_throw(h: int, hold: int) -> void:
 			# arrival gets less certain (height feeds drift/wobble/jitter below),
 			# while the catch-chance penalty saturates at the 1.4 cap.
 			tfrac = 1.35 + 0.45 * minf(tfrac, 1.0)
-		elif this_trick == TR_BTB:
+		else:
 			tfrac = clampf(tfrac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
 		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX) * (1.0 - DEFICIT_HEIGHT * deficit)))
 	# the pattern shapes the throw: a shower's feed hand snaps a fast low pass no
@@ -2762,25 +2896,38 @@ func do_throw(h: int, hold: int) -> void:
 		# reverse cascade, where everything rides the high road) it climbs straight,
 		# staying clear of the WIDE lane the high balls land in.
 		b.bulge = 34.0
-	if mid_ball and was_mid:
-		b.from_pos = stage_center()
+	var cy := stage_center().y
+	if lanes:
+		# each column owns its own x (assign_lane), so two balls in one hand's
+		# lane never stack on the same vertical line - that was the same-hand
+		# overlap Louis flagged. Straight up and down within the column.
+		assign_lane(b, h)
+		b.from_pos = Vector2(b.lane_x, cy)
+		b.to_pos = Vector2(b.lane_x + drift, cy)
+	elif mid_ball:
+		# the middle ball rests at centre once marked (was_mid), but on the throw
+		# that first marks it, it launches from wherever it was actually held
+		b.from_pos = stage_center() if was_mid else inner_pos(h)
+		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	elif over_top:
 		# the wide wind-up: with low traffic incoming, the lob leaves from 20px
-		# outside the catch point (hand_target holds the hand out there too)
+		# outside the catch point (hand_target holds the hand out there too), and
+		# lands WIDE of the usual catch point so the high road never shares air
+		# with the low weave (the empty hand drifts out to meet it, see hand_target)
 		var windup := (20.0 if h == RIGHT else -20.0) if b.bulge > 0.0 else 0.0
 		b.from_pos = outer_pos(h) + Vector2(windup, 0.0)
-	else:
-		b.from_pos = inner_pos(h)
-	if lanes:
-		b.to_pos = b.from_pos + Vector2(drift, 0.0)   # straight up and down in the lane
-	elif mid_ball:
-		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
-	else:
-		# an over-the-top ball lands WIDE of the usual catch point (the hand drifts
-		# out to meet it, see hand_target): the high road's landing lane must sit
-		# clearly outside the weave's, or the corner traffic shares air
-		var wide := (40.0 if b.to_hand == RIGHT else -40.0) if over_top else 0.0
+		var wide := 40.0 if b.to_hand == RIGHT else -40.0
 		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + wide, 0.0)
+	else:
+		# a plain cascade/fountain throw: inner launch, outer catch. A FOUNTAIN is
+		# same-hand, so its two balls (half a cycle apart) trace the same arc and
+		# cleared by only 5px; widening the landing outward opens the up-leg and
+		# down-leg apart so they never share air.
+		b.from_pos = inner_pos(h)
+		var fwide := 0.0
+		if pattern == FOUNTAIN:
+			fwide = 22.0 if b.to_hand == RIGHT else -22.0
+		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + fwide, 0.0)
 	# Behind the Back is a flourish, drawn as a high wide sweeping loop in flight_pos
 
 	throw_kick[h] = tick
@@ -4209,11 +4356,10 @@ func draw_targets() -> void:
 				var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
 				var adiff := absi(dd)
 				var r := 22.0 * prop_scale(b.kind)
-				# a clacked ball (hard mode) catches only inside HALF the Perfect
-				# window: its ring stays warning-hot until that true window, so
+				# a clacked ball (hard mode) catches ONLY inside the Perfect window
+				# (same frames as normal): its ring stays warning-hot outside it, so
 				# the taught timing never lies about what will actually catch
-				var wpb := maxi(1, wp / 2) if b.bumped else wp
-				if adiff <= wpb:
+				if adiff <= wp:
 					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
 					draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
 				elif b.bumped:
@@ -5043,7 +5189,10 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.9, 0.82, 0.66))
 	draw_string(font, Vector2(px + 46.0, dy + 62.0), desc, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.78, 0.72, 0.64))
 
-	draw_string(font, Vector2(px, py + ph - 22.0), "arrows browse      Esc to leave", HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(0.74, 0.68, 0.6))
+	var foot := "arrows browse      Enter  practise this skill      Esc to leave"
+	if not is_unlocked:
+		foot = "arrows browse      Esc to leave      (this one is still locked)"
+	draw_string(font, Vector2(px, py + ph - 22.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(0.74, 0.68, 0.6))
 
 
 # -----------------------------------------------------------------------------
@@ -6503,12 +6652,13 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 
 
 func _demo_step() -> void:
-	# auto-catch: secure any ball arriving at an empty hand
+	# auto-catch: secure any ball arriving at an empty hand (the odd-columns middle
+	# ball counts for either hand, matching the either-hand rule in on_catch)
 	for h in [LEFT, RIGHT]:
 		if not stack(h).is_empty():
 			continue
 		for b in balls:
-			if b.state == STATE_FLIGHT and b.to_hand == h and absi(b.land_tick - tick) <= 1:
+			if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball) and absi(b.land_tick - tick) <= 1:
 				on_catch(h)
 				break
 	# dev trick preview: kick off a Spin whenever the pattern is full and cooled down
@@ -6535,13 +6685,14 @@ func _demo_step() -> void:
 			h = other(h)
 		if not stack(h).is_empty():
 			if _demo_trick:
-				# mimic a real Space press per throw: select, prime, and let
-				# do_throw consume the one-shot exactly like player input would
+				# mimic a real Space press per throw for the one-shot (Overthrow);
+				# the flourish toggles (High Toss / BTB) run via toggle_on, set
+				# once above like any other toggle, so nothing to prime here
 				if pin_kind == "arm":
 					trick_sel = _demo_trick_pin
 					trick_primed = true
-				elif _demo_trick_pin == -1:
-					trick_sel = TR_HIGH if (tick / DEMO_BEAT) % 2 == 0 else TR_BTB
+				elif _demo_trick_pin == -1 and (tick / DEMO_BEAT) % 2 == 0:
+					trick_sel = TR_OVER   # the lone remaining one-shot, shown each other beat
 					trick_primed = true
 			do_throw(h, _demo_hold)
 			_demo_next = other(h)
