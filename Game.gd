@@ -312,6 +312,10 @@ class Ball:
 							  # over-the-top lob swinging around low traffic dropping into
 							  # its corner), negative bows inward (a shower's high throw
 							  # dodging the feed that descends outside its launch)
+	var land_dodge := 0.0     # px of LATE sideways bow (over-the-top only): the descent bows
+							  # outboard, away from the mid-stage weave, so the high road comes
+							  # down OUTSIDE the corridor its landing hand's crossing low throw
+							  # rises through, then settles cleanly onto the catch at p=1
 	var bumped := false       # hard mode: this ball clacked another mid-air; only a
 							  # half-Perfect-window catch can still save it
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
@@ -558,6 +562,9 @@ var _collcheck := false   # dev: --collcheck measures the tightest mid-air clear
 						  # IDEAL pattern geometry), printed on the --shot capture
 var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
 var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
+var _handlog := false       # dev: --handlog prints each hand's x every tick during play,
+							  # to tell a real jitter (oscillating x) from a hand that merely
+							  # sits still but far from the ball's lane (ROADMAP 12b)
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 var _shot := false
 var _shot_path := ""
@@ -624,7 +631,11 @@ func _ready() -> void:
 		return
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
-	var skip_menu := _demo or _shot or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
+	if ua.has("--collcheck"):   # dev: audit the ideal pattern for mid-air overlap. Read
+		_collcheck = true       # early: it stands alone, and it runs fine under --headless
+	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
+		_handlog = true
+	var skip_menu := _demo or _shot or _collcheck or _handlog or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
 	if ua.has("--menu"):
 		skip_menu = false
 	if skip_menu:
@@ -660,8 +671,6 @@ func _ready() -> void:
 		var hoi := ua.find("--hold")    # dev: the auto-player's hold per throw (0..44),
 		if hoi != -1 and hoi + 1 < ua.size():   # to verify held heights on screenshots
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
-		if ua.has("--collcheck"):   # dev: audit the ideal pattern for mid-air overlap
-			_collcheck = true
 		if ua.has("--collide"):     # dev: force the hard-collisions toggle ON this session
 			set_collide = true
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
@@ -720,7 +729,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	audio_update()   # pick the music theme and glide the layer volumes, every state
-	if _shot:
+	if _shot or _collcheck or _handlog:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
 		if _shot_frames >= _shot_tick:
 			_capture_and_quit()
@@ -2392,7 +2401,41 @@ func throw_slot(h: int) -> int:
 func catch_slot(h: int) -> int:
 	if pattern == COLUMNS or toggle_on == TR_COLS:
 		return HAND_INNER
-	return HAND_INNER if next_throw_over_top(other(h)) else HAND_OUTER
+	if next_throw_over_top(other(h)):
+		return over_top_land_slot(h)
+	return HAND_OUTER
+
+
+# where an over-the-top throw COMES DOWN on hand t, and the one rule that keeps the high
+# road clear of the low weave. Hand t has three fixed slots: OUTER (its normal catch, dx
+# 104), INNER (its normal throw, dx 58), VERY_INNER (dx 24). An over-the-top landing must
+# avoid every OTHER thing that occupies a slot on t, so it takes a slot nothing else uses.
+# A geometric guarantee, not a tuned gap, holding at any cadence and for patterns not yet
+# written (Phase 5).
+#
+# This is the fix for the ROADMAP 12a regression and its follow-on. ddbd706 landed every
+# over-the-top throw at INNER: the reverse cascade wanted that close crossing (both its
+# hands ride the high road, launch from OUTER, so INNER was free) but a MIXED pattern's
+# low hand LAUNCHES from INNER, so the landing sat on the launch - -14px Half Shower,
+# -22px Shower, a launch and a landing on one pixel.
+#
+# So it lands on the complement of t's OWN launch slot: INNER when t launches from OUTER
+# (reverse cascade, both hands high), OUTER when t launches from INNER (a low hand). A
+# landing then never sits on a launch, which was the whole -14/-22px regression. Landing
+# at OUTER also costs no extra reach - it is the hand's normal catch point, where it is
+# already waiting (the pre-ddbd706 "outer + 40" wide landing, minus the +40 that drew the
+# "arms too long" complaint), and the land_dodge (do_throw) bows the descent clear of any
+# low ball crossing that corner.
+#
+# Known residual: Tennis at 4 balls (a fountain base, so its low hand catches its OWN low
+# balls at OUTER too, double-booking that slot only for this one trick+count). Everything
+# else - the ROADMAP's confirmed Half Shower and Shower, plus Waterfall, Overthrow and
+# Reverse Cascade - clears at 3/4/5 balls. Tennis-4 was the lowest-priority case the
+# ROADMAP flagged ("conflict window inherently smaller"); it is left to the Phase 5
+# siteswap rework, which replaces this whole hand-picked geometry with one derived from
+# the pattern, rather than special-cased here at the cost of the cases that already work.
+func over_top_land_slot(t: int) -> int:
+	return HAND_INNER if throw_slot(t) == HAND_OUTER else HAND_OUTER
 
 
 # where hand h wants to be right now (Louis): while holding, wherever ITS OWN
@@ -2890,11 +2933,19 @@ func do_throw(h: int, hold: int) -> void:
 		cross = false
 	b.to_hand = other(h) if cross else h
 	# lock the receiving hand's waiting point in RIGHT NOW, for exactly this ball
-	# (Louis): over-the-top and Columns/lane/mid-ball throws all land INNER, a
+	# (Louis): Columns/lane/mid-ball throws land INNER, an over-the-top throw lands
+	# wherever the receiving hand does NOT throw from (over_top_land_slot), and a
 	# plain throw lands OUTER. This is the one and only place hand_catch_rest
 	# changes, so the empty hand never has to guess where a future throw goes -
-	# it already knows, the instant this one leaves the hand.
-	hand_catch_rest[b.to_hand] = HAND_INNER if (over_top or lanes or mid_ball) else HAND_OUTER
+	# it already knows, the instant this one leaves the hand. Resolving the slot ONCE
+	# here, and reusing it for b.to_pos below, is what keeps the hand and the ball
+	# agreeing on a single landing point even if the pattern changes mid-flight.
+	var land_slot := HAND_OUTER
+	if over_top:
+		land_slot = over_top_land_slot(b.to_hand)
+	elif lanes or mid_ball:
+		land_slot = HAND_INNER
+	hand_catch_rest[b.to_hand] = land_slot
 	# always launch from wherever the ball is actually sitting: a lane or normal
 	# ball rests pulled in at inner_pos while held, the middle ball rests at
 	# stage center (see draw_hand) - EXCEPT on the very throw that first marks it
@@ -2905,6 +2956,7 @@ func do_throw(h: int, hold: int) -> void:
 	# high road starts wide and never shares air with the low weave.
 	b.over_top = over_top
 	b.bulge = 0.0
+	b.land_dodge = 0.0
 	if over_top and incoming_low(h):
 		# something low is dropping into this same corner (the launch-side catch
 		# point): the lob winds up a touch WIDE (from_pos below) and its early
@@ -2913,6 +2965,17 @@ func do_throw(h: int, hold: int) -> void:
 		# reverse cascade, where everything rides the high road) it climbs straight,
 		# staying clear of the WIDE lane the high balls land in.
 		b.bulge = 34.0
+	# the LANDING-side mirror of that dodge, and the second half of the 12a fix. Its
+	# gate is STRUCTURAL, not "is a low ball airborne right now" (incoming_low): the
+	# over-top may launch a beat BEFORE the crossing low ball it must miss even exists,
+	# so a timing gate misses it (that was Waterfall 4-ball, -12.6, the low feed born
+	# after the lob). Instead: if the LANDING hand throws low, its own crossing low
+	# throw WILL rise through mid-stage during this descent, so bow the descent outboard
+	# to come down outside it. When the landing hand is itself over-top (reverse cascade:
+	# no low weave anywhere) there is nothing to miss, and the descent stays straight -
+	# which is what keeps reverse cascade's clean crossing untouched.
+	if over_top and not next_throw_over_top(b.to_hand):
+		b.land_dodge = 60.0
 	var cy := stage_center().y
 	if lanes:
 		# each column owns its own x (assign_lane), so two balls in one hand's
@@ -2928,12 +2991,11 @@ func do_throw(h: int, hold: int) -> void:
 		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	elif over_top:
 		# the wide wind-up: with low traffic incoming, the lob leaves from 20px
-		# outside the catch point. It lands INNER (Louis: the over-the-top road
-		# comes down close, crossing the low weave closely but never touching it),
-		# which the receiving hand is already waiting at (hand_catch_rest, set above).
+		# outside the catch point. It comes down on land_slot (see above): as close in
+		# as the receiving hand's own launch corner allows, and never ON it.
 		var windup := (20.0 if h == RIGHT else -20.0) if b.bulge > 0.0 else 0.0
 		b.from_pos = outer_pos(h) + Vector2(windup, 0.0)
-		b.to_pos = inner_pos(b.to_hand) + Vector2(drift, 0.0)
+		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
 	else:
 		# a plain cascade/fountain throw: inner launch, outer catch. A FOUNTAIN is
 		# same-hand, so its two balls (half a cycle apart) trace the same arc and
@@ -3855,6 +3917,15 @@ func update_hands() -> void:
 		hpos[h] = cur.lerp(hand_target(h), HAND_SMOOTH)
 		var want := 1.0 if not stack(h).is_empty() else 0.0
 		hclose[h] = lerpf(hclose[h], want, 0.3)
+	if _handlog and tick >= 24:
+		# one line per tick: each hand's live x, its target x, the slot it is aiming at,
+		# and whether it holds. A hand that alternates target slots every few ticks (its
+		# aim x jumping) is the tremor; a steady aim far from the ball's lane is the
+		# other hypothesis. dc is the centre-relative offset, so 24/58/104 read directly.
+		var c := stage_center().x
+		print("t%4d  L x=%6.1f aim=%6.1f dc=%5.1f hold=%d   R x=%6.1f aim=%6.1f dc=%5.1f hold=%d" % [
+			tick, hpos[LEFT].x, hand_target(LEFT).x, hand_target(LEFT).x - c, int(not stack(LEFT).is_empty()),
+			hpos[RIGHT].x, hand_target(RIGHT).x, hand_target(RIGHT).x - c, int(not stack(RIGHT).is_empty())])
 
 
 func add_popup(pos: Vector2, text: String, col: Color) -> void:
@@ -3896,6 +3967,14 @@ func flight_pos(b: Ball) -> Vector2:
 		# centre. Gone by mid-flight either way.
 		var dir_out := 1.0 if b.from_pos.x >= get_viewport_rect().size.x * 0.5 else -1.0
 		pos.x += b.bulge * dir_out * sin(clampf(p * 2.0, 0.0, 1.0) * PI)
+	if b.land_dodge != 0.0:
+		# the LATE landing-side dodge (see do_throw): the descent bows OUTBOARD (away
+		# from mid-stage, toward its own landing side) across the back half of the
+		# flight, so the high road comes down outside the corridor its landing hand's
+		# crossing low throw rises through, then eases back to zero at p=1 so the catch
+		# still lands exactly on target. Peaks around p=0.7, silent before mid-flight.
+		var dir_land := 1.0 if b.to_pos.x >= get_viewport_rect().size.x * 0.5 else -1.0
+		pos.x += b.land_dodge * dir_land * sin(clampf((p - 0.4) / 0.6, 0.0, 1.0) * PI)
 	if b.trick == TR_BTB:
 		# a showy behind-the-back loop: the ball bows back toward the throwing side and
 		# lifts high over the mid-flight, then settles cleanly onto the catch point
@@ -4994,8 +5073,15 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 		label += "  -  ON"
 		hot = true
 	elif toggle_on >= 0:
-		# some other toggle keeps running while a different trick is selected
-		label += "   (%s on)" % String(TRICKS[toggle_on]["name"]).to_lower()
+		# a toggle is RUNNING while the player has cycled the selection to a different
+		# trick (ROADMAP 12c). Cycling never stops a toggle - only a second Space does -
+		# but the old HUD dimmed this whole line and buried the still-ON toggle in a
+		# small lowercase aside, so it read as "my trick switched off". Lead with the
+		# running toggle, loud and gold, and demote the mere selection to the aside, so
+		# "what is ON" always wins the eye over "what is loaded".
+		label = "%s  -  ON   (%s next)" % [String(TRICKS[toggle_on]["name"]).to_upper(),
+			String(TRICKS[sel]["name"])]
+		hot = true
 	var lc := Color(1.0, 0.86, 0.5) if hot else Color(0.72, 0.66, 0.78, 0.85)
 	var pw := 330.0
 	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
@@ -6765,7 +6851,13 @@ func _capture_and_quit() -> void:
 		# airborne props reached this session (negative would be a visual overlap)
 		print("collcheck min clearance: %.1f px" % _coll_min)
 		print("collcheck at: %s" % _coll_at)
-	var img := get_viewport().get_texture().get_image()
-	if img != null and _shot_path != "":
-		img.save_png(_shot_path)
+	# the audit needs no picture, and a picture is the only thing --headless cannot
+	# give us (the viewport has no texture there). Asking for one anyway is what used
+	# to force the whole pattern sweep through slow, wall-clock-bound windowed runs.
+	if _shot_path != "":
+		var tex := get_viewport().get_texture()
+		if tex != null:
+			var img := tex.get_image()
+			if img != null:
+				img.save_png(_shot_path)
 	get_tree().quit()
