@@ -240,6 +240,131 @@ What to add, in descending order of value per line of code:
 
 ---
 
+## Track D. The interface (Louis's ask: happier colours, better layout)
+
+I captured the shop, the results card and the stat sheet. The diagnosis is the
+same in all of them, and it is not really a layout problem at root, it is a
+**colour and hierarchy** problem.
+
+### What is actually wrong
+
+1. **There is exactly one colour idea in the whole interface.** Every panel in
+   the game (the shop, the results card, the pause menu, the HUD boxes, the venue
+   card) is the same near-black rectangle with a thin orange border. So no screen
+   feels like a different *place*, and the whole game has one flat mood.
+
+2. **The shop uses RED for anything you cannot afford.** Open it as a new player
+   holding 100 gold and you see 200, 500, 1000, 2000, 8000, all in red. Red is
+   the colour of errors. **Your shop currently reads as a rejection letter.** This
+   is the single worst thing in the interface and it is a one-line fix.
+
+3. **The play HUD bleeds through behind every overlay.** Behind the shop panel
+   you can still read the score box, the stamina bar, the venue card and the trick
+   hints. A modal screen should own the entire frame. A large share of the sense
+   of clutter comes from this alone.
+
+4. **Everything is a text list.** The shop is seven rows of text with tiny icons.
+   The prop icons (`draw_prop_icon()`) are charming little vector drawings and
+   they are rendered at about sixteen pixels, unlit, in the dark, where nobody can
+   enjoy them.
+
+5. **No hierarchy.** One typeface, a narrow range of sizes, a narrow range of
+   colours. The eye has nowhere to land, so every screen reads as uniform grey
+   text and the player has to *scan* rather than *see*.
+
+6. **Cryptic input.** `[1] [2] [3]` to buy. There is already a cursor idiom
+   elsewhere in the game (the day hub, the pause menu). Use it.
+
+7. **Huge dead space** around every panel, which makes the panels feel like
+   dialogs floating in a void rather than places.
+
+### The organising idea
+
+> **The stage is dark and dramatic. The juggler's LIFE is warm and bright.**
+
+The shop, the day hub, the skills screen and the records are not performances.
+Right now they are lit like performances, which is why they feel gloomy. Make
+them sunlit: a parchment and cream palette, deep ink text, gold and teal accents.
+Then walking out of the dark stage into the bright market becomes a rhythm the
+player *feels* every single loop, and the dark of the stage hits harder for the
+contrast.
+
+This is how "happier colours" gets to happen without betraying ART_AND_MUSIC.md's
+warm-theatrical identity. The identity is about the *stage*. It was never
+supposed to be about the menus.
+
+### The work
+
+**D.1 A real design system, because there isn't one.** Every screen currently
+hand-rolls its own magic numbers, which is exactly why they do not feel like a
+family. Define once, at the top of the file:
+
+- **A spacing scale.** One base unit (8px), and every margin, gap and padding is a
+  multiple of it. Nothing else is allowed.
+- **A type scale.** Five sizes, not fifteen. Display, title, body, label, caption.
+- **A palette**, defined semantically rather than literally, so the meaning is in
+  the name:
+
+  | token | use |
+  |---|---|
+  | `INK` | body text on light panels |
+  | `PARCHMENT` | the panel ground for LIFE screens |
+  | `GOLD` | money, records, the thing you want |
+  | `SAGE` | affordable, safe, good |
+  | `EMBER` | the stage's warm light |
+  | `DUST` | disabled, unaffordable, quiet (NOT red) |
+  | `BLOOD` | reserved for genuine loss ONLY: a drop, lost reputation, game over |
+
+- **A component set**, written once and reused: `ui_panel()`, `ui_card()`,
+  `ui_row()`, `ui_badge()`, `ui_bar()`, `ui_keycap()` (this one exists already as
+  `draw_keycap()` and is good). Every screen is then assembled from these rather
+  than from raw `draw_rect` and `draw_string` calls.
+
+This refactor is the highest-leverage item in the track. It is not glamorous, but
+after it exists, every screen gets better *and stays* better, and a new screen
+costs a tenth of what it costs today.
+
+**D.2 Fix the colour semantics.** Affordable items glow (GOLD, slightly raised,
+a soft warm halo). Unaffordable items go quiet (DUST, desaturated, dimmed). Red is
+never used for a price again. This is a small change that flips the shop's whole
+emotional register from "you are poor" to "look what is coming".
+
+**D.3 Modal screens own the frame.** When the shop, the sheet, the skills screen
+or the records are open, the play HUD is hidden outright, not dimmed. One full
+scrim, then the panel. This will make every overlay feel twice as spacious for
+zero layout work.
+
+**D.4 Rebuild the shop as a shelf, not a list.** This is the screen Louis called
+out and it is the one that deserves real attention.
+
+- Each item becomes a **card**, laid out in a grid, not a row in a table.
+- The prop is drawn **large and lit** on its card (the icons already exist, they
+  are just tiny). A club should tumble slowly. A torch should actually flicker and
+  cast light on its own card. This is where the code-only art approach *wins*: the
+  props are already animated draw functions, so putting a live, lit, rotating
+  torch on a shop card is nearly free and it would look genuinely lovely.
+- Each card shows the price, whether you own it, and **one line about why you want
+  it** ("Heavier. Scores more. Needs Strength 22.").
+- Cards you can afford lift and warm. Cards you cannot go quiet.
+- Group into three shelves: **Props**, **Gear**, **Provisions**.
+- Move with the cursor, buy with Enter, and let the gold counter *count down* with
+  a coin sound while the item slides onto the shelf. The feedback of spending
+  should feel good, because spending money is one of the game's few rewards.
+
+**D.5 The day hub as a place.** It is a menu of six text rows today. It is meant
+to be a juggler's life. Give it a warm illustrated frame (procedurally: a room, a
+window with the time of day showing through it, the props on a shelf), and let the
+day's clock actually change the light through the window as segments are used.
+This costs little and it is the difference between "a menu" and "somewhere you
+live".
+
+**D.6 Keep what already works.** The results card's grade badge, the section
+rules, the confetti and the row rhythm are genuinely good and should become the
+template the other screens copy, not something to replace. And the typography
+(Nunito) is the best thing in the game already. Leave it alone.
+
+---
+
 ## Track C. The ink pass (highest risk, highest identity payoff)
 
 This is the one that answers what you actually want, and it is the one I cannot
@@ -291,14 +416,27 @@ structural thing in this whole document.
 
 ## Order of work
 
-1. **The pose/render split** (the refactor above). It de-risks everything after it.
-2. **Track A.2, make the props read.** This is a gameplay bug and it comes first.
-3. **Track A.1, the post chain.** Verify the glow situation on `gl_compatibility`
-   before committing to an approach.
-4. **Track B, motion.** Head-tracking first, it is five lines and it is the
-   biggest single win in the document.
-5. **Track A.3, light as signal.** The art doc already designed it.
-6. **Track C, the ink pass.** Behind a flag. You judge it.
+1. **Track D.1 and D.2, the design system and the colour semantics.** First,
+   because it is cheap, it is zero-risk, it is the thing Louis asked for, and
+   every screen built after it inherits it. Killing the red prices is a one-line
+   change that improves the game's mood immediately.
+2. **Track A.2, make the props read.** This is a gameplay bug wearing an art
+   costume and it outranks everything else visual.
+3. **Track D.3 and D.4, the modal scrim and the shop shelf.** High visible payoff,
+   very low risk, and the live lit torch on a shop card is the single most
+   charming thing available for the least work.
+4. **Track A.1, the post chain.** Verify the glow situation on `gl_compatibility`
+   before committing to an approach, since that decides whether we use Godot's
+   built-in `WorldEnvironment` or hand-roll it through a `SubViewport`.
+5. **Track B, motion.** Head-tracking first, it is about five lines and it is the
+   biggest single win per line in the whole document.
+6. **Track A.3, light as signal.** The art doc already designed this and never
+   built it.
+7. **The pose/render split.** Do this before Track C, since it is what makes Track
+   C safe to attempt and keeps the door open to a real artist.
+8. **Track C, the ink pass.** Behind a flag. You judge it from a screenshot.
+9. **Track D.5, the day hub as a place.** The nicest-to-have, and the one most
+   worth doing only once everything above has settled.
 
 After each step I will capture the same frame, at the same venue, at the same
 tick, before and after, and put the two images in front of you. If you do not like
