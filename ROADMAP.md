@@ -200,12 +200,45 @@ and make sure the demo auto-player (--demo --trick) still exercises it.
 
 ## 12. URGENT REGRESSION: over-the-top landings collide, Columns hands jitter, C cancels a running toggle (Louis, 2026-07-13)
 
+**STATUS 2026-07-15 (Phase 0 of PLAN.md):** 12a RESOLVED for every confirmed case,
+12c RESOLVED, 12b DIAGNOSED and awaiting Louis's choice of fix direction. Details
+inline at the head of each subsection below. The `--collcheck` audit is now
+headless-capable and batchable (a parallel sweep of all 13 patterns/tricks at 3/4/5
+balls runs in ~2 min), and a new `--handlog` flag dumps hand x per tick for 12b.
+
 Three bugs reported after the fifth-batch session (commit ddbd706, see the memory
 log and this file's history) that reworked hand choreography and scoring. Do
 this session BEFORE any further feature work - it is a regression, not new
 content, and item 2's remaining "content depth" ask can wait another round.
 
 ### 12a. Over-the-top throws now visually and physically collide with the low weave
+
+**RESOLVED 2026-07-15.** Fix (two parts, both in Game.gd):
+1. `over_top_land_slot(t)` lands an over-the-top throw on the COMPLEMENT of hand t's
+   own launch slot (INNER when t launches OUTER as in reverse cascade, OUTER when t
+   launches INNER as a low hand). A landing can then never sit on a launch, which was
+   the -14px Half Shower / -22px Shower regression. It is a structural guarantee, not
+   a tuned gap, so Phase 5 inherits it. `catch_slot` and `do_throw` both read it, so
+   the ball's landing and the receiving hand's rest pose come from one source.
+2. A late-flight `land_dodge` (Ball field, set in `do_throw`, applied in `flight_pos`)
+   bows an over-the-top ball's DESCENT outboard when its landing hand throws low, so
+   the high road comes down outside the corridor that hand's crossing low throw rises
+   through. Gated structurally on `not next_throw_over_top(b.to_hand)`, which keeps the
+   reverse cascade (all hands high, no low weave) untouched.
+
+Verified by the parallel `--collcheck` sweep at 3/4/5 balls: Half Shower +25/+25/+8.2,
+Shower +24/+24.5/+24.5, Waterfall +26.6/+16.5/+8.3, Overthrow +11.7 all, Reverse
+Cascade +16.2 all. **One residual: Tennis at 4 balls, still -16px.** Tennis-4 rides a
+fountain (same-hand) base, so its low hand catches its OWN low balls at OUTER, the very
+slot the over-the-top ball lands on - a genuine same-tick, same-slot conflict that no
+dodge separates. It is the lowest-priority case this section flagged ("conflict window
+inherently smaller") and is left to the Phase 5 siteswap rework that replaces this
+hand-picked geometry with one derived from the pattern, rather than special-cased at
+the cost of the cases that now work. Tennis at 3 and 5 balls (cascade base) is clean.
+
+---
+Original analysis below (kept for the Phase 5 rework's reference):
+
 
 **Root cause, confirmed empirically.** ddbd706 changed an over-the-top throw's
 landing point (`b.to_pos` in `do_throw`'s `elif over_top:` branch) from
@@ -328,6 +361,36 @@ or a dodge, not either extreme.
 
 ### 12b. Columns hands are jittery, not settled at their two fixed points
 
+**DIAGNOSED 2026-07-15 with the new `--handlog` flag - it is BOTH hypotheses, and the
+fix direction is Louis's call (this section already said so).** Measured with
+`--demo --handlog --pattern columns --balls 5`, logging each hand's x per tick:
+- Hypothesis 2 CONFIRMED (the tremor): the LEFT hand oscillates between x=582 (INNER,
+  its catch/wait slot) and x=616 (VERY_INNER, its throw slot) EVERY throw-catch cycle,
+  and never settles - it reaches 583.7, reverses, climbs to 613.3, reverses again,
+  continuously, because the two slots are only 34px apart and the cadence retargets
+  before the 0.22 lerp arrives. A hand that holds WITHOUT throwing (RIGHT, parked at
+  664 the whole window) is rock-steady - proving the tremor is specifically the
+  catch/throw retarget, not general motion.
+- Hypothesis 1 ALSO present (the disconnect): at 5 balls the LEFT hand serves two lanes
+  (ball x = 552 and 596) but hovers at 582-616, so it sits 30-64px off the outer lane
+  it is nominally catching.
+
+Fix options for Louis to pick (this subsection explicitly asked to confirm before
+coding the deeper one):
+  A. Single rest point for Columns: make `catch_slot`/`throw_slot` return the SAME slot
+     so the hand holds one x and only does the vertical throw-kick - kills the tremor,
+     but the hand no longer visibly "loads" inward before a throw.
+  B. Hand tracks its ball's lane x (a per-lane rest) - kills BOTH the tremor and the
+     disconnect, but breaks Louis's "hands rest at fixed points, don't chase the ball"
+     rule for Columns specifically (arguably fine, since real columns hands DO sit under
+     their columns).
+  C. Leave it: the tremor is largely a fast-`--demo`-cadence artifact; at a human
+     cadence the hand has time to settle at each endpoint and reads as two held poses.
+
+---
+Original analysis below:
+
+
 Reported after the same session. Not yet root-caused with certainty, since it
 needs to be SEEN moving (a single screenshot cannot show jitter) and this
 session only had static captures + the automated demo, whose fixed 28-tick
@@ -376,6 +439,20 @@ simplification beyond what Louis originally asked for, so confirm with him
 before doing it rather than assuming.
 
 ### 12c. Pressing C to cycle the trick selection appears to deactivate a running toggle
+
+**RESOLVED 2026-07-15 - it was hypothesis 1, legibility.** Confirmed by reading:
+`cycle_trick()` only ever writes `trick_sel`, never `toggle_on`, so a running toggle
+keeps running after C. The old HUD, though, dimmed the whole trick card when the
+selection differed from the running toggle and buried the still-ON toggle in a small
+lowercase "(x on)" aside - which reads as "my trick switched off". Fix in
+`draw_trick_hud`: when a toggle runs but a different trick is selected, LEAD with the
+running toggle in the bright gold "hot" colour ("HIGH TOSS  -  ON   (Overthrow next)")
+and demote the mere selection to the aside. What is ON now always wins the eye. No
+state-management change was needed or made. Verified in a live screenshot.
+
+---
+Original analysis below:
+
 
 Traced as far as static reading gets you. **Not reproduced interactively this
 session**, and the code does not show an obvious cause, which itself is worth
