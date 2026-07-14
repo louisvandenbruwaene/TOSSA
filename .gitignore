@@ -9,3 +9,6 @@
 export/macos/
 export/windows/
 export/linux/
+
+# dev screenshot captures
+shot*.png
