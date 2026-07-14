@@ -5,6 +5,17 @@ spec of what exists (that is README.md). This is a design argument about what
 the game is missing structurally, and the concrete additions that would close
 the gap, ordered by how much each one changes the game per unit of work.
 
+> **CORRECTION, 2026-07-14.** Part 0 below overstates one thing. It claims a set
+> cannot be lost. In fact `drop_ball()` already triggers a full collapse when
+> applause reaches zero: the hands give up, every prop falls, the round ends.
+> That machinery is complete and simply never reached, because applause only
+> moves on events and **never decays with time**, so a competent player is never
+> near zero. The argument of this document survives unchanged (a set still has no
+> target and no real cost to a drop) but the work is cheaper than described: we
+> are adding a decay term and a target to a fail state that already works, not
+> building one. See PLAN.md, which is the executable version of this document and
+> supersedes it where they differ.
+
 Everything here is measured against one question: **why would a stranger pay
 ten dollars for this, and why would they still be playing it in week three?**
 
