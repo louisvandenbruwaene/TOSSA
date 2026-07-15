@@ -297,6 +297,63 @@ const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
 const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
 
+# --- THE BOOKING (Phase 2) ----------------------------------------------------
+# A performance is no longer one open-ended set: it is a booking of three sets at
+# one venue, played back to back. Each set is a contest with a number to beat (the
+# TARGET), a crowd whose patience DRAINS (the applause meter, now a clock), and a
+# hard DROP LIMIT (the damage). Clear a target and you may WALK OFF to bank it, or
+# push for a growing overtime multiplier and risk the night. The third set adds a
+# named ENCORE condition drawn from a deck. This is the layer that turns a lovely
+# toy into a game with stakes, and almost all of it activates machinery Game.gd
+# already had (the collapse, the applause meter, the graceful finish, purist,
+# set_collide, the record boards) and simply never pressed on.
+const SET_WARMUP := 0
+const SET_MAIN := 1
+const SET_ENCORE := 2
+const SETS_PER_BOOKING := 3
+# the Warm-up target per venue. The whole phase lives or dies on these numbers, so
+# they were set against the --calib autoplayer sweep, not guessed: a flawless three-
+# ball cascade clears the Backyard Warm-up and falls well short of the Championship.
+const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000]
+const SET_STEP := [1.0, 1.9, 3.2]     # Warm-up, The Set, The Encore: each a taller bar
+const ANTE_STEP := 0.15               # each cleared booking at a venue raises its bar 15%
+# the crowd's patience bleeds this much per tick, per venue (120 ticks a second). At
+# the Backyard a still juggler loses the room in ~24s; at the World Arena in ~8. Every
+# Perfect catch pays ~0.05 back, so keeping the crowd is a matter of keeping juggling.
+const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092]
+const DROP_LIMIT := 3                 # three drops and the crowd turns (an Encore may lower it)
+const OVERTIME_PER_CATCH := 0.02      # each catch past the target grows the walk-off bonus
+const OVERTIME_MAX := 2.5             # ...capped, so pushing forever is not the play
+const APPL_THROW_HEIGHT := 0.012      # a big throw excites the crowd: patience back, scaled by height
+# the crowd's patience economy, now that it is a CLOCK rather than decoration. The
+# per-catch gains are deliberately smaller than a set's decay bleed, so steady low play
+# is a slow drain the crowd bleeds out of - reaching the target is a race, and spectacle
+# (height, tricks) is what buys the time to win it. Tuned against the --calib autoplayer.
+const APPL_PERFECT := 0.014
+const APPL_GOOD := 0.007
+const APPL_LATE := -0.020
+const APPL_WHIFF := -0.040
+const APPL_SPIN := 0.010
+const BOOK_PAY_PER_SCORE := 0.0015    # gold per point banked across the booking (score already
+									  # scales with the venue, so this needs no separate venue term)
+# The Encore deck: each is a single named twist on the third set, and each is a couple
+# of lines because it toggles a constant or a draw call that already exists. Several
+# were designed months ago as "cosmetic" or "optional" (the glow-in-the-dark prop is
+# Blackout, the Purist toggle is The Purist's Night, Hard Mode's clacks are Close
+# Quarters): boss blinds that finally have somewhere to live.
+const ENCORES := [
+	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
+	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
+	{"id": "draft",     "name": "The Draft",          "desc": "A wind through the room. Every throw drifts wider."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "Only the top of each arc is lit. Catch what you cannot see."},
+	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
+	{"id": "long",      "name": "The Long Set",       "desc": "Twice the target, but the crowd is patient. An endurance test."},
+	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
+	{"id": "purist",    "name": "The Purist's Night", "desc": "No gear, no stats, no help. Only your hands."},
+	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives and torches score."},
+	{"id": "tight",     "name": "Close Quarters",     "desc": "The stage is cramped. Props that clip mid-air turn treacherous."},
+]
+
 
 class Ball:
 	var state := STATE_FLIGHT
@@ -367,6 +424,28 @@ var running := false      # true once the player makes the first throw
 var started := false
 var popups: Array[Dictionary] = []
 var rng := RandomNumberGenerator.new()
+
+# --- the booking's live state (Phase 2). A booking is three sets at one venue; most
+# of this is per-booking and deliberately NOT saved (a booking is short, and losing
+# it on quit is a fair, far simpler price than mid-booking resume). Only `ante`
+# persists, since it is the standing difficulty the venue remembers.
+var set_index := 0            # 0 Warm-up, 1 The Set, 2 The Encore
+var booking_score := 0        # banked across the booking's cleared sets (the record number)
+var booking_active := false   # true from begin_performance until the booking resolves
+var overtime := 0.0           # the walk-off multiplier, earned by catches past the target
+var set_cleared := false      # this set's target has been beaten (locks true, enables the walk-off)
+var set_collapsed := false    # this set ended by the crowd walking or the drop limit (overtime lost)
+var encore := -1              # index into ENCORES for this booking's third set, or -1
+var sets_cleared := 0         # how many of the three the player cleared, for pay and reputation
+var ante: Array[int] = [0, 0, 0, 0, 0, 0]   # bookings cleared per venue: the standing raised bar
+# the booking's running totals, summed across its sets so the results card reads the
+# whole night, not just the last set
+var book_caught := 0
+var book_dropped := 0
+var book_best_streak := 0
+var book_tricks := 0
+var book_trick_score := 0
+var book_xp := 0
 
 # progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
@@ -580,6 +659,8 @@ var _shot := false
 var _shot_path := ""
 var _shot_tick := 170
 var _shot_frames := 0
+var _calib := false        # dev: --calib prints the autoplayer's score at _calib_ticks, then quits
+var _calib_ticks := 3600   # 30 sim-seconds by default (deterministic ticks, not real time)
 var _demo_next := RIGHT
 const DEMO_BEAT := 28
 
@@ -656,10 +737,42 @@ func _ready() -> void:
 		if bi != -1 and bi + 1 < ua.size():
 			strength = maxi(strength, 30)   # so max_balls() allows up to 7
 			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
+		var vfi := ua.find("--venue")   # dev: play at venue N (0..5), so booking targets and
+		if vfi != -1 and vfi + 1 < ua.size():   # patience decay match that stage (calibration + shots)
+			var vn := clampi(int(ua[vfi + 1]), 0, TOP_VENUE)
+			reputation = VENUE_REP[vn]
+			venue_pick = vn
+		var pfi := ua.find("--prop")    # dev: juggle prop N (0..5) with enough owned + Strength
+		if pfi != -1 and pfi + 1 < ua.size():
+			var pn := clampi(int(ua[pfi + 1]), 0, PROPS.size() - 1)
+			prop_type = pn
+			prop_count[pn] = maxi(prop_count[pn], 7)
+			strength = maxi(strength, int(PROPS[pn]["req"]))
 		start_run(start_n)
 		game_state = ST_PLAY
-		if ua.has("--demo"):    # dev: the auto-player performs, so we can see Applause
+		if ua.has("--demo"):    # dev: the auto-player performs, so we can see the booking HUD
 			mode = MODE_PERFORM
+		if ua.has("--booking"):   # dev: run a REAL booking (rolls an Encore), for shots and --calib.
+			# --encore <id> pins the condition; --set <n> jumps straight to that set (2 = the Encore).
+			booking_active = true
+			set_index = 0
+			booking_score = 0
+			sets_cleared = 0
+			encore = randi() % ENCORES.size()
+			var eni := ua.find("--encore")
+			if eni != -1 and eni + 1 < ua.size():
+				for ek in ENCORES.size():
+					if String(ENCORES[ek]["id"]) == ua[eni + 1]:
+						encore = ek
+			var sei := ua.find("--set")
+			if sei != -1 and sei + 1 < ua.size():
+				set_index = clampi(int(ua[sei + 1]), 0, SET_ENCORE)
+				booking_score = set_target_for(run_venue, 0) if set_index > 0 else 0
+		var ci := ua.find("--calib")   # dev: print the autoplayer's score at N ticks, then quit,
+		if ci != -1:                   # to tune VENUE_BASE against real strong-player numbers
+			_calib = true
+			if ci + 1 < ua.size() and not ua[ci + 1].begins_with("--"):
+				_calib_ticks = maxi(120, int(ua[ci + 1]))
 		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
 		if pi != -1 and pi + 1 < ua.size():
 			for pj in PATTERNS.size():
@@ -688,12 +801,13 @@ func _ready() -> void:
 			sheet_open = true
 		if ua.has("--shop"):    # dev: open the shop for a screenshot
 			shop_open = true
-		if ua.has("--results"):   # dev: fabricate a finished performance to screenshot the card
+		if ua.has("--results"):   # dev: fabricate a finished booking to screenshot the card
 			mode = MODE_PERFORM
-			run_venue = 2
-			caught = 78; dropped = 4; best_streak = 33; score = 14820
-			peak_applause = 0.94; tricks_landed = 5; trick_score = 1350
-			last_pay = 240; last_rep_delta = 22; run_xp = 190; points = 3
+			run_venue = 4
+			sets_cleared = 3          # a complete night, for the card's header and grade
+			caught = 214; dropped = 3; best_streak = 132; score = 951875
+			peak_applause = 0.94; tricks_landed = 11; trick_score = 42600
+			last_pay = 6996; last_rep_delta = 60; run_xp = 1240; points = 3
 			started = true; running = false; results_open = true; results_record = true
 			results_tick = 0
 		if ua.has("--pause"):   # dev: open the pause menu for a screenshot
@@ -708,9 +822,22 @@ func _ready() -> void:
 	if ti != -1:
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
 		begin_tutorial(id)
-	var ei := ua.find("--establish")  # dev: screenshot a venue exterior card, e.g. --establish 3
-	if ei != -1:
-		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2
+	var ei := ua.find("--establish")  # dev: screenshot a venue exterior card, e.g. --establish 3.
+	if ei != -1:                      # add --booking (and optionally --set/--encore) to show the
+		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2   # booking's set/target/encore panel
+		if ua.has("--booking"):
+			booking_active = true
+			run_venue = establish_venue
+			set_index = SET_WARMUP
+			var esi := ua.find("--set")
+			if esi != -1 and esi + 1 < ua.size():
+				set_index = clampi(int(ua[esi + 1]), 0, SET_ENCORE)
+			encore = randi() % ENCORES.size()
+			var eei := ua.find("--encore")
+			if eei != -1 and eei + 1 < ua.size():
+				for ek2 in ENCORES.size():
+					if String(ENCORES[ek2]["id"]) == ua[eei + 1]:
+						encore = ek2
 		game_state = ST_ESTABLISH
 		cine_tick = 0
 	if ua.has("--credits"):           # dev: jump straight to the credits roll for a screenshot
@@ -748,6 +875,9 @@ func _physics_process(delta: float) -> void:
 		cine_tick += 1           # drives the stage card, menu, and hub motion
 		if game_state == ST_DAY and day_anim != "":
 			day_anim_step()          # a hub vignette is playing; its effect lands at the end
+		if _demo and game_state == ST_ESTABLISH and cine_tick > 40:
+			establish_key()          # dev: the autoplayer dismisses each set's card, so
+									 #      --demo --booking runs a whole booking end to end
 		queue_redraw()
 		return
 	if sheet_open or shop_open or paused:
@@ -782,6 +912,17 @@ func _physics_process(delta: float) -> void:
 			return
 		_tick_acc -= 1.0
 	tick += 1
+	if _calib and (tick >= _calib_ticks or collapsing):
+		# the calibration verdict: what a strong player (the fixed-metronome autoplayer)
+		# scores before the crowd walks - or in _calib_ticks if it never does - at this
+		# venue / prop / count. Quitting AT the collapse captures the true reachable score,
+		# since after a collapse the halted-sim autoplayer keeps zombie-feeding itself.
+		var wt := set_target_for(run_venue, SET_WARMUP)
+		var reason := "COLLAPSE" if collapsing else "time"
+		print("CALIB venue=%d prop=%d n=%d hold=%d end=%s tick=%d score=%d caught=%d streak=%d appl=%.2f  warmup=%d clears=%s" % [
+			run_venue, prop_type, num_balls, _demo_hold, reason, tick, score, caught, best_streak, applause, wt, str(score >= wt)])
+		get_tree().quit()
+		return
 	step_effects()   # age the egg-break shards, yolk splats, and particles
 	if results_open:
 		results_anim_sfx()   # the card's count-up ticks, stamp, and record fanfare
@@ -907,10 +1048,12 @@ func _input(event: InputEvent) -> void:
 		match kc:
 			KEY_R, KEY_SPACE:
 				if not too_tired():
+					# "go again" books a WHOLE fresh booking (a new establishing card and a
+					# new Encore), not a bare set, so it costs a day segment like any booking
 					seg_used += 1
 					save_progress()
 					results_open = false
-					start_run(num_balls)
+					begin_performance(num_balls)
 				else:
 					play_sfx("whiff", -10.0)   # out of stamina: sleep first (the
 											   # card's footer says so in words)
@@ -1088,21 +1231,53 @@ func pause_activate() -> void:
 
 
 func finish_performance() -> void:
-	# End a performance gracefully while the props are still up, so a strong set can be
-	# banked on a high note instead of only ever ending on a full drop. Clearing running
-	# fires on_round_end from the running->false edge in _physics_process, which scores
-	# and shows the results card. It is not a drop, so nothing is penalised.
+	# THE WALK-OFF (Phase 2). Once a set's target is cleared, the finish key banks the
+	# score with its overtime multiplier and moves to the next set. Before the target
+	# is cleared there is nothing to bank, so the key just declines: a set can only end
+	# on a clear or on a collapse, never on giving up early (which would let a player
+	# fish for a soft ending). Clearing running fires on_round_end from the running->
+	# false edge in _physics_process, where resolve_set() banks and advances the booking.
 	if mode != MODE_PERFORM or not running or tut_active:
+		return
+	if booking_active and not set_cleared:
+		set_trick_msg("reach the target first")   # nothing to walk off with yet
+		play_sfx("whiff", -12.0)
 		return
 	play_sfx("streak", -6.0)   # a short rising flourish to close the set
 	running = false
 
 
 func begin_performance(n: int) -> void:
-	# a performance opens on an establishing shot of WHERE you are about to play,
-	# the way a film cuts to the outside of the building before the scene inside
+	# a booking opens on an establishing shot of WHERE you are about to play, the way a
+	# film cuts to the outside of the building before the scene inside. It also rolls
+	# this booking's Encore and clears the per-booking accumulators, so the whole night
+	# is set up here and the three sets simply run.
 	mode = MODE_PERFORM
 	establish_after = n
+	establish_venue = play_venue()
+	booking_active = true
+	set_index = SET_WARMUP
+	booking_score = 0
+	sets_cleared = 0
+	# a fresh cosmetic roll for the Encore (global randi, never the sim rng, so the
+	# deterministic catch sequence is untouched by which condition came up)
+	encore = randi() % ENCORES.size()
+	book_caught = 0
+	book_dropped = 0
+	book_best_streak = 0
+	book_tricks = 0
+	book_trick_score = 0
+	book_xp = 0
+	game_state = ST_ESTABLISH
+	cine_tick = 0
+
+
+func next_set() -> void:
+	# advance to the next set of the booking WITHOUT returning to the hub: re-establish
+	# the card (so each set gets its "here is what they want" beat), then start_run deals
+	# a fresh set that keeps the same loadout and the accumulating booking_score.
+	set_index = clampi(set_index + 1, 0, SET_ENCORE)
+	establish_after = num_balls
 	establish_venue = play_venue()
 	game_state = ST_ESTABLISH
 	cine_tick = 0
@@ -1111,6 +1286,66 @@ func begin_performance(n: int) -> void:
 func establish_key() -> void:
 	game_state = ST_PLAY
 	start_run(establish_after)   # the card dismissed: walk out and begin the set
+
+
+# --- booking maths: the target (gate), the deck's live effects, the drop limit -----
+
+func set_target_for(venue: int, si: int) -> int:
+	# the number to beat, scaling off the VENUE and the standing ante, never off the
+	# player's own record (scaling off your best would punish you for improving). The
+	# Encore's multiplier folds in only on the third set.
+	var base := float(VENUE_BASE[clampi(venue, 0, VENUE_BASE.size() - 1)])
+	var step := float(SET_STEP[clampi(si, 0, SET_STEP.size() - 1)])
+	var a := 1.0 + ANTE_STEP * float(ante[clampi(venue, 0, ante.size() - 1)])
+	var enc := encore_target_mult() if si == SET_ENCORE else 1.0
+	return int(round(base * step * a * enc))
+
+
+func set_target() -> int:
+	return set_target_for(run_venue, set_index)
+
+
+func book_total() -> int:
+	# the live running total across the booking: banked sets plus the current set's score.
+	# monotonic, so it drives the record chase and the "how close am I" HUD honestly.
+	return booking_score + score
+
+
+func encore_on(id: String) -> bool:
+	# is THIS booking's Encore active right now? Only ever true on the third set of a
+	# real booking, so a warm-up and a --demo run are never touched by a condition.
+	return booking_active and mode == MODE_PERFORM and set_index == SET_ENCORE \
+		and encore >= 0 and encore < ENCORES.size() and String(ENCORES[encore]["id"]) == id
+
+
+func encore_decay_mult() -> float:
+	# how fast the crowd's patience bleeds this set: The Hecklers double it, The Long
+	# Set halves it (a patient crowd for a marathon target)
+	if encore_on("hecklers"):
+		return 2.0
+	if encore_on("long"):
+		return 0.5
+	return 1.0
+
+
+func encore_target_mult() -> float:
+	return 2.0 if encore_on("long") else 1.0
+
+
+func encore_score_mult() -> float:
+	# For the Danger: only heavy props (clubs and up) score, so a crowd that came for
+	# danger cannot be satisfied with balls. A run uses one prop, so the current prop's
+	# weight decides the whole set.
+	if encore_on("fire") and prop_weight() < 3:
+		return 0.0
+	return 1.0
+
+
+func drop_limit() -> int:
+	# three drops and the crowd turns. The Understudy lowers it to one.
+	if encore_on("understudy"):
+		return 1
+	return DROP_LIMIT
 
 
 # =============================================================================
@@ -2189,6 +2424,7 @@ func reset_new_game() -> void:
 	started = false
 	seen_tuts.clear()      # a fresh slot re-teaches everything from scratch
 	pending_tuts.clear()
+	ante = [0, 0, 0, 0, 0, 0]   # every venue back to its opening bar
 	stamina_max = 50.0 + float(endurance)
 	stamina = stamina_max
 	save_progress()
@@ -2735,6 +2971,12 @@ func start_run(n: int) -> void:
 	best_streak = 0
 	dropped = 0
 	caught = 0
+	# per-SET booking state re-arms every run (the per-BOOKING state - set_index,
+	# booking_score, encore - is owned by begin_performance and next_set, never here,
+	# so practice and a dev autoplay leave it at its harmless defaults)
+	set_cleared = false
+	set_collapsed = false
+	overtime = 0.0
 	running = false
 	started = false
 	stamina_max = 50.0 + float(endurance)
@@ -2820,6 +3062,10 @@ func start_run(n: int) -> void:
 # -----------------------------------------------------------------------------
 
 func on_catch(h: int) -> void:
+	if collapsing:
+		return  # the act has fallen apart: you watch it all come down, you cannot save it.
+				# Without this a player (or the autoplayer) could keep catching the still-
+				# airborne props after the crowd walked, grinding score with the clock off.
 	if not stack(h).is_empty():
 		return  # hand occupied; you physically cannot catch (this IS the traffic rule)
 	var best: Ball = null
@@ -2835,7 +3081,7 @@ func on_catch(h: int) -> void:
 				best_d = d
 	if best == null or best_d > COMMIT:
 		# reached for empty air: a whiff. Discourage mashing with a small wobble.
-		applause = maxf(0.0, applause - 0.04)
+		applause = maxf(0.0, applause + APPL_WHIFF)
 		catch_flash[h] = tick
 		hclose[h] = 0.0
 		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
@@ -2864,7 +3110,8 @@ func on_catch(h: int) -> void:
 			return
 	# secured. Harder patterns AND harder loads pay more per catch (their base
 	# difficulty is the reward), so grinding the tamest routine is never the best.
-	var pm := pattern_mult() * object_mult()
+	# encore_score_mult zeroes light props on a "For the Danger" night.
+	var pm := pattern_mult() * object_mult() * encore_score_mult()
 	best.state = STATE_HAND
 	stack(h).append(best)
 	catch_flash[h] = tick
@@ -2880,7 +3127,7 @@ func on_catch(h: int) -> void:
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
 		score += int(round(100.0 * streak_mult() * pm))
-		applause = minf(1.0, applause + 0.05)
+		applause = minf(1.0, applause + APPL_PERFECT)
 		add_xp(3)
 		# the slow-motion earn, only when a REAL pattern is up (three props or
 		# more, so two lazy balls cannot farm it): a FRAME-perfect catch is an
@@ -2916,7 +3163,7 @@ func on_catch(h: int) -> void:
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
 		score += int(round(50.0 * streak_mult() * pm))
-		applause = minf(1.0, applause + 0.025)
+		applause = minf(1.0, applause + APPL_GOOD)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
 		play_sfx("good", -8.0)
@@ -2927,14 +3174,15 @@ func on_catch(h: int) -> void:
 		streak = 0
 		perfect_chain = 0
 		score += int(round(10.0 * pm))
-		applause = maxf(0.0, applause - 0.02)
+		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
-	# the record chase: passing your own best AT this venue mid-run is a moment
-	# (each board chases its own bests, so a Purist night chases Purist records)
+	# the record chase: passing your own best AT this venue mid-booking is a moment. The
+	# record is now the whole night's booking_score, so the live total is book_total()
+	# (banked sets plus this set), which is what a completed booking will be judged on.
 	if mode == MODE_PERFORM and not record_broken and run_venue >= 0 and run_venue < rec_table().size() \
-			and rec_table()[run_venue] > 0 and score > rec_table()[run_venue]:
+			and rec_table()[run_venue] > 0 and book_total() > rec_table()[run_venue]:
 		record_broken = true
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.27), "NEW RECORD!", Color(1.0, 0.86, 0.42))
@@ -2946,7 +3194,7 @@ func on_catch(h: int) -> void:
 		var extra := score - sc_before
 		score += int(round(float(extra) * (SPIN_CATCH_MULT - 1.0)))
 		trick_score += int(round(float(extra) * (SPIN_CATCH_MULT - 1.0)))
-		applause = minf(1.0, applause + 0.02)
+		applause = minf(1.0, applause + APPL_SPIN)
 		add_popup(outer_pos(h) + Vector2(0, -20), "x2", Color(0.72, 0.9, 1.0))
 		if not spin_scored:
 			spin_scored = true
@@ -2955,6 +3203,28 @@ func on_catch(h: int) -> void:
 	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
 	if best.trick >= 0 and best_d <= W_GOOD:
 		reward_trick(best.trick, outer_pos(h), best.height)
+	# THE BOOKING: this catch (with any trick bonus above) may clear the set's target,
+	# unlocking the walk-off; every catch PAST the target grows the overtime multiplier
+	# you gamble by staying out for. A catch that itself crosses the line clears the set
+	# but earns no overtime yet - overtime is strictly what you catch beyond the number.
+	if booking_active and mode == MODE_PERFORM and not tut_active:
+		if set_cleared:
+			overtime = minf(OVERTIME_MAX, overtime + OVERTIME_PER_CATCH)
+		check_set_cleared()
+
+
+func check_set_cleared() -> void:
+	# the instant the set's score reaches the target, the gate opens: the crowd roars,
+	# the HUD flips to the walk-off prompt, and finish_performance() will now bank.
+	if set_cleared or not booking_active or mode != MODE_PERFORM or tut_active:
+		return
+	if score >= set_target():
+		set_cleared = true
+		var s := get_viewport_rect().size
+		add_popup(Vector2(s.x * 0.5, s.y * 0.24), "TARGET CLEARED  -  walk off, or push for more", Color(1.0, 0.86, 0.42))
+		play_sfx("cheer", -5.0)
+		play_sfx("record", -8.0)
+		spawn_parts(Vector2(s.x * 0.5, s.y * 0.16), Color(1.0, 0.85, 0.45), 22, 2.5, "confetti")
 
 
 # -----------------------------------------------------------------------------
@@ -2963,8 +3233,8 @@ func on_catch(h: int) -> void:
 # -----------------------------------------------------------------------------
 
 func on_throw_press(h: int) -> void:
-	if stack(h).is_empty():
-		return
+	if collapsing or stack(h).is_empty():
+		return   # nothing you throw during a collapse counts; the set is already over
 	charging[h] = true
 	charge_start[h] = tick
 
@@ -2980,7 +3250,7 @@ func on_throw_release(h: int) -> void:
 
 
 func do_throw(h: int, hold: int) -> void:
-	if stack(h).is_empty():
+	if collapsing or stack(h).is_empty():
 		return
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
@@ -3247,7 +3517,12 @@ func do_throw(h: int, hold: int) -> void:
 	# and flags itself above the stage so the player learns height control. An
 	# under-strength throw is low but sloppy, so the deficit strips most of that reward:
 	# a sagging heavy prop should not read to the crowd as tidy control.
-	applause = minf(1.0, applause + 0.01 * (1.0 - clampf(frac, 0.0, 1.0)) * (1.0 - 0.8 * deficit))
+	applause = minf(1.0, applause + 0.004 * (1.0 - clampf(frac, 0.0, 1.0)) * (1.0 - 0.8 * deficit))
+	# but now that the crowd's patience is a resource (Phase 2), a genuinely BIG throw
+	# thrills them: on stage, height feeds the meter a little, so spectacle buys time
+	# and a timid low weave slowly bores the room even as it stays tidy.
+	if mode == MODE_PERFORM and not tut_active:
+		applause = minf(1.0, applause + APPL_THROW_HEIGHT * clampf(frac, 0.0, 1.4) * (1.0 - 0.8 * deficit))
 	if set_flags and frac >= 1.0:
 		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
 	if mode == MODE_PERFORM and not tut_active and frac >= 1.1:
@@ -3430,6 +3705,7 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 		# Higher risk (wider drift, a beat out of sight) earns a higher reward,
 		# the same bargain the Purist bonus makes.
 		bonus = int(round(float(bonus) * (1.0 + 0.5 * clampf((height - 1.35) / 0.45, 0.0, 1.0))))
+	bonus = int(round(float(bonus) * encore_score_mult()))   # For the Danger zeroes light props
 	if bonus <= 0:
 		return
 	var tog := String(td["kind"]) == "toggle"
@@ -3575,75 +3851,120 @@ func on_round_end() -> void:
 	if round_scored:
 		return
 	round_scored = true
+	# a set of a real booking resolves through the booking machinery (bank + advance, or
+	# end the night). Everything else - practice, a dev autoplay - just banks its XP.
+	if mode == MODE_PERFORM and booking_active and not tut_active:
+		resolve_set()
+		return
 	var clean := 1.0
 	if caught + dropped > 0:
 		clean = float(caught) / float(caught + dropped)
-	# harder routines (more balls, heavier props) are worth more XP and pay more
+	# harder routines (more balls, heavier props) are worth more XP
 	var diff := 1.0 + 0.25 * float(num_balls - MIN_BALLS) + 0.25 * float(prop_weight() - 1)
-	var bonus := int(round((float(best_streak) * 4.0 + float(caught) * 1.5) * clean * diff))
-	add_xp(bonus)
-	if mode == MODE_PERFORM:
-		# reputation swings mostly on the SCORE you put up (ideas.rtf: venues expect
-		# better juggling, not just a clean set), with clean play and the crowd's
-		# high point as a smaller modifier on top. Score is judged against your OWN
-		# best at this venue (pattern_mult/object_mult already make a harder load
-		# post a bigger number, so this stays fair across routines): 0 = barely
-		# showed up, 1 = matched your best, 2 = doubled it, the cap. With no record
-		# yet at this venue, fall back to quality alone so a first set is not
-		# unfairly starved or inflated.
-		var quality := clampf(0.7 * clean + 0.3 * peak_applause, 0.0, 1.0)
-		var rec := 0
-		if run_venue >= 0 and run_venue < rec_table().size():
-			rec = rec_table()[run_venue]
-		var score_factor := clampf(float(score) / float(rec), 0.0, 2.0) if rec > 0 else quality
-		var purist_mult := PURIST_BONUS if purist else 1.0
-		# a low score earns little reputation even with a lively crowd, and a
-		# genuinely poor set (low score AND low applause) now drags reputation DOWN
-		# instead of merely drifting up, the way it used to.
-		var rep_delta := int(round((0.75 * (score_factor - 0.6) + 0.25 * (quality - 0.5)) * float(REP_SWING) * purist_mult))
-		# never more than one venue's worth of Reputation from a single set, however
-		# huge the score: the next stage still takes more than one great night
-		var cur_tier := venue_index_of(reputation)
-		if cur_tier + 2 < VENUE_REP.size():
-			rep_delta = mini(rep_delta, VENUE_REP[cur_tier + 2] - 1 - reputation)
-		reputation = maxi(0, reputation + rep_delta)
-		last_rep_delta = rep_delta
-		# a grander stage pays more for the same set (the climb is worth money),
-		# and a broke juggler always leaves with SOMETHING in the hat, so debt is
-		# tension rather than a dead end (GDD 4.4 busking floor). A Purist set
-		# pays a real premium (PURIST_BONUS): it is only worth it if the skill
-		# is really there to back it up, since the catch odds are brutal.
-		var venue_mult := 1.0 + VENUE_PAY * float(run_venue)
-		last_pay = int(round((float(caught) * 1.2 + float(best_streak) * 2.0) * clean * diff * pay_mult() * venue_mult * purist_mult))
-		if money < BROKE_GOLD and caught > 0:
-			last_pay = maxi(last_pay, BUSK_FLOOR)
-		money += last_pay
-		if last_pay > 0:
-			play_sfx("coin", -8.0)   # the pay chime at the end of a performance
-		# the career ledger remembers every set
-		career["perfs"] = int(career["perfs"]) + 1
-		career["gold_earned"] = int(career["gold_earned"]) + last_pay
-		career["tricks"] = int(career["tricks"]) + tricks_landed
-		career["best_score"] = maxi(int(career["best_score"]), score)
-		# a new personal best at this venue is the meta hook: a target to chase.
-		# A Purist booking writes to the Purist board and never the assisted one.
-		results_record = false
-		if run_venue >= 0 and run_venue < rec_table().size() and score > rec_table()[run_venue]:
-			rec_table()[run_venue] = score
-			results_record = true
-		# the results panel takes over the end-of-run screen for performances
-		results_open = true
-		results_tick = tick
-		results_stamped = false
+	add_xp(int(round((float(best_streak) * 4.0 + float(caught) * 1.5) * clean * diff)))
 	career["best_streak"] = maxi(int(career["best_streak"]), best_streak)
-	# THE WIN (Balatro-style): the top stage is the summit of the climb. Setting a
-	# record at the World Arena clears the game and shows the victory screen once,
-	# the first time, after the results card is dismissed. The career then plays on
-	# freely, so records and higher scores are still there to chase.
-	if mode == MODE_PERFORM and run_venue >= TOP_VENUE and results_record and not won:
+
+
+func resolve_set() -> void:
+	# a set just ended - by a clean walk-off (finish_performance) or a collapse (the crowd
+	# walked, or the drop limit landed). Roll its play into the booking, then either bank
+	# and advance to the next set, or resolve the whole night.
+	book_caught += caught
+	book_dropped += dropped
+	book_best_streak = maxi(book_best_streak, best_streak)
+	book_tricks += tricks_landed
+	book_trick_score += trick_score
+	book_xp += run_xp
+	if set_cleared:
+		sets_cleared += 1
+		# a clean walk-off banks the score with its overtime multiplier. A cleared set that
+		# ended in COLLAPSE still counts as cleared - you beat the number - but the overtime
+		# and the raw score above the target are lost, banking only the bare target. That is
+		# the whole push-your-luck: clear it, then leave with the win or gamble for more.
+		var banked := set_target() if set_collapsed else int(round(float(score) * (1.0 + overtime)))
+		booking_score += banked
+		if set_index < SET_ENCORE:
+			play_sfx("coin", -9.0)
+			next_set()   # walk out again, one rung higher, the booking_score carried across
+		else:
+			resolve_booking(true)    # the Encore fell: a complete night
+	else:
+		resolve_booking(false)       # the set was lost: the booking ends here
+
+
+func resolve_booking(complete: bool) -> void:
+	# the whole night is over. Pay, reputation, records and the win now key off the
+	# BOOKING, not a single set: a record means one complete great night, and reputation
+	# swings on how much of the booking you cleared rather than the old divide-by-your-own-
+	# record (which punished you for having a high best).
+	booking_active = false
+	var purist_mult := PURIST_BONUS if purist else 1.0
+	# a completion XP bonus off the whole night's play
+	var clean := 1.0
+	if book_caught + book_dropped > 0:
+		clean = float(book_caught) / float(book_caught + book_dropped)
+	var diff := 1.0 + 0.25 * float(num_balls - MIN_BALLS) + 0.25 * float(prop_weight() - 1)
+	var xp_bonus := int(round((float(book_best_streak) * 4.0 + float(book_caught) * 1.5) * clean * diff))
+	add_xp(xp_bonus)
+	book_xp += xp_bonus
+	# how much of the three you cleared: 0, 1/3, 2/3, or a whole night. (f*1.5 - 0.5) gives
+	# +1.0 of a swing for a complete booking, 0 for one set, -0.5 for bombing the warm-up.
+	var frac := float(sets_cleared) / float(SETS_PER_BOOKING)
+	var rep_delta := int(round(float(REP_SWING) * (frac * 1.5 - 0.5) * purist_mult))
+	var cur_tier := venue_index_of(reputation)
+	if cur_tier + 2 < VENUE_REP.size():
+		rep_delta = mini(rep_delta, VENUE_REP[cur_tier + 2] - 1 - reputation)
+	reputation = maxi(0, reputation + rep_delta)
+	last_rep_delta = rep_delta
+	# PAY scales with what you banked (a partial booking pays partial; the score already
+	# scales with the venue, so no separate venue multiplier), lifted by Reputation and a
+	# Purist premium, with the busking floor so a broke juggler always leaves with something.
+	last_pay = int(round(float(booking_score) * BOOK_PAY_PER_SCORE * pay_mult() * purist_mult))
+	if money < BROKE_GOLD and booking_score > 0:
+		last_pay = maxi(last_pay, BUSK_FLOOR)
+	money += last_pay
+	if last_pay > 0:
+		play_sfx("coin", -8.0)
+	# a completed booking raises this venue's standing bar for next time (the ante)
+	if complete and run_venue >= 0 and run_venue < ante.size():
+		ante[run_venue] += 1
+	# the career ledger remembers the night
+	career["perfs"] = int(career["perfs"]) + 1
+	career["gold_earned"] = int(career["gold_earned"]) + last_pay
+	career["tricks"] = int(career["tricks"]) + book_tricks
+	career["best_score"] = maxi(int(career["best_score"]), booking_score)
+	career["best_streak"] = maxi(int(career["best_streak"]), book_best_streak)
+	# the record board keys off the whole night's booking_score. A Purist booking writes
+	# to the Purist board and never the assisted one.
+	results_record = false
+	if run_venue >= 0 and run_venue < rec_table().size() and booking_score > rec_table()[run_venue]:
+		rec_table()[run_venue] = booking_score
+		results_record = true
+	# hand the display vars the BOOKING totals so the results card reads the whole night,
+	# not just the final set (this run is finished; these all reset on the next start_run)
+	score = booking_score
+	caught = book_caught
+	dropped = book_dropped
+	best_streak = book_best_streak
+	tricks_landed = book_tricks
+	trick_score = book_trick_score
+	run_xp = book_xp
+	# THE WIN: a record at the World Arena clears the game once, the first time, after the
+	# results card is dismissed. The career then plays on freely, records still to chase.
+	if run_venue >= TOP_VENUE and results_record and not won:
 		won = true
 		pending_win = true
+	results_open = true
+	results_tick = tick
+	results_stamped = false
 	save_progress()
+	if _demo:
+		# dev: report the whole-booking outcome and quit, so --demo --booking is a
+		# one-shot end-to-end check of the resolve path (targets, banking, pay, rep)
+		print("BOOKING venue=%d prop=%d n=%d sets=%d/%d complete=%s booking_score=%d pay=%d rep=%+d record=%s" % [
+			run_venue, prop_type, num_balls, sets_cleared, SETS_PER_BOOKING, str(complete),
+			booking_score, last_pay, last_rep_delta, str(results_record)])
+		get_tree().quit()
 
 
 func stamina_mult() -> float:
@@ -3693,9 +4014,12 @@ func slow_amount() -> float:
 
 
 func purist_run() -> bool:
-	# a PURIST booking strips the stat comforts from the catch maths, so its
-	# records are pure skill. Training is never purist (practice is practice).
-	return purist and mode == MODE_PERFORM
+	# a PURIST booking strips the stat comforts from the catch maths, so its records are
+	# pure skill. The Purist's Night Encore does the same to a single set. Which RECORD
+	# board a night writes to still keys off the booking's `purist` flag, not this - so a
+	# Purist Encore only makes the third set harder, it does not relabel the whole booking.
+	# Training is never purist (practice is practice).
+	return (purist and mode == MODE_PERFORM) or encore_on("purist")
 
 
 func eff_accuracy() -> float:
@@ -3707,7 +4031,10 @@ func eff_accuracy() -> float:
 func inacc_factor() -> float:
 	# 1.0 of the base inaccuracy at Accuracy 0, ACC_MIN_FACTOR at Accuracy 100.
 	# Never reaches zero, so a max-height throw always still needs a real catch.
-	return lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
+	var f := lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
+	if encore_on("draft"):
+		f *= 2.0   # The Draft: a wind through the room, every throw drifts twice as wide
+	return f
 
 
 func catch_chance(quality: int, height: float) -> float:
@@ -3780,13 +4107,16 @@ func perfect_window() -> int:
 		return W_LATE   # in a lesson, ANY in-window press is a Perfect: a beginner
 						# should never fail a catch they reasonably attempted. The real
 						# windows return the instant the lesson ends.
-	if purist_run():
-		return W_PERFECT           # no Focus widening on the Purist board
-	var extra := focus() - 100.0
-	var bonus := 0
-	if extra > 0.0:
-		bonus = mini(FOCUS_WINDOW_MAX, int(extra / FOCUS_WINDOW_PER))
-	return mini(W_GOOD, W_PERFECT + bonus)
+	var w := W_PERFECT
+	if not purist_run():           # no Focus widening on the Purist board
+		var extra := focus() - 100.0
+		var bonus := 0
+		if extra > 0.0:
+			bonus = mini(FOCUS_WINDOW_MAX, int(extra / FOCUS_WINDOW_PER))
+		w = mini(W_GOOD, W_PERFECT + bonus)
+	if encore_on("cold"):
+		w = maxi(2, w - 2)         # Cold Hands: the Perfect window is two ticks tighter
+	return w
 
 
 func pay_mult() -> float:
@@ -4094,6 +4424,12 @@ func load_progress() -> void:
 			pending_tuts.clear()
 			for v in (pt as Array):
 				pending_tuts.append(String(v))
+		# the standing ante per venue (bookings cleared there): the raised bar the venue
+		# remembers between visits. The rest of the booking is per-night and unsaved.
+		var an: Variant = cf.get_value("prog", "ante", [])
+		if an is Array:
+			for i in mini((an as Array).size(), ante.size()):
+				ante[i] = int((an as Array)[i])
 		purist = bool(cf.get_value("day", "purist", false))
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
@@ -4130,6 +4466,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "career", career)
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
+	cf.set_value("prog", "ante", ante)                  # each venue's standing raised bar
 	cf.set_value("day", "purist", purist)
 	cf.set_value("day", "day", day)
 	cf.set_value("day", "seg_used", seg_used)
@@ -4179,20 +4516,41 @@ func drop_ball(b: Ball, why: String) -> void:
 		play_sfx("groan", -10.0)   # the crowd sags with the prop (ART doc stingers)
 	_duck = 1.0   # a drop briefly ducks the music, so the silence lands
 	add_popup(b.to_pos + Vector2(0, -6), why, Color(1.0, 0.32, 0.3))
-	# a lost crowd no longer cuts straight to the verdict: the COLLAPSE begins,
-	# the hands give up, and the round only ends once everything has hit the
-	# floor (see the collapse step in _physics_process). Training plays on.
-	if mode == MODE_PERFORM and applause <= 0.0 and not collapsing:
-		collapsing = true
-		# whatever is still held slips from the hands too: you watch it all fall
-		for h in [LEFT, RIGHT]:
-			for hb in stack(h):
-				balls.erase(hb)
-				spawn_falling(hpos[h], hb.kind, hb.color)
-			stack(h).clear()
+	# the collapse now has TWO triggers: an emptied crowd (below) and, new in Phase 2,
+	# the drop limit. Both funnel through start_collapse(). Training plays on.
+	if mode == MODE_PERFORM and not tut_active:
+		if dropped >= drop_limit():
+			add_popup(b.to_pos + Vector2(0, -28), "THAT'S THE SET", Color(1.0, 0.5, 0.35))
+			start_collapse()
+		elif applause <= 0.0:
+			start_collapse()
+
+
+func start_collapse() -> void:
+	# the act falls apart: the hands give up and whatever is still held slips from them,
+	# so the player watches it all come down. The round ends only once everything has
+	# landed (see the collapse step in _physics_process). Marks set_collapsed so the set
+	# resolves as a hard ending, which is what strips a cleared set's overtime bonus.
+	if collapsing:
+		return
+	collapsing = true
+	set_collapsed = true
+	for h in [LEFT, RIGHT]:
+		for hb in stack(h):
+			balls.erase(hb)
+			spawn_falling(hpos[h], hb.kind, hb.color)
+		stack(h).clear()
 
 
 func update_sim() -> void:
+	# THE CLOCK (Phase 2): the crowd's patience bleeds every tick while performing, at a
+	# venue-scaled rate the Encore can bend. Reach zero and the room empties (the collapse
+	# that was always built and never reached). Catches and big throws pay patience back,
+	# so keeping the crowd is simply keeping the act alive.
+	if mode == MODE_PERFORM and not tut_active and running and not collapsing:
+		applause = maxf(0.0, applause - APPL_DECAY[clampi(run_venue, 0, APPL_DECAY.size() - 1)] * encore_decay_mult())
+		if applause <= 0.0:
+			start_collapse()
 	var lost: Array[Ball] = []
 	for b in balls:
 		if b.state == STATE_FLIGHT and tick > b.land_tick + MISS_GRACE:
@@ -4204,11 +4562,12 @@ func update_sim() -> void:
 			var maxlen := 5 + int(clampf(b.height, 0.0, 1.4) * 8.0)
 			while b.trail.size() > maxlen:
 				b.trail.remove_at(0)
-	# mid-air contact. With the hard-mode toggle on, two props that visibly clack
-	# both become nearly uncatchable (see on_catch); a PERFECT pattern never
-	# collides, so this only ever punishes sloppy heights that share air. The
-	# dev --collcheck harness rides the same loop to audit the ideal geometry.
-	if set_collide or _collcheck:
+	# mid-air contact. With the hard-mode toggle on (or the Close Quarters Encore), two
+	# props that visibly clack both become nearly uncatchable (see on_catch); a PERFECT
+	# pattern never collides, so this only ever punishes sloppy heights that share air.
+	# The dev --collcheck harness rides the same loop to audit the ideal geometry.
+	var clacks := set_collide or encore_on("tight")
+	if clacks or _collcheck:
 		var fly: Array[Ball] = []
 		var fpos: Array[Vector2] = []
 		for b in balls:
@@ -4226,7 +4585,7 @@ func update_sim() -> void:
 						clampf(float(tick - fly[i].launch_tick) / float(maxi(1, fly[i].land_tick - fly[i].launch_tick)), 0.0, 1.0),
 						fpos[j].x, fpos[j].y, str(fly[j].over_top), fly[j].height,
 						clampf(float(tick - fly[j].launch_tick) / float(maxi(1, fly[j].land_tick - fly[j].launch_tick)), 0.0, 1.0)]
-				if set_collide and d < rr and not (fly[i].bumped and fly[j].bumped):
+				if clacks and d < rr and not (fly[i].bumped and fly[j].bumped):
 					fly[i].bumped = true
 					fly[j].bumped = true
 					var mid := (fpos[i] + fpos[j]) * 0.5
@@ -4816,6 +5175,8 @@ func draw_targets() -> void:
 	# all within the game's warm gold family (Louis: no green on stage): faint gold
 	# on approach, bright gold while the press would land Good, a white flash inside
 	# the Perfect band, dimming amber once the moment is slipping late.
+	if encore_on("fright"):
+		return   # Stage Fright: the lights are in your eyes, no landing markers at all
 	var wp := perfect_window()
 	for b in balls:
 		if b.state == STATE_FLIGHT:
@@ -4901,6 +5262,15 @@ func draw_charge_gauges() -> void:
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
 	var sc := prop_scale(b.kind)
+	# BLACKOUT Encore: only the top of each arc is lit. A prop in the lower two-thirds
+	# of its flight is drawn as a bare ghost (a faint halo, no shape), so the player must
+	# track it by rhythm and read the apex, then catch what they cannot quite see.
+	if encore_on("blackout") and b.state == STATE_FLIGHT:
+		var span := maxi(1, b.land_tick - b.launch_tick)
+		var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
+		if 4.0 * p * (1.0 - p) < 0.55:
+			draw_circle(pos, 16.0 * sc, Color(b.color.r, b.color.g, b.color.b, 0.05))
+			return
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
@@ -5099,6 +5469,19 @@ func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
 		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
 
 
+func commafy(n: int) -> String:
+	# a thousands separator for the big booking numbers, so 34000 reads at a glance
+	var raw := str(absi(n))
+	var out := ""
+	var c := 0
+	for i in range(raw.length() - 1, -1, -1):
+		out = raw[i] + out
+		c += 1
+		if c % 3 == 0 and i > 0:
+			out = "," + out
+	return ("-" if n < 0 else "") + out
+
+
 func draw_hud(font: Font, s: Vector2) -> void:
 	var performing := mode == MODE_PERFORM
 
@@ -5133,12 +5516,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
 		draw_string(font, Vector2(34, 146 + 14), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7, pa))
 
-	# ---- top centre: mode tag and the Applause meter with its high-water mark ----
-	var mlabel := "PERFORMING" if performing else "TRAINING"
-	if performing and purist:
-		mlabel = "PERFORMING  -  PURIST"
-	# slow motion reads on screen: a cool veil over the stage and a quiet label,
-	# so thickened time is legible the moment it begins
+	# ---- top centre: the BOOKING dashboard (Phase 2) - the whole point of the phase is
+	# that the goal is reachable and LEGIBLE, so this is not chrome, it is the feature.
+	# The target bar is the loudest thing on screen; the drop pips make every throw feel
+	# dangerous; the patience bar is the old applause meter, now visibly draining.
+	var cx := s.x * 0.5
+	# slow motion reads on screen: a cool veil over the stage and a quiet label, so
+	# thickened time is legible the moment it begins (pushed clear of the booking stack)
 	var slow := slow_amount()
 	if slow > 0.005:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.55, 0.72, 1.0, 0.03 + 0.09 * slow))
@@ -5147,21 +5531,78 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stext += "   (pie)"
 		if _frames < chain_until:
 			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
-		draw_string(font, Vector2(0, 92.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
-	if debug_mode:
-		mlabel += "   -   DEBUG"
-	var mcol := Color(1.0, 0.82, 0.4) if performing else Color(0.68, 0.74, 0.82)
-	draw_string(font, Vector2(s.x * 0.5 - 200, 26), mlabel, HORIZONTAL_ALIGNMENT_CENTER, 400, 14, mcol)
-	if performing:
-		var bw := 300.0
-		var bx := s.x * 0.5 - bw * 0.5
-		var by := 36.0
-		draw_rect(Rect2(bx - 2, by - 2, bw + 4, 19.0), Color(0.05, 0.03, 0.045, 0.6))
-		draw_rect(Rect2(bx, by, bw, 15.0), Color(0.2, 0.14, 0.11, 0.7))
+		draw_string(font, Vector2(0, 120.0 if performing else 92.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
+	if not performing:
+		var tl := "TRAINING" + ("   -   DEBUG" if debug_mode else "")
+		draw_string(font, Vector2(cx - 200, 26), tl, HORIZONTAL_ALIGNMENT_CENTER, 400, 14, Color(0.68, 0.74, 0.82))
+	elif not results_open:
+		# the results card owns the screen once a booking resolves, so the live dashboard
+		# steps aside for it rather than showing a stale set behind the card
+		# the set tag: which of the three, and the Encore's name once it is the set at hand
+		var setnames := ["WARM-UP", "THE SET", "THE ENCORE"]
+		var tag := "SET %d / %d    %s" % [set_index + 1, SETS_PER_BOOKING, setnames[clampi(set_index, 0, 2)]]
+		if purist:
+			tag += "    PURIST"
+		if debug_mode:
+			tag += "    DEBUG"
+		draw_string(font, Vector2(cx - 300, 24), tag, HORIZONTAL_ALIGNMENT_CENTER, 600, 14, Color(1.0, 0.82, 0.42))
+		if set_index == SET_ENCORE and encore >= 0 and encore < ENCORES.size():
+			draw_string(font, Vector2(cx - 300, 40), String(ENCORES[encore]["name"]).to_upper() + "  -  " + String(ENCORES[encore]["desc"]),
+				HORIZONTAL_ALIGNMENT_CENTER, 600, 11, Color(0.95, 0.62, 0.45, 0.85))
+
+		# --- the TARGET bar ---
+		var target := set_target()
+		var tw := clampf(s.x * 0.32, 300.0, 460.0)
+		var tx := cx - tw * 0.5
+		var ty := 48.0
+		var th := 22.0
+		var tfrac := clampf(float(score) / float(maxi(1, target)), 0.0, 1.0)
+		draw_rect(Rect2(tx - 2, ty - 2, tw + 4, th + 4), Color(0.05, 0.03, 0.045, 0.75))
+		draw_rect(Rect2(tx, ty, tw, th), Color(0.22, 0.15, 0.12, 0.85))
+		if set_cleared:
+			var pl := 0.72 + 0.28 * sin(float(tick) * 0.16)
+			draw_rect(Rect2(tx, ty, tw, th), Color(1.0, 0.86, 0.42))
+			draw_rect(Rect2(tx - 2, ty - 2, tw + 4, th + 4), Color(1.0, 0.92, 0.55, 0.5 * pl), false, 2.5)
+			var otxt := "TARGET CLEARED  -  Enter to walk off"
+			if overtime > 0.001:
+				otxt = "CLEARED  x%.2f  -  Enter to bank, or push" % (1.0 + overtime)
+			draw_string(font, Vector2(tx, ty + 15.5), otxt, HORIZONTAL_ALIGNMENT_CENTER, tw, 12, Color(0.12, 0.06, 0.03))
+		else:
+			var fcol := Color(0.82, 0.5, 0.28).lerp(Color(1.0, 0.86, 0.42), tfrac)
+			draw_rect(Rect2(tx, ty, tw * tfrac, th), fcol)
+			draw_string(font, Vector2(tx + 8, ty + 15.5), "TARGET", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.95, 0.9, 0.8, 0.9))
+			draw_string(font, Vector2(tx, ty + 15.5), "%s / %s" % [commafy(score), commafy(target)], HORIZONTAL_ALIGNMENT_CENTER, tw, 13, Color(1.0, 0.97, 0.85))
+		# the booking's running bank, once past the first set, sits just under the bar
+		if booking_active and booking_score > 0:
+			draw_string(font, Vector2(tx, ty + th + 2.0), "banked  %s   +   this set  %s" % [commafy(booking_score), commafy(score)],
+				HORIZONTAL_ALIGNMENT_CENTER, tw, 11, Color(0.85, 0.78, 0.6, 0.7))
+
+		# --- the DROP PIPS: the single most important new pixel, so make them large and
+		# unmissable. A pip goes dark as a drop is spent; the last one is the whole night. ---
+		var lim := drop_limit()
+		var pipy := ty + th + 24.0
+		var pgap := 26.0
+		var px0 := cx - float(lim - 1) * pgap * 0.5
+		for i in lim:
+			var spent := i < dropped
+			var last := (lim - dropped) == 1 and not spent   # your final drop: pulse it red
+			var pc := Color(0.32, 0.17, 0.15) if spent else Color(0.95, 0.45, 0.35)
+			if last:
+				pc = Color(1.0, 0.35, 0.28, 0.75 + 0.25 * sin(float(tick) * 0.3))
+			draw_circle(Vector2(px0 + i * pgap, pipy), 8.0, pc)
+			draw_arc(Vector2(px0 + i * pgap, pipy), 10.0, 0.0, TAU, 22, Color(0.7, 0.35, 0.3, 0.45), 1.5, true)
+		draw_string(font, Vector2(px0 + float(lim) * pgap + 2.0, pipy + 5.0), "drops", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.55, 0.5, 0.7))
+
+		# --- the PATIENCE bar: the old Applause meter, now a clock that visibly falls ---
+		var bw := clampf(s.x * 0.26, 240.0, 360.0)
+		var bx := cx - bw * 0.5
+		var by := pipy + 18.0
+		draw_rect(Rect2(bx - 2, by - 2, bw + 4, 15.0), Color(0.05, 0.03, 0.045, 0.6))
+		draw_rect(Rect2(bx, by, bw, 11.0), Color(0.2, 0.14, 0.11, 0.7))
 		var pcol := Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.85, 0.42), applause)
-		draw_rect(Rect2(bx, by, bw * applause, 15.0), pcol)
-		draw_rect(Rect2(bx + bw * peak_applause - 1.0, by - 2.0, 2.0, 19.0), Color(1.0, 0.95, 0.8, 0.75))
-		draw_string(font, Vector2(bx + 6, by + 12.0), "APPLAUSE", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.1, 0.05, 0.04, 0.75))
+		draw_rect(Rect2(bx, by, bw * applause, 11.0), pcol)
+		draw_rect(Rect2(bx + bw * peak_applause - 1.0, by - 2.0, 2.0, 15.0), Color(1.0, 0.95, 0.8, 0.7))
+		draw_string(font, Vector2(bx + 6, by + 9.5), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.1, 0.05, 0.04, 0.75))
 
 	# ---- top-right card: stamina, purse, reputation ----
 	var pw := 250.0
@@ -5275,8 +5716,11 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var lx := px + 34.0
 	var rx := px + pw - 34.0
 
-	# header: the run's venue; the grade badge stamps in later, once the rows are up
-	draw_string(font, Vector2(lx, py + 40.0), "PERFORMANCE", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.72, 0.55))
+	# header: the night's outcome and venue; the grade badge stamps in later
+	var complete := sets_cleared >= SETS_PER_BOOKING
+	var htag := "BOOKING COMPLETE" if complete else ("BOOKING  -  %d of %d cleared" % [sets_cleared, SETS_PER_BOOKING])
+	var htc := Color(1.0, 0.86, 0.45) if complete else Color(0.9, 0.72, 0.55)
+	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, htc)
 	draw_string(font, Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
 	if age >= 64:
 		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
@@ -5298,9 +5742,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var ra := func(i: int) -> float: return clampf(float(age - 10 - i * 7) / 10.0, 0.0, 1.0)
 	var y := py + 140.0
 	var rowh := 40.0
-	_result_row(font, lx, rx, y, "Score", str(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
+	_result_row(font, lx, rx, y, "Booking score", commafy(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
 	if age > 54:
-		var rec := "NEW VENUE RECORD" if results_record else "best here   %d" % rec_table()[run_venue]
+		var rec := "NEW VENUE RECORD" if results_record else "best here   %s" % commafy(rec_table()[run_venue])
 		if purist:
 			rec = "PURIST  -  " + rec
 		var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
@@ -6428,9 +6872,31 @@ func draw_establish(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(0, recy), "PURIST BOOKING  -  no stat help, its own record board", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.82, 0.72, 0.85, 0.85 * tagA))
 		recy += 24.0
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
-		draw_string(font, Vector2(0, recy), "record to beat   %d" % rec_table()[establish_venue], HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
+		draw_string(font, Vector2(0, recy), "record to beat   %s" % commafy(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
 	else:
 		draw_string(font, Vector2(0, recy), "no record here yet  -  set one", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.82, 0.6, 0.7 * tagA))
+
+	# THE BOOKING (Phase 2): which of the three sets you are about to walk into, the number
+	# you must beat, and - from the very first card - the Encore condition waiting at the end,
+	# so a player knows what the night wants of them before they choose to walk out.
+	if booking_active:
+		var by2 := recy + 46.0
+		var setnames := ["THE WARM-UP", "THE SET", "THE ENCORE"]
+		var target := set_target_for(establish_venue, set_index)
+		draw_string(font, Vector2(0, by2), "%s  of  %d    -    target  %s" % [setnames[clampi(set_index, 0, 2)], SETS_PER_BOOKING, commafy(target)],
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, 20, Color(1.0, 0.88, 0.5, 0.9 * tagA))
+		if encore >= 0 and encore < ENCORES.size():
+			var enc: Dictionary = ENCORES[encore]
+			var pw := clampf(s.x * 0.5, 460.0, 720.0)
+			var pxx := s.x * 0.5 - pw * 0.5
+			var eyy := by2 + 24.0
+			var hot := set_index == SET_ENCORE   # the condition is live THIS set
+			var ec := Color(1.0, 0.55, 0.4) if hot else Color(0.85, 0.7, 0.55)
+			draw_rect(Rect2(pxx, eyy, pw, 52.0), Color(0.12, 0.06, 0.07, 0.55 * tagA))
+			draw_rect(Rect2(pxx, eyy, pw, 52.0), Color(ec.r, ec.g, ec.b, 0.5 * tagA), false, 1.5)
+			var etag := "TONIGHT'S ENCORE" if not hot else "THE ENCORE  -  NOW"
+			draw_string(font, Vector2(pxx, eyy + 20.0), "%s:  %s" % [etag, String(enc["name"]).to_upper()], HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(ec.r, ec.g, ec.b, 0.9 * tagA))
+			draw_string(font, Vector2(pxx + 16.0, eyy + 40.0), String(enc["desc"]), HORIZONTAL_ALIGNMENT_CENTER, pw - 32.0, 12, Color(0.9, 0.82, 0.72, 0.8 * tagA))
 
 	var py := s.y - 70.0
 	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
@@ -7127,6 +7593,12 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 
 
 func _demo_step() -> void:
+	# in a --booking demo the autoplayer walks off the moment a target is cleared, banking
+	# with whatever overtime it built, so a whole booking advances cleanly and never hangs
+	# at a venue whose crowd a low routine can sustain forever (v0/v1)
+	if booking_active and set_cleared and running:
+		finish_performance()
+		return
 	# auto-catch: secure any ball arriving at an empty hand (the odd-columns middle
 	# ball counts for either hand, matching the either-hand rule in on_catch)
 	for h in [LEFT, RIGHT]:

@@ -901,3 +901,88 @@ Phases 2 and 3 together are the difference between a game that reviews as "a
 lovely little juggling toy" and one that reviews as "I have put sixty hours into
 this". Both are mostly a matter of activating machinery that is already sitting in
 Game.gd doing nothing.
+
+---
+
+## Phase 2 — DONE (2026-07-15)
+
+Every performance is now a **Booking**: three sets at one venue (Warm-up / The Set /
+The Encore), played back to back. Each set is a real contest — a target to beat, a
+crowd whose patience drains, a hard drop limit — and clearing a target lets you WALK
+OFF to bank it or push for a growing overtime multiplier and risk the night. The
+whole thing sits on machinery that already existed (the collapse, the applause meter,
+`finish_performance`, `purist`, `set_collide`, the record boards).
+
+What shipped, against the plan:
+
+- **The clock.** `applause` now decays every tick in `update_sim` (`APPL_DECAY` per
+  venue). The collapse block was factored out of `drop_ball` into `start_collapse()`,
+  now fired by an emptied crowd OR the drop limit. **A collapse is decisive**: a real
+  bug surfaced in testing — with the sim halted, catching + re-throwing the still-
+  airborne props let a player grind on with the clock off — so `on_catch`, `do_throw`
+  and `on_throw_press` now early-return while `collapsing`.
+- **The target.** `set_target()` scales off venue × set × ante × encore. Cleared state
+  tracked by `set_cleared` / `check_set_cleared()`.
+- **Bank or push.** `finish_performance()` only banks once cleared; overtime accrues
+  per catch past the target; a collapse strips overtime (banks the bare target).
+- **The Encore deck.** Ten conditions (`ENCORES`), each a toggle on an existing hook:
+  hecklers/long → `encore_decay_mult`, long → `encore_target_mult`, fright →
+  `draw_targets`, blackout → `draw_prop`, cold → `perfect_window`, understudy →
+  `drop_limit`, purist → `purist_run`, draft → `inacc_factor`, fire → `encore_score_
+  mult`, tight → the collision loop. **onehand was cut** (it jams the pattern — a hand
+  that catches but never throws fills and dies; not survivable), replaced by Close
+  Quarters (mid-air clacks).
+- **Flow.** `on_round_end` splits into `resolve_set` (bank + advance, or fail) and
+  `resolve_booking` (pay, rep, records, the win). Reputation now swings on **sets
+  cleared** (`frac*1.5 - 0.5` × `REP_SWING`), not the old divide-by-your-own-record.
+  Records and pay key off `booking_score`. "Go again" from the results card starts a
+  fresh booking (new Encore), not a bare set.
+- **HUD.** New top-centre dashboard: the set tag, the prominent TARGET bar (flips to a
+  gold walk-off prompt when cleared), the drop pips, and the relabelled draining
+  "THE CROWD" patience bar. The establish card names the set, its target, and the
+  Encore from the first card. The results card reads the whole night.
+
+### Calibration (the numbers are the feature)
+
+Added a `--calib` dev flag that runs the autoplayer and prints the score reached
+**before the crowd walks** (it quits AT the collapse, since a halted-sim autoplayer
+zombie-feeds itself afterward). Also `--booking`, `--encore <id>`, `--set <n>`,
+`--venue <n>`, `--prop <n>` for driving and shooting booking states. All dev-only,
+behind `is_debug_build()`.
+
+Two levers were mis-set in the plan and had to change:
+
+1. The plan's `+0.05`-per-catch applause gain **swamped** the decay — the crowd never
+   walked, so there was no clock. Per-catch gains are now small (`APPL_PERFECT 0.014`,
+   etc.), deliberately below a set's decay bleed, so steady low play is a slow drain
+   and reaching the target is a race. Spectacle (height, tricks) and **density** buy
+   the time: more props in the air = more catches/sec = more patience fed, which is
+   *why* heavy loads are needed at the top, not just that they score more.
+2. Scoring is ~100× larger than the plan's placeholder targets assumed (a 3-ball
+   cascade racks up hundreds of thousands). `VENUE_BASE` is now
+   `[8000, 20000, 55000, 85000, 100000, 140000]`.
+
+Measured autoplayer result (a "decent" fixed-metronome player, no tricks — a human
+with tricks does better, so targets are conservative):
+
+| Venue | 3 balls | intended heavy loadout |
+|---|---|---|
+| Backyard / Street / Theatre | 3/3 | — |
+| Circus | 2/3 (fails the Encore) | 4+ props clear |
+| Championship | 1/3 | 5 torches 3/3 |
+| World Arena | **0/3 (−30 rep)** | 5 torches / 6 knives 3/3 |
+
+This finally enforces ideas.rtf's "near impossible to climb the top venues on three
+balls" as a hard gate, not a soft one.
+
+### Follow-ups (a real tuning pass, with a human, is still owed)
+
+- The autoplayer throws a fixed metronome and never uses tricks, so it *undersells*
+  crowd management. Watch a human play the Championship/Arena and adjust `APPL_DECAY`
+  and `VENUE_BASE` — especially whether the Arena feels brutal or fair.
+- `BOOK_PAY_PER_SCORE` (0.0015) sets the economy; sanity-check it against prop/glasses
+  prices over a full career.
+- The `fire`/`purist` Encores are loadout-dependent (shown up front on the establish
+  card); confirm that reads as fair rather than a coin-flip.
+- Mid-booking quit still drops the booking by design (only `ante` persists). Revisit
+  if it annoys.
