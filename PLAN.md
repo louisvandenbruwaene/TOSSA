@@ -937,10 +937,19 @@ What shipped, against the plan:
   cleared** (`frac*1.5 - 0.5` × `REP_SWING`), not the old divide-by-your-own-record.
   Records and pay key off `booking_score`. "Go again" from the results card starts a
   fresh booking (new Encore), not a bare set.
-- **HUD.** New top-centre dashboard: the set tag, the prominent TARGET bar (flips to a
-  gold walk-off prompt when cleared), the drop pips, and the relabelled draining
-  "THE CROWD" patience bar. The establish card names the set, its target, and the
-  Encore from the first card. The results card reads the whole night.
+- **HUD.** Two-rail, Balatro-style (revised after Louis's first look — the first cut
+  put everything top-centre, right in the path of the flying props). The **left rail**
+  is the contest: venue + set dots, the SCORE card climbing toward the target, the
+  draining "THE CROWD" clock, the DROP limit (downward triangles, not ball-like pips,
+  so it never reads as a ball count), and the Encore condition. The **right rail** is
+  you: the ×N multiplier, stamina, gold, reputation, level. **The centre stays clear.**
+  The establish card names the set/target/Encore; the results card reads the whole
+  night. Helpers: `hud_card`, `draw_meter`, `draw_drop_marks`, `_wrap_text`.
+- **Take a bow (revised per Louis).** The finish key (Enter) is no longer gated on
+  clearing — you can end a set gracefully at any time, catching what you hold, keeping
+  the crowd happy, no collapse. Clear the target and Enter banks + advances; below the
+  target it banks the partial and ends the night on a high note. A set only ever
+  *collapses* involuntarily (crowd walks / drop limit).
 
 ### Calibration (the numbers are the feature)
 

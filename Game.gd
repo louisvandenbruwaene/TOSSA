@@ -1231,17 +1231,14 @@ func pause_activate() -> void:
 
 
 func finish_performance() -> void:
-	# THE WALK-OFF (Phase 2). Once a set's target is cleared, the finish key banks the
-	# score with its overtime multiplier and moves to the next set. Before the target
-	# is cleared there is nothing to bank, so the key just declines: a set can only end
-	# on a clear or on a collapse, never on giving up early (which would let a player
-	# fish for a soft ending). Clearing running fires on_round_end from the running->
-	# false edge in _physics_process, where resolve_set() banks and advances the booking.
+	# TAKE A BOW (Phase 2, revised per Louis). The finish key ALWAYS ends the set
+	# gracefully - you catch what you have and bow, the crowd stays happy, nothing falls.
+	# If the target was cleared you bank it (with overtime) and advance; if not, you have
+	# chosen to bow out below the number, which banks the partial and ends the night on a
+	# high note rather than risking a collapse. A set only ever COLLAPSES involuntarily,
+	# from an emptied crowd or the drop limit. Clearing running fires on_round_end from the
+	# running->false edge, where resolve_set() banks and either advances or resolves.
 	if mode != MODE_PERFORM or not running or tut_active:
-		return
-	if booking_active and not set_cleared:
-		set_trick_msg("reach the target first")   # nothing to walk off with yet
-		play_sfx("whiff", -12.0)
 		return
 	play_sfx("streak", -6.0)   # a short rising flourish to close the set
 	running = false
@@ -3889,7 +3886,12 @@ func resolve_set() -> void:
 		else:
 			resolve_booking(true)    # the Encore fell: a complete night
 	else:
-		resolve_booking(false)       # the set was lost: the booking ends here
+		# below the target. A voluntary BOW (finish, not a collapse) keeps the crowd happy
+		# and still banks the partial score toward the night's pay and record; a COLLAPSE
+		# banks nothing for this set. Either way the booking ends here - you did not clear.
+		if not set_collapsed:
+			booking_score += score
+		resolve_booking(false)
 
 
 func resolve_booking(complete: bool) -> void:
@@ -5406,6 +5408,60 @@ func hud_panel(r: Rect2) -> void:
 	draw_rect(r, Color(0.9, 0.6, 0.35, 0.22), false, 1.0)
 
 
+func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
+	# the rail cards (Phase 2 HUD): a touch more opaque than hud_panel so text stays
+	# readable over a busy stage, with a thin top accent line for a little Balatro-ish
+	# chunk. All live HUD lives in the LEFT and RIGHT rails now, never over the centre
+	# where the props fly.
+	draw_rect(r, Color(0.07, 0.04, 0.055, 0.84))
+	draw_rect(Rect2(r.position.x, r.position.y, r.size.x, 2.0), Color(accent.r, accent.g, accent.b, 0.5))
+	draw_rect(r, accent, false, 1.0)
+
+
+func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color, label := "") -> void:
+	# a labelled progress bar used across the rails (target / crowd / stamina / xp)
+	draw_rect(Rect2(x - 1, y - 1, w + 2, h + 2), Color(0.03, 0.02, 0.03, 0.7))
+	draw_rect(Rect2(x, y, w, h), Color(0.18, 0.12, 0.10, 0.85))
+	draw_rect(Rect2(x, y, w * clampf(frac, 0.0, 1.0), h), fill)
+	if label != "":
+		draw_string(game_font(), Vector2(x + 7, y + h - 4.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.08, 0.04, 0.03, 0.8))
+
+
+func draw_drop_marks(x: float, y: float, lim: int, used: int) -> void:
+	# the DROP limit, drawn as small DOWNWARD triangles (a falling prop, so it never
+	# reads as a count of balls in play - Louis). Solid warm = a drop you can still
+	# afford, hollow = spent; the last one left pulses in warning.
+	for i in lim:
+		var cxm := x + float(i) * 22.0
+		var spent := i < used
+		var last := (lim - used) == 1 and not spent
+		var pts := PackedVector2Array([Vector2(cxm - 7.0, y), Vector2(cxm + 7.0, y), Vector2(cxm, y + 12.0)])
+		if spent:
+			draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]), Color(0.4, 0.24, 0.22, 0.7), 1.5)
+		else:
+			var c := Color(0.96, 0.44, 0.34)
+			if last:
+				c = Color(1.0, 0.36, 0.28, 0.72 + 0.28 * sin(float(tick) * 0.28))
+			draw_colored_polygon(pts, c)
+
+
+func _wrap_text(font: Font, text: String, x: float, y: float, w: float, size: int, col: Color) -> void:
+	# word-wrap a line to a width, for the Encore description in its rail card
+	var words := text.split(" ")
+	var line := ""
+	var ly := y
+	for word in words:
+		var test := word if line == "" else line + " " + word
+		if line != "" and font.get_string_size(test, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > w:
+			draw_string(font, Vector2(x, ly), line, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+			line = word
+			ly += float(size) + 4.0
+		else:
+			line = test
+	if line != "":
+		draw_string(font, Vector2(x, ly), line, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+
+
 func pad_active() -> bool:
 	# hints follow whichever device spoke most recently, so a keyboard player
 	# never sees pad glyphs and a pad player never hunts for key names
@@ -5483,46 +5539,17 @@ func commafy(n: int) -> String:
 
 
 func draw_hud(font: Font, s: Vector2) -> void:
+	# THE HUD (rebuilt Balatro-style, Louis): the whole live state lives in a LEFT rail
+	# (the contest - set, target, crowd, drops, the Encore) and a RIGHT rail (you - the
+	# multiplier, stamina, purse, reputation, level). The CENTRE stays clear, because that
+	# is where the props actually fly; nothing legible sits in their path any more.
 	var performing := mode == MODE_PERFORM
+	var gold := Color(1.0, 0.86, 0.45)
+	var warm := Color(0.86, 0.76, 0.62)
+	var dim := Color(0.72, 0.65, 0.56)
 
-	# ---- top-left card: score, the record chase, streak heat, accuracy, level ----
-	hud_panel(Rect2(18, 14, 322, 132))
-	draw_string(font, Vector2(34, 46), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
-	draw_string(font, Vector2(96, 48), str(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color(1.0, 0.92, 0.72))
-	if performing and run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
-		if record_broken:
-			var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
-			draw_string(font, Vector2(200, 42), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.86, 0.42, ra))
-		else:
-			draw_string(font, Vector2(200, 42), "best  %d" % rec_table()[run_venue], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.7, 0.64, 0.56))
-	# streak: the multiplier IS the streak, so show it as a heat-coloured x that
-	# pops on every extension (the addictive number to protect)
-	var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
-	var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
-	var pulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
-	draw_string(font, Vector2(34, 78), "x%d" % streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 21 + pulse, scol2)
-	draw_string(font, Vector2(96, 78), "streak   best %d" % best_streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.6))
-	var acc := "-"
-	if caught + dropped > 0:
-		acc = "%d%%" % int(round(100.0 * float(caught) / float(caught + dropped)))
-	draw_string(font, Vector2(34, 100), "caught %d    dropped %d    clean %s" % [caught, dropped, acc], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
-	var need := xp_to_next(level)
-	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_string(font, Vector2(34, 128), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.85, 0.5))
-	draw_rect(Rect2(88, 117, 160, 9), Color(0.2, 0.14, 0.11, 0.7))
-	draw_rect(Rect2(88, 117, 160.0 * xf, 9), Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(258, 126), "%d / %d" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.72, 0.58))
-	if points > 0:
-		var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-		draw_string(font, Vector2(34, 146 + 14), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.7, 0.95, 0.7, pa))
-
-	# ---- top centre: the BOOKING dashboard (Phase 2) - the whole point of the phase is
-	# that the goal is reachable and LEGIBLE, so this is not chrome, it is the feature.
-	# The target bar is the loudest thing on screen; the drop pips make every throw feel
-	# dangerous; the patience bar is the old applause meter, now visibly draining.
-	var cx := s.x * 0.5
-	# slow motion reads on screen: a cool veil over the stage and a quiet label, so
-	# thickened time is legible the moment it begins (pushed clear of the booking stack)
+	# slow motion reads on screen: a cool veil + a quiet label, tucked low so it never
+	# fights the rails or the stage
 	var slow := slow_amount()
 	if slow > 0.005:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.55, 0.72, 1.0, 0.03 + 0.09 * slow))
@@ -5531,139 +5558,147 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stext += "   (pie)"
 		if _frames < chain_until:
 			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
-		draw_string(font, Vector2(0, 120.0 if performing else 92.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
-	if not performing:
-		var tl := "TRAINING" + ("   -   DEBUG" if debug_mode else "")
-		draw_string(font, Vector2(cx - 200, 26), tl, HORIZONTAL_ALIGNMENT_CENTER, 400, 14, Color(0.68, 0.74, 0.82))
-	elif not results_open:
-		# the results card owns the screen once a booking resolves, so the live dashboard
-		# steps aside for it rather than showing a stale set behind the card
-		# the set tag: which of the three, and the Encore's name once it is the set at hand
-		var setnames := ["WARM-UP", "THE SET", "THE ENCORE"]
-		var tag := "SET %d / %d    %s" % [set_index + 1, SETS_PER_BOOKING, setnames[clampi(set_index, 0, 2)]]
-		if purist:
-			tag += "    PURIST"
-		if debug_mode:
-			tag += "    DEBUG"
-		draw_string(font, Vector2(cx - 300, 24), tag, HORIZONTAL_ALIGNMENT_CENTER, 600, 14, Color(1.0, 0.82, 0.42))
-		if set_index == SET_ENCORE and encore >= 0 and encore < ENCORES.size():
-			draw_string(font, Vector2(cx - 300, 40), String(ENCORES[encore]["name"]).to_upper() + "  -  " + String(ENCORES[encore]["desc"]),
-				HORIZONTAL_ALIGNMENT_CENTER, 600, 11, Color(0.95, 0.62, 0.45, 0.85))
+		draw_string(font, Vector2(0, s.y - 96.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
 
-		# --- the TARGET bar ---
+	# ============================ LEFT RAIL: the contest ============================
+	var LX := 18.0
+	var LW := 300.0
+	if performing and not results_open:
+		# --- the booking header: venue, which of the three sets, and the set dots ---
+		hud_card(Rect2(LX, 16, LW, 52))
+		draw_string(font, Vector2(LX + 14, 40), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, gold)
+		var setnames := ["WARM-UP", "THE SET", "THE ENCORE"]
+		var setline := "SET %d / %d   %s" % [set_index + 1, SETS_PER_BOOKING, setnames[clampi(set_index, 0, 2)]]
+		if purist:
+			setline += "   PURIST"
+		draw_string(font, Vector2(LX + 14, 60), setline, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
+		for i in SETS_PER_BOOKING:
+			var dotc := Vector2(LX + LW - 20.0 - float(SETS_PER_BOOKING - 1 - i) * 18.0, 34.0)
+			if i < sets_cleared:
+				draw_circle(dotc, 6.0, gold)
+			elif i == set_index:
+				draw_arc(dotc, 6.0, 0.0, TAU, 20, gold, 2.0, true)
+			else:
+				draw_circle(dotc, 5.0, Color(0.35, 0.28, 0.24, 0.8))
+
+		# --- the TARGET card: the hero. Your score climbing toward the number to beat. ---
 		var target := set_target()
-		var tw := clampf(s.x * 0.32, 300.0, 460.0)
-		var tx := cx - tw * 0.5
-		var ty := 48.0
-		var th := 22.0
+		var tcard_y := 78.0
+		hud_card(Rect2(LX, tcard_y, LW, 108), Color(1.0, 0.82, 0.4, 0.4))
+		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(LX + 14, tcard_y + 52), commafy(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.94, 0.76))
+		# the record chase, top-right of the card
+		if run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
+			if record_broken:
+				var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
+				draw_string(font, Vector2(LX + LW - 134, tcard_y + 22), "NEW RECORD", HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 11, Color(1.0, 0.86, 0.42, ra))
+			else:
+				draw_string(font, Vector2(LX + LW - 134, tcard_y + 22), "best  %s" % commafy(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 11, dim)
 		var tfrac := clampf(float(score) / float(maxi(1, target)), 0.0, 1.0)
-		draw_rect(Rect2(tx - 2, ty - 2, tw + 4, th + 4), Color(0.05, 0.03, 0.045, 0.75))
-		draw_rect(Rect2(tx, ty, tw, th), Color(0.22, 0.15, 0.12, 0.85))
+		var barx := LX + 14
+		var barw := LW - 28
 		if set_cleared:
 			var pl := 0.72 + 0.28 * sin(float(tick) * 0.16)
-			draw_rect(Rect2(tx, ty, tw, th), Color(1.0, 0.86, 0.42))
-			draw_rect(Rect2(tx - 2, ty - 2, tw + 4, th + 4), Color(1.0, 0.92, 0.55, 0.5 * pl), false, 2.5)
-			var otxt := "TARGET CLEARED  -  Enter to walk off"
+			draw_rect(Rect2(barx - 1, tcard_y + 63, barw + 2, 20.0), Color(1.0, 0.86, 0.42, pl))
+			var otxt := "CLEARED   Enter to bank"
 			if overtime > 0.001:
-				otxt = "CLEARED  x%.2f  -  Enter to bank, or push" % (1.0 + overtime)
-			draw_string(font, Vector2(tx, ty + 15.5), otxt, HORIZONTAL_ALIGNMENT_CENTER, tw, 12, Color(0.12, 0.06, 0.03))
+				otxt = "CLEARED  x%.2f   Enter to bank" % (1.0 + overtime)
+			draw_string(font, Vector2(barx, tcard_y + 78), otxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(0.12, 0.06, 0.03))
 		else:
 			var fcol := Color(0.82, 0.5, 0.28).lerp(Color(1.0, 0.86, 0.42), tfrac)
-			draw_rect(Rect2(tx, ty, tw * tfrac, th), fcol)
-			draw_string(font, Vector2(tx + 8, ty + 15.5), "TARGET", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.95, 0.9, 0.8, 0.9))
-			draw_string(font, Vector2(tx, ty + 15.5), "%s / %s" % [commafy(score), commafy(target)], HORIZONTAL_ALIGNMENT_CENTER, tw, 13, Color(1.0, 0.97, 0.85))
-		# the booking's running bank, once past the first set, sits just under the bar
-		if booking_active and booking_score > 0:
-			draw_string(font, Vector2(tx, ty + th + 2.0), "banked  %s   +   this set  %s" % [commafy(booking_score), commafy(score)],
-				HORIZONTAL_ALIGNMENT_CENTER, tw, 11, Color(0.85, 0.78, 0.6, 0.7))
+			draw_meter(barx, tcard_y + 63, barw, 20.0, tfrac, fcol)
+			draw_string(font, Vector2(barx, tcard_y + 78), "target  %s" % commafy(target), HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
+		# banked-so-far and the take-a-bow hint
+		if booking_score > 0:
+			draw_string(font, Vector2(LX + 14, tcard_y + 100), "banked  %s" % commafy(booking_score), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.78, 0.6, 0.8))
+		if not set_cleared:
+			draw_string(font, Vector2(LX + LW - 134, tcard_y + 100), "Enter: take a bow", HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 10, Color(0.72, 0.66, 0.58, 0.7))
 
-		# --- the DROP PIPS: the single most important new pixel, so make them large and
-		# unmissable. A pip goes dark as a drop is spent; the last one is the whole night. ---
-		var lim := drop_limit()
-		var pipy := ty + th + 24.0
-		var pgap := 26.0
-		var px0 := cx - float(lim - 1) * pgap * 0.5
-		for i in lim:
-			var spent := i < dropped
-			var last := (lim - dropped) == 1 and not spent   # your final drop: pulse it red
-			var pc := Color(0.32, 0.17, 0.15) if spent else Color(0.95, 0.45, 0.35)
-			if last:
-				pc = Color(1.0, 0.35, 0.28, 0.75 + 0.25 * sin(float(tick) * 0.3))
-			draw_circle(Vector2(px0 + i * pgap, pipy), 8.0, pc)
-			draw_arc(Vector2(px0 + i * pgap, pipy), 10.0, 0.0, TAU, 22, Color(0.7, 0.35, 0.3, 0.45), 1.5, true)
-		draw_string(font, Vector2(px0 + float(lim) * pgap + 2.0, pipy + 5.0), "drops", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.55, 0.5, 0.7))
-
-		# --- the PATIENCE bar: the old Applause meter, now a clock that visibly falls ---
-		var bw := clampf(s.x * 0.26, 240.0, 360.0)
-		var bx := cx - bw * 0.5
-		var by := pipy + 18.0
-		draw_rect(Rect2(bx - 2, by - 2, bw + 4, 15.0), Color(0.05, 0.03, 0.045, 0.6))
-		draw_rect(Rect2(bx, by, bw, 11.0), Color(0.2, 0.14, 0.11, 0.7))
+		# --- the CROWD (patience clock) and the DROP limit ---
+		var ccard_y := 194.0
+		hud_card(Rect2(LX, ccard_y, LW, 70), Color(0.95, 0.5, 0.4, 0.35))
+		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.72, 0.62))
 		var pcol := Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.85, 0.42), applause)
-		draw_rect(Rect2(bx, by, bw * applause, 11.0), pcol)
-		draw_rect(Rect2(bx + bw * peak_applause - 1.0, by - 2.0, 2.0, 15.0), Color(1.0, 0.95, 0.8, 0.7))
-		draw_string(font, Vector2(bx + 6, by + 9.5), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.1, 0.05, 0.04, 0.75))
+		draw_meter(LX + 14, ccard_y + 28, LW - 28, 12.0, applause, pcol)
+		draw_rect(Rect2(LX + 14 + (LW - 28) * peak_applause - 1.0, ccard_y + 26, 2.0, 16.0), Color(1.0, 0.95, 0.8, 0.6))
+		draw_string(font, Vector2(LX + 14, ccard_y + 58), "DROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.6, 0.55))
+		draw_drop_marks(LX + 72, ccard_y + 48, drop_limit(), dropped)
 
-	# ---- top-right card: stamina, purse, reputation ----
-	var pw := 250.0
-	var px := s.x - 18.0 - pw
-	hud_panel(Rect2(px, 14, pw, 96))
-	var sx := px + 16.0
-	var sw := pw - 32.0
+		# --- the ENCORE condition, only while the Encore is the set at hand ---
+		if set_index == SET_ENCORE and encore >= 0 and encore < ENCORES.size():
+			var ec := Color(1.0, 0.55, 0.42)
+			hud_card(Rect2(LX, 272, LW, 66), Color(ec.r, ec.g, ec.b, 0.5))
+			draw_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, ec)
+			_wrap_text(font, String(ENCORES[encore]["desc"]), LX + 14, 312, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+	elif not performing:
+		# training: no contest, just what you are drilling
+		hud_card(Rect2(LX, 16, LW, 64))
+		var tl := "PRACTICE" + ("   -   DEBUG" if debug_mode else "")
+		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.72, 0.82, 0.9))
+		draw_string(font, Vector2(LX + 14, 60), "%s   -   %s   -   no crowd, no pay" % [String(cur_prop()["name"]).to_lower(), String(PATTERNS[pattern]["name"]).to_lower()], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
+		if next_ball_strength() > 0:
+			draw_string(font, Vector2(LX + 14, 78 + 16), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
+
+	# ============================ RIGHT RAIL: you ============================
+	var RW := 264.0
+	var RX := s.x - 18.0 - RW
+	# the MULTIPLIER (streak) - the addictive number, big and heat-coloured
+	hud_card(Rect2(RX, 16, RW, 50))
+	var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
+	var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
+	var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
+	draw_string(font, Vector2(RX + 14, 52), "x%d" % streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
+	draw_string(font, Vector2(RX + RW - 150, 40), "STREAK", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
+	draw_string(font, Vector2(RX + RW - 150, 56), "best  %d" % best_streak, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+	# STATE: stamina, purse, reputation, level
+	hud_card(Rect2(RX, 74, RW, 132))
+	var sx := RX + 14.0
+	var sw := RW - 28.0
 	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-	draw_string(font, Vector2(sx, 34), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.9, 0.85, 0.8))
-	draw_string(font, Vector2(sx + sw - 70.0, 34), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 70.0, 11, Color(0.85, 0.9, 0.85, 0.8))
-	draw_rect(Rect2(sx, 40, sw, 12.0), Color(0.2, 0.14, 0.11, 0.7))
-	var scol := Color(0.55, 0.80, 0.6)
+	draw_string(font, Vector2(sx, 96), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.9, 0.85, 0.85))
+	draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 11, Color(0.85, 0.9, 0.85, 0.85))
+	var stcol := Color(0.55, 0.80, 0.6)
 	if sfrac < STAM_LOW:
-		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
-	draw_rect(Rect2(sx, 40, sw * sfrac, 12.0), scol)
-	draw_circle(Vector2(sx + 7.0, 70.0), 6.0, Color(1.0, 0.84, 0.4))
-	draw_circle(Vector2(sx + 5.0, 68.0), 2.0, Color(1.0, 0.95, 0.7))
-	draw_string(font, Vector2(sx + 20.0, 76.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
-	draw_string(font, Vector2(sx, 98.0), "Rep %d   %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
+		stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
+	draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
+	draw_circle(Vector2(sx + 7.0, 132.0), 6.0, gold)
+	draw_circle(Vector2(sx + 5.0, 130.0), 2.0, Color(1.0, 0.95, 0.7))
+	draw_string(font, Vector2(sx + 20.0, 138.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, gold)
+	draw_string(font, Vector2(sx + sw - 160.0, 138.0), "Rep %s  %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, 160.0, 12, Color(0.82, 0.72, 0.85))
+	var need := xp_to_next(level)
+	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+	draw_string(font, Vector2(sx, 164), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, gold)
+	draw_meter(sx + 44, 154, sw - 44, 10.0, xf, Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(sx + 44, 162), "%d / %d" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, sw - 44, 10, Color(0.9, 0.85, 0.7, 0.8))
+	if points > 0:
+		var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
+		draw_string(font, Vector2(sx, 190), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
 
-	# a freshly unlocked trick announces itself, non-blocking so a live run is never
-	# frozen. Only while actually juggling, so it never overlaps the round-over text
-	# or the results card (both of which sit centre-screen with the run stopped).
+	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360:
 		draw_trick_unlock_banner(font, s)
-	# trick feedback line, centred (works even before any trick is unlocked)
+	# trick feedback line, tucked LOW under the performer so it never sits in the arcs
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
 		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
-		draw_string(font, Vector2(s.x * 0.5 - 170, s.y * 0.30), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 340, 18, Color(1.0, 0.88, 0.55, ta))
-	# the primed-trick readout sits just above the control hints, once a trick exists
+		draw_string(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
+	# the loaded-trick readout (bottom-right corner, out of the way)
 	if not tut_active and not results_open and not unlocked_tricks().is_empty():
 		draw_trick_hud(font, s)
 
-	# the round chrome (venue line, control hints, ROUND OVER, start prompt) is
-	# hidden during a lesson, and behind the results card, to keep those clean
 	if not tut_active and not results_open:
-		var patt := String(PATTERNS[pattern]["name"]).to_lower()
-		var propname := String(cur_prop()["name"]).to_upper()
-		var vname := String(venue_data(play_venue())["name"]).to_upper()
+		# an under-strength warning sits low-centre, in words, only when it applies
 		if prop_deficit() > 0.0:
-			draw_string(font, Vector2(30, s.y - 106), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [propname, prop_req()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.4))
-		hud_panel(Rect2(18, s.y - 78, 330, 60))
-		draw_string(font, Vector2(34, s.y - 54), vname, HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.8, 0.5))
-		draw_prop_icon(prop_type, Vector2(44, s.y - 34))
-		draw_string(font, Vector2(64, s.y - 28), "%d %s   -   %s   -   day %d, %s" % [num_balls, propname.to_lower(), patt, day, seg_name()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.6))
-		if not performing and next_ball_strength() > 0:
-			draw_string(font, Vector2(34, s.y - 86), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.66, 0.56, 0.85))
-		# the persistent control-hint rows used to sit here; the full control list now
-		# lives in Settings > Controls, so live play stays uncluttered (Louis). Only
-		# the loaded-trick HUD and the transient start / round-over prompts remain.
-
+			draw_string(font, Vector2(0, s.y - 112.0), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [String(cur_prop()["name"]).to_upper(), prop_req()], HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.55, 0.4))
 		if not started:
 			var verb := "perform" if performing else "practise"
 			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
 			var tnames := "( L2 or R2 )" if pad_active() else "( %s or %s )" % [OS.get_keycode_string(K_LT), OS.get_keycode_string(K_RT)]
-			draw_string(font, Vector2(0, s.y * 0.23), "press a THROW  %s  to %s" % [tnames, verb],
+			draw_string(font, Vector2(0, s.y * 0.22), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
-			draw_string(font, Vector2(0, s.y * 0.23 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
+			draw_string(font, Vector2(0, s.y * 0.22 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.85, 0.75, 0.6, 0.8))
-		elif not running and not results_open:
-			# training (or a performance with no panel) keeps the plain end-of-run line
+		elif not running:
+			# training keeps the plain end-of-run line (a booking goes straight to results)
 			draw_string(font, Vector2(0, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_CENTER, s.x, 40, Color(1.0, 0.5, 0.4))
 			draw_string(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   R goes again, Enter ends the session" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
 
