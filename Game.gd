@@ -81,7 +81,8 @@ const ST_GAMEOVER := 10   # the road's end: too tired to earn, too poor for a be
 # Skill-first guardrail: none of this touches the catch or throw timing floor.
 const SEG_PER_DAY := 3
 const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly up
-const EAT_STAM := 14.0
+const EAT_STAM := 0.35     # a meal restores this FRACTION of max Stamina (scales with
+						   # Endurance, so it stays a meaningful top-up at 100 or at 1000)
 const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
 const INN_COST := 15       # a proper bed: full stamina on waking. It wants FULL
 						   # payment now (Louis): a juggler who cannot afford the
@@ -425,6 +426,8 @@ var booking_active := false   # true from begin_performance until the booking re
 var overtime := 0.0           # the walk-off multiplier, earned by catches past the target
 var set_cleared := false      # this set's target has been beaten (locks true, enables the walk-off)
 var set_collapsed := false    # this set ended by the crowd walking or the drop limit (overtime lost)
+var exhausted := false        # the collapse was caused by empty stamina: on return to the day,
+							  # steer the player straight to EAT / SLEEP (Louis)
 var encore := -1              # index into ENCORES for this booking's third set, or -1
 var sets_cleared := 0         # how many of the three the player cleared, for pay and reputation
 var ante: Array[int] = [0, 0, 0, 0, 0, 0]   # bookings cleared per venue: the standing raised bar
@@ -440,7 +443,7 @@ var book_xp := 0
 # progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
-var endurance := 6        # raises max Stamina; gates heavy props later
+var endurance := 0        # raises max Stamina (100 base + 9 each, to 1000); gates heavy props later
 var speed := 0            # the Speed stat: every 4 points slows the world 1% (cap 100 = 25%)
 var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
 var pie_active := false   # a pie eaten in the hub works until you SLEEP
@@ -461,8 +464,8 @@ var has_glasses := false  # bought gear: raises the catch chance
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
-var stamina := 56.0       # within-run resource; low stamina lowers Accuracy
-var stamina_max := 56.0   # 50 + Endurance
+var stamina := 100.0      # within-run resource; empty = you cannot catch, so mind it
+var stamina_max := 100.0  # 100 base + 9 per Endurance point, to 1000 at Endurance 100
 var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
 var last_rep_delta := 0   # reputation change from the last performance, for the results screen
@@ -725,7 +728,7 @@ func _ready() -> void:
 		var start_n := 3
 		var bi := ua.find("--balls")   # dev: force the ball count (audit 4- and 6-ball fountains)
 		if bi != -1 and bi + 1 < ua.size():
-			strength = maxi(strength, 30)   # so max_balls() allows up to 7
+			strength = maxi(strength, 33)   # so max_balls() allows up to 7
 			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
 		var vfi := ua.find("--venue")   # dev: play at venue N (0..5), so booking targets and
 		if vfi != -1 and vfi + 1 < ua.size():   # patience decay match that stage (calibration + shots)
@@ -1394,6 +1397,17 @@ func enter_day() -> void:
 	day_msg = ""
 	view_venue = -1
 	cine_tick = 0
+	# came off the stage SPENT: land the cursor on the first recovery you can afford
+	# (a meal, else the inn) and say so, so the player is steered to it, not left guessing
+	if exhausted:
+		exhausted = false
+		var rows := day_rows()
+		var want := "eat" if money >= EAT_COST and stamina < stamina_max - 1.0 else "inn"
+		for i in rows.size():
+			if String(rows[i]["id"]) == want:
+				day_sel = i
+				break
+		set_day_msg("your hands gave out  -  eat or sleep to get them back")
 	save_progress()
 	check_dead_end()   # broke AND spent on arrival: the road ends here
 
@@ -1570,7 +1584,7 @@ func day_anim_step() -> void:
 	match id:
 		"eat":
 			money -= EAT_COST
-			stamina = minf(stamina_max, stamina + EAT_STAM)
+			stamina = minf(stamina_max, stamina + EAT_STAM * stamina_max)
 			meals += 1
 			if meals % MEALS_PER_STR == 0 and strength < 100:
 				var prev_max := max_balls()
@@ -2030,7 +2044,7 @@ func tut_setup_step() -> void:
 		caught = 0
 		dropped = 0
 		running = false
-		stamina_max = 50.0 + float(endurance)
+		stamina_max = 100.0 + 9.0 * float(endurance)
 		stamina = stamina_max
 		hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
 		hand_catch_rest = [catch_slot(LEFT), catch_slot(RIGHT)]
@@ -2440,7 +2454,7 @@ func reset_new_game() -> void:
 	# a brand new juggler, so a fresh slot never inherits the previous one's stats
 	accuracy = 5
 	strength = 6
-	endurance = 6
+	endurance = 0
 	speed = 0
 	pie_count = 0
 	pie_active = false
@@ -2467,7 +2481,7 @@ func reset_new_game() -> void:
 	seen_tuts.clear()      # a fresh slot re-teaches everything from scratch
 	pending_tuts.clear()
 	ante = [0, 0, 0, 0, 0, 0]   # every venue back to its opening bar
-	stamina_max = 50.0 + float(endurance)
+	stamina_max = 100.0 + 9.0 * float(endurance)
 	stamina = stamina_max
 	save_progress()
 
@@ -2968,26 +2982,42 @@ func ball_color(i: int) -> Color:
 # -----------------------------------------------------------------------------
 
 func max_balls() -> int:
-	# Strength unlocks more balls, gradually (no big jumps). 3 and 4 from the start.
-	var m := 4
-	if strength >= 12:
+	# THREE to start; every larger load is earned through Strength, each landing a bit
+	# before the venue that leans on it (Louis). Four is the first unlock now, not free.
+	var m := 3
+	if strength >= 9:
+		m = 4
+	if strength >= 15:
 		m = 5
-	if strength >= 20:
+	if strength >= 23:
 		m = 6
-	if strength >= 30:
+	if strength >= 33:
 		m = 7
 	return m
 
 
 func next_ball_strength() -> int:
 	# Strength needed for the next ball unlock, or 0 if already at the cap
-	if strength < 12:
-		return 12
-	if strength < 20:
-		return 20
-	if strength < 30:
-		return 30
+	if strength < 9:
+		return 9
+	if strength < 15:
+		return 15
+	if strength < 23:
+		return 23
+	if strength < 33:
+		return 33
 	return 0
+
+
+func count_air_scale() -> float:
+	# the tap-height FLOOR scales with the load: 3-4 balls stay snappy and low, but 5/6/7
+	# must fly higher just to have air to weave in, so even a tap lofts a big load enough
+	# to juggle. ~+45% airtime at six matches the hold a real six-ball fountain needs.
+	match num_balls:
+		5: return 1.3
+		6: return 1.45
+		7: return 1.6
+		_: return 1.0
 
 
 func start_run(n: int) -> void:
@@ -3022,7 +3052,7 @@ func start_run(n: int) -> void:
 	overtime = 0.0
 	running = false
 	started = false
-	stamina_max = 50.0 + float(endurance)
+	stamina_max = 100.0 + 9.0 * float(endurance)
 	# stamina PERSISTS through the day now: only sleep (or a meal) restores it, so
 	# a third booking in one evening is genuinely tired work. Dev auto-runs top up
 	# so screenshots stay comparable.
@@ -3133,6 +3163,12 @@ func on_catch(h: int) -> void:
 	if best_d > W_LATE:
 		# way off the arrival: a genuine mistime, the ball drops
 		drop_ball(best, "MISTIME")
+		return
+	# out of stamina: your hands simply cannot close (Louis). A well-timed arrival that
+	# would otherwise be caught slips through, which soon trips the drop limit and ends
+	# the set - see the exhaustion redirect in drop_ball, straight to eat/sleep.
+	if stamina <= 0.0:
+		drop_ball(best, "SPENT")
 		return
 	# hard mode (set_collide): a ball that clacked another mid-air only catches
 	# on PERFECT timing - the full Perfect window (Louis: same frames as normal,
@@ -3306,7 +3342,11 @@ func do_throw(h: int, hold: int) -> void:
 	# Strength ONLY matters when you are UNDER a prop's Required Strength: then the whole
 	# throw sags (the ideas.rtf rule) with a lower tap floor (DEFICIT_BASE) AND a lower
 	# ceiling (DEFICIT_HEIGHT), so a too-heavy prop never gets up to a clean height.
-	var base_air := float(BASE_AIR) * (1.0 - DEFICIT_BASE * deficit)
+	# higher loads must fly HIGHER just to have time to weave (Louis): a 5/6/7 fountain
+	# thrown at the 3-ball tap height comes back down before the hand can clear its other
+	# props, so everything drops at once and it felt unthrowable. Airtime rises with the
+	# count, so the tap FLOOR does too - a tap already lofts a big load enough to juggle.
+	var base_air := float(BASE_AIR) * count_air_scale() * (1.0 - DEFICIT_BASE * deficit)
 	var gain_mult := 1.0 - DEFICIT_HEIGHT * deficit
 	# SURPLUS Strength over a heavy prop's requirement lofts it HIGHER per held
 	# tick, scaled by weight (Louis: five clubs need real height to fit in the
@@ -3571,20 +3611,19 @@ func object_mult() -> float:
 	return (1.0 + OBJ_BALL_BONUS * ball_step) * (1.0 + OBJ_WEIGHT_BONUS * weight_step)
 
 
-const STREAK_LINEAR := 30   # streak bonus is plain linear up to this length
-const STREAK_TAPER := 4.0   # then grows with the square root, scaled by this
+func streak_cap() -> int:
+	# the multiplier a load can reach is CAPPED at ten per ball (Louis): 3 balls stop
+	# at 30, 4 at 40, up to 7 at 70. An easy three-ball run can hold a streak forever,
+	# so without this it out-earns a genuinely hard load; the cap makes climbing to more
+	# (and heavier) props - object_mult() above - the only way to a bigger multiplier.
+	return num_balls * 10
 
 
 func streak_mult() -> float:
-	# ideas.rtf: the consecutive-perfect multiplier was too strong for easy three-
-	# ball play, which alone can sustain a streak far longer than a genuinely hard
-	# load ever will. Linear up to STREAK_LINEAR catches (an ordinary good run is
-	# untouched), then square-root beyond it, so grinding one streak to absurd
-	# length stops being the top strategy - object_mult() above is.
-	var s := float(streak)
-	if s <= float(STREAK_LINEAR):
-		return s
-	return float(STREAK_LINEAR) + sqrt(s - float(STREAK_LINEAR)) * STREAK_TAPER
+	# the multiplier IS the streak length, growing one per clean catch up to the load's
+	# cap, then holding flat there. The streak itself keeps counting (for the record);
+	# only its score multiplier stops climbing.
+	return float(mini(streak, streak_cap()))
 
 
 func rec_table() -> Array[int]:
@@ -4321,7 +4360,7 @@ func invest(which: String) -> void:
 			strength = mini(100, strength + 1)
 		"end":
 			endurance = mini(100, endurance + 1)
-			stamina_max = 50.0 + float(endurance)
+			stamina_max = 100.0 + 9.0 * float(endurance)
 		"spd":
 			if speed >= SPEED_CAP:
 				return   # the permanent slow tops out (ideas.rtf): no point wasted
@@ -4383,8 +4422,8 @@ func _adjust(which: String, delta: int) -> void:
 		"str":
 			strength = clampi(strength + delta, 1, 100)
 		"end":
-			endurance = clampi(endurance + delta, 1, 100)
-			stamina_max = 50.0 + float(endurance)
+			endurance = clampi(endurance + delta, 0, 100)
+			stamina_max = 100.0 + 9.0 * float(endurance)
 			stamina = minf(stamina, stamina_max)
 		"spd":
 			speed = clampi(speed + delta, 0, SPEED_CAP)
@@ -4408,7 +4447,7 @@ func load_progress() -> void:
 	if cf.load(save_file()) == OK:
 		accuracy = int(cf.get_value("stats", "accuracy", 5))
 		strength = int(cf.get_value("stats", "strength", 6))
-		endurance = int(cf.get_value("stats", "endurance", 6))
+		endurance = int(cf.get_value("stats", "endurance", 0))
 		speed = int(cf.get_value("stats", "speed", 0))
 		pie_count = int(cf.get_value("stats", "pies", 0))
 		pie_active = bool(cf.get_value("day", "pie_active", false))
@@ -4461,7 +4500,7 @@ func load_progress() -> void:
 		seg_used = int(cf.get_value("day", "seg_used", 0))
 		venue_pick = int(cf.get_value("day", "venue_pick", -1))
 		meals = int(cf.get_value("day", "meals", 0))
-	stamina_max = 50.0 + float(endurance)
+	stamina_max = 100.0 + 9.0 * float(endurance)
 	# stamina persists through the day now (sleep restores it). An old save that
 	# predates the day loop simply wakes rested.
 	stamina = clampf(float(cf.get_value("day", "stamina", stamina_max)), 0.0, stamina_max)
@@ -4545,11 +4584,19 @@ func drop_ball(b: Ball, why: String) -> void:
 	# the collapse now has TWO triggers: an emptied crowd (below) and, new in Phase 2,
 	# the drop limit. Both funnel through start_collapse(). Training plays on.
 	if mode == MODE_PERFORM and not tut_active:
-		if dropped >= drop_limit():
-			add_popup(b.to_pos + Vector2(0, -28), "THAT'S THE SET", Color(1.0, 0.5, 0.35))
+		if stamina <= 0.0:
+			# collapsing because you are SPENT, not because the crowd walked: remember it,
+			# so the day steers you to eat or sleep the moment this comes down (Louis)
+			exhausted = true
+		if dropped >= drop_limit() or stamina <= 0.0:
+			add_popup(b.to_pos + Vector2(0, -28), "SPENT  -  THAT'S THE SET" if exhausted else "THAT'S THE SET", Color(1.0, 0.5, 0.35))
 			start_collapse()
 		elif applause <= 0.0:
 			start_collapse()
+	elif mode == MODE_TRAIN and not tut_active and stamina <= 0.0 and running:
+		# spent in practice too: end the session so the day can steer you to recovery
+		exhausted = true
+		running = false
 
 
 func start_collapse() -> void:
@@ -5654,13 +5701,18 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if not results_open:
 		var RW := 264.0
 		var RX := s.x - 18.0 - RW
-		# the MULTIPLIER (streak) - the addictive number, big and heat-coloured
+		# the MULTIPLIER - the addictive number, big and heat-coloured. It is the streak
+		# CAPPED per load (streak_cap): once you hit the ceiling it holds, so a bigger
+		# multiplier means more (and heavier) props, not a longer easy run (Louis).
 		hud_card(Rect2(RX, 16, RW, 50))
-		var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
+		var cap := streak_cap()
+		var mult := mini(streak, cap)
+		var capped := streak >= cap and streak > 0
+		var heat := clampf(float(mult) / float(cap), 0.0, 1.0)
 		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
 		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
-		draw_string(font, Vector2(RX + 14, 52), "x%d" % streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "STREAK", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + 14, 52), "x%d" % mult, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
+		draw_string(font, Vector2(RX + RW - 150, 40), "MAX  -  x%d" % cap if capped else "STREAK  /%d" % cap, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(1.0, 0.7, 0.35) if capped else Color(0.85, 0.72, 0.55))
 		draw_string(font, Vector2(RX + RW - 150, 56), "best  %d" % best_streak, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
 		# STATE: stamina, purse, reputation, level
 		hud_card(Rect2(RX, 74, RW, 132))
