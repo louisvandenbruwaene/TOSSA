@@ -60,7 +60,6 @@ const DEFICIT_FLOOR := 0.85         # under-strength: minimum inaccuracy "as if"
 # --- inaccuracy scale (the risk half of the risk/reward) ----------------------
 const DRIFT_MAX := 26.0   # px lateral landing drift at max height
 const JITTER_MAX := 5     # ticks of arrival uncertainty at max height
-const WOBBLE_MAX := 11.0  # px of in-flight arc wobble at max height
 
 # --- game flow: the app boots to a menu, not straight into a run ---------------
 const ST_MENU := 0        # title / main menu
@@ -252,8 +251,8 @@ const TRICKS := [
 	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
 	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 4, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 7, "min_air": 2, "bonus": 0,   "shout": "SPIN!",
-	 "desc": "Spin while everything is airborne. Catches score double, you catch blind."},
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 7, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
+	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
 	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 3, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
 	{"id": "cols", "name": "Columns",          "kind": "toggle", "lvl": 5, "min_air": 0, "bonus": 30,  "shout": "columns",
@@ -363,23 +362,14 @@ class Ball:
 	var launch_tick := 0
 	var land_tick := 0
 	var arc := 120.0
-	var wobble := 0.0
 	var height := 0.0         # normalized throw height 0..~1.4; higher lowers catch odds
 	var color := Color.WHITE
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
 	var trick := -1           # which trick shaped this throw (TR_HIGH/TR_BTB), or -1 for a plain throw
-	var over_top := false     # an over-the-top lob: launched at the OUTER point, lands wide
+	var over_top := false     # an over-the-top lob: scooped from INNER, lofted wide to OUTER
 	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
 							  # balls in one hand never stack on the same line (-1 = unset)
-	var bulge := 0.0          # px of early sideways bow, SIGNED: positive bows outward (an
-							  # over-the-top lob swinging around low traffic dropping into
-							  # its corner), negative bows inward (a shower's high throw
-							  # dodging the feed that descends outside its launch)
-	var land_dodge := 0.0     # px of LATE sideways bow (over-the-top only): the descent bows
-							  # outboard, away from the mid-stage weave, so the high road comes
-							  # down OUTSIDE the corridor its landing hand's crossing low throw
-							  # rises through, then settles cleanly onto the catch at p=1
 	var bumped := false       # hard mode: this ball clacked another mid-air; only a
 							  # half-Perfect-window catch can still save it
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
@@ -2880,17 +2870,18 @@ func catch_slot(h: int) -> int:
 # (reverse cascade, both hands high), OUTER when t launches from INNER (a low hand). A
 # landing then never sits on a launch, which was the whole -14/-22px regression. Landing
 # at OUTER also costs no extra reach - it is the hand's normal catch point, where it is
-# already waiting (the pre-ddbd706 "outer + 40" wide landing, minus the +40 that drew the
-# "arms too long" complaint), and the land_dodge (do_throw) bows the descent clear of any
-# low ball crossing that corner.
+# already waiting.
 #
-# Known residual: Tennis at 4 balls (a fountain base, so its low hand catches its OWN low
-# balls at OUTER too, double-booking that slot only for this one trick+count). Everything
-# else - the ROADMAP's confirmed Half Shower and Shower, plus Waterfall, Overthrow and
-# Reverse Cascade - clears at 3/4/5 balls. Tennis-4 was the lowest-priority case the
-# ROADMAP flagged ("conflict window inherently smaller"); it is left to the Phase 5
-# siteswap rework, which replaces this whole hand-picked geometry with one derived from
-# the pattern, rather than special-cased here at the cost of the cases that already work.
+# This picks the LANDING slot only. It cannot, by itself, keep a MIXED pattern's high
+# road from sharing air with the low weave mid-flight: now that every path is a strict
+# parabola (Louis - no sideways swerve to dodge with), an over-the-top ball and a low
+# ball timed into the same corner simply cross there, exactly as two juggling balls do.
+# Good timing keeps them from occupying that corner at the SAME instant (a real player,
+# and the Phase 5 siteswap rework, throw on a rhythm that interleaves them); the naive
+# alternating autoplayer does not, so --collcheck still reports crossings on Waterfall
+# and Tennis. Those read as balls crossing, not as an impossible path, and the mid-air
+# clack penalty only bites in hard mode - so this is left to the siteswap rework, which
+# replaces this whole hand-picked geometry with a rhythm derived from the pattern.
 func over_top_land_slot(t: int) -> int:
 	return HAND_INNER if throw_slot(t) == HAND_OUTER else HAND_OUTER
 
@@ -3389,7 +3380,6 @@ func do_throw(h: int, hold: int) -> void:
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
-	b.wobble = 0.0 if _collcheck else WOBBLE_MAX * spread * inacc
 	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
@@ -3446,27 +3436,6 @@ func do_throw(h: int, hold: int) -> void:
 	# catch point (hand_target holds the hand out there while it waits), so the
 	# high road starts wide and never shares air with the low weave.
 	b.over_top = over_top
-	b.bulge = 0.0
-	b.land_dodge = 0.0
-	if over_top and incoming_low(h):
-		# something low is dropping into this same corner (the launch-side catch
-		# point): the lob winds up a touch WIDE (from_pos below) and its early
-		# flight bows outward (flight_pos), swinging around the incoming ball even
-		# when the throw happens a beat before the catch. With no low traffic (a
-		# reverse cascade, where everything rides the high road) it climbs straight,
-		# staying clear of the WIDE lane the high balls land in.
-		b.bulge = 34.0
-	# the LANDING-side mirror of that dodge, and the second half of the 12a fix. Its
-	# gate is STRUCTURAL, not "is a low ball airborne right now" (incoming_low): the
-	# over-top may launch a beat BEFORE the crossing low ball it must miss even exists,
-	# so a timing gate misses it (that was Waterfall 4-ball, -12.6, the low feed born
-	# after the lob). Instead: if the LANDING hand throws low, its own crossing low
-	# throw WILL rise through mid-stage during this descent, so bow the descent outboard
-	# to come down outside it. When the landing hand is itself over-top (reverse cascade:
-	# no low weave anywhere) there is nothing to miss, and the descent stays straight -
-	# which is what keeps reverse cascade's clean crossing untouched.
-	if over_top and not next_throw_over_top(b.to_hand):
-		b.land_dodge = 60.0
 	var cy := stage_center().y
 	if lanes:
 		# each column owns its own x (assign_lane), so two balls in one hand's
@@ -3481,11 +3450,10 @@ func do_throw(h: int, hold: int) -> void:
 		b.from_pos = stage_center() if was_mid else inner_pos(h)
 		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	elif over_top:
-		# the wide wind-up: with low traffic incoming, the lob leaves from 20px
-		# outside the catch point. It comes down on land_slot (see above): as close in
-		# as the receiving hand's own launch corner allows, and never ON it.
-		var windup := (20.0 if h == RIGHT else -20.0) if b.bulge > 0.0 else 0.0
-		b.from_pos = outer_pos(h) + Vector2(windup, 0.0)
+		# the over-the-top lob leaves from the OUTER catch corner and rides a tall
+		# parabola down onto land_slot (over_top_land_slot: the complement of the
+		# receiving hand's own launch slot, so a landing never sits on a launch).
+		b.from_pos = outer_pos(h)
 		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
 	else:
 		# a plain cascade/fountain throw: inner launch, outer catch. A FOUNTAIN is
@@ -3630,7 +3598,8 @@ func on_trick() -> void:
 	match String(t["kind"]):
 		"live":
 			if balls_airborne() < int(t["min_air"]):
-				set_trick_msg("Spin needs %d in the air" % int(t["min_air"]))
+				var na := int(t["min_air"])
+				set_trick_msg("Spin needs a ball in the air" if na == 1 else "Spin needs %d in the air" % na)
 				return
 			if tick < trick_ready:
 				return   # still cooling down; ignore the mash
@@ -4645,32 +4614,17 @@ func age_popups() -> void:
 
 
 func flight_pos(b: Ball) -> Vector2:
+	# Every prop is a projectile: constant horizontal velocity, gravity on the
+	# vertical, so the path is ALWAYS a clean parabola (Louis) - nothing ever
+	# swerves sideways in the air. Which parabola differs per throw (its launch
+	# and landing x, and its height b.arc); a column shares one x, so it rides
+	# straight up and down on the very same curve. Flight time is set by the
+	# throw's height alone (b.land_tick, from the hold), never by how wide it is,
+	# so a wide throw of the same height just travels faster across.
 	var span := maxi(1, b.land_tick - b.launch_tick)
 	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
 	var pos := b.from_pos.lerp(b.to_pos, p)
-	pos.y -= 4.0 * b.arc * p * (1.0 - p)                 # parabolic arc
-	pos.x += b.wobble * sin(p * PI) * sin(p * 9.0)       # high-throw arc wobble
-	if b.bulge != 0.0:
-		# the early sideways dodge (see do_throw): positive bows outward around
-		# the ball dropping into the launch corner, negative bows in toward the
-		# centre. Gone by mid-flight either way.
-		var dir_out := 1.0 if b.from_pos.x >= get_viewport_rect().size.x * 0.5 else -1.0
-		pos.x += b.bulge * dir_out * sin(clampf(p * 2.0, 0.0, 1.0) * PI)
-	if b.land_dodge != 0.0:
-		# the LATE landing-side dodge (see do_throw): the descent bows OUTBOARD (away
-		# from mid-stage, toward its own landing side) across the back half of the
-		# flight, so the high road comes down outside the corridor its landing hand's
-		# crossing low throw rises through, then eases back to zero at p=1 so the catch
-		# still lands exactly on target. Peaks around p=0.7, silent before mid-flight.
-		var dir_land := 1.0 if b.to_pos.x >= get_viewport_rect().size.x * 0.5 else -1.0
-		pos.x += b.land_dodge * dir_land * sin(clampf((p - 0.4) / 0.6, 0.0, 1.0) * PI)
-	if b.trick == TR_BTB:
-		# a showy behind-the-back loop: the ball bows back toward the throwing side and
-		# lifts high over the mid-flight, then settles cleanly onto the catch point
-		var s := sin(p * PI)
-		var dir := 1.0 if b.from_pos.x >= b.to_pos.x else -1.0
-		pos.x += 62.0 * s * dir                          # loop back toward the throwing hand
-		pos.y -= 48.0 * s                                # and a tall, graceful lift
+	pos.y -= 4.0 * b.arc * p * (1.0 - p)   # the parabola: peak height = b.arc at mid-flight
 	return pos
 
 
