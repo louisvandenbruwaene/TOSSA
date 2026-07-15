@@ -607,8 +607,13 @@ var _sfx_next := 0
 # subscription and replaces this file under the same name. Do not release a
 # build to anyone outside personal testing while this warning is still here.
 const MUSIC_PATH := "res://Juggling Game.mp3"
+# a second track (Louis) for every non-juggling moment - menus, the day hub, the
+# establishing cards, results. The two crossfade: the driving track only while you
+# actually juggle, this calmer Chill Trio mix everywhere else.
+const MUSIC_PATH_CHILL := "res://Juggling Game (Chill Trio Mix).mp3"
 var mus: AudioStreamPlayer
-var _vol := {"mus": -80.0}
+var mus2: AudioStreamPlayer
+var _vol := {"mus": -80.0, "mus2": -80.0}
 var _duck := 0.0                    # transient music dip on a drop, decays
 
 # the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
@@ -6649,6 +6654,13 @@ func setup_audio() -> void:
 		m.loop = true
 		mus.stream = m
 		mus.play()
+	# the calmer non-juggling track, looping alongside, held silent until it is wanted
+	mus2 = AudioStreamPlayer.new(); add_child(mus2); mus2.volume_db = -80.0
+	var m2 := load(MUSIC_PATH_CHILL) as AudioStreamMP3
+	if m2 != null:
+		m2.loop = true
+		mus2.stream = m2
+		mus2.play()
 	_audio_ready = true
 
 
@@ -6683,14 +6695,24 @@ func audio_update() -> void:
 		return
 	var in_play := game_state == ST_PLAY
 	var perf := in_play and mode == MODE_PERFORM and not tut_active
+	# JUGGLING = a live run on the stage (performance, practice, or a lesson). The main
+	# track rides only here; everywhere else the Chill Trio mix carries it (Louis). They
+	# crossfade, so stepping onto the stage lifts the drive and stepping off eases back.
+	var juggling := in_play and running and not results_open
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
-	var t := -14.0
-	if perf:
-		t = lerpf(-13.0, -9.0, energy)
+	var main_t := -80.0
+	var chill_t := -80.0
+	if juggling:
+		main_t = lerpf(-13.0, -9.0, energy) if perf else -14.0
+	else:
+		chill_t = -13.0
 	if not set_music:
-		t = -80.0
-	_vol["mus"] = lerpf(_vol["mus"], t - _duck * 9.0, 0.06)
+		main_t = -80.0
+		chill_t = -80.0
+	_vol["mus"] = lerpf(_vol["mus"], main_t - _duck * 9.0, 0.06)
 	mus.volume_db = _vol["mus"]
+	_vol["mus2"] = lerpf(_vol["mus2"], chill_t, 0.05)
+	mus2.volume_db = _vol["mus2"]
 	_duck = maxf(0.0, _duck - 0.03)
 
 
