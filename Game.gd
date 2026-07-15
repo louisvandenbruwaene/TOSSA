@@ -1180,6 +1180,12 @@ func day_rows() -> Array[Dictionary]:
 	# built fresh every frame and every keypress so drawing and input always agree.
 	var vname := String(venue_data(play_venue())["name"])
 	var out: Array[Dictionary] = []
+	# a queued lesson sits at the TOP of the hub, so a new unlock is the first thing you
+	# see and can choose to learn - it never yanks you out of a set, and costs no day time
+	if not pending_tuts.is_empty():
+		out.append({"id": "learn", "name": "LEARN  -  %s" % lesson_title(pending_tuts[0]),
+			"cost": "", "ok": true, "why": "",
+			"sub": "something new. Taught slow, one step at a time. Costs no time."})
 	var tired := too_tired()
 	var tired_why := "too tired to work (stamina under %d)  -  sleep first" % int(TIRED_FLOOR)
 	out.append({"id": "perform", "name": "PERFORM  at  %s" % vname,
@@ -1306,6 +1312,17 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			skills_open = true          # a reference card, no cost, no vignette
 			skills_sel = 0
 			play_sfx("ui2", -13.0)
+		"learn":
+			# drain one queued lesson and teach it now. Marked seen BEFORE teaching, and
+			# saved, so it is remembered as taught even if the player quits mid-lesson.
+			if not pending_tuts.is_empty():
+				var lid: String = pending_tuts[0]
+				pending_tuts.remove_at(0)
+				if not seen_tuts.has(lid):
+					seen_tuts.append(lid)
+				save_progress()
+				begin_tutorial(lid)
+				play_sfx("ui2", -11.0)
 
 
 func day_anim_len(id: String) -> int:
@@ -1328,7 +1345,9 @@ func day_anim_step() -> void:
 			stamina = minf(stamina_max, stamina + EAT_STAM)
 			meals += 1
 			if meals % MEALS_PER_STR == 0 and strength < 100:
+				var prev_max := max_balls()
 				strength += 1
+				check_ball_unlock(prev_max)   # a meal's Strength can cross a ball gate too
 				set_day_msg("the good food is paying off  -  Strength +1")
 				play_sfx("streak", -8.0)
 			else:
@@ -1541,13 +1560,10 @@ func try_buy(kind: int) -> void:
 
 
 func offer_prop_tutorial(kind: int) -> void:
-	# the first time a new prop becomes juggle-able, run its hands-on lesson once
-	var id := "prop_%d" % kind
-	if seen_tuts.has(id):
-		return
-	seen_tuts.append(id)
-	shop_open = false            # clear the shop overlay for a clean lesson handoff
-	begin_tutorial(id)
+	# the first time a new prop becomes juggle-able, queue its hands-on lesson. It is
+	# routed through the same queue every other unlock uses, so the hub's LEARN row
+	# offers it (rather than yanking the player out of the shop mid-purchase).
+	queue_lesson("prop_%d" % kind)
 
 
 # =============================================================================
@@ -1572,6 +1588,12 @@ func tut_lesson(id: String) -> Array:
 		var need := 6 if k == PROP_TORCHES else 5
 		return [{"prop": k, "balls": 3, "hand": RIGHT, "goal": "catch", "need": need,
 			"text": "New prop: %s" % String(PROPS[k]["name"]), "sub": "%s Land %d clean catches." % [quirk, need]}]
+	if id.begins_with("trick_"):
+		return trick_lesson_steps(trick_by_id(id.substr(6)))
+	if id.begins_with("count_"):
+		return count_lesson_steps(int(id.substr(6)))
+	if id.begins_with("pattern_"):
+		return pattern_lesson_steps(pattern_by_id(id.substr(8)))
 	# the core progression: one ball, then two, then the three-ball cascade.
 	# Key names come from the live bindings, so a remapped player is taught
 	# THEIR keys, not the defaults.
@@ -1594,6 +1616,91 @@ func tut_lesson(id: String) -> Array:
 			"text": "Two balls now, one in each hand", "sub": "Throw the first, and as it peaks throw the second up under it. Land four catches."},
 		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 4,
 			"text": "Three balls. The cascade", "sub": "Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for four."},
+	]
+
+
+func trick_lesson_steps(t: int) -> Array:
+	# a trick lesson mirrors the three INPUT GRAMMARS the game has, because the grammar
+	# is what confuses people, not the trick: a toggle switches on and off, an arm shot
+	# empowers one throw, a live trick acts on what is already in the air. Taught with
+	# plain balls (the trick shaping is prop-independent), slow, and drilled.
+	if t < 0 or t >= TRICKS.size():
+		return [{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
+			"text": "Keep the cascade going", "sub": "Land three."}]   # defensive: never index []
+	var td: Dictionary = TRICKS[t]
+	var nm := String(td["name"])
+	var kb := String(k_trick()[0])
+	match String(td["kind"]):
+		"toggle":
+			return [
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_on", "need": 1,
+					"trick": t, "prompt": "trick", "slow": 0.62,
+					"text": "%s: switch it ON" % nm,
+					"sub": "Press %s. Every throw reshapes into %s until you press it again." % [kb, nm]},
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
+					"prompt": "catch", "slow": 0.5,
+					"text": "Now keep it going, and catch them down",
+					"sub": "Watch how the weave changes shape. Land three while it runs."},
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_off", "need": 1,
+					"trick": t, "prompt": "trick", "slow": 0.35,
+					"text": "And switch it OFF",
+					"sub": "Press %s again to fall back to a normal weave. That is the whole toggle." % kb},
+			]
+		"arm":
+			return [
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
+					"trick": t, "prompt": "trick", "slow": 0.55,
+					"text": "%s: arm it, then throw" % nm,
+					"sub": "Press %s, then throw. Just that ONE next throw flies over the top, and it lands the trick." % kb},
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 2,
+					"trick": t, "prompt": "trick", "slow": 0.4,
+					"text": "Again - it is a one-shot, so arm it each time",
+					"sub": "Press %s, throw, catch. Land two more. Every %s is its own press." % [kb, nm]},
+			]
+		_:  # live (Spin): acts on the balls already airborne
+			return [
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 2,
+					"prompt": "catch", "slow": 0.55,
+					"text": "First get all three weaving",
+					"sub": "%s acts on the balls already in the air, so fill the air before you call it." % nm},
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
+					"trick": t, "prompt": "trick", "slow": 0.62,
+					"text": "Now press it, and catch through the turn",
+					"sub": "Press %s. The catches come while you are still spinning - trust the timing, it is thick and slow here." % kb},
+			]
+
+
+func count_lesson_steps(n: int) -> Array:
+	# a new ball count: a slow drill to feel the higher, faster load, then a faster one.
+	# The pattern is left to the parity default (odd -> cascade, even -> fountain).
+	return [
+		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 6,
+			"prompt": "catch", "slow": 0.6,
+			"text": "%d balls now" % n,
+			"sub": "Your Strength carries another. It climbs higher and moves faster than before - throw a touch higher than feels right."},
+		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 10, "slow": 0.25,
+			"text": "Again, closer to real speed",
+			"sub": "Same pattern, less thick time. Land ten."},
+	]
+
+
+func pattern_lesson_steps(p: int) -> Array:
+	# a new pattern: forced via the "pattern" step key, run slow with the PATTERNS table's
+	# own desc as the teaching text (one source of truth), then drilled toward real speed.
+	if p < 0 or p >= PATTERNS.size():
+		return [{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
+			"text": "Keep the cascade going", "sub": "Land three."}]
+	var pd: Dictionary = PATTERNS[p]
+	var nm := String(pd["name"])
+	var desc := String(pd.get("desc", "Feel out its shape."))
+	var n := 4 if p == FOUNTAIN else 3   # fountain wants an even count; the rest read at 3
+	return [
+		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p, "goal": "catch", "need": 5,
+			"prompt": "catch", "slow": 0.58,
+			"text": "New pattern: %s" % nm, "sub": desc},
+		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p, "goal": "catch", "need": 8, "slow": 0.28,
+			"text": "%s, closer to speed" % nm,
+			"sub": "Hold its shape as the world speeds up. Land eight."},
 	]
 
 
@@ -1752,13 +1859,14 @@ func tut_maintain() -> void:
 
 
 func tut_finish() -> void:
-	var was_prop := tut_id.begins_with("prop_")
+	var was_basics := tut_id == "balls"
 	tut_active = false
 	tut_id = ""
 	tut_flash = ""
 	mode = MODE_TRAIN
-	if not was_prop:
-		prop_type = PROP_BALLS   # after the basics, drop back to plain balls
+	if was_basics:
+		prop_type = PROP_BALLS   # ONLY the basics lesson forces balls back; a trick or
+								 # count lesson taught with the owned prop leaves it be
 	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
 	enter_day()
 	set_day_msg("lesson complete  -  your day begins")
@@ -3375,20 +3483,71 @@ func add_xp(amount: int) -> void:
 		save_progress()
 
 
+func queue_lesson(id: String) -> void:
+	# an unlock during a live set cannot interrupt it, so its lesson WAITS at the hub.
+	# Queued once, taught once, then remembered forever (seen_tuts). A lesson already
+	# taught, or already waiting, is never re-queued.
+	if seen_tuts.has(id) or pending_tuts.has(id):
+		return
+	pending_tuts.append(id)
+
+
+func check_ball_unlock(prev_max: int) -> void:
+	# max_balls() grows silently at Strength 12/20/30; catch each crossing and queue the
+	# lesson that teaches the new, faster, higher count (a genuine content hole before)
+	var now := max_balls()
+	if now > prev_max:
+		queue_lesson("count_%d" % now)
+
+
+func lesson_title(id: String) -> String:
+	# a human name for a queued lesson, shown on the hub's LEARN row
+	if id.begins_with("trick_"):
+		var t := trick_by_id(id.substr(6))
+		return "%s (new trick)" % (String(TRICKS[t]["name"]) if t >= 0 else id.substr(6))
+	if id.begins_with("pattern_"):
+		var p := pattern_by_id(id.substr(8))
+		return "%s (new pattern)" % (String(PATTERNS[p]["name"]) if p >= 0 else id.substr(8))
+	if id.begins_with("count_"):
+		return "%s balls" % id.substr(6)
+	if id.begins_with("prop_"):
+		var k := int(id.substr(5))
+		return "%s (new prop)" % String(PROPS[k]["name"]) if k >= 0 and k < PROPS.size() else id
+	if id == "balls":
+		return "the basics"
+	return id
+
+
+func trick_by_id(tid: String) -> int:
+	for i in TRICKS.size():
+		if String(TRICKS[i]["id"]) == tid:
+			return i
+	return -1
+
+
+func pattern_by_id(pid: String) -> int:
+	for i in PATTERNS.size():
+		if String(PATTERNS[i]["id"]) == pid:
+			return i
+	return -1
+
+
 func announce_new_patterns(prev_level: int) -> void:
 	# a pattern whose unlock level we just crossed announces itself on the trick
-	# feedback line, teaching the P key in the same breath
+	# feedback line, teaching the P key in the same breath, and queues its lesson
 	for i in PATTERNS.size():
 		var lv := int(PATTERNS[i]["lvl"])
 		if lv > prev_level and lv <= level:
 			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
+			queue_lesson("pattern_%s" % String(PATTERNS[i]["id"]))
 			play_sfx("streak", -6.0)
 
 
 func announce_new_tricks(prev_level: int) -> void:
 	# a trick whose unlock level we just crossed gets a banner and becomes the
 	# SELECTED trick, so the very next Space press does the thing the banner just
-	# explained (nothing fires by itself: the one-shot still wants its own press)
+	# explained (nothing fires by itself: the one-shot still wants its own press),
+	# and queues a hands-on lesson to be taught at the hub
 	for i in TRICKS.size():
 		var lv := int(TRICKS[i]["lvl"])
 		if lv > prev_level and lv <= level:
@@ -3396,6 +3555,7 @@ func announce_new_tricks(prev_level: int) -> void:
 			trick_unlock_tick = tick
 			trick_sel = i
 			trick_primed = false
+			queue_lesson("trick_%s" % String(TRICKS[i]["id"]))
 			play_sfx("streak", -5.0)
 
 
@@ -3797,6 +3957,7 @@ func prop_scale(kind: int) -> float:
 func invest(which: String) -> void:
 	if points <= 0:
 		return
+	var prev_max := max_balls()   # Strength may cross a ball-count gate; catch it below
 	match which:
 		"acc":
 			accuracy = mini(ACC_CAP, accuracy + 1)   # past 100 becomes Focus
@@ -3810,6 +3971,7 @@ func invest(which: String) -> void:
 				return   # the permanent slow tops out (ideas.rtf): no point wasted
 			speed += 1
 	points -= 1
+	check_ball_unlock(prev_max)   # a new ball count queues its own lesson at the hub
 	save_progress()
 
 
@@ -3858,6 +4020,7 @@ func sheet_repeat(dt: float) -> void:
 
 
 func _adjust(which: String, delta: int) -> void:
+	var prev_max := max_balls()
 	match which:
 		"acc":
 			accuracy = clampi(accuracy + delta, 1, ACC_CAP)
@@ -3869,6 +4032,7 @@ func _adjust(which: String, delta: int) -> void:
 			stamina = minf(stamina, stamina_max)
 		"spd":
 			speed = clampi(speed + delta, 0, SPEED_CAP)
+	check_ball_unlock(prev_max)
 	save_progress()
 
 
