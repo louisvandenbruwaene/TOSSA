@@ -286,6 +286,14 @@ const SLOW_RAMP := 0.0025      # slow motion ramps LINEARLY in and out per frame
 							   # reaction time instead of a sudden gear change)
 const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
 							   # no chain or Amazing! farming with two balls
+# --- lessons (Louis): a lesson is taught in thick time, so a beginner can SEE the arc
+# and the window. It starts nearly frozen and speeds up as the lesson goes on, so the
+# last step is close to real speed and the player is never dumped from a slow world
+# straight into a fast one. A step may override this floor with its own "slow" key.
+const TUT_SLOW_START := 0.62   # the first step of a lesson: 62% slow
+const TUT_SLOW_END := 0.20     # the last step: nearly real time
+const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
+							   # and brighten (at 62% slow that is about two real seconds)
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
 const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
 
@@ -468,6 +476,8 @@ var cine_tick := 0        # cosmetic clock for the stage card, menu, and hub mot
 var establish_venue := 0  # which venue's exterior the stage card shows
 var establish_after := 3  # ball count to start the performance with once dismissed
 var seen_tuts: Array[String] = []  # lesson ids already shown, so they fire once
+var pending_tuts: Array[String] = []  # lessons queued by an unlock, taught at the hub
+									  # (an unlock happens mid-set; the lesson must wait)
 
 # --- interactive tutorial (runs on the REAL sim, guided step by step) ---------
 var tut_active := false   # a hands-on lesson is running inside ST_PLAY
@@ -478,6 +488,7 @@ var tut_threw_l := false  # a left-hand throw happened this step
 var tut_threw_r := false  # a right-hand throw happened this step
 var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw lands)
 var tut_flash := ""       # brief "Nice!" feedback between steps
+var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
@@ -1581,8 +1592,8 @@ func tut_lesson(id: String) -> Array:
 			"text": "Keep one ball going, back and forth", "sub": "Throw, catch, throw from that hand, catch. Land four in a row."},
 		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
 			"text": "Two balls now, one in each hand", "sub": "Throw the first, and as it peaks throw the second up under it. Land four catches."},
-		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 6,
-			"text": "Three balls. The cascade", "sub": "Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for six."},
+		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 4,
+			"text": "Three balls. The cascade", "sub": "Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for four."},
 	]
 
 
@@ -1592,6 +1603,8 @@ func begin_tutorial(id: String) -> void:
 	tut_active = true
 	game_state = ST_PLAY
 	started = true            # a lesson is its own thing, not the opening "first run"
+	_slow_cur = tut_slow()    # a lesson opens ALREADY thick, it does not ease in over the
+							  # ~4s the 0.0025 ramp would take from a standing start
 	tut_setup_step()
 
 
@@ -1609,7 +1622,19 @@ func tut_setup_step() -> void:
 	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() > want_n
 	prop_type = want_prop
 	num_balls = want_n
-	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	# a pattern lesson forces its own pattern; otherwise the parity default
+	if step.has("pattern"):
+		pattern = int(step["pattern"])
+		pattern_sel = pattern
+	else:
+		pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	# a trick lesson selects (and de-arms) its trick, so the step starts from a known
+	# state: Space will act on exactly this trick, nothing is primed or toggled yet
+	if step.has("trick"):
+		trick_sel = int(step["trick"])
+		toggle_on = -1
+		trick_primed = false
+		tennis_ball = null
 	if fresh:
 		balls.clear()
 		_stack_l.clear()
@@ -1659,6 +1684,7 @@ func tut_setup_step() -> void:
 	tut_count = 0
 	tut_threw_l = false
 	tut_threw_r = false
+	tut_tricks = 0
 	tut_advance_at = -1
 
 
@@ -1684,6 +1710,9 @@ func tut_check() -> void:
 	match String(step["goal"]):
 		"throw_r": done = tut_threw_r
 		"throw_l": done = tut_threw_l
+		"trick_on": done = toggle_on == int(step.get("trick", -1))   # the toggle is running
+		"trick_off": done = toggle_on < 0                             # ...and now switched off
+		"trick_use": done = tut_tricks >= int(step["need"])           # arm/live: reward_trick fired
 		_: done = tut_count >= int(step["need"])
 	if done:
 		tut_flash = "Nice!"
@@ -1738,6 +1767,7 @@ func tut_finish() -> void:
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var steps := tut_lesson(tut_id)
 	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+	draw_tut_prompts(font, s, step)   # the floating "press THIS now" affordance over the hands
 	var bw := s.x * 0.66
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := 40.0
@@ -1754,6 +1784,95 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		[[k_catch(), "catch"], [k_throw(), "throw, hold = higher"], [k_pause(), "pause"]])
 	if tut_flash != "":
 		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
+
+
+func draw_key_prompt(font: Font, at: Vector2, keys: Array, label: String, urgency: float, col: Color) -> void:
+	# a floating "press THIS now" bubble: a keycap plus a word, calm and faint when the
+	# moment is far off, bright and large and pulsing when it is NOW. Drawn ABOVE its
+	# hand, never over it, so the hand and the ball it is catching stay readable.
+	var u := clampf(urgency, 0.0, 1.0)
+	var sc := lerpf(0.85, 1.25, u)
+	var a := lerpf(0.45, 1.0, u)
+	if u > 0.6:
+		sc *= 1.0 + 0.05 * sin(atick() * 0.18) * (u - 0.6) / 0.4   # a throb only at the end
+	var fs := int(round(15.0 * sc))
+	var pad := 7.0 * sc
+	var kw := 0.0
+	for k in keys:
+		kw += maxf(20.0 * sc, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 10.0 * sc) + 4.0 * sc
+	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var total := kw + lw + pad
+	var h := 22.0 * sc
+	var p := at + Vector2(0, -64.0)   # float clear of the hand sprite
+	var box := Rect2(p.x - total * 0.5 - pad, p.y - h * 0.5 - pad * 0.5, total + pad * 2.0, h + pad)
+	draw_rect(box, Color(0.06, 0.04, 0.05, 0.7 * a))
+	draw_rect(box, Color(col.r, col.g, col.b, 0.5 * a), false, 1.5)
+	var x := p.x - total * 0.5
+	var ky := p.y - h * 0.5
+	for k in keys:
+		var w := maxf(20.0 * sc, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 10.0 * sc)
+		draw_rect(Rect2(x, ky, w, h), Color(0.15, 0.10, 0.10, 0.92 * a))
+		draw_rect(Rect2(x, ky, w, h), Color(col.r, col.g, col.b, 0.7 * a), false, 1.0)
+		draw_string(font, Vector2(x, ky + h - 5.0 * sc), String(k), HORIZONTAL_ALIGNMENT_CENTER, w, fs, Color(1.0, 0.94, 0.8, a))
+		x += w + 4.0 * sc
+	x += pad
+	draw_string(font, Vector2(x, ky + h - 5.0 * sc), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col.r, col.g, col.b, a))
+
+
+func draw_timing_ring(at: Vector2, d: int) -> void:
+	# LESSON ONLY: turn the invisible catch window into a visible target. A ring around
+	# the receiving hand tightens as the ball approaches (d = ticks until it lands) and
+	# flashes gold across the Perfect window, so a beginner can SEE why a catch is early
+	# or on time. Never drawn in a real set - it would defeat the timing skill.
+	var pw := perfect_window()
+	var r := lerpf(14.0, 48.0, clampf(float(d) / float(PROMPT_LEAD), 0.0, 1.0))
+	var perfect := absi(d) <= pw
+	var col := Color(1.0, 0.85, 0.35, 0.95) if perfect else Color(0.7, 0.8, 0.95, 0.55)
+	var width := 3.5 if perfect else 2.0
+	draw_arc(at, r, 0.0, TAU, 40, col, width, true)
+	if perfect:
+		draw_arc(at, r + 4.0, 0.0, TAU, 40, Color(1.0, 0.9, 0.5, 0.4), 2.0, true)
+
+
+func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
+	# THE lesson affordance (Louis): the key to press, over the hand that should press
+	# it, at the moment it should be pressed. Silent once a step is cleared, so success
+	# leaves the screen quiet instead of nagging.
+	if tut_advance_at >= 0:
+		return
+	var kc := k_catch()
+	var kt := k_throw()
+	# a catch prompt + timing ring for every ball dropping toward an empty hand
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		var d := b.land_tick - tick
+		if d <= 0 or d > PROMPT_LEAD:
+			continue
+		var h := b.to_hand
+		var hp: Vector2 = hpos[clampi(h, 0, 1)]
+		draw_timing_ring(hp, d)
+		var urg := 1.0 - float(d) / float(PROMPT_LEAD)
+		draw_key_prompt(font, hp, [kc[clampi(h, 0, 1)]], "catch", urg, Color(0.65, 0.85, 1.0))
+	# a throw or hold prompt over a hand the step wants to throw from
+	var prompt := String(step.get("prompt", ""))
+	var goal := String(step["goal"])
+	if prompt == "throw" or prompt == "hold" or goal == "throw_r" or goal == "throw_l":
+		var th := RIGHT if (goal == "throw_r" or prompt == "throw") else LEFT
+		if goal == "throw_l":
+			th = LEFT
+		# prompt the hand that actually holds a ball, so a two-handed step points right
+		for hh in [int(step.get("hand", th)), LEFT, RIGHT]:
+			if not stack(hh).is_empty():
+				th = hh
+				break
+		if not stack(th).is_empty():
+			var label := "hold, then release" if prompt == "hold" else "throw"
+			draw_key_prompt(font, hpos[th], [kt[th]], label, 0.7, Color(1.0, 0.8, 0.45))
+	# a trick prompt over the juggler's head (Space is not a handed action)
+	if prompt == "trick":
+		var head := stage_center() + Vector2(0, -128.0)
+		draw_key_prompt(font, head, k_trick(), "trick", 0.85, Color(1.0, 0.7, 0.9))
 
 
 func try_buy_pie() -> void:
@@ -1960,6 +2079,8 @@ func reset_new_game() -> void:
 	venue_pick = 0
 	meals = 0
 	started = false
+	seen_tuts.clear()      # a fresh slot re-teaches everything from scratch
+	pending_tuts.clear()
 	stamina_max = 50.0 + float(endurance)
 	stamina = stamina_max
 	save_progress()
@@ -3164,6 +3285,8 @@ func on_trick() -> void:
 			trick_primed = true
 			set_trick_msg("%s  -  next throw" % String(t["name"]).to_upper())
 			play_sfx("ui2", -13.0)
+	if tut_active:
+		tut_check()   # a trick_on / trick_off lesson step clears the instant Space toggles
 
 
 func cycle_trick() -> void:
@@ -3217,6 +3340,9 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 		add_xp(4)
 		add_popup(at + Vector2(0, -34), String(td["shout"]), Color(1.0, 0.85, 0.45))
 		play_sfx("streak", -6.0)
+	if tut_active:
+		tut_tricks += 1   # a trick_use lesson step counts each landed shaped catch
+		tut_check()
 
 
 # -----------------------------------------------------------------------------
@@ -3277,6 +3403,8 @@ func energy_mult() -> float:
 	# performing costs more energy, and bigger routines cost more still;
 	# training is lighter so you can practice without burning out. Focus (trained
 	# Accuracy past 100) discounts every action's stamina cost (stage 1).
+	if tut_active:
+		return 0.0   # a lesson costs no stamina at all, so a slow drill never tires out
 	var base := 0.5
 	if mode == MODE_PERFORM:
 		base = 1.0 + 0.15 * float(num_balls - MIN_BALLS)
@@ -3378,7 +3506,26 @@ func slow_target() -> float:
 		a += 0.25
 	if _frames < chain_until:
 		a += 0.25
+	if tut_active:
+		a = maxf(a, tut_slow())   # a lesson sets a FLOOR on slowness, never a sum: it
+								  # must not stack with a Pie into a frozen world
 	return clampf(a, 0.0, 1.0)
+
+
+func tut_slow() -> float:
+	# the lesson's own slow-motion floor. A step may pin its own value ("slow" key, e.g.
+	# a trick step stays thick while its drill step speeds up); otherwise it eases from
+	# thick to real across the lesson's steps, so the player is handed back to full speed
+	# gradually rather than dropped out of a slow world into a fast one.
+	var steps := tut_lesson(tut_id)
+	if tut_step >= 0 and tut_step < steps.size():
+		var s: Dictionary = steps[tut_step]
+		if s.has("slow"):
+			return clampf(float(s["slow"]), 0.0, 1.0)
+	if steps.size() <= 1:
+		return TUT_SLOW_START
+	var f := float(tut_step) / float(steps.size() - 1)
+	return lerpf(TUT_SLOW_START, TUT_SLOW_END, clampf(f, 0.0, 1.0))
 
 
 func slow_amount() -> float:
@@ -3407,6 +3554,10 @@ func catch_chance(quality: int, height: float) -> float:
 	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures.
 	# Rises with Accuracy and falls with the throw's height. Perfect timing is
 	# handled separately in on_catch.
+	if tut_active:
+		return 1.0   # a lesson never punishes a reasonable attempt with an unseen dice
+					 # roll. A total MISS still loses the ball (MISTIME/MISS_GRACE reach
+					 # drop_ball), so whiffing entirely is still taught.
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
@@ -3465,6 +3616,10 @@ func perfect_window() -> int:
 	# Stage 2: once stage 1 has bottomed out (Focus > 100), each FOCUS_WINDOW_PER
 	# of further Focus widens the Perfect band by a tick, capped so timing still
 	# rules. Never grows past the Good band, so a tier of Good always remains.
+	if tut_active:
+		return W_LATE   # in a lesson, ANY in-window press is a Perfect: a beginner
+						# should never fail a catch they reasonably attempted. The real
+						# windows return the instant the lesson ends.
 	if purist_run():
 		return W_PERFECT           # no Focus widening on the Purist board
 	var extra := focus() - 100.0
@@ -3763,6 +3918,18 @@ func load_progress() -> void:
 			for k in career:
 				if (cr as Dictionary).has(k):
 					career[k] = int((cr as Dictionary)[k])
+		# lessons already taught, and lessons queued but not yet taught, both persist -
+		# without this an unlock lesson (Phase 1) re-fired every launch (the seen_tuts bug)
+		var st: Variant = cf.get_value("prog", "seen_tuts", [])
+		if st is Array:
+			seen_tuts.clear()
+			for v in (st as Array):
+				seen_tuts.append(String(v))
+		var pt: Variant = cf.get_value("prog", "pending_tuts", [])
+		if pt is Array:
+			pending_tuts.clear()
+			for v in (pt as Array):
+				pending_tuts.append(String(v))
 		purist = bool(cf.get_value("day", "purist", false))
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
@@ -3797,6 +3964,8 @@ func save_progress() -> void:
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
 	cf.set_value("prog", "career", career)
+	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
+	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
 	cf.set_value("day", "purist", purist)
 	cf.set_value("day", "day", day)
 	cf.set_value("day", "seg_used", seg_used)
