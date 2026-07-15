@@ -5640,39 +5640,43 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(LX + 14, 78 + 16), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
 
 	# ============================ RIGHT RAIL: you ============================
-	var RW := 264.0
-	var RX := s.x - 18.0 - RW
-	# the MULTIPLIER (streak) - the addictive number, big and heat-coloured
-	hud_card(Rect2(RX, 16, RW, 50))
-	var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
-	var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
-	var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
-	draw_string(font, Vector2(RX + 14, 52), "x%d" % streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
-	draw_string(font, Vector2(RX + RW - 150, 40), "STREAK", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
-	draw_string(font, Vector2(RX + RW - 150, 56), "best  %d" % best_streak, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
-	# STATE: stamina, purse, reputation, level
-	hud_card(Rect2(RX, 74, RW, 132))
-	var sx := RX + 14.0
-	var sw := RW - 28.0
-	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-	draw_string(font, Vector2(sx, 96), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.9, 0.85, 0.85))
-	draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 11, Color(0.85, 0.9, 0.85, 0.85))
-	var stcol := Color(0.55, 0.80, 0.6)
-	if sfrac < STAM_LOW:
-		stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
-	draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
-	draw_circle(Vector2(sx + 7.0, 132.0), 6.0, gold)
-	draw_circle(Vector2(sx + 5.0, 130.0), 2.0, Color(1.0, 0.95, 0.7))
-	draw_string(font, Vector2(sx + 20.0, 138.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, gold)
-	draw_string(font, Vector2(sx + sw - 160.0, 138.0), "Rep %s  %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, 160.0, 12, Color(0.82, 0.72, 0.85))
-	var need := xp_to_next(level)
-	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_string(font, Vector2(sx, 164), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, gold)
-	draw_meter(sx + 44, 154, sw - 44, 10.0, xf, Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(sx + 44, 162), "%d / %d" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, sw - 44, 10, Color(0.9, 0.85, 0.7, 0.8))
-	if points > 0:
-		var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-		draw_string(font, Vector2(sx, 190), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
+	# hidden during the results panel so it never lingers, dimmed, beside the card
+	if not results_open:
+		var RW := 264.0
+		var RX := s.x - 18.0 - RW
+		# the MULTIPLIER (streak) - the addictive number, big and heat-coloured
+		hud_card(Rect2(RX, 16, RW, 50))
+		var heat := clampf(float(streak) / 20.0, 0.0, 1.0)
+		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
+		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
+		draw_string(font, Vector2(RX + 14, 52), "x%d" % streak, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
+		draw_string(font, Vector2(RX + RW - 150, 40), "STREAK", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + RW - 150, 56), "best  %d" % best_streak, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+		# STATE: stamina, purse, reputation, level
+		hud_card(Rect2(RX, 74, RW, 132))
+		var sx := RX + 14.0
+		var sw := RW - 28.0
+		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
+		draw_string(font, Vector2(sx, 96), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.9, 0.85, 0.85))
+		draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 11, Color(0.85, 0.9, 0.85, 0.85))
+		var stcol := Color(0.55, 0.80, 0.6)
+		if sfrac < STAM_LOW:
+			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
+		draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
+		draw_circle(Vector2(sx + 7.0, 132.0), 6.0, gold)
+		draw_circle(Vector2(sx + 5.0, 130.0), 2.0, Color(1.0, 0.95, 0.7))
+		draw_string(font, Vector2(sx + 20.0, 138.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, gold)
+		draw_string(font, Vector2(sx + sw - 160.0, 138.0), "Rep %s  %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, 160.0, 12, Color(0.82, 0.72, 0.85))
+		var need := xp_to_next(level)
+		var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+		# LV label and the exact xp on their own row, so the number never sits
+		# muddied on top of the meter fill; the bar spans full width beneath
+		draw_string(font, Vector2(sx, 160), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, gold)
+		draw_string(font, Vector2(sx + sw - 110.0, 160), "%s / %s" % [commafy(xp), commafy(need)], HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 11, Color(0.85, 0.78, 0.6, 0.85))
+		draw_meter(sx, 166, sw, 8.0, xf, Color(0.9, 0.7, 0.35))
+		if points > 0:
+			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
+			draw_string(font, Vector2(sx, 192), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360:
