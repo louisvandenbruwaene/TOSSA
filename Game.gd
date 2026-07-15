@@ -1077,6 +1077,17 @@ func _input(event: InputEvent) -> void:
 	if shop_open:
 		shop_input(kc)
 		return
+	if tut_active:
+		# a lesson is a controlled space (Louis): ONLY reset and pause act on a key, so
+		# no stray press can break it into a normal run, a panel, or a prop swap. The
+		# juggling itself - throw, catch, Space - stays live (polled in _read_inputs),
+		# and the lesson only ever advances on its own goals.
+		match kc:
+			KEY_R:
+				tut_reset_step()
+			KEY_ESCAPE:
+				open_pause()
+		return
 	# a performance cannot be reset or rebuilt mid-set: no restart, no ball-count
 	# change, no prop swap, no bailing to practice. That would make a good ending
 	# trivial to fish for. You either FINISH cleanly (Enter) or drop out, and you
@@ -2018,11 +2029,11 @@ func tut_setup_step() -> void:
 	var want_prop := int(step["prop"])
 	var want_n := int(step["balls"])
 	var start_hand := int(step.get("hand", RIGHT))
-	# a met goal flows STRAIGHT into the next step (Louis): whatever is in the
-	# hands or the air stays exactly where it is, so a player who can already
-	# juggle clears the whole lesson in one unbroken run. Only the first step,
-	# a prop change, or a step needing FEWER balls deals a fresh table.
-	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() > want_n
+	# a met goal flows into the next step, but ANY change in the ball COUNT deals a
+	# clean, fully-held table rather than topping up mid-air (Louis): adding a ball to a
+	# hand that a live ball is already dropping into made the current one uncatchable -
+	# a forced drop right at "two balls now". Same count (a trick/pattern drill) flows on.
+	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() != want_n
 	prop_type = want_prop
 	num_balls = want_n
 	# a pattern lesson forces its own pattern; otherwise the parity default
@@ -2091,6 +2102,34 @@ func tut_setup_step() -> void:
 	tut_advance_at = -1
 
 
+func tut_step_data() -> Dictionary:
+	# the current lesson step, always in range - the one source every tutorial reader uses
+	var steps := tut_lesson(tut_id)
+	return steps[clampi(tut_step, 0, steps.size() - 1)]
+
+
+func tut_incoming(h: int) -> bool:
+	# is any ball in flight dropping toward hand h right now? (the odd-count middle ball
+	# either hand may take, so it counts for both). Used to keep a top-up off a busy hand.
+	for b in balls:
+		if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball):
+			return true
+	return false
+
+
+func tut_reset_step() -> void:
+	# R re-deals THIS step from a clean hold, so a tangle is never a dead end - the same
+	# controlled start it began with, no forced drop, no stray state carried in (Louis)
+	balls.clear()
+	_stack_l.clear()
+	_stack_r.clear()
+	charging = [false, false]
+	tut_advance_at = -1
+	tut_flash = ""
+	tut_setup_step()   # balls now empty, so it deals the step fresh
+	play_sfx("ui2", -13.0)
+
+
 func tut_on_throw(h: int) -> void:
 	if h == LEFT:
 		tut_threw_l = true
@@ -2135,23 +2174,32 @@ func tut_maintain() -> void:
 			tut_setup_step()
 		return
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
-		var steps := tut_lesson(tut_id)
-		var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+		var step := tut_step_data()
 		var teach_hand := int(step.get("hand", RIGHT))
 		for _i in (num_balls - balls.size()):
+			# only ever refill a hand with NOTHING dropping into it, so a top-up never
+			# lands on the hand a live ball still needs - that was the forced drop (Louis).
+			# If both hands are busy catching, wait a beat and try again next tick.
+			var choices: Array[int] = []
+			for hh in [LEFT, RIGHT]:
+				if not tut_incoming(hh):
+					choices.append(hh)
+			if choices.is_empty():
+				break
+			var to_h := int(choices[0])
+			if num_balls == 1 and choices.has(teach_hand):
+				to_h = teach_hand   # a single-ball step returns the ball to its teaching hand
+			else:
+				for hh in choices:   # otherwise the emptier free hand keeps the load even
+					if stack(hh).size() < stack(to_h).size():
+						to_h = hh
 			var b := Ball.new()
 			b.state = STATE_HAND
 			b.kind = prop_type
 			b.color = ball_color(balls.size()) if prop_type == PROP_BALLS else prop_color(prop_type)
 			b.spin_dir = 1.0
 			balls.append(b)
-			# a single-ball step returns the ball to the exact hand it is teaching, so a
-			# fumble drops you back into the same lesson rather than the wrong hand
-			var to_left := (teach_hand == LEFT) if num_balls == 1 else (stack(RIGHT).size() > stack(LEFT).size())
-			if to_left:
-				_stack_l.append(b)
-			else:
-				_stack_r.append(b)
+			stack(to_h).append(b)
 
 
 func tut_finish() -> void:
@@ -2169,12 +2217,14 @@ func tut_finish() -> void:
 
 
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
+	var step := tut_step_data()
 	var steps := tut_lesson(tut_id)
-	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
-	draw_tut_prompts(font, s, step)   # the floating "press THIS now" affordance over the hands
+	draw_tut_prompts(font, s, step)   # a timing ring + bare handed key over the hands, no boxes
+	# the ONE rectangle at the top (Louis): the lesson text and progress. Everything else
+	# lives along the bottom, so the centre - where the props fly - stays clear.
 	var bw := s.x * 0.66
 	var bx := s.x * 0.5 - bw * 0.5
-	var by := 40.0
+	var by := 24.0
 	draw_rect(Rect2(bx, by, bw, 92.0), Color(0.05, 0.03, 0.05, 0.86))
 	draw_rect(Rect2(bx, by, bw, 92.0), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
 	draw_string(font, Vector2(bx, by + 30.0), "LESSON  -  " + String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 23, Color(1.0, 0.9, 0.6))
@@ -2183,44 +2233,17 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	if String(step["goal"]).begins_with("catch") and int(step["need"]) > 1:
 		prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
 	draw_string(font, Vector2(bx, by + 80.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.8, 0.75, 0.68))
-	# a quiet controls reminder along the bottom (the normal HUD hints are hidden)
-	draw_hints_row(font, s.x * 0.5, s.y - 42.0,
-		[[k_catch(), "catch"], [k_throw(), "throw, hold = higher"], [k_pause(), "pause"]])
+	# ALL the controls, always, along the very bottom (Louis: every command, not just the
+	# one this step uses). The trick key lights up when the step calls for it.
+	var trick_hot := String(step.get("prompt", "")) == "trick"
+	var tcol := Color(1.0, 0.72, 0.4) if trick_hot else Color(0.82, 0.74, 0.62, 0.9)
+	draw_hints_row(font, s.x * 0.5, s.y - 40.0,
+		[[k_throw(), "throw"], [k_catch(), "catch"], [k_trick(), "trick"], [["R"], "reset"], [k_pause(), "pause"]])
+	if trick_hot:
+		var pa := 0.55 + 0.45 * (0.5 + 0.5 * sin(atick() * 0.13))
+		draw_text_shout(font, Vector2(0, s.y - 64.0), "press %s now" % String(k_trick()[0]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(tcol.r, tcol.g, tcol.b, pa))
 	if tut_flash != "":
-		draw_string(font, Vector2(0, s.y * 0.32), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(0.7, 0.95, 0.7))
-
-
-func draw_key_prompt(font: Font, at: Vector2, keys: Array, label: String, urgency: float, col: Color) -> void:
-	# a floating "press THIS now" bubble: a keycap plus a word, calm and faint when the
-	# moment is far off, bright and large and pulsing when it is NOW. Drawn ABOVE its
-	# hand, never over it, so the hand and the ball it is catching stay readable.
-	var u := clampf(urgency, 0.0, 1.0)
-	var sc := lerpf(0.85, 1.25, u)
-	var a := lerpf(0.45, 1.0, u)
-	if u > 0.6:
-		sc *= 1.0 + 0.05 * sin(atick() * 0.18) * (u - 0.6) / 0.4   # a throb only at the end
-	var fs := int(round(15.0 * sc))
-	var pad := 7.0 * sc
-	var kw := 0.0
-	for k in keys:
-		kw += maxf(20.0 * sc, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 10.0 * sc) + 4.0 * sc
-	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	var total := kw + lw + pad
-	var h := 22.0 * sc
-	var p := at + Vector2(0, -64.0)   # float clear of the hand sprite
-	var box := Rect2(p.x - total * 0.5 - pad, p.y - h * 0.5 - pad * 0.5, total + pad * 2.0, h + pad)
-	draw_rect(box, Color(0.06, 0.04, 0.05, 0.7 * a))
-	draw_rect(box, Color(col.r, col.g, col.b, 0.5 * a), false, 1.5)
-	var x := p.x - total * 0.5
-	var ky := p.y - h * 0.5
-	for k in keys:
-		var w := maxf(20.0 * sc, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 10.0 * sc)
-		draw_rect(Rect2(x, ky, w, h), Color(0.15, 0.10, 0.10, 0.92 * a))
-		draw_rect(Rect2(x, ky, w, h), Color(col.r, col.g, col.b, 0.7 * a), false, 1.0)
-		draw_string(font, Vector2(x, ky + h - 5.0 * sc), String(k), HORIZONTAL_ALIGNMENT_CENTER, w, fs, Color(1.0, 0.94, 0.8, a))
-		x += w + 4.0 * sc
-	x += pad
-	draw_string(font, Vector2(x, ky + h - 5.0 * sc), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col.r, col.g, col.b, a))
+		draw_text_shout(font, Vector2(0, s.y - 92.0), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.7, 0.95, 0.7))
 
 
 func draw_timing_ring(at: Vector2, d: int) -> void:
@@ -2238,15 +2261,28 @@ func draw_timing_ring(at: Vector2, d: int) -> void:
 		draw_arc(at, r + 4.0, 0.0, TAU, 40, Color(1.0, 0.9, 0.5, 0.4), 2.0, true)
 
 
+func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: float) -> void:
+	# a single BARE key letter floating over a hand - outlined, no box - so the handed
+	# press (which hand, which key) is guided at the point of action without a text
+	# rectangle in the middle of the stage (Louis: keep the centre clear).
+	var u := clampf(urgency, 0.0, 1.0)
+	var sc := lerpf(0.9, 1.4, u)
+	if u > 0.6:
+		sc *= 1.0 + 0.06 * sin(atick() * 0.18) * (u - 0.6) / 0.4
+	var fs := int(round(19.0 * sc))
+	var a := lerpf(0.5, 1.0, u)
+	draw_text_shout(font, at - Vector2(80.0, 0.0), key, HORIZONTAL_ALIGNMENT_CENTER, 160.0, fs, Color(col.r, col.g, col.b, a))
+
+
 func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
-	# THE lesson affordance (Louis): the key to press, over the hand that should press
-	# it, at the moment it should be pressed. Silent once a step is cleared, so success
-	# leaves the screen quiet instead of nagging.
+	# THE lesson affordance (Louis): which key, over which hand, at the moment to press it
+	# - but as a bare letter and a timing ring, never a boxed bubble. Silent once a step is
+	# cleared, so success leaves the centre quiet.
 	if tut_advance_at >= 0:
 		return
 	var kc := k_catch()
 	var kt := k_throw()
-	# a catch prompt + timing ring for every ball dropping toward an empty hand
+	# catch: a timing ring on the receiving hand, its bare catch key just above it
 	for b in balls:
 		if b.state != STATE_FLIGHT:
 			continue
@@ -2257,26 +2293,20 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		var hp: Vector2 = hpos[clampi(h, 0, 1)]
 		draw_timing_ring(hp, d)
 		var urg := 1.0 - float(d) / float(PROMPT_LEAD)
-		draw_key_prompt(font, hp, [kc[clampi(h, 0, 1)]], "catch", urg, Color(0.65, 0.85, 1.0))
-	# a throw or hold prompt over a hand the step wants to throw from
+		draw_tut_key(font, hp + Vector2(0.0, -44.0), String(kc[clampi(h, 0, 1)]), Color(0.7, 0.88, 1.0), urg)
+	# throw: the bare throw key over the hand the step wants to throw from
 	var prompt := String(step.get("prompt", ""))
 	var goal := String(step["goal"])
 	if prompt == "throw" or prompt == "hold" or goal == "throw_r" or goal == "throw_l":
 		var th := RIGHT if (goal == "throw_r" or prompt == "throw") else LEFT
 		if goal == "throw_l":
 			th = LEFT
-		# prompt the hand that actually holds a ball, so a two-handed step points right
 		for hh in [int(step.get("hand", th)), LEFT, RIGHT]:
 			if not stack(hh).is_empty():
 				th = hh
 				break
 		if not stack(th).is_empty():
-			var label := "hold, then release" if prompt == "hold" else "throw"
-			draw_key_prompt(font, hpos[th], [kt[th]], label, 0.7, Color(1.0, 0.8, 0.45))
-	# a trick prompt over the juggler's head (Space is not a handed action)
-	if prompt == "trick":
-		var head := stage_center() + Vector2(0, -128.0)
-		draw_key_prompt(font, head, k_trick(), "trick", 0.85, Color(1.0, 0.7, 0.9))
+			draw_tut_key(font, hpos[th] + Vector2(0.0, -44.0), String(kt[th]), Color(1.0, 0.82, 0.5), 0.7)
 
 
 func try_buy_pie() -> void:
@@ -2801,17 +2831,22 @@ func stage_center() -> Vector2:
 
 
 func outer_pos(h: int) -> Vector2:
-	# the catch position, about a shoulder-and-a-half out. Narrower than before so the
-	# arms of the eight-head figure do not splay into long stretched sticks.
+	# the catch position, a little in from a shoulder-and-a-half so the arms rest a touch
+	# less splayed (Louis). Kept 46px out from inner_pos so the crossing weave still
+	# clears (see inner_pos); pulling only this one in cramps the two roads into overlap.
 	var c := stage_center()
-	var dx := 104.0
+	var dx := 100.0
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
 func inner_pos(h: int) -> Vector2:
-	# just outside the torso silhouette, so a carried ball never sits on the body
+	# just outside the torso silhouette, so a carried ball never sits on the body.
+	# outer_pos and this move IN TOGETHER (Louis wanted the arms a touch less splayed):
+	# the crossing clearance depends on outer - inner (the two crossing balls peak
+	# ~(outer - inner) apart), so shrinking both by the same amount narrows the whole
+	# stance without pulling the crossing weave into an overlap.
 	var c := stage_center()
-	var dx := 58.0
+	var dx := 54.0
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
@@ -3688,10 +3723,15 @@ func on_trick() -> void:
 	# The TRICK key (Space) is the one-shot powerup. With an arm trick selected it
 	# primes exactly the next throw (pressing again waves it off); with Spin selected
 	# it performs the spin right now. The selection itself lives on C (cycle_trick).
-	if unlocked_tricks().is_empty():
+	# in a lesson, the trick being TAUGHT is always usable, whatever your level - the
+	# step selects it and skips the unlock gate, so it can never dead-end waiting for a
+	# Space press the gate silently refused (Louis: the trick lesson would not respond).
+	if tut_active and tut_step_data().has("trick"):
+		trick_sel = int(tut_step_data()["trick"])
+	elif unlocked_tricks().is_empty():
 		set_trick_msg("first trick unlocks at level %d" % int(TRICKS[0]["lvl"]))
 		return
-	if trick_sel < 0 or not trick_unlocked(trick_sel):
+	elif trick_sel < 0 or not trick_unlocked(trick_sel):
 		trick_sel = int(unlocked_tricks()[0])
 	var t: Dictionary = TRICKS[trick_sel]
 	match String(t["kind"]):
