@@ -1107,11 +1107,17 @@ func _input(event: InputEvent) -> void:
 		KEY_7:
 			if not performing: start_run(7)
 		KEY_O:
-			if not performing:
-				cycle_prop(1)   # cycle to the next owned prop
+			# switch the object either way: live during a performance (re-skins the
+			# props in play, keeps the run), or with a fresh deal in practice
+			if performing:
+				cycle_prop_live(1)
+			else:
+				cycle_prop(1)
 		KEY_P:
-			if not performing:
-				cycle_pattern()   # step the juggling pattern (training only)
+			if performing:
+				cycle_pattern_live(1)   # switch the routine live, mid-performance
+			else:
+				cycle_pattern()   # step the juggling pattern (re-deals the hands)
 		KEY_F1:
 			if debug_mode: debug_jump_venue(0)   # debug: F1..F6 jump reputation to venues 1..6
 		KEY_F2:
@@ -1743,6 +1749,55 @@ func cycle_prop(dir: int) -> void:
 			prop_type = k
 			break
 	start_run(num_balls)
+
+
+func cycle_prop_live(dir: int) -> void:
+	# switch objects mid-performance WITHOUT restarting (Louis): the props already in
+	# play are re-skinned to the new object and the run, score and streak carry on.
+	# The new weight and spin take effect on the next throw. Only objects you own
+	# enough of for the CURRENT load are offered.
+	var n := PROPS.size()
+	var need := maxi(MIN_BALLS, balls.size())
+	var found := -1
+	var k := prop_type
+	for _i in n:
+		k = (k + dir + n) % n
+		if k != prop_type and have(k) >= need:
+			found = k
+			break
+	if found < 0:
+		set_trick_msg("no other object you own %d of" % need)
+		play_sfx("late", -12.0)
+		return
+	prop_type = found
+	var i := 0
+	for b in balls:
+		b.kind = prop_type
+		b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
+		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
+		i += 1
+	set_trick_msg(String(PROPS[prop_type]["name"]).to_upper())
+	play_sfx("ui2", -13.0)
+
+
+func cycle_pattern_live(dir: int) -> void:
+	# switch the routine mid-performance WITHOUT restarting: like a trick toggle, the
+	# new pattern simply shapes every throw from here on. Balls already in flight keep
+	# their own paths; the lane bookkeeping resets so Columns starts clean.
+	var un: Array = []
+	for i in PATTERNS.size():
+		if pattern_unlocked(i):
+			un.append(i)
+	if un.size() <= 1:
+		set_trick_msg("more patterns unlock at level %d" % int(PATTERNS[COLUMNS]["lvl"]))
+		return
+	var idx := un.find(pattern_sel)
+	pattern_sel = int(un[(idx + dir + un.size()) % un.size()]) if idx >= 0 else int(un[0])
+	pattern = pattern_sel
+	col_air_ref = -1.0
+	col_mid_ball = null
+	set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
+	play_sfx("ui2", -13.0)
 
 
 func confirm_spend(id: String, cost: int, in_shop: bool) -> bool:
@@ -4800,11 +4855,12 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			draw_fence(s, fy - 2.0, s.x * 0.60, s.x * 0.97)
 			draw_house(Vector2(s.x * 0.88, fy + 2.0), 132.0, 108.0)
 		1:   # street corner: the cold city behind one warm lamp. The skyline gets its
-			# own heavy night veil: lit windows read as distant, never as clutter.
+			# own heavy night veil: lit windows read as distant, never as clutter or a
+			# fight with the text that floats over them (Louis).
 			draw_moon(Vector2(s.x * 0.87, s.y * 0.13), 20.0)
 			draw_stars(s, 26, 0.38)
 			draw_city_row(s, fy)
-			draw_rect(Rect2(0, 0, s.x, fy), Color(0.03, 0.04, 0.09, 0.78))
+			draw_rect(Rect2(0, 0, s.x, fy), Color(0.03, 0.04, 0.09, 0.85))
 			draw_streetlamp(Vector2(s.x * 0.07, fy), fy)
 		2:   # small theatre: velvet wings and a valance frame the stage
 			draw_theatre_wings(s, fy)
@@ -5512,7 +5568,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stext += "   (pie)"
 		if _frames < chain_until:
 			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
-		draw_string(font, Vector2(0, s.y - 96.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
+		draw_text_shout(font, Vector2(0, s.y - 96.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
 
 	# ============================ LEFT RAIL: the contest ============================
 	var LX := 18.0
@@ -5638,27 +5694,31 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	# trick feedback line, tucked LOW under the performer so it never sits in the arcs
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
 		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
-		draw_string(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
+		draw_text_shout(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
 	# the loaded-trick readout (bottom-right corner, out of the way)
 	if not tut_active and not results_open and not unlocked_tricks().is_empty():
 		draw_trick_hud(font, s)
+	# the routine readout (bottom-left): the object and pattern in play, and the keys
+	# that switch them - live mid-performance now, not just in practice (Louis)
+	if not tut_active and not results_open:
+		draw_routine_hud(font, s)
 
 	if not tut_active and not results_open:
 		# an under-strength warning sits low-centre, in words, only when it applies
 		if prop_deficit() > 0.0:
-			draw_string(font, Vector2(0, s.y - 112.0), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [String(cur_prop()["name"]).to_upper(), prop_req()], HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.55, 0.4))
+			draw_text_shout(font, Vector2(0, s.y - 112.0), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [String(cur_prop()["name"]).to_upper(), prop_req()], HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.55, 0.4))
 		if not started:
 			var verb := "perform" if performing else "practise"
 			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
 			var tnames := "( L2 or R2 )" if pad_active() else "( %s or %s )" % [OS.get_keycode_string(K_LT), OS.get_keycode_string(K_RT)]
-			draw_string(font, Vector2(0, s.y * 0.22), "press a THROW  %s  to %s" % [tnames, verb],
+			draw_text_shout(font, Vector2(0, s.y * 0.22), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
-			draw_string(font, Vector2(0, s.y * 0.22 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
+			draw_text_shout(font, Vector2(0, s.y * 0.22 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.85, 0.75, 0.6, 0.8))
 		elif not running:
 			# training keeps the plain end-of-run line (a booking goes straight to results)
-			draw_string(font, Vector2(0, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_CENTER, s.x, 40, Color(1.0, 0.5, 0.4))
-			draw_string(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   R goes again, Enter ends the session" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
+			draw_text_shout(font, Vector2(0, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_CENTER, s.x, 40, Color(1.0, 0.5, 0.4))
+			draw_text_shout(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   R goes again, Enter ends the session" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
 
 
 func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0) -> void:
@@ -5868,6 +5928,27 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	if un.size() > 1:
 		items.append([k_cycle(), "switch trick"])
 	draw_hints_row(font, cx, s.y - 40.0, items)
+
+
+func draw_routine_hud(font: Font, s: Vector2) -> void:
+	# bottom-LEFT mirror of the trick readout: the OBJECT and PATTERN in play, and the
+	# keys to switch each. Live during a performance now (re-skins / reshapes on the
+	# fly), a fresh deal in practice - the hints are the same either way (Louis).
+	var pw := 330.0
+	var px := 18.0
+	var cx := px + pw * 0.5
+	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0))
+	var oname := String(cur_prop()["name"]).to_upper()
+	var pname := String(PATTERNS[pattern]["name"]).to_upper()
+	var ocol := ball_color(0) if prop_type == PROP_BALLS else prop_color(prop_type)
+	# object name in its own colour, pattern name warm, centred together as the title
+	var otext := oname + "    "
+	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var jx := cx - jw * 0.5
+	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ocol)
+	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.86, 0.76, 0.62))
+	draw_hints_row(font, cx, s.y - 40.0, [[["O"], "object"], [["P"], "pattern"]])
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -7284,6 +7365,17 @@ func draw_stat_row(font: Font, x: float, y: float, w: float, name: String, value
 		draw_string(font, Vector2(x + w - 60.0, y), "[%s]+" % keyhint, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
 
 
+func draw_text_shout(font: Font, pos: Vector2, text: String, align: int, width: float, size: int, col: Color) -> void:
+	# floating STAGE text - popups, shouts, warnings, prompts - rides over whatever the
+	# venue paints (a lit-window skyline, a warm spotlight), so it carries a dark outline
+	# to stay legible on any of them without moving off the spot it belongs to (Louis).
+	var oc := Color(0.04, 0.02, 0.03, col.a * 0.9)
+	for o in [Vector2(-1.5, 0.0), Vector2(1.5, 0.0), Vector2(0.0, -1.5), Vector2(0.0, 1.5),
+			Vector2(-1.1, -1.1), Vector2(1.1, -1.1), Vector2(-1.1, 1.1), Vector2(1.1, 1.1)]:
+		draw_string(font, pos + o, text, align, width, size, oc)
+	draw_string(font, pos, text, align, width, size, col)
+
+
 func draw_popups(font: Font) -> void:
 	for p in popups:
 		var age := tick - int(p["born"])
@@ -7299,7 +7391,7 @@ func draw_popups(font: Font) -> void:
 			size = 23 + maxi(0, 6 - age)
 		# the box is 240 wide, so its LEFT edge sits half that from the anchor: the
 		# old -60 offset centred every popup 60px right of the hand it belonged to
-		draw_string(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
+		draw_text_shout(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
 
 
 # --- venue exteriors: the "where", shared by establishing cards and wide shots -
