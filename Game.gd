@@ -225,10 +225,9 @@ const REMAP_ACTS := [
 # to a throw or catch (Louis): no drifting ahead of the ball to meet it.
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
 const HAND_OUTER := 0        # the catch point, standard
-const HAND_INNER := 1        # the throw point, standard (and the catch point for
-							  # anything riding the over-the-top road, or Columns)
-const HAND_VERY_INNER := 2   # Columns' own throw point: the pair shifted one notch
-							  # further in, almost to the midline
+const HAND_INNER := 1        # the throw point, standard; also the catch point for
+							  # anything riding the over-the-top road, and BOTH points
+							  # for Columns (one rest slot, so the hand does not tremor)
 
 # --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space). C
 # selects which trick Space is loaded with (the selection persists). THREE
@@ -2290,19 +2289,8 @@ func inner_pos(h: int) -> Vector2:
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
-func very_inner_pos(h: int) -> Vector2:
-	# Columns' own throw point (Louis): the pair shifts one notch further in from
-	# the standard {outer, inner}, almost to the midline, so a lane throw never
-	# needs the wide outer reach - a straight, short lob up its own column.
-	var c := stage_center()
-	var dx := 24.0
-	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
-
-
 func slot_pos(h: int, slot: int) -> Vector2:
 	match slot:
-		HAND_VERY_INNER:
-			return very_inner_pos(h)
 		HAND_INNER:
 			return inner_pos(h)
 		_:
@@ -2394,7 +2382,14 @@ func next_throw_over_top(h: int) -> bool:
 # CATCH point is locked in per-ball at throw time (do_throw), not re-derived here.
 func throw_slot(h: int) -> int:
 	if pattern == COLUMNS or toggle_on == TR_COLS:
-		return HAND_VERY_INNER
+		# Columns rests at ONE point (Louis, ROADMAP 12b): the same slot it catches at,
+		# so the hand holds still and only the vertical throw-kick moves it. It used to
+		# throw from VERY_INNER and catch at INNER - two slots 34px apart, retargeted
+		# every catch/throw, so the hand never settled and read as a tremor. The lane
+		# ball flies to its own lane_x either way (do_throw's `lanes` branch, never the
+		# hand slot), so the hand slot is purely where the sprite waits; INNER sits
+		# closest to the actual lanes, so it also shrinks the hand/ball gap.
+		return HAND_INNER
 	return HAND_OUTER if next_throw_over_top(h) else HAND_INNER
 
 
