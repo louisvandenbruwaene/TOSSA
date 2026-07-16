@@ -73,6 +73,9 @@ const ST_DAY := 7         # the day hub: a juggler's life between performances
 const ST_STATS := 8       # the career ledger: every record and lifetime number
 const ST_REMAP := 9       # the controls screen: rebind the six action keys
 const ST_GAMEOVER := 10   # the road's end: too tired to earn, too poor for a bed
+const ST_TUTDONE := 11    # the small congrats card after the basics lesson: the
+						   # starting kit, a breath, THEN the day hub (Louis: no
+						   # hard cut from the lesson straight into a menu)
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -132,20 +135,35 @@ const FOUNTAIN := 1
 const COLUMNS := 2
 const HALFSHOWER := 3
 const SHOWER := 4
+const RCASC := 5
+const WFALL := 6
+const TENNIS := 7
 # --- patterns as learnable content (GDD economy: harder base pays more, so one
 # tamed routine is never optimal). P cycles the unlocked patterns in training.
 # "mult" scales every catch's score, the reward for the pattern's base difficulty.
+# EXACTLY ONE pattern is active at a time (Louis): Reverse Cascade, Waterfall and
+# Tennis live HERE now, not as Space toggles, so switching patterns always switches
+# the whole routine and Columns can never run "on top of" anything.
+# Unlocks are spread across the CAREER, not the first evenings (Louis): each entry
+# may ask for a level, a stat, and a stage. All present keys must be met -
+# see skill_req_met / skill_req_text. Indices 0..4 are frozen (pattern_sel saves).
 const PATTERNS := [
 	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0,
 	 "desc": "The weave. Every throw crosses to the other hand."},
 	{"id": "fountain",   "name": "Fountain",    "lvl": 1, "mult": 1.1,
 	 "desc": "Each hand juggles its own circle. Even counts feel natural."},
-	{"id": "columns",    "name": "Columns",     "lvl": 3, "mult": 1.15,
+	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 8, "mult": 1.15,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
-	{"id": "halfshower", "name": "Half Shower", "lvl": 5, "mult": 1.25,
+	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25,
 	 "desc": "The right hand throws over the top, the left keeps the weave."},
-	{"id": "shower",     "name": "Shower",      "lvl": 8, "mult": 1.4,
+	{"id": "shower",     "name": "Shower",      "lvl": 14, "acc": 18, "ven": 2, "mult": 1.4,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
+	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 17, "acc": 22, "ven": 3, "mult": 1.45,
+	 "desc": "BOTH hands throw over the top, the weave runs backward."},
+	{"id": "wfall",      "name": "Waterfall",   "lvl": 11, "str": 14, "ven": 2, "mult": 1.3,
+	 "desc": "The right hand keeps throwing over the top while the left flows low beneath it."},
+	{"id": "tennis",     "name": "Tennis",      "lvl": 20, "acc": 26, "str": 18, "ven": 4, "mult": 1.5,
+	 "desc": "One marked ball sails over the top, back and forth across the weave."},
 ]
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
@@ -229,41 +247,32 @@ const HAND_INNER := 1        # the throw point, standard; also the catch point f
 							  # anything riding the over-the-top road, and BOTH points
 							  # for Columns (one rest slot, so the hand does not tremor)
 
-# --- tricks (GDD Section 3): flourishes fired with the TRICK key (Space). C
-# selects which trick Space is loaded with (the selection persists). THREE
-# grammars (Louis): "toggle" switches ON with one press and OFF with the next,
-# smoothly reshaping every throw in between (High Toss, Behind the Back, the
-# columns lanes and over-the-top arcs) - for a single flourish you switch on,
-# throw, and switch off; "arm" is the one-shot powerup (Overthrow only), one
-# press empowers exactly the next throw; "live" acts on the balls already
-# airborne (Spin). Each landed shaped catch pays its bonus, so a trick is a
-# skill choice, never a free bonus. A running toggle SURVIVES an R restart in
-# training, so a trick can be drilled run after run. Tricks unlock by level.
+# --- tricks (GDD Section 3): FLOURISHES fired with the TRICK key (Space), laid
+# OVER whatever pattern is running. C selects which trick Space is loaded with
+# (the selection persists). Anything that reshapes the whole routine (Columns,
+# Waterfall, Reverse Cascade, Tennis) is a PATTERN now, not a trick (Louis: one
+# pattern at a time, always switch-off-able with P). THREE grammars remain:
+# "toggle" switches ON with one press and OFF with the next, smoothly reshaping
+# every throw in between (High Toss, Behind the Back) - for a single flourish
+# you switch on, throw, and switch off; "arm" is the one-shot powerup (Overthrow
+# only), one press empowers exactly the next throw; "live" acts on the balls
+# already airborne (Spin). Each landed shaped catch pays its bonus, so a trick
+# is a skill choice, never a free bonus. A running toggle SURVIVES an R restart
+# in training, so a trick can be drilled run after run. Unlocks are spread over
+# the career like the patterns' (lvl / str / acc / ven keys, all must be met).
 const TR_HIGH := 0
 const TR_BTB := 1
 const TR_SPIN := 2
 const TR_OVER := 3
-const TR_COLS := 4
-const TR_WFALL := 5
-const TR_RCASC := 6
-const TR_TENNIS := 7
 const TRICKS := [
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 2, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 3, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
 	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 4, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 9, "acc": 12, "ven": 1, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 7, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 13, "acc": 16, "ven": 2, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
-	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 3, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
+	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 6, "str": 10, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
-	{"id": "cols", "name": "Columns",          "kind": "toggle", "lvl": 5, "min_air": 0, "bonus": 30,  "shout": "columns",
-	 "desc": "Toggle: every ball rides its own straight lane - an odd count opens a middle lane too."},
-	{"id": "wfall", "name": "Waterfall",       "kind": "toggle", "lvl": 6, "min_air": 0, "bonus": 45,  "shout": "waterfall",
-	 "desc": "Toggle: the right hand keeps throwing over the top."},
-	{"id": "rcasc", "name": "Reverse Cascade", "kind": "toggle", "lvl": 9, "min_air": 0, "bonus": 60,  "shout": "reverse!",
-	 "desc": "Toggle: BOTH hands throw over the top, the weave runs backward."},
-	{"id": "tennis", "name": "Tennis",         "kind": "toggle", "lvl": 10, "min_air": 0, "bonus": 50, "shout": "tennis",
-	 "desc": "Toggle: one marked ball sails over the top, back and forth."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
 const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
@@ -490,7 +499,7 @@ var round_scored := false
 # Space has primed a one-shot, the live-Spin timer, and the run's trick tally.
 var trick_sel := -1       # the selected trick (index into TRICKS), or -1 before any unlock
 var trick_primed := false # Space pressed: the very next throw becomes the selected arm trick
-var toggle_on := -1       # the toggle trick currently running (TR_COLS etc), or -1
+var toggle_on := -1       # the flourish toggle currently running (TR_HIGH / TR_BTB), or -1
 var toggle_scored := false   # this activation has already counted toward tricks_landed
 var tennis_ball: Ball = null # the marked ball that sails over the top while Tennis runs
 var col_air_ref := -1.0  # Columns: running reference airtime, so lanes bounce in sync
@@ -614,6 +623,7 @@ const MUSIC_PATH_CHILL := "res://Juggling Game (Chill Trio Mix).mp3"
 var mus: AudioStreamPlayer
 var mus2: AudioStreamPlayer
 var _vol := {"mus": -80.0, "mus2": -80.0}
+var _mix := 0.0   # crossfade position: 0 = the Chill Trio mix carries it, 1 = the stage track
 var _duck := 0.0                    # transient music dip on a drop, decays
 
 # the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
@@ -775,13 +785,14 @@ func _ready() -> void:
 		if pi != -1 and pi + 1 < ua.size():
 			for pj in PATTERNS.size():
 				if String(PATTERNS[pj]["id"]) == ua[pi + 1]:
-					level = maxi(level, int(PATTERNS[pj]["lvl"]))
+					dev_meet_req(PATTERNS[pj])   # composite reqs now: floor every axis it asks
 					pattern_sel = pj
 					start_run(num_balls)
 		var tri := ua.find("--trick")   # dev: unlock every trick and let the auto-player
-		if tri != -1:                   # show them off. An optional id (--trick wfall)
+		if tri != -1:                   # show them off. An optional id (--trick high)
 			_demo_trick = true          # pins that one trick, so toggles can be watched
-			level = 10
+			for tj in TRICKS.size():
+				dev_meet_req(TRICKS[tj])
 			if tri + 1 < ua.size() and not ua[tri + 1].begins_with("--"):
 				for tj in TRICKS.size():
 					if String(TRICKS[tj]["id"]) == ua[tri + 1]:
@@ -846,6 +857,9 @@ func _ready() -> void:
 		cine_tick = 0
 	if ua.has("--gameover"):          # dev: the road's-end screen, for a screenshot
 		game_state = ST_GAMEOVER
+		cine_tick = 0
+	if ua.has("--tutdone"):           # dev: the basics-lesson congrats card, for a screenshot
+		game_state = ST_TUTDONE
 		cine_tick = 0
 	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
 		enter_day()
@@ -1012,6 +1026,13 @@ func _input(event: InputEvent) -> void:
 				game_state = ST_MENU
 				menu_sel = 0
 				play_sfx("ui", -12.0)
+			return
+		ST_TUTDONE:
+			# the congrats card reads itself out for a beat, then any key begins the day
+			if cine_tick > 40 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
+				enter_day()
+				set_day_msg("your first day begins  -  the stage is yours")
+				play_sfx("ui2", -11.0)
 			return
 		ST_ESTABLISH:
 			establish_key()
@@ -1722,12 +1743,15 @@ func practice_skill(idx: int) -> void:
 	# trick (or pattern) can be drilled straight from where it is explained (Louis).
 	# Costs a day segment like any practice; a locked skill or an empty tank refuses.
 	var is_trick := idx < TRICKS.size()
+	# the Skills screen lists patterns in UNLOCK order (pattern_order), so a
+	# pattern row index translates back to the raw PATTERNS index here
+	var pat := -1 if is_trick else int(pattern_order()[idx - TRICKS.size()])
 	if is_trick and not trick_unlocked(idx):
-		set_day_msg("that trick unlocks at level %d" % int(TRICKS[idx]["lvl"]))
+		set_day_msg("that trick asks for %s" % skill_req_text(TRICKS[idx]))
 		play_sfx("whiff", -10.0)
 		return
-	if not is_trick and not pattern_unlocked(idx - TRICKS.size()):
-		set_day_msg("that pattern unlocks at level %d" % int(PATTERNS[idx - TRICKS.size()]["lvl"]))
+	if not is_trick and not pattern_unlocked(pat):
+		set_day_msg("that pattern asks for %s" % skill_req_text(PATTERNS[pat]))
 		play_sfx("whiff", -10.0)
 		return
 	if too_tired():
@@ -1737,7 +1761,7 @@ func practice_skill(idx: int) -> void:
 	# a pattern needs a matching ball count (an even fountain, odd cascade); a trick
 	# keeps the current count. Set the pattern BEFORE start_run so it deals right.
 	if not is_trick:
-		pattern_sel = idx - TRICKS.size()
+		pattern_sel = pat
 	skills_open = false
 	seg_used += 1
 	career["practices"] = int(career["practices"]) + 1
@@ -1754,10 +1778,6 @@ func practice_skill(idx: int) -> void:
 		if kind == "toggle":
 			toggle_on = idx
 			toggle_scored = false
-			tennis_ball = null
-			if idx == TR_COLS:
-				col_air_ref = -1.0
-				col_mid_ball = null
 			set_trick_msg("%s ON  -  practising" % String(TRICKS[idx]["name"]).to_upper())
 		elif kind == "arm":
 			trick_primed = true
@@ -1815,17 +1835,18 @@ func cycle_pattern_live(dir: int) -> void:
 	# new pattern simply shapes every throw from here on. Balls already in flight keep
 	# their own paths; the lane bookkeeping resets so Columns starts clean.
 	var un: Array = []
-	for i in PATTERNS.size():
+	for i in pattern_order():
 		if pattern_unlocked(i):
 			un.append(i)
 	if un.size() <= 1:
-		set_trick_msg("more patterns unlock at level %d" % int(PATTERNS[COLUMNS]["lvl"]))
+		set_trick_msg("the next pattern (Columns) asks for %s" % skill_req_text(PATTERNS[COLUMNS]))
 		return
 	var idx := un.find(pattern_sel)
 	pattern_sel = int(un[(idx + dir + un.size()) % un.size()]) if idx >= 0 else int(un[0])
 	pattern = pattern_sel
 	col_air_ref = -1.0
 	col_mid_ball = null
+	tennis_ball = null   # Tennis re-marks its ball on the first throw under it
 	set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
 	play_sfx("ui2", -13.0)
 
@@ -2208,10 +2229,15 @@ func tut_finish() -> void:
 	tut_id = ""
 	tut_flash = ""
 	mode = MODE_TRAIN
+	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
 	if was_basics:
 		prop_type = PROP_BALLS   # ONLY the basics lesson forces balls back; a trick or
 								 # count lesson taught with the owned prop leaves it be
-	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
+		# the FIRST lesson earns a small congrats card - the starting kit and a
+		# breath - instead of a hard cut into the day hub (Louis)
+		game_state = ST_TUTDONE
+		cine_tick = 0
+		return
 	enter_day()
 	set_day_msg("lesson complete  -  your day begins")
 
@@ -2923,11 +2949,11 @@ func next_throw_over_top(h: int) -> bool:
 	# Mirrors the over_top decision in do_throw, read BEFORE the ball is popped.
 	if trick_primed and trick_sel == TR_OVER:
 		return true
-	if toggle_on == TR_RCASC:
+	if pattern == RCASC:
 		return true
-	if toggle_on == TR_WFALL and h == RIGHT:
+	if pattern == WFALL and h == RIGHT:
 		return true
-	if toggle_on == TR_TENNIS:
+	if pattern == TENNIS:
 		if tennis_ball == null or not balls.has(tennis_ball):
 			return true   # nothing marked yet: the very NEXT throw claims the mark
 		return stack(h).has(tennis_ball)
@@ -2942,7 +2968,7 @@ func next_throw_over_top(h: int) -> bool:
 # catch_slot only seeds the initial hand_catch_rest, since after that the actual
 # CATCH point is locked in per-ball at throw time (do_throw), not re-derived here.
 func throw_slot(h: int) -> int:
-	if pattern == COLUMNS or toggle_on == TR_COLS:
+	if pattern == COLUMNS:
 		# Columns rests at ONE point (Louis, ROADMAP 12b): the same slot it catches at,
 		# so the hand holds still and only the vertical throw-kick moves it. It used to
 		# throw from VERY_INNER and catch at INNER - two slots 34px apart, retargeted
@@ -2955,7 +2981,7 @@ func throw_slot(h: int) -> int:
 
 
 func catch_slot(h: int) -> int:
-	if pattern == COLUMNS or toggle_on == TR_COLS:
+	if pattern == COLUMNS:
 		return HAND_INNER
 	if next_throw_over_top(other(h)):
 		return over_top_land_slot(h)
@@ -2996,10 +3022,22 @@ func over_top_land_slot(t: int) -> int:
 
 
 # where hand h wants to be right now (Louis): while holding, wherever ITS OWN
-# next throw departs from; once empty, exactly where the ball just thrown its
-# way was aimed, and nowhere else until that catch (or a whiff) resolves.
+# next throw departs from; once empty, exactly where the soonest ball flying its
+# way will actually land (to_pos: the landing ring's spot), so the ring always
+# draws centred on the waiting palm - the fountain's widened landing sat 22px
+# off the slot the hand used to wait at, and its rings read as "wrong" next to
+# the cascade's. With nothing inbound, the slot the last throw aimed at.
 func hand_target(h: int) -> Vector2:
-	var p := slot_pos(h, throw_slot(h)) if not stack(h).is_empty() else slot_pos(h, hand_catch_rest[h])
+	var p: Vector2
+	if not stack(h).is_empty():
+		p = slot_pos(h, throw_slot(h))
+	else:
+		var inc: Ball = null
+		for b in balls:
+			if b.state == STATE_FLIGHT and b.to_hand == h:
+				if inc == null or b.land_tick < inc.land_tick:
+					inc = b
+		p = inc.to_pos if inc != null else slot_pos(h, hand_catch_rest[h])
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -3428,44 +3466,35 @@ func do_throw(h: int, hold: int) -> void:
 	# catch (the shower feed used to do exactly that, a quiet 260-a-catch exploit).
 	if pattern == SHOWER and h == LEFT and this_trick < 0:
 		air = int(round(base_air * SHOWER_FEED))
-	# an active TOGGLE trick reshapes every throw while it runs, and Overthrow
-	# (a one-shot) sends this single throw up and over the top of the pattern.
-	# A toggle only TAGS a throw the one-shot has not already claimed: the tag
-	# decides which trick the catch pays, and the loud one-shot must never be
-	# paid out as the toggle's small per-catch bonus.
+	# the PATTERN shapes every throw (there is exactly one pattern at a time now -
+	# Louis - so Reverse Cascade, Waterfall and Tennis reshape here as patterns,
+	# never as trick toggles), and Overthrow (a one-shot) sends this single throw
+	# up and over the top of whatever pattern runs. Pattern throws are NOT tagged
+	# as tricks: the pattern's own score mult is its reward.
 	# The SHOWER's and HALF SHOWER's high hand ride the same over-the-top road
-	# as the toggles (that is what those patterns ARE), so they inherit the
-	# outer launch, the wide landing, and the corner dodge in one mechanic.
+	# (that is what those patterns ARE), so they inherit the outer launch, the
+	# wide landing, and the corner dodge in one mechanic.
 	var over_top := this_trick == TR_OVER
 	if h == RIGHT and pattern in [SHOWER, HALFSHOWER]:
 		over_top = true
-	if toggle_on == TR_COLS:
-		if this_trick < 0:
-			this_trick = TR_COLS
-	elif toggle_on == TR_WFALL:
+	if pattern == WFALL:
 		if h == RIGHT:
 			over_top = true
-			if this_trick < 0:
-				this_trick = TR_WFALL
 		elif this_trick < 0:
 			# the other hand keeps the weave, but forced LOW (a ceiling, not a floor),
 			# so it visibly flows under the over-the-top side instead of drifting up
 			# to meet it when the player holds both hands about the same
 			air = mini(air, int(round(base_air + WATERFALL_LOW * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
-	elif toggle_on == TR_RCASC:
+	elif pattern == RCASC:
 		over_top = true
-		if this_trick < 0:
-			this_trick = TR_RCASC
-	elif toggle_on == TR_TENNIS:
+	elif pattern == TENNIS:
 		if tennis_ball == null or not balls.has(tennis_ball):
-			tennis_ball = b   # the marked ball: the first one thrown after the toggle
+			tennis_ball = b   # the marked ball: the first one thrown under the pattern
 		if b == tennis_ball:
 			over_top = true
-			if this_trick < 0:
-				this_trick = TR_TENNIS
 	if over_top:
 		var high_min := OVER_TOP_MIN
-		if this_trick == TR_WFALL:
+		if pattern == WFALL and h == RIGHT:
 			high_min = maxf(high_min, WATERFALL_HIGH)
 		if h == RIGHT and pattern == SHOWER:
 			high_min = maxf(high_min, SHOWER_MIN)
@@ -3478,7 +3507,7 @@ func do_throw(h: int, hold: int) -> void:
 	# the catch timing unreadable). Breakout throws are exempt: an over_top throw and
 	# an armed one-shot (High Toss, Behind the Back) are meant to stand out, not blend
 	# in - and neither may drag the lanes' reference height up after itself.
-	var col_lanes := pattern == COLUMNS or toggle_on == TR_COLS
+	var col_lanes := pattern == COLUMNS
 	if col_lanes and not over_top and this_trick != TR_HIGH and this_trick != TR_BTB:
 		if col_air_ref < 0.0:
 			col_air_ref = float(air)
@@ -3519,7 +3548,11 @@ func do_throw(h: int, hold: int) -> void:
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
 	# landing a touch wide of the usual catch point
-	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER]
+	# every weaving pattern crosses hands; only Fountain and Columns keep a ball
+	# with its own hand (Reverse Cascade, Waterfall and Tennis are all woven too -
+	# their over-the-top throws force cross below anyway, but the LOW half of a
+	# Waterfall and Tennis's unmarked balls also weave, so they cross here)
+	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER, RCASC, WFALL, TENNIS]
 	if over_top:
 		cross = true
 	# an over-the-top throw never joins the lane bookkeeping (it is the breakout,
@@ -3632,8 +3665,62 @@ func do_throw(h: int, hold: int) -> void:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
 
 
+# --- unlock requirements: a skill (trick or pattern) may ask for a level, a
+# Strength, an Accuracy, and a stage of the career (the venue Reputation has
+# reached). ALL present keys must be met, so the content spreads over the whole
+# climb instead of dumping itself on the first evenings (Louis).
+func dev_meet_req(d: Dictionary) -> void:
+	# dev flags only (--pattern / --trick): floor every progress axis to satisfy
+	# this entry's ask, so a screenshot run is never silently refused a skill.
+	# Reputation only ever rises here (venue_pick is untouched, so the stage
+	# actually shown stays whatever --venue chose).
+	level = maxi(level, int(d.get("lvl", 1)))
+	strength = maxi(strength, int(d.get("str", 0)))
+	accuracy = maxi(accuracy, int(d.get("acc", 0)))
+	if int(d.get("ven", 0)) > 0:
+		reputation = maxi(reputation, VENUE_REP[int(d["ven"])])
+
+
+func skill_req_met(d: Dictionary) -> bool:
+	if level < int(d.get("lvl", 1)):
+		return false
+	if strength < int(d.get("str", 0)):
+		return false
+	if accuracy < int(d.get("acc", 0)):
+		return false
+	if venue_index() < int(d.get("ven", 0)):
+		return false
+	return true
+
+
+func skill_req_text(d: Dictionary) -> String:
+	# the requirement, said plainly, for lock messages and the Skills screen
+	var parts: Array[String] = []
+	if int(d.get("lvl", 1)) > 1:
+		parts.append("level %d" % int(d["lvl"]))
+	if int(d.get("str", 0)) > 0:
+		parts.append("Strength %d" % int(d["str"]))
+	if int(d.get("acc", 0)) > 0:
+		parts.append("Accuracy %d" % int(d["acc"]))
+	if int(d.get("ven", 0)) > 0:
+		parts.append("reach the %s" % String(venue_data(int(d["ven"]))["name"]))
+	if parts.is_empty():
+		return "yours from the start"
+	return " + ".join(parts)
+
+
 func pattern_unlocked(i: int) -> bool:
-	return level >= int(PATTERNS[i]["lvl"])
+	return skill_req_met(PATTERNS[i])
+
+
+func pattern_order() -> Array:
+	# pattern indices in UNLOCK order (by asking level): the array itself keeps
+	# indices 0..4 frozen for old saves, so display and the P cycle sort here
+	var out: Array = []
+	for i in PATTERNS.size():
+		out.append(i)
+	out.sort_custom(func(a, b): return int(PATTERNS[a]["lvl"]) < int(PATTERNS[b]["lvl"]))
+	return out
 
 
 func pattern_mult() -> float:
@@ -3675,11 +3762,13 @@ func cycle_pattern() -> void:
 	# P steps the pattern in training (a performance is committed to its routine).
 	# Restarts the run so the hands are re-dealt for the new choreography.
 	var un: Array = []
-	for i in PATTERNS.size():
+	for i in pattern_order():
 		if pattern_unlocked(i):
 			un.append(i)
-	if un.size() <= 2 and level < 3:
-		set_trick_msg("more patterns unlock at level %d" % int(PATTERNS[COLUMNS]["lvl"]))
+	if un.size() <= 2:
+		# only the parity starters are open, and start_run snaps those to the ball
+		# count anyway, so there is nothing real to cycle yet - say what comes next
+		set_trick_msg("the next pattern (Columns) asks for %s" % skill_req_text(PATTERNS[COLUMNS]))
 		return
 	var idx := un.find(pattern_sel)
 	pattern_sel = int(un[(idx + 1) % un.size()]) if idx >= 0 else int(un[0])
@@ -3689,7 +3778,7 @@ func cycle_pattern() -> void:
 
 
 func trick_unlocked(i: int) -> bool:
-	return level >= int(TRICKS[i]["lvl"])
+	return skill_req_met(TRICKS[i])
 
 
 func unlocked_tricks() -> Array:
@@ -3729,7 +3818,7 @@ func on_trick() -> void:
 	if tut_active and tut_step_data().has("trick"):
 		trick_sel = int(tut_step_data()["trick"])
 	elif unlocked_tricks().is_empty():
-		set_trick_msg("first trick unlocks at level %d" % int(TRICKS[0]["lvl"]))
+		set_trick_msg("the first trick (%s) asks for %s" % [String(TRICKS[0]["name"]), skill_req_text(TRICKS[0])])
 		return
 	elif trick_sel < 0 or not trick_unlocked(trick_sel):
 		trick_sel = int(unlocked_tricks()[0])
@@ -3752,16 +3841,11 @@ func on_trick() -> void:
 			# Only one toggle runs at a time; switching replaces the old one.
 			if toggle_on == trick_sel:
 				toggle_on = -1
-				tennis_ball = null
 				set_trick_msg("%s OFF" % String(t["name"]).to_upper())
 				play_sfx("ui", -16.0)
 			else:
 				toggle_on = trick_sel
 				toggle_scored = false
-				tennis_ball = null   # Tennis marks the next thrown ball
-				if trick_sel == TR_COLS:
-					col_air_ref = -1.0
-					col_mid_ball = null
 				set_trick_msg("%s ON" % String(t["name"]).to_upper())
 				play_sfx("ui2", -13.0)
 		_:
@@ -3847,7 +3931,6 @@ func xp_to_next(lv: int) -> int:
 func add_xp(amount: int) -> void:
 	if amount <= 0:
 		return
-	var prev_level := level
 	xp += amount
 	run_xp += amount
 	var leveled := false
@@ -3859,18 +3942,19 @@ func add_xp(amount: int) -> void:
 	if leveled:
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
-		announce_new_tricks(prev_level)   # a level that crosses a trick's gate teaches it
-		announce_new_patterns(prev_level)   # and so does one that crosses a pattern's
+		announce_unlocks()   # a level that crosses a skill's gate teaches it
 		save_progress()
 
 
-func queue_lesson(id: String) -> void:
+func queue_lesson(id: String) -> bool:
 	# an unlock during a live set cannot interrupt it, so its lesson WAITS at the hub.
 	# Queued once, taught once, then remembered forever (seen_tuts). A lesson already
-	# taught, or already waiting, is never re-queued.
+	# taught, or already waiting, is never re-queued. Returns whether it queued NOW,
+	# which is what announce_unlocks uses as its "newly unlocked" signal.
 	if seen_tuts.has(id) or pending_tuts.has(id):
-		return
+		return false
 	pending_tuts.append(id)
+	return true
 
 
 func check_ball_unlock(prev_max: int) -> void:
@@ -3913,31 +3997,30 @@ func pattern_by_id(pid: String) -> int:
 	return -1
 
 
-func announce_new_patterns(prev_level: int) -> void:
-	# a pattern whose unlock level we just crossed announces itself on the trick
-	# feedback line, teaching the P key in the same breath, and queues its lesson
-	for i in PATTERNS.size():
-		var lv := int(PATTERNS[i]["lvl"])
-		if lv > prev_level and lv <= level:
-			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
-			queue_lesson("pattern_%s" % String(PATTERNS[i]["id"]))
-			play_sfx("streak", -6.0)
-
-
-func announce_new_tricks(prev_level: int) -> void:
-	# a trick whose unlock level we just crossed gets a banner and becomes the
-	# SELECTED trick, so the very next Space press does the thing the banner just
-	# explained (nothing fires by itself: the one-shot still wants its own press),
-	# and queues a hands-on lesson to be taught at the hub
+func announce_unlocks() -> void:
+	# a requirement can be crossed on ANY progress axis - a level, a stat spend, a
+	# stage reached - so after each of those this rechecks everything and announces
+	# whatever is newly open. queue_lesson's own once-ever dedupe is the memory of
+	# what was already announced, so nothing double-fires across sessions either.
+	# Skills open from the very start (Cascade, Fountain) never announce.
 	for i in TRICKS.size():
-		var lv := int(TRICKS[i]["lvl"])
-		if lv > prev_level and lv <= level:
+		if not trick_unlocked(i) or skill_req_text(TRICKS[i]) == "yours from the start":
+			continue
+		if queue_lesson("trick_%s" % String(TRICKS[i]["id"])):
+			# the banner, and the fresh trick becomes the SELECTED one, so the very
+			# next Space press does the thing the banner just explained (nothing
+			# fires by itself: the one-shot still wants its own press)
 			trick_unlock = i
 			trick_unlock_tick = tick
 			trick_sel = i
 			trick_primed = false
-			queue_lesson("trick_%s" % String(TRICKS[i]["id"]))
 			play_sfx("streak", -5.0)
+	for i in PATTERNS.size():
+		if not pattern_unlocked(i) or skill_req_text(PATTERNS[i]) == "yours from the start":
+			continue
+		if queue_lesson("pattern_%s" % String(PATTERNS[i]["id"])):
+			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
+			play_sfx("streak", -6.0)
 
 
 func energy_mult() -> float:
@@ -4026,6 +4109,7 @@ func resolve_booking(complete: bool) -> void:
 		rep_delta = mini(rep_delta, VENUE_REP[cur_tier + 2] - 1 - reputation)
 	reputation = maxi(0, reputation + rep_delta)
 	last_rep_delta = rep_delta
+	announce_unlocks()   # a Reputation jump can open the stage a skill was waiting on
 	# PAY scales with what you banked (a partial booking pays partial; the score already
 	# scales with the venue, so no separate venue multiplier), lifted by Reputation and a
 	# Purist premium, with the busking floor so a broke juggler always leaves with something.
@@ -4412,6 +4496,7 @@ func invest(which: String) -> void:
 			speed += 1
 	points -= 1
 	check_ball_unlock(prev_max)   # a new ball count queues its own lesson at the hub
+	announce_unlocks()            # a stat spend can cross a skill's Strength/Accuracy ask
 	save_progress()
 
 
@@ -4487,6 +4572,18 @@ func save_file() -> String:
 	return slot_path(save_slot)
 
 
+func _migrate_lesson_id(id: String) -> String:
+	# the four routine-reshaping toggles became PATTERNS (one pattern at a time,
+	# Louis), so their old trick-lesson ids map to the pattern lessons that
+	# replaced them. Every other id passes through untouched.
+	match id:
+		"trick_cols": return "pattern_columns"
+		"trick_wfall": return "pattern_wfall"
+		"trick_rcasc": return "pattern_rcasc"
+		"trick_tennis": return "pattern_tennis"
+	return id
+
+
 func load_progress() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(save_file()) == OK:
@@ -4516,24 +4613,26 @@ func load_progress() -> void:
 		if bp is Array:
 			for i in mini((bp as Array).size(), best_scores_purist.size()):
 				best_scores_purist[i] = int((bp as Array)[i])
-		pattern_sel = int(cf.get_value("prog", "pattern_sel", CASCADE))
+		pattern_sel = clampi(int(cf.get_value("prog", "pattern_sel", CASCADE)), 0, PATTERNS.size() - 1)
 		var cr: Variant = cf.get_value("prog", "career", {})
 		if cr is Dictionary:
 			for k in career:
 				if (cr as Dictionary).has(k):
 					career[k] = int((cr as Dictionary)[k])
 		# lessons already taught, and lessons queued but not yet taught, both persist -
-		# without this an unlock lesson (Phase 1) re-fired every launch (the seen_tuts bug)
+		# without this an unlock lesson (Phase 1) re-fired every launch (the seen_tuts bug).
+		# Ids run through _migrate_lesson_id: a save from before the pattern fold may
+		# still hold the four routine toggles as trick lessons.
 		var st: Variant = cf.get_value("prog", "seen_tuts", [])
 		if st is Array:
 			seen_tuts.clear()
 			for v in (st as Array):
-				seen_tuts.append(String(v))
+				seen_tuts.append(_migrate_lesson_id(String(v)))
 		var pt: Variant = cf.get_value("prog", "pending_tuts", [])
 		if pt is Array:
 			pending_tuts.clear()
 			for v in (pt as Array):
-				pending_tuts.append(String(v))
+				pending_tuts.append(_migrate_lesson_id(String(v)))
 		# the standing ante per venue (bookings cleared there): the raised bar the venue
 		# remembers between visits. The rest of the booking is per-night and unsaved.
 		var an: Variant = cf.get_value("prog", "ante", [])
@@ -4802,6 +4901,9 @@ func _draw() -> void:
 			return
 		ST_GAMEOVER:
 			draw_gameover(font, s)
+			return
+		ST_TUTDONE:
+			draw_tutdone(font, s)
 			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
@@ -6195,9 +6297,11 @@ func draw_pie_row(font: Font, x: float, y: float, w: float, keynum: int) -> void
 	draw_string(font, Vector2(x + w - 48.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
 
 
-func _skills_row(font: Font, x: float, y: float, w: float, ename: String, lvl: int, unlocked: bool, sel: bool) -> void:
-	# one entry in the Skills reference: name on the left, a ready / Lv-gate badge
-	# on the right, and a soft highlight when it is the selected entry.
+func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: Dictionary, unlocked: bool, sel: bool) -> void:
+	# one entry in the Skills reference: name on the left, a ready / gate badge
+	# on the right, and a soft highlight when it is the selected entry. The badge
+	# stays short (the level, plus a + when stats or a stage are also asked);
+	# the detail strip below spells the full requirement out.
 	if sel:
 		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.10))
 		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.35), false, 1.0)
@@ -6206,7 +6310,8 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, lvl: i
 	if unlocked:
 		draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
 	else:
-		draw_string(font, Vector2(x + w - 76.0, y), "Lv %d" % lvl, HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
+		var more: bool = int(req.get("str", 0)) > 0 or int(req.get("acc", 0)) > 0 or int(req.get("ven", 0)) > 0
+		draw_string(font, Vector2(x + w - 76.0, y), "Lv %d%s" % [int(req["lvl"]), "+" if more else ""], HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
 
 
 func draw_skills(font: Font, s: Vector2) -> void:
@@ -6239,10 +6344,13 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(col_r, y0 - 42.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
 	for i in nt:
 		var td: Dictionary = TRICKS[i]
-		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), int(td["lvl"]), trick_unlocked(i), i == skills_sel)
-	for j in PATTERNS.size():
-		var pd: Dictionary = PATTERNS[j]
-		_skills_row(font, col_r, y0 + float(j) * row_h, colw, String(pd["name"]), int(pd["lvl"]), pattern_unlocked(j), (nt + j) == skills_sel)
+		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), td, trick_unlocked(i), i == skills_sel)
+	# patterns list in UNLOCK order (pattern_order), not raw array order: the raw
+	# indices are frozen for old saves, so the tidy career ladder is sorted here
+	var pord := pattern_order()
+	for j in pord.size():
+		var pd: Dictionary = PATTERNS[pord[j]]
+		_skills_row(font, col_r, y0 + float(j) * row_h, colw, String(pd["name"]), pd, pattern_unlocked(pord[j]), (nt + j) == skills_sel)
 
 	# the detail strip: the selected entry explained, with its exact controls
 	var dy := py + ph - 118.0
@@ -6251,13 +6359,13 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var ename := ""
 	var how := ""
 	var desc := ""
-	var locked_at := 0
+	var req_line := ""
 	var is_unlocked := true
 	if skills_sel < nt:
 		var td2: Dictionary = TRICKS[skills_sel]
 		ename = String(td2["name"])
 		desc = String(td2["desc"])
-		locked_at = int(td2["lvl"])
+		req_line = skill_req_text(td2)
 		is_unlocked = trick_unlocked(skills_sel)
 		match String(td2["kind"]):
 			"live":
@@ -6267,15 +6375,17 @@ func draw_skills(font: Font, s: Vector2) -> void:
 			_:
 				how = "%s loads it, then %s powers your NEXT throw. One press, one trick." % [kc_sel, kc_use]
 	else:
-		var pd2: Dictionary = PATTERNS[skills_sel - nt]
+		var pd2: Dictionary = PATTERNS[pattern_order()[skills_sel - nt]]
 		ename = String(pd2["name"])
 		desc = String(pd2["desc"])
-		locked_at = int(pd2["lvl"])
-		is_unlocked = pattern_unlocked(skills_sel - nt)
+		req_line = skill_req_text(pd2)
+		is_unlocked = pattern_unlocked(pattern_order()[skills_sel - nt])
 		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still). Cascade and Fountain also match the ball count." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
 	draw_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
 	if not is_unlocked:
-		draw_string(font, Vector2(px + pw - 230.0, dy + 18.0), "unlocks at level %d" % locked_at, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.85, 0.62, 0.5))
+		# the full requirement, right-aligned so a long ask (level + stat + stage)
+		# never collides with the name on the left
+		draw_string(font, Vector2(px + pw - 490.0, dy + 18.0), "asks for %s" % req_line, HORIZONTAL_ALIGNMENT_RIGHT, 444.0, 13, Color(0.85, 0.62, 0.5))
 	draw_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.9, 0.82, 0.66))
 	draw_string(font, Vector2(px + 46.0, dy + 62.0), desc, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.78, 0.72, 0.64))
 
@@ -6623,6 +6733,48 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 	draw_vignette(s, 0.7)
 
 
+func draw_tutdone(font: Font, s: Vector2) -> void:
+	# the congrats card after the basics lesson (Louis): a breath between "you can
+	# juggle now" and the day hub, showing the starting kit instead of hard-cutting
+	# to a menu. The Backyard - the first stage - waits behind the veil.
+	ext_center = true
+	draw_venue_exterior(s, 0)
+	ext_center = false
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.6))
+	var fin := clampf(float(cine_tick) / 50.0, 0.0, 1.0)
+	draw_title_glow(font, s.y * 0.20, "YOU CAN JUGGLE", 42, Color(1.0, 0.88, 0.5, fin), s)
+	draw_ornament(s.x * 0.5, s.y * 0.20 + 66.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
+	draw_string(font, Vector2(0, s.y * 0.34), "Throw, catch, and keep it flying. The rest is a career.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.88, 0.8, 0.68, fin))
+
+	# the starting kit, one warm panel: the purse and the three balls
+	var kw := 460.0
+	var kx := s.x * 0.5 - kw * 0.5
+	var ky := s.y * 0.44
+	var ka := clampf(float(cine_tick - 30) / 40.0, 0.0, 1.0)
+	if ka > 0.0:
+		# an opaque underlay first: the Backyard house sits right behind this spot
+		# and hud_panel alone is translucent enough to let it bleed through the kit
+		draw_rect(Rect2(kx, ky, kw, 148.0), Color(0.05, 0.03, 0.05, 0.9 * ka))
+		hud_panel(Rect2(kx, ky, kw, 148.0))
+		draw_string(font, Vector2(kx, ky + 30.0), "YOUR STARTING KIT", HORIZONTAL_ALIGNMENT_CENTER, kw, 14, Color(0.95, 0.8, 0.55, ka))
+		draw_circle(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 0.84, 0.4, ka))
+		draw_circle(Vector2(kx + 117.0, ky + 63.0), 2.6, Color(1.0, 0.95, 0.7, ka))
+		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
+		for i in 3:
+			var bc := ball_color(i)
+			bc.a = ka
+			draw_ball_shape(Vector2(kx + 104.0 + float(i) * 26.0, ky + 108.0), bc, 0.9)
+		draw_string(font, Vector2(kx + 140.0 + 42.0, ky + 114.0), "three juggling balls", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.88, 0.8, 0.68, ka))
+
+	draw_string(font, Vector2(0, s.y * 0.66), "The Backyard is waiting for its first show.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.8, 0.74, 0.64, ka))
+	if cine_tick > 40:
+		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
+		draw_string(font, Vector2(0, s.y * 0.78), "Enter  -  begin your first day", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
+	draw_vignette(s, 0.6)
+
+
 func draw_stats(font: Font, s: Vector2) -> void:
 	# the career ledger: the two record boards side by side over the lifetime
 	# numbers, so every high score the save has ever set stays visible
@@ -6740,19 +6892,22 @@ func audio_update() -> void:
 	# crossfade, so stepping onto the stage lifts the drive and stepping off eases back.
 	var juggling := in_play and running and not results_open
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
-	var main_t := -80.0
-	var chill_t := -80.0
-	if juggling:
-		main_t = lerpf(-13.0, -9.0, energy) if perf else -14.0
-	else:
-		chill_t = -13.0
+	# the handover between the two tracks is a slow EQUAL-POWER crossfade (Louis: no
+	# hard switching): a mix value walks 0..1 over ~2.5s and each track's gain rides
+	# sin/cos of it, so both stay audible through the middle with no dip and no jump.
+	_mix = move_toward(_mix, 1.0 if juggling else 0.0, 1.0 / (2.5 * 120.0))
+	var main_base := (lerpf(-13.0, -9.0, energy) if perf else -14.0) - _duck * 9.0
+	var main_t := main_base + linear_to_db(maxf(sin(_mix * PI * 0.5), 0.001))
+	var chill_t := -13.0 + linear_to_db(maxf(cos(_mix * PI * 0.5), 0.001))
 	if not set_music:
 		main_t = -80.0
 		chill_t = -80.0
-	_vol["mus"] = lerpf(_vol["mus"], main_t - _duck * 9.0, 0.06)
-	mus.volume_db = _vol["mus"]
-	_vol["mus2"] = lerpf(_vol["mus2"], chill_t, 0.05)
-	mus2.volume_db = _vol["mus2"]
+	# the base loudness still GLIDES (energy swells, drop ducks); only the handover
+	# itself is the timed crossfade above
+	_vol["mus"] = lerpf(_vol["mus"], main_t, 0.06)
+	mus.volume_db = maxf(_vol["mus"], -80.0)
+	_vol["mus2"] = lerpf(_vol["mus2"], chill_t, 0.06)
+	mus2.volume_db = maxf(_vol["mus2"], -80.0)
 	_duck = maxf(0.0, _duck - 0.03)
 
 
@@ -7819,10 +7974,6 @@ func _demo_step() -> void:
 	if _demo_trick and pin_kind == "toggle" and toggle_on != _demo_trick_pin and tick >= 24:
 		toggle_on = _demo_trick_pin
 		toggle_scored = false
-		tennis_ball = null
-		if _demo_trick_pin == TR_COLS:
-			col_air_ref = -1.0
-			col_mid_ball = null
 	# metronome: every beat, release one ball from a hand that actually holds one.
 	# This can never desync because it only throws real held balls.
 	if tick >= 24 and tick % DEMO_BEAT == 0:
