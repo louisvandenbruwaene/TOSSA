@@ -105,7 +105,7 @@ const POINTS_PER_LEVEL := 3
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
 							  # max-height throw always still demands a real catch
 const STAM_DRAIN_CATCH := 0.4
-const STAM_DRAIN_THROW := 0.3
+# (throws price by the prop's flat "stam" rate in PROPS now, not a global const)
 const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
 const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
 
@@ -206,13 +206,16 @@ const PROP_CLUBS := 3
 const PROP_KNIVES := 4
 const PROP_TORCHES := 5
 const PROPS := [
-	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 0,    "spins": false},
-	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "spins": false},
-	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "spins": false},
-	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "spins": true},
-	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "spins": true},
-	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "spins": true},
+	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 0,    "stam": 1, "spins": false},
+	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "stam": 2, "spins": false},
+	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "stam": 3, "spins": false},
+	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "stam": 4, "spins": true},
+	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "stam": 5, "spins": true},
+	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "stam": 6, "spins": true},
 ]
+# "stam" is a throw's FLAT stamina price (Louis): every throw costs at least 1,
+# heavier props cost their own rate, and Focus shaves one point per 20 Focus,
+# never below 1. See do_throw - the old percent-of-a-percent drain is gone.
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
 
 # --- shop: spend gold on props and gear (ideas.rtf shop) ----------------------
@@ -283,12 +286,20 @@ const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
 # Amazing! frame-perfect catch and a run of ten straight Perfects are earned
 # bursts. Slow motion stretches the catch windows in REAL time, which is what
 # makes five clubs and seven torches humanly possible.
-const SPEED_CAP := 100         # the Speed stat's permanent ceiling (points, not percent:
-								# 4 points per 1% slow motion, so the cap is still 25%)
+# NERFED 2026-07-16 (Louis): slow motion was too easy to stack. The Speed stat
+# now costs 8 points per 1% (200 points to reach the full 25%), the Pie and the
+# earned bursts each give 15% instead of 25%, the bursts run shorter, and the
+# TOTAL slow is capped at 50% - above that the 120Hz sim visibly steps ("jitters
+# on balls"), and 50% is the intended ceiling for a five-object load anyway.
+const SPEED_CAP := 200         # the Speed stat's permanent ceiling (points, not percent:
+								# 8 points per 1% slow motion, so the cap is still 25%)
 const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
-const AMAZING_FRAMES := 480    # the frame-perfect reward burst (four seconds)
+const PIE_SLOW := 0.15         # the slice's share of slow motion (was a quarter)
+const BURST_SLOW := 0.15       # each earned burst's share (Amazing!, the chain)
+const SLOW_TOTAL_CAP := 0.5    # the stack's hard ceiling, jitter-free and earned
+const AMAZING_FRAMES := 360    # the frame-perfect reward burst (three seconds)
 const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
-const CHAIN_FRAMES := 3600     # ...which then lasts thirty seconds, then re-earn
+const CHAIN_FRAMES := 1800     # ...which then lasts fifteen seconds, then re-earn
 const SLOW_RAMP := 0.0025      # slow motion ramps LINEARLY in and out per frame
 							   # (a hard step made the player miss, Louis; slowed
 							   # further so both easing in and out give real
@@ -299,7 +310,8 @@ const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
 # and the window. It starts nearly frozen and speeds up as the lesson goes on, so the
 # last step is close to real speed and the player is never dumped from a slow world
 # straight into a fast one. A step may override this floor with its own "slow" key.
-const TUT_SLOW_START := 0.62   # the first step of a lesson: 62% slow
+const TUT_SLOW_START := 0.5    # the first step of a lesson: half speed (the
+								# slow-stack cap, so lessons stay jitter-free too)
 const TUT_SLOW_END := 0.20     # the last step: nearly real time
 const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
 							   # and brighten (at 62% slow that is about two real seconds)
@@ -1131,21 +1143,32 @@ func _input(event: InputEvent) -> void:
 			if not performing:
 				start_run(num_balls)
 		KEY_BRACKETLEFT:
-			if not performing:
+			# the load changes LIVE during a performance now (Louis): props are
+			# handed in or taken offstage without restarting the run
+			if performing:
+				set_count_live(balls.size() - 1)
+			else:
 				start_run(num_balls - 1)
 		KEY_BRACKETRIGHT:
-			if not performing:
+			if performing:
+				set_count_live(balls.size() + 1)
+			else:
 				start_run(num_balls + 1)
 		KEY_3:
-			if not performing: start_run(3)
+			if performing: set_count_live(3)
+			else: start_run(3)
 		KEY_4:
-			if not performing: start_run(4)
+			if performing: set_count_live(4)
+			else: start_run(4)
 		KEY_5:
-			if not performing: start_run(5)
+			if performing: set_count_live(5)
+			else: start_run(5)
 		KEY_6:
-			if not performing: start_run(6)
+			if performing: set_count_live(6)
+			else: start_run(6)
 		KEY_7:
-			if not performing: start_run(7)
+			if performing: set_count_live(7)
+			else: start_run(7)
 		KEY_O:
 			# switch the object either way: live during a performance (re-skins the
 			# props in play, keeps the run), or with a fresh deal in practice
@@ -1827,6 +1850,58 @@ func cycle_prop_live(dir: int) -> void:
 		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
 		i += 1
 	set_trick_msg(String(PROPS[prop_type]["name"]).to_upper())
+	play_sfx("ui2", -13.0)
+
+
+func set_count_live(n: int) -> void:
+	# change the LOAD mid-performance without restarting (Louis): extra props are
+	# handed in from offstage into a hand no ball is flying toward, and removing
+	# props takes HELD ones away. The run, score and streak carry on; the streak
+	# cap and object mult simply follow the new count from here.
+	n = clampi(n, MIN_BALLS, max_balls())
+	if n == balls.size():
+		return
+	if have(prop_type) < n:
+		set_trick_msg("you own %d of those  -  the shop sells more" % have(prop_type))
+		play_sfx("late", -12.0)
+		return
+	while balls.size() < n:
+		var to_h := -1
+		for hh in [LEFT, RIGHT]:
+			var busy := false
+			for b in balls:
+				if b.state == STATE_FLIGHT and b.to_hand == hh:
+					busy = true
+					break
+			if not busy and (to_h < 0 or stack(hh).size() < stack(to_h).size()):
+				to_h = hh
+		if to_h < 0:
+			set_trick_msg("hands are busy  -  try again between catches")
+			play_sfx("late", -12.0)
+			break
+		var nb := Ball.new()
+		nb.state = STATE_HAND
+		nb.kind = prop_type
+		nb.color = ball_color(balls.size()) if prop_type == PROP_BALLS else prop_color(prop_type)
+		nb.spin_dir = 1.0 if balls.size() % 2 == 0 else -1.0
+		balls.append(nb)
+		stack(to_h).append(nb)
+	while balls.size() > n:
+		var from_h := LEFT if stack(LEFT).size() >= stack(RIGHT).size() else RIGHT
+		if stack(from_h).is_empty():
+			set_trick_msg("everything is in the air  -  catch one first")
+			play_sfx("late", -12.0)
+			break
+		var gone: Ball = stack(from_h).pop_back()
+		balls.erase(gone)
+	num_balls = balls.size()
+	# the lane bookkeeping re-seeds for the new count (a middle lane may appear
+	# or vanish); Tennis keeps its mark unless that very ball just left the stage
+	col_air_ref = -1.0
+	col_mid_ball = null
+	if tennis_ball != null and not balls.has(tennis_ball):
+		tennis_ball = null
+	set_trick_msg("%d OBJECTS" % num_balls)
 	play_sfx("ui2", -13.0)
 
 
@@ -3029,14 +3104,17 @@ func over_top_land_slot(t: int) -> int:
 # the cascade's. With nothing inbound, the slot the last throw aimed at.
 func hand_target(h: int) -> Vector2:
 	var p: Vector2
+	var inc: Ball = null
+	for b in balls:
+		if b.state == STATE_FLIGHT and b.to_hand == h:
+			if inc == null or b.land_tick < inc.land_tick:
+				inc = b
 	if not stack(h).is_empty():
-		p = slot_pos(h, throw_slot(h))
+		# holding, but a hand may catch INTO a held stack now (Louis), so when a
+		# ball is about to land its way it still reaches for the landing point;
+		# otherwise it rests where its own next throw departs from
+		p = inc.to_pos if inc != null and inc.land_tick - tick < 36 else slot_pos(h, throw_slot(h))
 	else:
-		var inc: Ball = null
-		for b in balls:
-			if b.state == STATE_FLIGHT and b.to_hand == h:
-				if inc == null or b.land_tick < inc.land_tick:
-					inc = b
 		p = inc.to_pos if inc != null else slot_pos(h, hand_catch_rest[h])
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
@@ -3217,8 +3295,9 @@ func on_catch(h: int) -> void:
 		return  # the act has fallen apart: you watch it all come down, you cannot save it.
 				# Without this a player (or the autoplayer) could keep catching the still-
 				# airborne props after the crowd walked, grinding score with the clock off.
-	if not stack(h).is_empty():
-		return  # hand occupied; you physically cannot catch (this IS the traffic rule)
+	# a hand that already HOLDS a ball may still catch (Louis): the stack takes
+	# another. The old "hand occupied, no catch" traffic rule is gone - traffic
+	# is now the player's own problem, and holding two is a legitimate rescue.
 	var best: Ball = null
 	var best_d := 1000000
 	for b in balls:
@@ -3544,7 +3623,12 @@ func do_throw(h: int, hold: int) -> void:
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
-	stamina = maxf(0.0, stamina - STAM_DRAIN_THROW * energy_mult() * (1.0 + WEIGHT_STAM * float(weight - 1)))
+	# a throw's stamina price is the prop's FLAT rate (Louis): balls 1, eggs 2,
+	# rings 3, clubs 4, knives 5, torches 6. Focus shaves one point per 20
+	# Focus, never below 1 - every throw costs at least one. Lessons stay free.
+	if not tut_active:
+		var drain := maxf(1.0, float(PROPS[b.kind]["stam"]) - floor(focus() / 20.0))
+		stamina = maxf(0.0, stamina - drain)
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
 	# landing a touch wide of the usual catch point
@@ -3633,7 +3717,14 @@ func do_throw(h: int, hold: int) -> void:
 		if pattern == FOUNTAIN:
 			fwide = 22.0 if b.to_hand == RIGHT else -22.0
 		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + fwide, 0.0)
-	# Behind the Back is a flourish, drawn as a high wide sweeping loop in flight_pos
+	if this_trick == TR_BTB:
+		# BEHIND THE BACK actually goes behind now (Louis: it never read as
+		# behind): the arm wraps and the ball RELEASES from behind the opposite
+		# hip, a touch below the hand line, so it rises past the body - drawn
+		# BEHIND the figure until it clears (the two-pass split in the play
+		# draw). From release on it is the same clean parabola as any throw.
+		var bc := stage_center()
+		b.from_pos = Vector2(lerpf(bc.x, inner_pos(other(h)).x, 0.75), bc.y + 26.0)
 
 	throw_kick[h] = tick
 	charging[h] = false
@@ -4174,17 +4265,20 @@ func slow_target() -> float:
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
 	# frame-perfect catch, and an earned fifty-Perfect thirty-second window. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
-	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 4.0 / 100.0
+	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 8.0 / 100.0
 	if pie_active and not purist_run():
-		a += 0.25
+		a += PIE_SLOW
 	if _frames < amazing_until:
-		a += 0.25
+		a += BURST_SLOW
 	if _frames < chain_until:
-		a += 0.25
+		a += BURST_SLOW
 	if tut_active:
 		a = maxf(a, tut_slow())   # a lesson sets a FLOOR on slowness, never a sum: it
 								  # must not stack with a Pie into a frozen world
-	return clampf(a, 0.0, 1.0)
+	# the hard ceiling (Louis): past 50% the stepped sim reads as jitter, and 50%
+	# is the intended best case anyway - fully invested Speed plus a Pie plus one
+	# earned burst reaches it, so the stack only peaks when everything aligns
+	return clampf(a, 0.0, SLOW_TOTAL_CAP)
 
 
 func tut_slow() -> float:
@@ -4922,6 +5016,7 @@ func _draw() -> void:
 			return
 	draw_backdrop(s)
 	draw_egg_splats()      # yolk on the floor sits behind the performer
+	draw_balls_in_flight(true)   # Behind-the-Back balls still BEHIND the body
 	draw_juggler(s)
 	draw_targets()
 	draw_balls_in_flight()
@@ -5408,9 +5503,25 @@ func draw_targets() -> void:
 						Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
 
 
-func draw_balls_in_flight() -> void:
+func _btb_behind(b: Ball) -> bool:
+	# a Behind-the-Back ball spends the first stretch of its flight hidden BEHIND
+	# the figure (it was released behind the body), then pops out past the
+	# shoulder. Behind = early in the flight AND still over the torso; once it
+	# drifts wide or crests, it draws in front like everything else.
+	if b.trick != TR_BTB:
+		return false
+	var span := maxi(1, b.land_tick - b.launch_tick)
+	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
+	return p < 0.35 and absf(flight_pos(b).x - stage_center().x) < 90.0
+
+
+func draw_balls_in_flight(behind: bool = false) -> void:
+	# two passes (see the play draw): the `behind` pass runs BEFORE the juggler
+	# so a Behind-the-Back throw genuinely disappears behind the body
 	for b in balls:
 		if b.state == STATE_FLIGHT:
+			if _btb_behind(b) != behind:
+				continue
 			draw_trail(b)
 			var pos := flight_pos(b)
 			draw_prop(b, pos)
@@ -6150,7 +6261,7 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	var jx := cx - jw * 0.5
 	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ocol)
 	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.86, 0.76, 0.62))
-	draw_hints_row(font, cx, s.y - 40.0, [[["O"], "object"], [["P"], "pattern"]])
+	draw_hints_row(font, cx, s.y - 40.0, [[["O"], "object"], [["P"], "pattern"], [["[", "]"], "count"]])
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -6194,8 +6305,8 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	ry += 52.0
 	draw_stat_row(font, tx, ry, innerw, "ENDURANCE", endurance, "raises your maximum stamina", "3")
 	ry += 52.0
-	var spd_pct := speed / 4
-	var spd_note := "the world runs %d%% slower for you  -  4 points per percent, cap %d%%" % [spd_pct, SPEED_CAP / 4]
+	var spd_pct := speed / 8
+	var spd_note := "the world runs %d%% slower for you  -  8 points per percent, cap %d%%" % [spd_pct, SPEED_CAP / 8]
 	if speed >= SPEED_CAP:
 		spd_note = "the world runs %d%% slower for you  -  at the cap" % spd_pct
 	draw_stat_row(font, tx, ry, innerw, "SPEED", speed, spd_note, "4")
