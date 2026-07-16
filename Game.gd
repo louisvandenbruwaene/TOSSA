@@ -7202,22 +7202,24 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
 
 	var tagA := clampf(float(cine_tick - 10) / 20.0, 0.0, 1.0)
-	# STAGE n of 6, then the name in lights, then the crowd blurb
-	draw_string(font, Vector2(0, s.y * 0.12), "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1], HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.78, 0.55, 0.85 * tagA))
+	# STAGE n of 6, then the name in lights, then the crowd blurb. These centre
+	# lines sit right over the venue portrait (the Circus tent's bright pole ran
+	# straight through them), so they get the 8-way outline treatment.
+	draw_text_shout(font, Vector2(0, s.y * 0.12), "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1], HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.78, 0.55, 0.85 * tagA))
 	var vn := String(venue_data(establish_venue)["name"]).to_upper()
 	draw_title_glow(font, s.y * 0.14 + 12.0, vn, 56, Color(1.0, 0.9, 0.55), s)
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 78.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
-	draw_string(font, Vector2(0, s.y * 0.14 + 104.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.86, 0.78, 0.66, 0.8 * tagA))
+	draw_text_shout(font, Vector2(0, s.y * 0.14 + 104.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.86, 0.78, 0.66, 0.8 * tagA))
 
 	# the record to beat here (its own board on a purist night), plus a purist tag
 	var recy := s.y * 0.14 + 140.0
 	if purist:
-		draw_string(font, Vector2(0, recy), "PURIST BOOKING  -  no stat help, its own record board", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.82, 0.72, 0.85, 0.85 * tagA))
+		draw_text_shout(font, Vector2(0, recy), "PURIST BOOKING  -  no stat help, its own record board", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.82, 0.72, 0.85, 0.85 * tagA))
 		recy += 24.0
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
-		draw_string(font, Vector2(0, recy), "record to beat   %s" % commafy(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
+		draw_text_shout(font, Vector2(0, recy), "record to beat   %s" % commafy(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
 	else:
-		draw_string(font, Vector2(0, recy), "no record here yet  -  set one", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.82, 0.6, 0.7 * tagA))
+		draw_text_shout(font, Vector2(0, recy), "no record here yet  -  set one", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.82, 0.6, 0.7 * tagA))
 
 	# THE BOOKING (Phase 2): which of the three sets you are about to walk into, the number
 	# you must beat, and - from the very first card - the Encore condition waiting at the end,
