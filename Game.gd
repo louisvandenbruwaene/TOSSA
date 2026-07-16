@@ -5835,13 +5835,16 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, ec)
 			_wrap_text(font, String(ENCORES[encore]["desc"]), LX + 14, 312, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
 	elif not performing:
-		# training: no contest, just what you are drilling
-		hud_card(Rect2(LX, 16, LW, 64))
+		# training: no contest, just the mode. The prop and pattern are NOT repeated
+		# here (Louis: no redundancy) - the routine card at the foot of the stage
+		# owns them, along with the keys that switch them.
+		var nb := next_ball_strength()
+		hud_card(Rect2(LX, 16, LW, 78.0 if nb > 0 else 58.0))
 		var tl := "PRACTICE" + ("   -   DEBUG" if debug_mode else "")
 		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.72, 0.82, 0.9))
-		draw_string(font, Vector2(LX + 14, 60), "%s   -   %s   -   no crowd, no pay" % [String(cur_prop()["name"]).to_lower(), String(PATTERNS[pattern]["name"]).to_lower()], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
-		if next_ball_strength() > 0:
-			draw_string(font, Vector2(LX + 14, 78 + 16), "next ball at Strength %d" % next_ball_strength(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
+		draw_string(font, Vector2(LX + 14, 60), "no crowd, no pay", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
+		if nb > 0:
+			draw_string(font, Vector2(LX + 14, 78), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
 
 	# ============================ RIGHT RAIL: you ============================
 	# hidden during the results panel so it never lingers, dimmed, beside the card
@@ -5861,8 +5864,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(RX + 14, 52), "x%d" % mult, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
 		draw_string(font, Vector2(RX + RW - 150, 40), "MAX  -  x%d" % cap if capped else "STREAK  /%d" % cap, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(1.0, 0.7, 0.35) if capped else Color(0.85, 0.72, 0.55))
 		draw_string(font, Vector2(RX + RW - 150, 56), "best  %d" % best_streak, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
-		# STATE: stamina, purse, reputation, level
-		hud_card(Rect2(RX, 74, RW, 132))
+		# STATE: only what actually moves or matters DURING a run (Louis: the play
+		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
+		# stat points are actionable (Tab), so they get one pulsing line. Gold,
+		# Reputation, and the LV/XP bar never change mid-run - they live in the
+		# day hub, the sheet, and the results card instead of being repeated here.
+		var pts_row := points > 0
+		hud_card(Rect2(RX, 74, RW, 66.0 if pts_row else 48.0))
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
@@ -5872,20 +5880,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if sfrac < STAM_LOW:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 		draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
-		draw_circle(Vector2(sx + 7.0, 132.0), 6.0, gold)
-		draw_circle(Vector2(sx + 5.0, 130.0), 2.0, Color(1.0, 0.95, 0.7))
-		draw_string(font, Vector2(sx + 20.0, 138.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, gold)
-		draw_string(font, Vector2(sx + sw - 160.0, 138.0), "Rep %s  %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, 160.0, 12, Color(0.82, 0.72, 0.85))
-		var need := xp_to_next(level)
-		var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-		# LV label and the exact xp on their own row, so the number never sits
-		# muddied on top of the meter fill; the bar spans full width beneath
-		draw_string(font, Vector2(sx, 160), "LV %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, gold)
-		draw_string(font, Vector2(sx + sw - 110.0, 160), "%s / %s" % [commafy(xp), commafy(need)], HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 11, Color(0.85, 0.78, 0.6, 0.85))
-		draw_meter(sx, 166, sw, 8.0, xf, Color(0.9, 0.7, 0.35))
-		if points > 0:
+		if pts_row:
 			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-			draw_string(font, Vector2(sx, 192), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
+			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360:
@@ -6111,7 +6108,13 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
 	var cx := px + pw * 0.5
 	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0))
-	draw_string(font, Vector2(px + 10.0, s.y - 52.0), "TRICK  -  %s" % label, HORIZONTAL_ALIGNMENT_CENTER, pw - 20.0, 16, lc)
+	# no "TRICK -" prefix (the hints row already says trick, and the routine card
+	# opposite carries no prefix either), and the title shrinks to FIT the card -
+	# "BEHIND THE BACK - ON (High Toss next)" used to run off the right edge
+	var fs := 16
+	while fs > 11 and font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > pw - 24.0:
+		fs -= 1
+	draw_string(font, Vector2(px + 12.0, s.y - 52.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, fs, lc)
 	var items: Array = []
 	var use := ""
 	match kind:
@@ -6165,8 +6168,8 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	if debug_mode:
 		draw_string(font, Vector2(tx + 140.0, py + 48.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.55, 0.9, 1.0))
 	draw_string(font, Vector2(px + pw - 190.0, py + 40.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6))
-	draw_string(font, Vector2(px + pw - 190.0, py + 62.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
-	draw_string(font, Vector2(px + pw - 190.0, py + 82.0), "Rep %d  %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
+	draw_string(font, Vector2(px + pw - 190.0, py + 62.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(px + pw - 190.0, py + 82.0), "Rep %s  %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
 	# xp bar
 	var need := xp_to_next(level)
 	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
@@ -6226,7 +6229,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var tx := px + 40.0
 	var innerw := pw - 80.0
 	draw_string(font, Vector2(tx, py + 48.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(px + pw - 170.0, py + 44.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(px + pw - 170.0, py + 44.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.45))
 
 	var ry := py + 100.0
 	var keynum := 1
@@ -6434,8 +6437,8 @@ func draw_day(font: Font, s: Vector2) -> void:
 	hud_panel(Rect2(lx, ly, lw, 168.0))
 	draw_circle(Vector2(lx + 26.0, ly + 30.0), 7.0, Color(1.0, 0.84, 0.4))
 	draw_circle(Vector2(lx + 23.0, ly + 27.0), 2.4, Color(1.0, 0.95, 0.7))
-	draw_string(font, Vector2(lx + 42.0, ly + 37.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.86, 0.45))
-	draw_string(font, Vector2(lx + 20.0, ly + 64.0), "Rep %d   %s" % [reputation, rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.85))
+	draw_string(font, Vector2(lx + 42.0, ly + 37.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(lx + 20.0, ly + 64.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.85))
 	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
 	draw_string(font, Vector2(lx + 20.0, ly + 92.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.9, 0.85, 0.85))
 	draw_string(font, Vector2(lx + lw - 90.0, ly + 92.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 70.0, 12, Color(0.85, 0.9, 0.85, 0.85))
@@ -6760,7 +6763,7 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(kx, ky + 30.0), "YOUR STARTING KIT", HORIZONTAL_ALIGNMENT_CENTER, kw, 14, Color(0.95, 0.8, 0.55, ka))
 		draw_circle(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 0.84, 0.4, ka))
 		draw_circle(Vector2(kx + 117.0, ky + 63.0), 2.6, Color(1.0, 0.95, 0.7, ka))
-		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%d gold" % money, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
+		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
 		for i in 3:
 			var bc := ball_color(i)
 			bc.a = ka
