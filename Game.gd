@@ -1,5 +1,5 @@
 extends Node2D
-## JUGGLE core mechanic, Prototype 1.1.
+## IACTO ("I ACT o", the o a juggling ball - formerly JUGGLE). Core mechanic, Prototype 1.1.
 ##
 ## This rebuilds the throwaway spike into the real v0.2 catch-and-throw model
 ## (GDD Sections 2 and 9). The question it must answer: with catch and throw
@@ -124,6 +124,11 @@ const START_GOLD := 100       # a fresh juggler starts with a small purse (ideas
 # grind without touching the timing floor: stage 1 lowers stamina cost, and once
 # that bottoms out, stage 2 widens the Perfect window a little. Both are capped.
 const ACC_CAP := 250              # Accuracy trains to 250, so Focus reaches 150
+const STR_CAP := 200              # Strength and Endurance climb to 200 now (Louis: the
+const END_CAP := 200              # late game runs deep) - same per-point effects, just
+								  # a longer road; the 8-11 ball gates live up here
+const MASTERY_GOLD := 250         # once EVERY stat is capped, each level-up point turns
+								  # to gold instead: the crowd pays for mastery itself
 const FOCUS_STAM_FLOOR := 0.25    # stamina-cost multiplier once Focus hits 100
 const FOCUS_WINDOW_PER := 10.0    # +1 Perfect tick per this much Focus above 100
 const FOCUS_WINDOW_MAX := 6       # hard cap on the widening (skill-first guardrail)
@@ -191,7 +196,8 @@ const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
 const MODE_PERFORM := 1   # on stage: Applause meter, energy cost, and pay
 const MIN_BALLS := 3
-const MAX_BALLS_HARD := 7
+const MAX_BALLS_HARD := 11   # the late game runs deep: 8-11 objects live in the
+							 # raised Strength band (100..200), for masters only
 
 # --- props / objects (GDD 2.7, 4.6; ideas.rtf object table) -------------------
 # Each prop has a weight (heavier = more stamina and more inaccuracy) and a
@@ -368,7 +374,7 @@ const ENCORES := [
 	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
 	{"id": "draft",     "name": "The Draft",          "desc": "A wind through the room. Every throw drifts wider."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "Only the top of each arc is lit. Catch what you cannot see."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut: nothing in flight can be seen. Only a torch's flame still burns through."},
 	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
 	{"id": "long",      "name": "The Long Set",       "desc": "Twice the target, but the crowd is patient. An endurance test."},
 	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
@@ -506,7 +512,8 @@ var best_scores_purist: Array[int] = [0, 0, 0, 0, 0, 0]
 # --- the career ledger (persisted per slot): lifetime numbers behind the record
 # boards, shown on the RECORDS AND HISTORY screen reached from Settings
 var career := {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
-	"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0}
+	"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0,
+	"mastery": 0}   # level-up points turned to gold after every stat capped
 var results_open := false # the end-of-performance results panel is showing
 var results_record := false  # this performance beat the venue's record
 var paused := false       # the in-play pause menu is up (freezes the sim)
@@ -768,7 +775,7 @@ func _ready() -> void:
 		var start_n := 3
 		var bi := ua.find("--balls")   # dev: force the ball count (audit 4- and 6-ball fountains)
 		if bi != -1 and bi + 1 < ua.size():
-			strength = maxi(strength, 33)   # so max_balls() allows up to 7
+			strength = maxi(strength, int(BALL_GATES[MAX_BALLS_HARD]))   # every count open
 			prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], MAX_BALLS_HARD)   # balls are stock now
 			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
 		var vfi := ua.find("--venue")   # dev: play at venue N (0..5), so booking targets and
@@ -780,7 +787,7 @@ func _ready() -> void:
 		if pfi != -1 and pfi + 1 < ua.size():
 			var pn := clampi(int(ua[pfi + 1]), 0, PROPS.size() - 1)
 			prop_type = pn
-			prop_count[pn] = maxi(prop_count[pn], 7)
+			prop_count[pn] = maxi(prop_count[pn], MAX_BALLS_HARD)
 			strength = maxi(strength, int(PROPS[pn]["req"]))
 		start_run(start_n)
 		game_state = ST_PLAY
@@ -1181,6 +1188,20 @@ func _input(event: InputEvent) -> void:
 		KEY_7:
 			if performing: set_count_live(7)
 			else: start_run(7)
+		KEY_8:
+			if performing: set_count_live(8)
+			else: start_run(8)
+		KEY_9:
+			if performing: set_count_live(9)
+			else: start_run(9)
+		KEY_0:
+			# the number row runs out at nine, so 0 reads as ten and the key right
+			# of it as eleven (physical positions, so every layout has them)
+			if performing: set_count_live(10)
+			else: start_run(10)
+		KEY_MINUS:
+			if performing: set_count_live(11)
+			else: start_run(11)
 		KEY_O:
 			# switch the object either way: live during a performance (re-skins the
 			# props in play, keeps the run), or with a fresh deal in practice
@@ -1666,7 +1687,7 @@ func day_anim_step() -> void:
 			play_sfx("money", -9.0)   # gold on the counter
 			stamina = minf(stamina_max, stamina + EAT_STAM * stamina_max)
 			meals += 1
-			if meals % MEALS_PER_STR == 0 and strength < 100:
+			if meals % MEALS_PER_STR == 0 and strength < STR_CAP:
 				var prev_max := max_balls()
 				strength += 1
 				check_ball_unlock(prev_max)   # a meal's Strength can cross a ball gate too
@@ -2755,7 +2776,8 @@ func reset_new_game() -> void:
 	pattern_sel = CASCADE
 	purist = false
 	career = {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
-		"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0}
+		"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0,
+		"mastery": 0}
 	day = 1
 	seg_used = 0
 	venue_pick = 0
@@ -3083,8 +3105,15 @@ func outer_pos(h: int) -> Vector2:
 	# the catch position, a little in from a shoulder-and-a-half so the arms rest a touch
 	# less splayed (Louis). Kept 46px out from inner_pos so the crossing weave still
 	# clears (see inner_pos); pulling only this one in cramps the two roads into overlap.
+	# BIG props catch WIDER: a club is half again a ball, and the same-hand up-lane and
+	# down-lane sit (outer - inner)/2 apart at the pass, so only widening the catch
+	# point buys big props real clearance - exactly what club jugglers do with their
+	# arms. Balls are untouched (scale 1.0 adds zero).
+	# ...and the LATE-GAME counts (8+) widen too, the way real numbers jugglers
+	# open their arms: a ten-ball fountain runs five per hand, and the same-hand
+	# pass needs the extra room (it measured -1.5px edge overlap without this)
 	var c := stage_center()
-	var dx := 100.0
+	var dx := 100.0 + 70.0 * maxf(0.0, prop_scale(prop_type) - 1.0) + 6.0 * float(maxi(0, num_balls - 7))
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
@@ -3285,43 +3314,44 @@ func ball_color(i: int) -> Color:
 # Start: balls begin held, and the run begins on the player's first throw.
 # -----------------------------------------------------------------------------
 
+# the Strength each ball count asks for, indexed by count (3 is free). The first
+# rungs sit in the old 0..100 band; 8-11 climb the raised band toward the 200 cap,
+# so the late game keeps earning new loads long after the World Arena.
+const BALL_GATES := {4: 9, 5: 15, 6: 23, 7: 33, 8: 60, 9: 90, 10: 125, 11: 165}
+
+
 func max_balls() -> int:
 	# THREE to start; every larger load is earned through Strength, each landing a bit
-	# before the venue that leans on it (Louis). Four is the first unlock now, not free.
+	# before the stage that leans on it (Louis). Four is the first unlock now, not free.
 	var m := 3
-	if strength >= 9:
-		m = 4
-	if strength >= 15:
-		m = 5
-	if strength >= 23:
-		m = 6
-	if strength >= 33:
-		m = 7
+	for n in range(4, MAX_BALLS_HARD + 1):
+		if strength >= int(BALL_GATES[n]):
+			m = n
 	return m
 
 
 func next_ball_strength() -> int:
 	# Strength needed for the next ball unlock, or 0 if already at the cap
-	if strength < 9:
-		return 9
-	if strength < 15:
-		return 15
-	if strength < 23:
-		return 23
-	if strength < 33:
-		return 33
+	for n in range(4, MAX_BALLS_HARD + 1):
+		if strength < int(BALL_GATES[n]):
+			return int(BALL_GATES[n])
 	return 0
 
 
 func count_air_scale() -> float:
-	# the tap-height FLOOR scales with the load: 3-4 balls stay snappy and low, but 5/6/7
-	# must fly higher just to have air to weave in, so even a tap lofts a big load enough
-	# to juggle. ~+45% airtime at six matches the hold a real six-ball fountain needs.
-	match num_balls:
-		5: return 1.3
-		6: return 1.45
-		7: return 1.6
-		_: return 1.0
+	# the tap-height FLOOR scales with the load: 3-4 balls stay snappy and low, but five
+	# and up must fly higher just to have air to weave in, so even a tap lofts a big load
+	# enough to juggle. ~+45% airtime at six matches a real six-ball fountain's hold; the
+	# 8-11 late-game loads keep climbing the same curve.
+	var base := 1.0
+	if num_balls >= 5:
+		base = 1.3 + 0.15 * float(num_balls - 5)
+	# BIG props need proportionally more air on top: the same weave that clears five
+	# balls clips five clubs (a club is half again a ball's size), so from five objects
+	# up the tap floor rises with the prop's drawn size. Perfect throws should never
+	# collide, whatever is being juggled (Louis).
+	var size_lift := (prop_scale(prop_type) - 1.0) * 0.5 * clampf(float(num_balls - 4) / 3.0, 0.0, 1.0)
+	return base * (1.0 + maxf(0.0, size_lift))
 
 
 func start_run(n: int) -> void:
@@ -4187,6 +4217,11 @@ func xp_to_next(lv: int) -> int:
 	return int(round(60.0 * pow(float(lv), 1.4))) + 40 * lv
 
 
+func all_stats_capped() -> bool:
+	# the whole build is finished: every trainable stat sits at its ceiling
+	return accuracy >= ACC_CAP and strength >= STR_CAP and endurance >= END_CAP and speed >= SPEED_CAP
+
+
 func add_xp(amount: int) -> void:
 	if amount <= 0:
 		return
@@ -4200,7 +4235,18 @@ func add_xp(amount: int) -> void:
 		leveled = true
 	if leveled:
 		var s := get_viewport_rect().size
-		add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
+		# MASTERY (the late game): with every stat capped, points have nowhere to go,
+		# so a level-up pays gold instead - skill keeps earning long after the build
+		# is finished. Skill still sets the score; this is comfort, like pay always was.
+		if all_stats_capped() and points > 0:
+			var mg := points * MASTERY_GOLD
+			money += mg
+			career["mastery"] = int(career.get("mastery", 0)) + points
+			points = 0
+			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d  -  MASTERY  +%d gold" % [level, mg], Color(1.0, 0.9, 0.5))
+			play_sfx("money", -8.0)
+		else:
+			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
 		announce_unlocks()   # a level that crosses a skill's gate teaches it
 		save_progress()
 
@@ -4745,13 +4791,21 @@ func invest(which: String) -> void:
 	if points <= 0:
 		return
 	var prev_max := max_balls()   # Strength may cross a ball-count gate; catch it below
+	# a capped stat refuses the point instead of eating it (Speed always did; the
+	# others used to consume the point and change nothing)
 	match which:
 		"acc":
-			accuracy = mini(ACC_CAP, accuracy + 1)   # past 100 becomes Focus
+			if accuracy >= ACC_CAP:
+				return
+			accuracy += 1   # past 100 becomes Focus
 		"str":
-			strength = mini(100, strength + 1)
+			if strength >= STR_CAP:
+				return
+			strength += 1
 		"end":
-			endurance = mini(100, endurance + 1)
+			if endurance >= END_CAP:
+				return
+			endurance += 1
 			stamina_max = 100.0 + 9.0 * float(endurance)
 		"spd":
 			if speed >= SPEED_CAP:
@@ -4813,9 +4867,9 @@ func _adjust(which: String, delta: int) -> void:
 		"acc":
 			accuracy = clampi(accuracy + delta, 1, ACC_CAP)
 		"str":
-			strength = clampi(strength + delta, 1, 100)
+			strength = clampi(strength + delta, 1, STR_CAP)
 		"end":
-			endurance = clampi(endurance + delta, 0, 100)
+			endurance = clampi(endurance + delta, 0, END_CAP)
 			stamina_max = 100.0 + 9.0 * float(endurance)
 			stamina = minf(stamina, stamina_max)
 		"spd":
@@ -5698,6 +5752,16 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 		if b.state == STATE_FLIGHT:
 			if _btb_behind(b) != behind:
 				continue
+			# BLACKOUT Encore: a prop in flight draws NOTHING - no trail, no halo, no
+			# shape, no out-of-frame tracker. (The first version ghosted only the shape,
+			# and the comet trail still traced every prop perfectly, so the blackout
+			# read as no change at all - Louis.) The one exception is a TORCH: no
+			# blackout can argue with fire, so its flame alone stays faintly visible.
+			# That is the game knowledge: bring torches to a Blackout night.
+			if encore_on("blackout"):
+				if b.kind == PROP_TORCHES:
+					draw_flame_in_dark(flight_pos(b))
+				continue
 			draw_trail(b)
 			var pos := flight_pos(b)
 			draw_prop(b, pos)
@@ -5753,17 +5817,21 @@ func draw_charge_gauges() -> void:
 		draw_rect(Rect2(gx - 1.0, gy - gh * 0.78, 8.0, 1.5), Color(1.0, 0.9, 0.7, 0.7))
 
 
+func draw_flame_in_dark(pos: Vector2) -> void:
+	# the Blackout's one concession: a torch's flame, faint and flickering, with no
+	# handle and no trail - a small fire moving through the dark, nothing more
+	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)
+	draw_circle(pos + Vector2(0, -10), 16.0, Color(1.0, 0.55, 0.2, 0.06))
+	draw_colored_polygon(PackedVector2Array([
+		pos + Vector2(-5, -4), pos + Vector2(5, -4), pos + Vector2(0, -16.0 * fl),
+	]), Color(1.0, 0.5, 0.15, 0.30))
+	draw_colored_polygon(PackedVector2Array([
+		pos + Vector2(-2.5, -5), pos + Vector2(2.5, -5), pos + Vector2(0, -12.0 * fl),
+	]), Color(1.0, 0.85, 0.4, 0.32))
+
+
 func draw_prop(b: Ball, pos: Vector2) -> void:
 	var sc := prop_scale(b.kind)
-	# BLACKOUT Encore: only the top of each arc is lit. A prop in the lower two-thirds
-	# of its flight is drawn as a bare ghost (a faint halo, no shape), so the player must
-	# track it by rhythm and read the apex, then catch what they cannot quite see.
-	if encore_on("blackout") and b.state == STATE_FLIGHT:
-		var span := maxi(1, b.land_tick - b.launch_tick)
-		var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
-		if 4.0 * p * (1.0 - p) < 0.55:
-			draw_circle(pos, 16.0 * sc, Color(b.color.r, b.color.g, b.color.b, 0.05))
-			return
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
@@ -6129,12 +6197,15 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# here (Louis: no redundancy) - the routine card at the foot of the stage
 		# owns them, along with the keys that switch them.
 		var nb := next_ball_strength()
-		hud_card(Rect2(LX, 16, LW, 78.0 if nb > 0 else 58.0))
+		hud_card(Rect2(LX, 16, LW, 94.0 if nb > 0 else 74.0))
 		var tl := "PRACTICE" + ("   -   DEBUG" if debug_mode else "")
 		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.72, 0.82, 0.9))
 		draw_string(font, Vector2(LX + 14, 60), "no crowd, no pay", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
+		# the count keys, said once here (the number row runs 3..9, then 0 is ten and
+		# the key right of it eleven); the bottom-left card counts the load itself
+		draw_string(font, Vector2(LX + 14, 78), "3 - 9 set the count   (0 is ten, - eleven)", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
 		if nb > 0:
-			draw_string(font, Vector2(LX + 14, 78), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
+			draw_string(font, Vector2(LX + 14, 94), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
 
 	# ============================ RIGHT RAIL: you ============================
 	# hidden during the results panel so it never lingers, dimmed, beside the card
@@ -6493,6 +6564,11 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.86, 0.45, 0.7), false, 1.5)
 		draw_string(font, Vector2(tx, by0 + 23.0), "%d POINT%s TO SPEND  -  press the key on a card" % [points, "" if points == 1 else "S"],
 			HORIZONTAL_ALIGNMENT_CENTER, innerw, 16, Color(1.0, 0.92, 0.7))
+	elif all_stats_capped():
+		var mtext := "MASTERY - every stat is at its ceiling. Each new level now pays %d gold per point" % MASTERY_GOLD
+		if int(career.get("mastery", 0)) > 0:
+			mtext += "  (%d earned so far)" % int(career.get("mastery", 0))
+		draw_string(font, Vector2(tx, by0 + 23.0), mtext, HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
 	else:
 		draw_string(font, Vector2(tx, by0 + 23.0), "Skill sets your score. Stats only ease the climb - the next point comes with the next level.",
 			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
@@ -6956,7 +7032,7 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# a slow, graceful cascade above the title, with soft motion trails
 	draw_menu_cascade(Vector2(cx, s.y * 0.17), 1.0)
 
-	draw_title_glow(font, s.y * 0.32, "JUGGLE", 92, Color(1.0, 0.88, 0.5), s)
+	draw_iacto_logo(font, s.y * 0.32, 92, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.32 + 160.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
 
@@ -7179,6 +7255,8 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		["tricks landed", str(int(career["tricks"]))],
 		["gold earned on stage", str(int(career["gold_earned"]))],
 	]
+	if int(career.get("mastery", 0)) > 0:
+		lines.append(["mastery points turned to gold", str(int(career["mastery"]))])
 	for i in lines.size():
 		var ry := ly + 34.0 + float(i) * 30.0
 		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66))
@@ -7651,7 +7729,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	var gold := Color(1.0, 0.88, 0.5)
 	var rows: Array[Dictionary] = []
 	var cur := 0.0
-	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": "JUGGLE", "b": ""})
+	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": "IACTO", "b": ""})
 	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
@@ -7688,7 +7766,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		var btxt := String(row["b"])
 		match kind:
 			"title":
-				draw_title_glow(font, ry - 49.0, atxt, 76, Color(gold.r, gold.g, gold.b, a), s)
+				draw_iacto_logo(font, ry - 49.0, 76, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
 			"orn":
@@ -7706,13 +7784,13 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
 
 	# once the last line has climbed past centre the roll settles into a held final
-	# JUGGLE card, which waits, unmoving, for any key. The scrolling text is above it
+	# IACTO card, which waits, unmoving, for any key. The scrolling text is above it
 	# by then, so the two never overlap.
 	var last_sy := base + last_y - scroll
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.42
-		draw_title_glow(font, fy - 55.0, "JUGGLE", 84, Color(1.0, 0.9, 0.55, fa), s)
+		draw_iacto_logo(font, fy - 55.0, 84, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.72, 0.6, 0.65 * fa))
 
@@ -7794,6 +7872,28 @@ func draw_ornament(cx: float, y: float, half_w: float, col: Color) -> void:
 func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, s: Vector2) -> void:
 	draw_string(font, Vector2(2, y + 2.0 + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, Color(0, 0, 0, 0.55))
 	draw_string(font, Vector2(0, y + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, col)
+
+
+func draw_iacto_logo(font: Font, y: float, size: int, col: Color, s: Vector2) -> void:
+	# the wordmark: I ACT followed by a juggling ball as the lowercase o - the name
+	# is the sentence "I act", and the ball finishes it. The o is a REAL drawn ball
+	# (glossy highlight and all), never a letterform, and it bobs very slightly, a
+	# prop at the top of a tiny toss.
+	var text := "I ACT "
+	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var br := float(size) * 0.30           # ball radius, sized like a lowercase o
+	var total := tw + br * 2.0
+	var x := s.x * 0.5 - total * 0.5
+	var base := y + float(size)            # same baseline convention as draw_title_glow
+	draw_string(font, Vector2(x + 2.0, base + 2.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.55 * col.a))
+	draw_string(font, Vector2(x, base), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+	var bob := 3.0 * sin(float(cine_tick) * 0.045)
+	var bc := Vector2(x + tw + br, base - br * 1.08 + bob)
+	draw_circle(bc + Vector2(2.5, 2.5), br, Color(0, 0, 0, 0.35 * col.a))
+	draw_circle(bc, br * 1.5, Color(1.0, 0.82, 0.35, 0.10 * col.a))   # the soft flight halo
+	var ball := ball_color(0)
+	ball.a = col.a
+	draw_ball_shape(bc, ball, br / 11.0)
 
 
 func draw_dust(s: Vector2, n: int, glow: Color) -> void:
