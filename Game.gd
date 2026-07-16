@@ -206,7 +206,9 @@ const PROP_CLUBS := 3
 const PROP_KNIVES := 4
 const PROP_TORCHES := 5
 const PROPS := [
-	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 0,    "stam": 1, "spins": false},
+	# balls are REAL STOCK too (Louis: they don't appear out of thin air): a fresh
+	# juggler starts with three, and the fourth ball onward is bought like any prop
+	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 20,   "stam": 1, "spins": false},
 	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "stam": 2, "spins": false},
 	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "stam": 3, "spins": false},
 	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "stam": 4, "spins": true},
@@ -584,7 +586,6 @@ var tut_count := 0        # catches (or throws) banked in the current step
 var tut_threw_l := false  # a left-hand throw happened this step
 var tut_threw_r := false  # a right-hand throw happened this step
 var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw lands)
-var tut_flash := ""       # brief "Nice!" feedback between steps
 var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
 var tut_keys := 0         # command-key presses banked this step (the R and P teaching
 						  # goals count on their own, so a stray catch cannot clear them)
@@ -768,6 +769,7 @@ func _ready() -> void:
 		var bi := ua.find("--balls")   # dev: force the ball count (audit 4- and 6-ball fountains)
 		if bi != -1 and bi + 1 < ua.size():
 			strength = maxi(strength, 33)   # so max_balls() allows up to 7
+			prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], MAX_BALLS_HARD)   # balls are stock now
 			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
 		var vfi := ua.find("--venue")   # dev: play at venue N (0..5), so booking targets and
 		if vfi != -1 and vfi + 1 < ua.size():   # patience decay match that stage (calibration + shots)
@@ -1089,6 +1091,8 @@ func _input(event: InputEvent) -> void:
 			cycle_trick()   # C is part of a trick lesson's teaching, so it stays live
 			return          # (the next Space re-pins the taught trick regardless)
 		match kc:
+			KEY_ENTER, KEY_KP_ENTER:
+				tut_advance()   # a met goal holds open until the player says done
 			KEY_R:
 				if String(tut_step_data().get("goal", "")) == "press_r":
 					tut_demo_reset()   # the step IS the reset key: show it, count it
@@ -1159,18 +1163,9 @@ func _input(event: InputEvent) -> void:
 		KEY_R:
 			if not performing:
 				start_run(num_balls)
-		KEY_BRACKETLEFT:
-			# the load changes LIVE during a performance now (Louis): props are
-			# handed in or taken offstage without restarting the run
-			if performing:
-				set_count_live(balls.size() - 1)
-			else:
-				start_run(num_balls - 1)
-		KEY_BRACKETRIGHT:
-			if performing:
-				set_count_live(balls.size() + 1)
-			else:
-				start_run(num_balls + 1)
+		# ([ and ] used to step the count too, but they are unreachable on AZERTY
+		# and other layouts (Louis: "they don't work, nor should they") - the
+		# number keys 3-7 are the one way to set the load, live or fresh
 		KEY_3:
 			if performing: set_count_live(3)
 			else: start_run(3)
@@ -1738,23 +1733,26 @@ func sheet_input(kc: int) -> void:
 
 
 func shop_input(kc: int) -> void:
-	# the shop's keys, shared by the play overlay and the day hub
+	# the shop's keys, shared by the play overlay and the day hub. The number on
+	# each card is its buy key: 1-6 the props (balls included), 7 glasses, 8 pie.
 	match kc:
 		KEY_TAB, KEY_ESCAPE, KEY_S:
 			shop_open = false
 		KEY_1:
-			try_buy(PROP_EGGS)
+			try_buy(PROP_BALLS)
 		KEY_2:
-			try_buy(PROP_RINGS)
+			try_buy(PROP_EGGS)
 		KEY_3:
-			try_buy(PROP_CLUBS)
+			try_buy(PROP_RINGS)
 		KEY_4:
-			try_buy(PROP_KNIVES)
+			try_buy(PROP_CLUBS)
 		KEY_5:
-			try_buy(PROP_TORCHES)
+			try_buy(PROP_KNIVES)
 		KEY_6:
-			try_buy_glasses()
+			try_buy(PROP_TORCHES)
 		KEY_7:
+			try_buy_glasses()
+		KEY_8:
 			try_buy_pie()
 
 
@@ -2283,7 +2281,6 @@ func tut_reset_step() -> void:
 	_stack_r.clear()
 	charging = [false, false]
 	tut_advance_at = -1
-	tut_flash = ""
 	tut_setup_step()   # balls now empty, so it deals the step fresh
 	play_sfx("ui2", -13.0)
 
@@ -2344,22 +2341,29 @@ func tut_check() -> void:
 		"press_r", "press_p": done = tut_keys >= int(step["need"])   # the key itself is the goal
 		_: done = tut_count >= int(step["need"])
 	if done:
-		tut_flash = "Nice!"
-		tut_advance_at = tick + 72   # let the last throw finish its arc before cutting on
+		# the goal is met, but the step HOLDS OPEN: the banner flips to "good job -
+		# Enter continues, or keep trying", and only the player's Enter moves on
+		# (Louis: never cut away while they are still trying it out)
+		tut_advance_at = tick
+		play_sfx("streak", -10.0)
+
+
+func tut_advance() -> void:
+	# Enter moves the lesson on - and only once the step's goal has been met. A
+	# step never advances by itself: the player decides when they are done trying.
+	if tut_advance_at < 0:
+		return
+	tut_step += 1
+	if tut_step >= tut_lesson(tut_id).size():
+		tut_finish()
+	else:
+		play_sfx("ui2", -11.0)
+		tut_setup_step()
 
 
 func tut_maintain() -> void:
-	# advance when the post-goal beat elapses, and keep the step playable by topping
-	# the hands back up shortly after a ball is lost, so a fumble never stalls a lesson
-	if tut_advance_at >= 0 and tick >= tut_advance_at:
-		tut_flash = ""
-		tut_step += 1
-		if tut_step >= tut_lesson(tut_id).size():
-			tut_finish()
-		else:
-			play_sfx("streak", -8.0)   # a little rising "nice, next" between steps
-			tut_setup_step()
-		return
+	# keep the step playable by topping the hands back up shortly after a ball is
+	# lost, so a fumble never stalls a lesson
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
 		var step := tut_step_data()
 		var teach_hand := int(step.get("hand", RIGHT))
@@ -2393,7 +2397,6 @@ func tut_finish() -> void:
 	var was_basics := tut_id == "balls"
 	tut_active = false
 	tut_id = ""
-	tut_flash = ""
 	mode = MODE_TRAIN
 	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
 	if was_basics:
@@ -2438,14 +2441,27 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(bx, by + 46.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 22, Color(1.0, 0.9, 0.6))
 	draw_multiline_string(font, Vector2(bx + 20.0, by + 70.0), String(step["sub"]),
 		HORIZONTAL_ALIGNMENT_CENTER, bw - 40.0, 14, 2, Color(0.9, 0.85, 0.78))
-	var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
-	if String(step["goal"]).begins_with("catch") and int(step["need"]) > 1:
-		prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
-	draw_string(font, Vector2(bx, by + 108.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.8, 0.75, 0.68))
+	# the progress line flips to the GOOD JOB state once the goal is met: the step
+	# stays fully playable, and Enter is the player's own "I am done trying" (Louis)
+	var done := tut_advance_at >= 0
+	if done:
+		var last := tut_step >= steps.size() - 1
+		var ga := 0.75 + 0.25 * sin(atick() * 0.1)
+		var gtext := "GOOD JOB - you got it!   Enter %s, or keep trying" % ("finishes the lesson" if last else "continues")
+		draw_string(font, Vector2(bx, by + 108.0), gtext, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.72, 0.95, 0.7, ga))
+	else:
+		var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
+		if String(step["goal"]).begins_with("catch") and int(step["need"]) > 1:
+			prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
+		draw_string(font, Vector2(bx, by + 108.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.8, 0.75, 0.68))
 	# the controls that actually WORK in a lesson, always, along the very bottom - plus
 	# the lesson's own key (trick / pattern) so every command the game has gets its
 	# moment of attention in the lesson that owns it (Louis)
-	var items: Array = [[k_throw(), "throw"], [k_catch(), "catch"]]
+	var items: Array = []
+	if done:
+		items.append([["Enter"], "next"])
+	items.append([k_throw(), "throw"])
+	items.append([k_catch(), "catch"])
 	if tut_id.begins_with("trick_"):
 		items.append([k_trick(), "trick"])
 		items.append([k_cycle(), "switch trick"])
@@ -2455,7 +2471,8 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	items.append([k_pause(), "pause"])
 	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
 	# the step's OWN key shouts for its press: Space on a trick step, P on the pattern
-	# step, R on the reset step - one pulsing line right above the key row it points at
+	# step, R on the reset step - one pulsing line right above the key row it points
+	# at. Quiet once the goal is met (the banner's good-job line has taken over).
 	var hot_key := ""
 	if String(step.get("prompt", "")) == "trick":
 		hot_key = String(k_trick()[0])
@@ -2463,11 +2480,9 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		hot_key = "P"
 	elif String(step["goal"]) == "press_r":
 		hot_key = "R"
-	if hot_key != "":
+	if hot_key != "" and not done:
 		var pa := 0.55 + 0.45 * (0.5 + 0.5 * sin(atick() * 0.13))
 		draw_text_shout(font, Vector2(0, s.y - 64.0), "press %s now  -  once" % hot_key, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(1.0, 0.72, 0.4, pa))
-	if tut_flash != "":
-		draw_text_shout(font, Vector2(0, s.y - 92.0), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.7, 0.95, 0.7))
 	# trick feedback ("HIGH TOSS ON", or the lesson's gentle no-trick-here guidance)
 	# shows in lessons too - draw_hud, which normally carries it, never runs here
 	if trick_msg != "" and tick - trick_msg_tick < 90:
@@ -2505,10 +2520,9 @@ func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: flo
 
 func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# THE lesson affordance (Louis): which key, over which hand, at the moment to press it
-	# - but as a bare letter and a timing ring, never a boxed bubble. Silent once a step is
-	# cleared, so success leaves the centre quiet.
-	if tut_advance_at >= 0:
-		return
+	# - but as a bare letter and a timing ring, never a boxed bubble. A met goal no
+	# longer silences these: the step holds open for more practice, so the guidance
+	# keeps working until the player's Enter moves on.
 	var kc := k_catch()
 	var kt := k_throw()
 	# catch: a timing ring on the receiving hand, its bare catch key just above it.
@@ -2729,7 +2743,7 @@ func reset_new_game() -> void:
 	pie_active = false
 	money = START_GOLD
 	reputation = 0
-	prop_count = [0, 0, 0, 0, 0, 0]
+	prop_count = [3, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
 	prop_type = PROP_BALLS
 	has_glasses = false
 	level = 1
@@ -4696,8 +4710,9 @@ func prop_deficit() -> float:
 
 
 func have(kind: int) -> int:
-	# balls are free and effectively unlimited; other props you own by quantity
-	return 999 if kind == PROP_BALLS else prop_count[kind]
+	# EVERY prop is owned by quantity now, balls included (Louis: they don't appear
+	# out of thin air) - a fresh save starts with three, the shop sells the rest
+	return prop_count[kind]
 
 
 func available(kind: int) -> bool:
@@ -4847,6 +4862,9 @@ func load_progress() -> void:
 		if pc is Array:
 			for i in mini((pc as Array).size(), prop_count.size()):
 				prop_count[i] = int((pc as Array)[i])
+		# balls used to be free and unlimited, so old saves stored 0 of them: every
+		# save keeps at least the starting kit of three (balls are stock now)
+		prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], 3)
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
 		has_glasses = bool(cf.get_value("stats", "glasses", false))
 		level = int(cf.get_value("prog", "level", 1))
@@ -5823,7 +5841,9 @@ func draw_club(pos: Vector2, ang: float, sc: float) -> void:
 		Vector2(-3, 0), Vector2(3, 0), Vector2(7, -14), Vector2(-7, -14),
 	]), body)
 	draw_circle(Vector2(0, -14), 7.0, body)                # rounded head
-	draw_arc(Vector2(0, -14), 7.0, -2.5, -1.2, 6, band, 2.0, true)
+	# a soft same-hue sheen INSIDE the head - the old pale band arc sat on the rim
+	# and read as a white chip stuck to the club (Louis), worst at shop-card size
+	draw_circle(Vector2(-2.2, -16.2), 2.6, Color(1.0, 0.55, 0.56, 0.45))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -6410,9 +6430,10 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 
 
 func draw_routine_hud(font: Font, s: Vector2) -> void:
-	# bottom-LEFT mirror of the trick readout: the OBJECT and PATTERN in play, and the
-	# keys to switch each. Live during a performance now (re-skins / reshapes on the
-	# fly), a fresh deal in practice - the hints are the same either way (Louis).
+	# bottom-LEFT mirror of the trick readout: the OBJECT and PATTERN in play, and
+	# under them a LIVE count of where every prop is - left hand, in the air, right
+	# hand - updating throw by throw (Louis: that beats a row of key hints here; the
+	# O and P keys still work, and the lessons and Skills screen teach them).
 	var pw := 330.0
 	var px := 18.0
 	var cx := px + pw * 0.5
@@ -6427,7 +6448,12 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	var jx := cx - jw * 0.5
 	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ocol)
 	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.86, 0.76, 0.62))
-	draw_hints_row(font, cx, s.y - 40.0, [[["O"], "object"], [["P"], "pattern"], [["[", "]"], "count"]])
+	var colw := pw / 3.0
+	var cy := s.y - 26.0
+	var hand_c := Color(0.92, 0.84, 0.7)
+	draw_string(font, Vector2(px, cy), "left hand  %d" % _stack_l.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, hand_c)
+	draw_string(font, Vector2(px + colw, cy), "in the air  %d" % balls_airborne(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, Color(0.7, 0.85, 1.0))
+	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, hand_c)
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
@@ -6576,14 +6602,14 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(tx + 118.0, py + 50.0), "to juggle N of a prop, own N of them", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 
-	# ---------------- PROPS: five big cards in one row ----------------
+	# ---------------- PROPS: six big cards in one row ----------------
 	draw_string(font, Vector2(tx, py + 96.0), "PROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
 	var gap := 14.0
-	var cw := (innerw - gap * 4.0) / 5.0
+	var cw := (innerw - gap * 5.0) / 6.0
 	var ch := 272.0
 	var y0 := py + 110.0
-	for i in range(1, PROPS.size()):   # balls (index 0) are free and endless: not stock
-		var cx0 := tx + float(i - 1) * (cw + gap)
+	for i in PROPS.size():   # balls included: every prop is bought stock now (Louis)
+		var cx0 := tx + float(i) * (cw + gap)
 		var pcol := prop_color(i)
 		var cost := int(PROPS[i]["cost"])
 		var afford := money >= cost
@@ -6604,7 +6630,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		if req > strength:
 			reqcol = Color(0.95, 0.6, 0.45)   # under-strength: flag it before the buy
 		draw_string(font, Vector2(cx0, y0 + 196.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
-		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i), "%s g" % commafy(cost), afford)
+		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
 
 	# ---------------- GEAR: two wide cards ----------------
 	var gy := y0 + ch + 30.0
@@ -6625,7 +6651,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	if has_glasses:
 		draw_string(font, Vector2(gr.position.x, gy0 + 58.0), "OWNED", HORIZONTAL_ALIGNMENT_RIGHT, gw - 24.0, 18, Color(0.6, 0.9, 0.6))
 	else:
-		draw_price_plate(font, Rect2(tx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "6", "%s g" % commafy(GLASSES_COST), money >= GLASSES_COST)
+		draw_price_plate(font, Rect2(tx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "7", "%s g" % commafy(GLASSES_COST), money >= GLASSES_COST)
 	# Uncle Dan's Pie
 	var pxx := tx + gw + gap
 	hud_card(Rect2(pxx, gy0, gw, gh), Color(0.9, 0.62, 0.3, 0.4))
@@ -6637,13 +6663,13 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(pxx + 96.0, gy0 + 58.0), "a whole day of slow, clear time -", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
 	draw_string(font, Vector2(pxx + 96.0, gy0 + 74.0), "eaten in the day hub, ends at sleep", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
 	draw_string(font, Vector2(pxx, gy0 + 20.0), "own %d" % pie_count, HORIZONTAL_ALIGNMENT_RIGHT, gw - 16.0, 12, Color(0.75, 0.9, 0.72) if pie_count > 0 else Color(0.6, 0.55, 0.5, 0.8))
-	draw_price_plate(font, Rect2(pxx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "7", "%s g" % commafy(PIE_COST), money >= PIE_COST)
+	draw_price_plate(font, Rect2(pxx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "8", "%s g" % commafy(PIE_COST), money >= PIE_COST)
 
 	# ---------------- footer: warnings, then the keys ----------------
 	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
 		draw_string(font, Vector2(px, py + ph - 58.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(1.0, 0.62, 0.45))
 	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-		[[["1", "7"], "buy (the key on each card)"], [["Tab"], "leave"]])
+		[[["1", "8"], "buy (the key on each card)"], [["Tab"], "leave"]])
 
 
 func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: Dictionary, unlocked: bool, sel: bool) -> void:
@@ -7224,18 +7250,20 @@ func audio_update() -> void:
 		return
 	var in_play := game_state == ST_PLAY
 	var perf := in_play and mode == MODE_PERFORM and not tut_active
-	# JUGGLING = a live run on the stage (performance, practice, or a lesson). The main
-	# track rides only here; everywhere else the Chill Trio mix carries it (Louis). They
-	# crossfade, so stepping onto the stage lifts the drive and stepping off eases back.
-	var juggling := in_play and running and not results_open
+	# JUGGLING = anywhere the player could start juggling: the stage card and the
+	# whole play state (performance, practice, or a lesson - throwing or not). The
+	# handover used to wait for the FIRST THROW, which meant the chill mix was still
+	# fading while you were already juggling (Louis); now it starts at the stage
+	# door, so the swap is done before the balls go up. Only the results card hands
+	# back to the chill mix (the performance is over).
+	var juggling := game_state == ST_ESTABLISH or (in_play and not results_open)
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
-	# the handover between the two tracks is STAGED now (Louis: they differ too much
-	# in tempo and volume to overlap - the crossfade read as a mashup). _mix still
-	# walks 0..1, but the gain curves carve the walk into three bands: the leaving
-	# track fades fully OUT, a breath of true silence holds, then the arriving track
-	# fades IN from nothing. Both directions get the same shape, so stepping onto the
-	# stage and stepping off both land as a quiet beat, then the other song rising.
-	_mix = move_toward(_mix, 1.0 if juggling else 0.0, 1.0 / (4.5 * 120.0))
+	# the handover between the two tracks is STAGED (Louis: they differ too much in
+	# tempo and volume to overlap - a crossfade read as a mashup). _mix walks 0..1,
+	# and the gain curves carve the walk into three bands: the leaving track fades
+	# fully OUT, a breath of true silence holds, then the arriving track fades IN
+	# from nothing. Both directions get the same shape.
+	_mix = move_toward(_mix, 1.0 if juggling else 0.0, 1.0 / (3.0 * 120.0))
 	var chill_g := clampf(1.0 - _mix / 0.38, 0.0, 1.0)     # gone 38% into the walk
 	var main_g := clampf((_mix - 0.62) / 0.38, 0.0, 1.0)   # enters only after the hush
 	# the stage track RESTARTS from the top whenever it returns from full silence, so
@@ -7247,10 +7275,7 @@ func audio_update() -> void:
 		mus.play(0.0)
 	var main_base := (lerpf(-13.0, -9.0, energy) if perf else -14.0) - _duck * 9.0
 	var main_t := main_base + linear_to_db(maxf(main_g, 0.001))
-	# the hub rides the chill mix at ease; the STAGE CARD hushes it low, so the walk
-	# onto the boards is already a quiet moment before the stage track breathes in
-	var chill_base := -24.0 if game_state == ST_ESTABLISH else -13.0
-	var chill_t := chill_base + linear_to_db(maxf(chill_g, 0.001))
+	var chill_t := -13.0 + linear_to_db(maxf(chill_g, 0.001))
 	if not set_music:
 		main_t = -80.0
 		chill_t = -80.0
