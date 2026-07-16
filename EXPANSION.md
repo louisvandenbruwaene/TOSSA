@@ -415,3 +415,129 @@ Parts 1 and 2 together are, I would estimate, the difference between a game that
 reviews as "a lovely little juggling toy" and one that reviews as "I have put 60
 hours into this." They are also, between them, probably three or four focused
 sessions, because the machinery is nearly all sitting there already, unused.
+
+---
+
+## Part 6. The road from here (written 2026-07-16, supersedes Part 5's order)
+
+Part 5's list has aged well: most of its early items are now real. This part
+records what landed, reconciles Part 2 with the game as it stands today, and
+lays out the whole road to a game people buy and keep playing, in phases with
+clear gates. Where this section disagrees with anything above, this section
+wins.
+
+### What has landed since the essay was written
+
+The Booking is in and calibrated against the autoplayer (targets, the drop
+limit, applause as the clock, Encores, bank or push). The Lesson system is in,
+teaching every command, unbreakable, with a congrats card that hands the new
+player their starting kit. The geometry regression is gone at the root: every
+flight is a pure parabola, and the four routine-reshaping toggles (Columns,
+Waterfall, Reverse Cascade, Tennis) were folded into the pattern list, so
+exactly one pattern runs at a time and Space carries only true flourishes
+(High Toss, Behind the Back, Overthrow, Spin). Unlocks now spread across the
+whole career on level, Strength, Accuracy, and stage reached. The play HUD was
+stripped of everything that does not move during a run. Music crossfades
+between a stage track and a chill track instead of switching.
+
+Still open from the old list: the Suno re-render (the licensing blocker, a
+file swap once the paid render exists) and the human difficulty feel-pass on
+`VENUE_BASE` and `APPL_DECAY`, which the multiplier cap and the high-count
+height changes have made stale.
+
+### Phase F1. Flourish deck (the build layer, the next big lever)
+
+Part 2 stands, with one correction for the fold: the deck's passive Flourishes
+are a THIRD thing, cleanly distinct from the four active tricks on Space and
+the eight patterns on P. Call them CHARMS in the code to avoid the name
+collision with the trick flourishes. Slots between sets, offers in the
+existing results-and-shop loop, gold as the price, persistence across
+bookings. Every card must change what the player does in the next sixty
+seconds, and none may ever touch catch probability. Start with twelve from the
+Part 2 deck, biased toward the ones that read instantly: Metronome, Daredevil,
+All In, The Understudy, Fire Eater, Butterfingers' Charm, Showman (now keyed
+to the four real tricks), Weight Class, Blind Spot, One-Handed, The Long Arm,
+Deadpan. The Booking already gives them stakes to push against.
+
+Gate to pass: a player who owns eight charms can describe their build in one
+sentence and wants to tell someone about it.
+
+### Phase F2. The siteswap engine (the honesty debt and the content well)
+
+Part 3 stands in full. It is also now the fix of record for the one remaining
+physical dishonesty: the mixed patterns (Half Shower, Shower, Waterfall,
+Tennis) still let the autoplayer time the high road into the low weave, and
+the six-ball fountain still passes lane-mates through each other. A beat
+scheduler derived from the pattern replaces the hand-picked slot geometry,
+crossings become rhythm instead of luck, and every valid siteswap string
+becomes free content (441, 531, 51, 423 and onward). Patterns become data.
+After this, new patterns cost a table row, not a week.
+
+Gate to pass: collcheck reports zero overlap on every shipped pattern at
+every count, with no special cases in the throw code.
+
+### Phase F3. Career depth (a reason to come back that is not a number)
+
+Three additions, cheapest first.
+
+RIVALS. Three named jugglers, each holding a score on two or three venue
+boards from the start. Beating a rival's number at a venue plays a short
+title card and retires their entry there. Beating all of a rival's entries
+earns a permanent epithet on the save. This gives the record boards faces
+without reinstating a story: rivals never speak, they are names on boards,
+exactly as arcade high scores were.
+
+FESTIVALS. A booked multi-set marathon that appears on the calendar every
+several in-game weeks: fixed charms forced on, one prop enforced, brutal
+targets, triple pay, its own record board. Festivals are where stacked builds
+get to show off, and they give the mid-career a spike to train toward.
+
+PRESTIGE. After the World Arena win, a new-game-plus that keeps records and
+charms but raises every venue's ante permanently. The Purist boards remain
+the true ladder. The win stays meaningful because the wall it opened stays
+open.
+
+### Phase F4. Presentation (make the good game look like one)
+
+CROWD 2.0. Standing ovations on a venue record, hats and roses thrown on an
+Encore clear, the murmur bed staying deleted (the zero-noise rule holds, the
+stingers carry the audio). All drawn, none sampled.
+
+VENUE LIFE. The marquee shows the player's save name at theatres, posters
+weather with the seasons, rain at the Backyard and snow at the Street Corner
+purely as palette and particle work on the existing exteriors.
+
+GHOSTS AND REPLAYS. Part 4's ghost proposal stands and is cheap: the sim is
+deterministic per tick, a run is a list of tick and action pairs, so record
+every personal best and draw it as a translucent second juggler to race. The
+trailer is then cut from ghost footage with the HUD hidden.
+
+PHOTO MODE. The --shot infrastructure is nearly there already: freeze, hide
+the HUD, nudge the camera, save. Cheap and it markets the game for free.
+
+### Phase F5. Shipping (the commercial track)
+
+In order: the Suno paid re-render swapped in (blocker for any build leaving
+the machine), the difficulty feel-pass with a human at the keys, Steamworks
+(achievements from the career ledger, cloud saves, leaderboards published
+from the Purist boards only), capsule art (the deferred task, drawn in the
+game's own code-art style), a Next Fest demo cut at the Street Corner gate
+with the save carrying into the full game, and the trailer from ghosts.
+The Daily Booking from Part 4 ships with Steamworks, since its whole value
+is that everyone in the world gets the same seed on the same day.
+
+### Guardrails, restated once
+
+No story returns. Stats and charms never catch a ball for the player. One
+pattern at a time stays law. The game stays one file until that genuinely
+hurts, and the art stays code. Every addition above must survive the same
+question the Booking survived: does it change what the player is trying to
+do in the next sixty seconds, or does it merely add a number.
+
+### The order, plainly
+
+F1 charms, then F2 siteswap, then F3 career, with F4 presentation items
+slotted into gaps as palate cleansers, and F5 running as its own track that
+starts the day the paid music render exists. If only two things get built,
+build F1 and F2: the first makes run forty different from run thirty-nine,
+the second makes the game permanently itself.
