@@ -400,6 +400,9 @@ class Ball:
 var tick := 0
 var pattern := CASCADE
 var pattern_sel := CASCADE  # the chosen pattern (persisted); start_run snaps it to what is unlocked
+var pattern_once := -1    # a practice booked from the Skills screen runs THIS pattern for
+						  # that session only - the player's own P choice (pattern_sel) is
+						  # untouched, so trying a pattern never silently re-books the act
 var num_balls := 3
 var mode := MODE_TRAIN
 var balls: Array[Ball] = []
@@ -546,6 +549,7 @@ var _confirm_id := ""     # the purchase awaiting its second, confirming press
 var _confirm_ms := 0
 var shop_msg := ""        # transient warning line inside the shop panel
 var shop_msg_ms := 0
+var shop_buy_ms := 0      # when gold last changed hands, so the purse can flash
 
 # --- day-loop state (persisted per slot) ---------------------------------------
 var day := 1              # which day of the career this is
@@ -582,6 +586,8 @@ var tut_threw_r := false  # a right-hand throw happened this step
 var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw lands)
 var tut_flash := ""       # brief "Nice!" feedback between steps
 var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
+var tut_keys := 0         # command-key presses banked this step (the R and P teaching
+						  # goals count on their own, so a stray catch cannot clear them)
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
@@ -635,7 +641,9 @@ const MUSIC_PATH_CHILL := "res://Juggling Game (Chill Trio Mix).mp3"
 var mus: AudioStreamPlayer
 var mus2: AudioStreamPlayer
 var _vol := {"mus": -80.0, "mus2": -80.0}
-var _mix := 0.0   # crossfade position: 0 = the Chill Trio mix carries it, 1 = the stage track
+var _mix := 0.0   # handover position: 0 = the Chill Trio mix carries it, 1 = the stage track
+var _main_silent := true   # the stage track sits at zero gain: restart it from the top
+						   # (its opening bars) the next time the handover brings it in
 var _duck := 0.0                    # transient music dip on a drop, decays
 
 # the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
@@ -711,8 +719,12 @@ func _ready() -> void:
 	setup_font()
 	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
 	Input.joy_connection_changed.connect(_on_joy_connection)
-	if set_fullscreen:
+	if set_fullscreen and not ua.has("--shot"):
 		apply_fullscreen()                       # honour the remembered display mode
+												 # (a --shot capture run stays at the
+												 # windowed 1280x720 design size, so
+												 # screenshots are comparable and a
+												 # dev capture never seizes the display)
 	setup_audio()                                # synthesise all sound at startup
 	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]   # idle hands for the title screen
 	if not OS.is_debug_build():
@@ -1066,11 +1078,27 @@ func _input(event: InputEvent) -> void:
 	if paused:
 		pause_input(kc)
 		return
-	# during a hands-on lesson the command keys are locked; catch/throw are polled
-	# separately, so only Escape does anything here (it opens the pause menu)
+	# during a hands-on lesson the command keys are locked, so no stray press can break
+	# it into a normal run, a panel, or a prop swap. The juggling itself - throw, catch,
+	# Space - stays live (polled in _read_inputs). Only the lesson's own keys act here:
+	# R re-deals the step, P completes a pattern lesson's "P is the pattern key" step,
+	# and Escape pauses. (This is the ONE lesson key handler - a second, later block
+	# used to shadow this and left R dead inside lessons.)
 	if tut_active:
-		if kc == KEY_ESCAPE:
-			open_pause()
+		if kc == K_CYCLE and tut_id.begins_with("trick_"):
+			cycle_trick()   # C is part of a trick lesson's teaching, so it stays live
+			return          # (the next Space re-pins the taught trick regardless)
+		match kc:
+			KEY_R:
+				if String(tut_step_data().get("goal", "")) == "press_r":
+					tut_demo_reset()   # the step IS the reset key: show it, count it
+				else:
+					tut_reset_step()
+			KEY_P:
+				if String(tut_step_data().get("goal", "")) == "press_p":
+					tut_demo_pattern_off()   # the step IS the pattern key: show the swap
+			KEY_ESCAPE:
+				open_pause()
 		return
 	# the end-of-performance results panel: go again with R (another booking, so
 	# it costs a fresh day segment), spend/shop, or Enter/Esc back into the day.
@@ -1109,17 +1137,6 @@ func _input(event: InputEvent) -> void:
 		return
 	if shop_open:
 		shop_input(kc)
-		return
-	if tut_active:
-		# a lesson is a controlled space (Louis): ONLY reset and pause act on a key, so
-		# no stray press can break it into a normal run, a panel, or a prop swap. The
-		# juggling itself - throw, catch, Space - stays live (polled in _read_inputs),
-		# and the lesson only ever advances on its own goals.
-		match kc:
-			KEY_R:
-				tut_reset_step()
-			KEY_ESCAPE:
-				open_pause()
 		return
 	# a performance cannot be reset or rebuilt mid-set: no restart, no ball-count
 	# change, no prop swap, no bailing to practice. That would make a good ending
@@ -1311,6 +1328,7 @@ func begin_performance(n: int) -> void:
 	mode = MODE_PERFORM
 	establish_after = n
 	establish_venue = play_venue()
+	pattern_once = -1   # a booking always performs the pattern the player chose with P
 	booking_active = true
 	set_index = SET_WARMUP
 	booking_score = 0
@@ -1457,6 +1475,7 @@ func enter_day() -> void:
 	day_msg = ""
 	view_venue = -1
 	cine_tick = 0
+	pattern_once = -1   # a Skills-practice pattern was for that session only
 	# came off the stage SPENT: land the cursor on the first recovery you can afford
 	# (a meal, else the inn) and say so, so the player is steered to it, not left guessing
 	if exhausted:
@@ -1596,13 +1615,18 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			game_state = ST_PLAY
 			start_run(num_balls)
 			play_sfx("ui2", -11.0)
-		"eat", "inn", "shop":
-			# these three open with a small vignette; the effect lands when it
+		"eat", "inn":
+			# these two open with a small vignette; the effect lands when it
 			# ends. Dinner that would break the bed money asks first.
 			if id == "eat" and not confirm_spend("eat", EAT_COST, false):
 				return
 			day_anim = id
 			day_anim_start = cine_tick
+			play_sfx("ui2", -13.0)
+		"shop":
+			# the counter opens the moment you ask for it (Louis: the awning
+			# vignette between the press and the shop was dead time)
+			shop_open = true
 			play_sfx("ui2", -13.0)
 		"pie":
 			pie_count -= 1
@@ -1644,6 +1668,7 @@ func day_anim_step() -> void:
 	match id:
 		"eat":
 			money -= EAT_COST
+			play_sfx("money", -9.0)   # gold on the counter
 			stamina = minf(stamina_max, stamina + EAT_STAM * stamina_max)
 			meals += 1
 			if meals % MEALS_PER_STR == 0 and strength < 100:
@@ -1654,14 +1679,10 @@ func day_anim_step() -> void:
 				play_sfx("streak", -8.0)
 			else:
 				set_day_msg("a hot meal, stamina restored a little")
-				play_sfx("coin", -10.0)
-			save_progress()
 		"inn":
 			money -= INN_COST   # full price, always (the row blocks when short)
+			play_sfx("money", -9.0)
 			sleep_day()
-		"shop":
-			shop_open = true
-			play_sfx("ui2", -13.0)
 
 
 func sleep_day() -> void:
@@ -1782,16 +1803,23 @@ func practice_skill(idx: int) -> void:
 		play_sfx("whiff", -10.0)
 		return
 	# a pattern needs a matching ball count (an even fountain, odd cascade); a trick
-	# keeps the current count. Set the pattern BEFORE start_run so it deals right.
+	# keeps the current count. The pattern rides the ONE-SESSION override, never
+	# pattern_sel: trying a pattern from the Skills screen must not re-book the act
+	# (Louis) - only P, the player's own hand, changes the persistent choice.
 	if not is_trick:
-		pattern_sel = pat
+		pattern_once = pat
 	skills_open = false
 	seg_used += 1
 	career["practices"] = int(career["practices"]) + 1
 	save_progress()
 	mode = MODE_TRAIN
 	game_state = ST_PLAY
-	start_run(num_balls)
+	# the fountain reads even: borrow one more ball for the session so choosing it
+	# from the Skills screen actually shows a fountain (start_run clamps safely)
+	var run_n := num_balls
+	if pattern_once == FOUNTAIN and run_n % 2 == 1:
+		run_n += 1
+	start_run(run_n)
 	# now engage the chosen trick (start_run has cleared the per-run trick state):
 	# a toggle switches ON and stays, an arm trick primes the next throw, Spin just
 	# loads. The player still throws to begin, so nothing fires unbidden.
@@ -1808,7 +1836,7 @@ func practice_skill(idx: int) -> void:
 		else:
 			set_trick_msg("%s selected  -  %s performs it" % [String(TRICKS[idx]["name"]), k_trick()[0]])
 	else:
-		set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
+		set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern]["name"]).to_upper(), String(PATTERNS[pattern]["desc"])])
 	play_sfx("ui2", -11.0)
 
 
@@ -1916,6 +1944,7 @@ func cycle_pattern_live(dir: int) -> void:
 	if un.size() <= 1:
 		set_trick_msg("the next pattern (Columns) asks for %s" % skill_req_text(PATTERNS[COLUMNS]))
 		return
+	pattern_once = -1   # the player's own hand on P ends any Skills-practice override
 	var idx := un.find(pattern_sel)
 	pattern_sel = int(un[(idx + dir + un.size()) % un.size()]) if idx >= 0 else int(un[0])
 	pattern = pattern_sel
@@ -1957,7 +1986,9 @@ func try_buy(kind: int) -> void:
 		var was := available(kind)
 		money -= cost
 		prop_count[kind] += 1
+		shop_buy_ms = int(Time.get_ticks_msec())
 		save_progress()
+		play_sfx("money", -6.0)
 		if not was and available(kind):
 			offer_prop_tutorial(kind)   # first time you can juggle these: explain them
 
@@ -1999,7 +2030,10 @@ func tut_lesson(id: String) -> Array:
 		return pattern_lesson_steps(pattern_by_id(id.substr(8)))
 	# the core progression: one ball, then two, then the three-ball cascade.
 	# Key names come from the live bindings, so a remapped player is taught
-	# THEIR keys, not the defaults.
+	# THEIR keys, not the defaults. EVERY step names its keys (Louis: the throw
+	# and catch keys are shown every single time, never assumed remembered),
+	# and the floating key letters over the hands repeat them at the point of
+	# action all lesson long.
 	var kj := OS.get_keycode_string(K_RT)
 	var kf := OS.get_keycode_string(K_LT)
 	var kd := OS.get_keycode_string(K_LC)
@@ -2008,17 +2042,19 @@ func tut_lesson(id: String) -> Array:
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "throw_r", "need": 1,
 			"text": "Throw the ball from your RIGHT hand", "sub": "Tap %s. Just let it fall this time, no need to catch it yet." % kj},
 		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "throw_l", "need": 1,
-			"text": "Now throw from your LEFT hand", "sub": "Tap %s, and let it fall again. Feel that each hand has its own throw." % kf},
+			"text": "Now throw from your LEFT hand", "sub": "Tap %s, and let it fall again. Each hand has its own throw key: %s right, %s left." % [kf, kj, kf]},
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 1,
-			"text": "This time, catch it", "sub": "Throw with %s, then catch it in your LEFT hand with %s as it comes down." % [kj, kd]},
+			"text": "This time, catch it", "sub": "Throw with %s, then catch it in your LEFT hand with %s as it comes down. The letter over a hand is always the key it wants." % [kj, kd]},
 		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "catch", "need": 1,
-			"text": "And the other way", "sub": "Throw with %s, then catch it in your RIGHT hand with %s." % [kf, kk]},
+			"text": "And the other way", "sub": "Throw with %s, then catch it in your RIGHT hand with %s. Catching is always %s left, %s right." % [kf, kk, kd, kk]},
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
-			"text": "Keep one ball going, back and forth", "sub": "Throw, catch, throw from that hand, catch. Land four in a row."},
+			"text": "Keep one ball going, back and forth", "sub": "%s or %s throws, %s or %s catches - press them every single time, nothing is automatic. Land four in a row." % [kj, kf, kd, kk]},
+		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "press_r", "need": 1,
+			"text": "Tangled? R starts you over", "sub": "Press R now and watch the balls come back to hand. In any practice, R re-deals - the key row at the BOTTOM of the screen always lists it."},
 		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
-			"text": "Two balls now, one in each hand", "sub": "Throw the first, and as it peaks throw the second up under it. Land four catches."},
+			"text": "Two balls now, one in each hand", "sub": "Throw the first (%s), and as it peaks throw the second (%s) up under it. Catch with %s and %s - every catch is a press. Land four." % [kj, kf, kd, kk]},
 		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 4,
-			"text": "Three balls. The cascade", "sub": "Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for four."},
+			"text": "Three balls. The cascade", "sub": "Same four keys: %s %s throw, %s %s catch. Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for four." % [kj, kf, kd, kk]},
 	]
 
 
@@ -2033,32 +2069,33 @@ func trick_lesson_steps(t: int) -> Array:
 	var td: Dictionary = TRICKS[t]
 	var nm := String(td["name"])
 	var kb := String(k_trick()[0])
+	var kcy := String(k_cycle()[0])
 	match String(td["kind"]):
 		"toggle":
 			return [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_on", "need": 1,
 					"trick": t, "prompt": "trick", "slow": 0.62,
 					"text": "%s: switch it ON" % nm,
-					"sub": "Press %s. Every throw reshapes into %s until you press it again." % [kb, nm]},
+					"sub": "Press %s ONCE - not repeatedly. Every throw reshapes into %s until you switch it off." % [kb, nm]},
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
 					"prompt": "catch", "slow": 0.5,
 					"text": "Now keep it going, and catch them down",
-					"sub": "Watch how the weave changes shape. Land three while it runs."},
+					"sub": "Watch the weave change shape. The bottom-right card reads '%s - ON' whenever it runs. Land three." % nm.to_upper()},
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_off", "need": 1,
 					"trick": t, "prompt": "trick", "slow": 0.35,
 					"text": "And switch it OFF",
-					"sub": "Press %s again to fall back to a normal weave. That is the whole toggle." % kb},
+					"sub": "Press %s once more. One press ON, one press OFF - that is the whole toggle. %s swaps which trick %s carries." % [kb, kcy, kb]},
 			]
 		"arm":
 			return [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
 					"trick": t, "prompt": "trick", "slow": 0.55,
 					"text": "%s: arm it, then throw" % nm,
-					"sub": "Press %s, then throw. Just that ONE next throw flies over the top, and it lands the trick." % kb},
+					"sub": "Press %s once, then throw. Just that ONE next throw flies over the top, and it lands the trick." % kb},
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 2,
 					"trick": t, "prompt": "trick", "slow": 0.4,
-					"text": "Again - it is a one-shot, so arm it each time",
-					"sub": "Press %s, throw, catch. Land two more. Every %s is its own press." % [kb, nm]},
+					"text": "Again - it is a one-shot, so arm it EVERY time",
+					"sub": "%s, throw, catch - each trick is its own press. The bottom-right card says READY while one is armed; %s swaps tricks." % [kb, kcy]},
 			]
 		_:  # live (Spin): acts on the balls already airborne
 			return [
@@ -2069,7 +2106,7 @@ func trick_lesson_steps(t: int) -> Array:
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
 					"trick": t, "prompt": "trick", "slow": 0.62,
 					"text": "Now press it, and catch through the turn",
-					"sub": "Press %s. The catches come while you are still spinning - trust the timing, it is thick and slow here." % kb},
+					"sub": "Press %s once - it fires the moment you press. Catches come while you spin; the bottom-right card shows its cooldown. %s swaps tricks." % [kb, kcy]},
 			]
 
 
@@ -2104,6 +2141,13 @@ func pattern_lesson_steps(p: int) -> Array:
 		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p, "goal": "catch", "need": 8, "slow": 0.28,
 			"text": "%s, closer to speed" % nm,
 			"sub": "Hold its shape as the world speeds up. Land eight."},
+		# the last step TEACHES the key that owns patterns: one press of P visibly hands
+		# the routine back to the plain weave. The lesson never touches pattern_sel, so
+		# what the player chose before the lesson is exactly what they keep after it.
+		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "press_p", "need": 1,
+			"prompt": "pattern", "slow": 0.4,
+			"text": "Patterns live on the P key",
+			"sub": "Press P once: the routine swaps back to the plain weave. In any practice, P chooses your pattern - the bottom-left card always names the one running."},
 	]
 
 
@@ -2115,6 +2159,18 @@ func begin_tutorial(id: String) -> void:
 	started = true            # a lesson is its own thing, not the opening "first run"
 	_slow_cur = tut_slow()    # a lesson opens ALREADY thick, it does not ease in over the
 							  # ~4s the 0.0025 ramp would take from a standing start
+	# a lesson is a controlled space: nothing primed or toggled walks in from the last
+	# session, so step one always starts from the state its text describes
+	toggle_on = -1
+	trick_primed = false
+	tennis_ball = null
+	spin_until = -999
+	# the key that ACTIVATED the lesson (Space or Enter on the hub row) is still held
+	# right now. Without seeding, the first play frame read that held Space as a fresh
+	# edge and fired the trick BEFORE the player saw step one - the step then cleared
+	# (or toggled) itself, and the player's own later press did the opposite of the
+	# banner's ask. That is the "Space does not work in lessons" bug.
+	seed_input_edges()
 	tut_setup_step()
 
 
@@ -2132,17 +2188,22 @@ func tut_setup_step() -> void:
 	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() != want_n
 	prop_type = want_prop
 	num_balls = want_n
-	# a pattern lesson forces its own pattern; otherwise the parity default
+	# a pattern lesson forces its own pattern FOR THE LESSON ONLY: pattern_sel (the
+	# player's own P choice, the one that persists) is never touched here - a lesson
+	# demonstrating Columns must not walk out with Columns selected (Louis). A step
+	# without a "pattern" key keeps whatever is running when the juggle flows on, and
+	# falls to the parity default only on a fresh deal.
 	if step.has("pattern"):
 		pattern = int(step["pattern"])
-		pattern_sel = pattern
-	else:
+	elif fresh:
 		pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
 	# a trick lesson selects (and de-arms) its trick, so the step starts from a known
-	# state: Space will act on exactly this trick, nothing is primed or toggled yet
+	# state: Space will act on exactly this trick. A "switch it OFF" step is the one
+	# exception - it must start with the toggle RUNNING (the thing to switch off),
+	# otherwise the player's one press flips it back ON and the step cannot complete
 	if step.has("trick"):
 		trick_sel = int(step["trick"])
-		toggle_on = -1
+		toggle_on = trick_sel if String(step["goal"]) == "trick_off" else -1
 		trick_primed = false
 		tennis_ball = null
 	if fresh:
@@ -2195,6 +2256,7 @@ func tut_setup_step() -> void:
 	tut_threw_l = false
 	tut_threw_r = false
 	tut_tricks = 0
+	tut_keys = 0
 	tut_advance_at = -1
 
 
@@ -2226,6 +2288,34 @@ func tut_reset_step() -> void:
 	play_sfx("ui2", -13.0)
 
 
+func tut_demo_reset() -> void:
+	# the basics lesson's "press R" step: the press must both DO the thing (the balls
+	# re-deal, so the key is seen working) and COUNT toward the goal - tut_reset_step
+	# cannot be used as-is because it zeroes the step's counters, which would wipe the
+	# very press being taught. So: spill the hands, let tut_maintain re-stock them,
+	# and bank the press.
+	balls.clear()
+	_stack_l.clear()
+	_stack_r.clear()
+	charging = [false, false]
+	tut_keys += 1
+	play_sfx("ui2", -13.0)
+	tut_check()
+
+
+func tut_demo_pattern_off() -> void:
+	# the pattern lesson's "press P" step: one press visibly hands the routine back to
+	# the plain weave, so the player SEES that P is how patterns are chosen - without
+	# ever touching pattern_sel (their own persistent choice)
+	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	col_air_ref = -1.0
+	col_mid_ball = null
+	tennis_ball = null
+	tut_keys += 1
+	play_sfx("ui2", -13.0)
+	tut_check()
+
+
 func tut_on_throw(h: int) -> void:
 	if h == LEFT:
 		tut_threw_l = true
@@ -2251,6 +2341,7 @@ func tut_check() -> void:
 		"trick_on": done = toggle_on == int(step.get("trick", -1))   # the toggle is running
 		"trick_off": done = toggle_on < 0                             # ...and now switched off
 		"trick_use": done = tut_tricks >= int(step["need"])           # arm/live: reward_trick fired
+		"press_r", "press_p": done = tut_keys >= int(step["need"])   # the key itself is the goal
 		_: done = tut_count >= int(step["need"])
 	if done:
 		tut_flash = "Nice!"
@@ -2317,34 +2408,71 @@ func tut_finish() -> void:
 	set_day_msg("lesson complete  -  your day begins")
 
 
+func tut_kind_tag() -> String:
+	# what KIND of thing this lesson teaches, said outright at the top of the banner,
+	# because "is this a trick or a pattern?" was exactly the confusion (Louis)
+	if tut_id.begins_with("trick_"):
+		return "TRICK LESSON  -  a flourish on %s, %s swaps which one" % [String(k_trick()[0]), String(k_cycle()[0])]
+	if tut_id.begins_with("pattern_"):
+		return "PATTERN LESSON  -  the whole routine, chosen with P"
+	if tut_id.begins_with("prop_"):
+		return "NEW PROP LESSON"
+	if tut_id.begins_with("count_"):
+		return "MORE BALLS"
+	return "THE BASICS"
+
+
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var step := tut_step_data()
 	var steps := tut_lesson(tut_id)
 	draw_tut_prompts(font, s, step)   # a timing ring + bare handed key over the hands, no boxes
-	# the ONE rectangle at the top (Louis): the lesson text and progress. Everything else
-	# lives along the bottom, so the centre - where the props fly - stays clear.
-	var bw := s.x * 0.66
+	# the ONE rectangle at the top (Louis): the lesson kind, text and progress. Everything
+	# else lives along the bottom, so the centre - where the props fly - stays clear.
+	var bw := s.x * 0.72
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := 24.0
-	draw_rect(Rect2(bx, by, bw, 92.0), Color(0.05, 0.03, 0.05, 0.86))
-	draw_rect(Rect2(bx, by, bw, 92.0), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
-	draw_string(font, Vector2(bx, by + 30.0), "LESSON  -  " + String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 23, Color(1.0, 0.9, 0.6))
-	draw_string(font, Vector2(bx + 20.0, by + 55.0), String(step["sub"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 40.0, 15, Color(0.9, 0.85, 0.78))
+	draw_rect(Rect2(bx, by, bw, 118.0), Color(0.05, 0.03, 0.05, 0.86))
+	draw_rect(Rect2(bx, by, bw, 118.0), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
+	var kind_col := Color(1.0, 0.72, 0.4) if tut_id.begins_with("trick_") else (Color(0.65, 0.85, 1.0) if tut_id.begins_with("pattern_") else Color(0.85, 0.75, 0.6))
+	draw_string(font, Vector2(bx, by + 20.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_CENTER, bw, 12, kind_col)
+	draw_string(font, Vector2(bx, by + 46.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 22, Color(1.0, 0.9, 0.6))
+	draw_multiline_string(font, Vector2(bx + 20.0, by + 70.0), String(step["sub"]),
+		HORIZONTAL_ALIGNMENT_CENTER, bw - 40.0, 14, 2, Color(0.9, 0.85, 0.78))
 	var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
 	if String(step["goal"]).begins_with("catch") and int(step["need"]) > 1:
 		prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
-	draw_string(font, Vector2(bx, by + 80.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.8, 0.75, 0.68))
-	# ALL the controls, always, along the very bottom (Louis: every command, not just the
-	# one this step uses). The trick key lights up when the step calls for it.
-	var trick_hot := String(step.get("prompt", "")) == "trick"
-	var tcol := Color(1.0, 0.72, 0.4) if trick_hot else Color(0.82, 0.74, 0.62, 0.9)
-	draw_hints_row(font, s.x * 0.5, s.y - 40.0,
-		[[k_throw(), "throw"], [k_catch(), "catch"], [k_trick(), "trick"], [["R"], "reset"], [k_pause(), "pause"]])
-	if trick_hot:
+	draw_string(font, Vector2(bx, by + 108.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.8, 0.75, 0.68))
+	# the controls that actually WORK in a lesson, always, along the very bottom - plus
+	# the lesson's own key (trick / pattern) so every command the game has gets its
+	# moment of attention in the lesson that owns it (Louis)
+	var items: Array = [[k_throw(), "throw"], [k_catch(), "catch"]]
+	if tut_id.begins_with("trick_"):
+		items.append([k_trick(), "trick"])
+		items.append([k_cycle(), "switch trick"])
+	elif tut_id.begins_with("pattern_"):
+		items.append([["P"], "pattern"])
+	items.append([["R"], "reset"])
+	items.append([k_pause(), "pause"])
+	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
+	# the step's OWN key shouts for its press: Space on a trick step, P on the pattern
+	# step, R on the reset step - one pulsing line right above the key row it points at
+	var hot_key := ""
+	if String(step.get("prompt", "")) == "trick":
+		hot_key = String(k_trick()[0])
+	elif String(step["goal"]) == "press_p":
+		hot_key = "P"
+	elif String(step["goal"]) == "press_r":
+		hot_key = "R"
+	if hot_key != "":
 		var pa := 0.55 + 0.45 * (0.5 + 0.5 * sin(atick() * 0.13))
-		draw_text_shout(font, Vector2(0, s.y - 64.0), "press %s now" % String(k_trick()[0]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(tcol.r, tcol.g, tcol.b, pa))
+		draw_text_shout(font, Vector2(0, s.y - 64.0), "press %s now  -  once" % hot_key, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(1.0, 0.72, 0.4, pa))
 	if tut_flash != "":
 		draw_text_shout(font, Vector2(0, s.y - 92.0), tut_flash, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.7, 0.95, 0.7))
+	# trick feedback ("HIGH TOSS ON", or the lesson's gentle no-trick-here guidance)
+	# shows in lessons too - draw_hud, which normally carries it, never runs here
+	if trick_msg != "" and tick - trick_msg_tick < 90:
+		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
+		draw_text_shout(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
 
 
 func draw_timing_ring(at: Vector2, d: int) -> void:
@@ -2367,11 +2495,11 @@ func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: flo
 	# press (which hand, which key) is guided at the point of action without a text
 	# rectangle in the middle of the stage (Louis: keep the centre clear).
 	var u := clampf(urgency, 0.0, 1.0)
-	var sc := lerpf(0.9, 1.4, u)
+	var sc := lerpf(1.0, 1.4, u)
 	if u > 0.6:
 		sc *= 1.0 + 0.06 * sin(atick() * 0.18) * (u - 0.6) / 0.4
 	var fs := int(round(19.0 * sc))
-	var a := lerpf(0.5, 1.0, u)
+	var a := lerpf(0.78, 1.0, u)   # never faint: a calm key must still read at a glance
 	draw_text_shout(font, at - Vector2(80.0, 0.0), key, HORIZONTAL_ALIGNMENT_CENTER, 160.0, fs, Color(col.r, col.g, col.b, a))
 
 
@@ -2383,31 +2511,33 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		return
 	var kc := k_catch()
 	var kt := k_throw()
-	# catch: a timing ring on the receiving hand, its bare catch key just above it
+	# catch: a timing ring on the receiving hand, its bare catch key just above it.
+	# The lead runs LONGER than the in-game glow (Louis: shown early enough), so a
+	# beginner reads the key well before the ball asks for it.
+	var lead := PROMPT_LEAD * 3 / 2
+	var catching := [false, false]
 	for b in balls:
 		if b.state != STATE_FLIGHT:
 			continue
 		var d := b.land_tick - tick
-		if d <= 0 or d > PROMPT_LEAD:
+		if d <= 0 or d > lead:
 			continue
-		var h := b.to_hand
-		var hp: Vector2 = hpos[clampi(h, 0, 1)]
+		var h := clampi(b.to_hand, 0, 1)
+		var hp: Vector2 = hpos[h]
 		draw_timing_ring(hp, d)
-		var urg := 1.0 - float(d) / float(PROMPT_LEAD)
-		draw_tut_key(font, hp + Vector2(0.0, -44.0), String(kc[clampi(h, 0, 1)]), Color(0.7, 0.88, 1.0), urg)
-	# throw: the bare throw key over the hand the step wants to throw from
-	var prompt := String(step.get("prompt", ""))
+		var urg := 1.0 - float(d) / float(lead)
+		draw_tut_key(font, hp + Vector2(0.0, -44.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
+		catching[h] = true
+	# throw: the bare throw key over EVERY hand holding a ball, all lesson long (Louis:
+	# the keys are shown every single time, never assumed learned). It brightens when
+	# the step's whole point is that throw, stays calm otherwise, and yields to a catch
+	# prompt already claiming the same hand.
 	var goal := String(step["goal"])
-	if prompt == "throw" or prompt == "hold" or goal == "throw_r" or goal == "throw_l":
-		var th := RIGHT if (goal == "throw_r" or prompt == "throw") else LEFT
-		if goal == "throw_l":
-			th = LEFT
-		for hh in [int(step.get("hand", th)), LEFT, RIGHT]:
-			if not stack(hh).is_empty():
-				th = hh
-				break
-		if not stack(th).is_empty():
-			draw_tut_key(font, hpos[th] + Vector2(0.0, -44.0), String(kt[th]), Color(1.0, 0.82, 0.5), 0.7)
+	for hh: int in [LEFT, RIGHT]:
+		if stack(hh).is_empty() or catching[hh]:
+			continue
+		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT)
+		draw_tut_key(font, hpos[hh] + Vector2(0.0, -44.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
 func try_buy_pie() -> void:
@@ -2420,8 +2550,9 @@ func try_buy_pie() -> void:
 		return
 	money -= PIE_COST
 	pie_count += 1
+	shop_buy_ms = int(Time.get_ticks_msec())
 	save_progress()
-	play_sfx("coin", -8.0)
+	play_sfx("money", -6.0)
 
 
 func try_buy_glasses() -> void:
@@ -2431,7 +2562,9 @@ func try_buy_glasses() -> void:
 		return
 	money -= GLASSES_COST
 	has_glasses = true
+	shop_buy_ms = int(Time.get_ticks_msec())
 	save_progress()
+	play_sfx("money", -6.0)
 
 
 # -----------------------------------------------------------------------------
@@ -2835,8 +2968,9 @@ func _read_inputs() -> void:
 	_edge("rc", k_rc or p_rc, RIGHT, true)
 	_edge("rt", k_rt or p_rt, RIGHT, false)
 	# the top face button mirrors the C key and steps which trick Space is loaded
-	# with. lessons and the results card lock C, so the pad honours that too.
-	if p_cy and not bool(_prev["cycle"]) and not tut_active and not results_open:
+	# with. The results card locks C, and so do lessons - except a TRICK lesson,
+	# where C is part of what is being taught (same rule as the keyboard path).
+	if p_cy and not bool(_prev["cycle"]) and not results_open and (not tut_active or tut_id.begins_with("trick_")):
 		cycle_trick()
 	_prev["cycle"] = p_cy
 
@@ -3188,6 +3322,16 @@ func start_run(n: int) -> void:
 	if not pattern_unlocked(pattern_sel) or pattern_sel == CASCADE or pattern_sel == FOUNTAIN:
 		pattern_sel = CASCADE if num_balls % 2 == 1 else FOUNTAIN
 	pattern = pattern_sel
+	# a Skills-screen practice runs its chosen pattern for THIS session without
+	# re-booking the act: P (cycle_pattern) clears the override, an explicit choice.
+	# The two parity starters stay snapped to the count (an odd fountain has never
+	# been juggleable here, and the override must not smuggle one in).
+	if pattern_once >= 0 and pattern_unlocked(pattern_once):
+		pattern = pattern_once
+		if pattern == FOUNTAIN and num_balls % 2 == 1:
+			pattern = CASCADE
+		elif pattern == CASCADE and num_balls % 2 == 0:
+			pattern = FOUNTAIN
 	balls.clear()
 	_stack_l.clear()
 	_stack_r.clear()
@@ -3852,6 +3996,7 @@ func rec_table() -> Array[int]:
 func cycle_pattern() -> void:
 	# P steps the pattern in training (a performance is committed to its routine).
 	# Restarts the run so the hands are re-dealt for the new choreography.
+	pattern_once = -1   # the player's own hand on P ends any Skills-practice override
 	var un: Array = []
 	for i in pattern_order():
 		if pattern_unlocked(i):
@@ -3903,11 +4048,20 @@ func on_trick() -> void:
 	# The TRICK key (Space) is the one-shot powerup. With an arm trick selected it
 	# primes exactly the next throw (pressing again waves it off); with Spin selected
 	# it performs the spin right now. The selection itself lives on C (cycle_trick).
-	# in a lesson, the trick being TAUGHT is always usable, whatever your level - the
-	# step selects it and skips the unlock gate, so it can never dead-end waiting for a
-	# Space press the gate silently refused (Louis: the trick lesson would not respond).
-	if tut_active and tut_step_data().has("trick"):
-		trick_sel = int(tut_step_data()["trick"])
+	# In a TRICK lesson the trick being TAUGHT is always usable, on EVERY step of it,
+	# whatever your level - the lesson selects it and skips the unlock gate, so it can
+	# never dead-end waiting for a Space press the gate silently refused, and a press
+	# on the drill steps still acts on the taught trick, never on some other one.
+	# In any OTHER lesson Space is not part of the exercise: say so instead of firing
+	# a trick invisibly under a pattern drill.
+	if tut_active and tut_id.begins_with("trick_"):
+		trick_sel = trick_by_id(tut_id.substr(6))
+	elif tut_active:
+		if tut_id.begins_with("pattern_"):
+			set_trick_msg("this lesson is a PATTERN - it runs on its own. Tricks ride %s on the stage" % k_trick()[0])
+		else:
+			set_trick_msg("no trick in this lesson - just throws and catches")
+		return
 	elif unlocked_tricks().is_empty():
 		set_trick_msg("the first trick (%s) asks for %s" % [String(TRICKS[0]["name"]), skill_req_text(TRICKS[0])])
 		return
@@ -5025,7 +5179,11 @@ func _draw() -> void:
 	draw_charge_gauges()   # the hold-to-throw height gauge beside a charging hand
 	draw_vignette(s, 0.5)  # frame the lit stage so it reads photographed, not flat
 	if tut_active:
-		draw_tutorial_banner(font, s)   # a lesson shows only the guided banner, no HUD
+		draw_tutorial_banner(font, s)   # a lesson shows only the guided banner, no HUD -
+		if tut_id.begins_with("trick_"):     # - plus the ONE corner card its text points
+			draw_trick_hud(font, s)          # at, so "the bottom-right card" is a real
+		elif tut_id.begins_with("pattern_"): # thing on screen, not a promise (Louis)
+			draw_routine_hud(font, s)
 	else:
 		draw_hud(font, s)
 	draw_popups(font)
@@ -5697,10 +5855,11 @@ func draw_torch(pos: Vector2, ang: float, sc: float) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-func draw_prop_icon(kind: int, pos: Vector2) -> void:
-	# a small, still version of the prop shape, for menus
+func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0) -> void:
+	# a small, still version of the prop shape, for menus. mag blows it up for the
+	# shop's big cards, where the tiny list-row size read as clutter (Louis)
 	var col := prop_color(kind)
-	var sc := minf(prop_scale(kind), 1.0)
+	var sc := minf(prop_scale(kind), 1.0) * mag
 	match kind:
 		PROP_EGGS:
 			draw_egg(pos, col, sc)
@@ -6002,7 +6161,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
 		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
 		draw_text_shout(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
-	# the loaded-trick readout (bottom-right corner, out of the way)
+	# the loaded-trick readout (bottom-right corner, out of the way). Lessons draw
+	# their own corner card from _draw's lesson branch - draw_hud never runs there.
 	if not tut_active and not results_open and not unlocked_tricks().is_empty():
 		draw_trick_hud(font, s)
 	# the routine readout (bottom-left): the object and pattern in play, and the keys
@@ -6194,7 +6354,13 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	# Sits bottom-RIGHT, mirroring the venue/prop card bottom-left, so the two share
 	# the foot of the stage evenly instead of the trick card floating mid-screen.
 	var un := unlocked_tricks()
-	var sel := trick_sel if trick_sel >= 0 and trick_unlocked(trick_sel) else int(un[0])
+	var sel := trick_sel
+	if tut_active and tut_id.begins_with("trick_"):
+		sel = trick_by_id(tut_id.substr(6))   # a lesson shows ITS trick, gate or no gate
+	elif sel < 0 or not trick_unlocked(sel):
+		sel = int(un[0])
+	if sel < 0:
+		return
 	var kind := String(TRICKS[sel]["kind"])
 	var label := String(TRICKS[sel]["name"]).to_upper()
 	var hot := false
@@ -6265,150 +6431,219 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 
 
 func draw_sheet(font: Font, s: Vector2) -> void:
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82))
-	var pw := 580.0
-	var ph := 440.0
+	# the character sheet, dealt as CARDS like the shop (Louis: Balatro look - one big
+	# card per stat, its key printed on the card, a loud banner when points wait)
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
+	var pw := minf(1040.0, s.x - 60.0)
+	var ph := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
-
-	var tx := px + 36.0
-	var innerw := pw - 72.0
-	draw_string(font, Vector2(tx, py + 48.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	if debug_mode:
-		draw_string(font, Vector2(tx + 140.0, py + 48.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.55, 0.9, 1.0))
-	draw_string(font, Vector2(px + pw - 190.0, py + 40.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6))
-	draw_string(font, Vector2(px + pw - 190.0, py + 62.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(1.0, 0.86, 0.45))
-	draw_string(font, Vector2(px + pw - 190.0, py + 82.0), "Rep %s  %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.72, 0.85))
-	# xp bar
-	var need := xp_to_next(level)
-	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	var xbw := 300.0   # kept short so it never runs under the gold/reputation column
-	draw_rect(Rect2(tx, py + 66.0, xbw, 10.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(tx, py + 66.0, xbw * xf, 10.0), Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(tx, py + 92.0), "%d / %d xp to next level" % [xp, need], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.8, 0.72, 0.58))
-
-	var str_note := "heavy props fly higher and catch easier  -  %d balls now" % max_balls()
-	if next_ball_strength() > 0:
-		str_note = "heavy props steadier and easier to catch  -  %d-ball unlock at Str %d" % [max_balls() + 1, next_ball_strength()]
-	var acc_note := "higher chance to catch off-Perfect; lands throws closer"
-	if accuracy > 100:
-		if focus() <= 100.0:
-			acc_note = "Focus %d  -  cheaper stamina every action" % int(focus())
-		else:
-			acc_note = "Focus %d  -  min stamina cost, +%d Perfect ticks" % [int(focus()), perfect_window() - W_PERFECT]
-	var ry := py + 132.0
-	draw_stat_row(font, tx, ry, innerw, "ACCURACY", accuracy, acc_note, "1")
-	ry += 52.0
-	draw_stat_row(font, tx, ry, innerw, "STRENGTH", strength, str_note, "2")
-	ry += 52.0
-	draw_stat_row(font, tx, ry, innerw, "ENDURANCE", endurance, "raises your maximum stamina", "3")
-	ry += 52.0
-	var spd_pct := speed / 8
-	var spd_note := "the world runs %d%% slower for you  -  8 points per percent, cap %d%%" % [spd_pct, SPEED_CAP / 8]
-	if speed >= SPEED_CAP:
-		spd_note = "the world runs %d%% slower for you  -  at the cap" % spd_pct
-	draw_stat_row(font, tx, ry, innerw, "SPEED", speed, spd_note, "4")
-	ry += 52.0
-	# stamina is a resource, not an investable stat
-	draw_string(font, Vector2(tx, ry), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.8, 0.9, 0.85))
-	draw_rect(Rect2(tx + 130.0, ry - 13.0, innerw - 260.0, 12.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(tx + 130.0, ry - 13.0, (innerw - 260.0) * clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0), 12.0), Color(0.55, 0.80, 0.6))
-	draw_string(font, Vector2(tx + innerw - 120.0, ry), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.85, 0.9, 0.85))
-	draw_string(font, Vector2(tx, ry + 16.0), "drains as you play; low stamina makes throws wild", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-
-	var by := py + ph - 46.0
-	if debug_mode:
-		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.6, 0.9, 1.0))
-	elif points > 0:
-		draw_string(font, Vector2(tx, by), "%d point%s to spend  -  press 1 / 2 / 3 / 4" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
-	else:
-		draw_string(font, Vector2(tx, by), "Skill sets your score. Stats only ease the climb.", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.75, 0.7, 0.62))
-	draw_string(font, Vector2(px + pw - 150.0, by), "Tab to resume", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
-
-
-func draw_shop(font: Font, s: Vector2) -> void:
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.85))
-	var pw := 640.0
-	var ph := 502.0
-	var px := s.x * 0.5 - pw * 0.5
-	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98))
 	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
-	draw_string(font, Vector2(tx, py + 48.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(px + pw - 170.0, py + 44.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.86, 0.45))
+	draw_string(font, Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
+	if debug_mode:
+		draw_string(font, Vector2(tx + 168.0, py + 50.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.55, 0.9, 1.0))
+	draw_purse(font, px + pw - 40.0, py + 52.0)
+	draw_string(font, Vector2(px, py + 74.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 13, Color(0.82, 0.72, 0.85))
 
-	var ry := py + 100.0
-	var keynum := 1
-	for kind in range(1, PROPS.size()):   # skip balls (index 0, always owned)
-		draw_shop_row(font, tx, ry, innerw, kind, keynum)
-		ry += 50.0
-		keynum += 1
-	draw_glasses_row(font, tx, ry, innerw, keynum)
-	ry += 50.0
-	draw_pie_row(font, tx, ry, innerw, keynum + 1)
+	# the level and its road: one full-width bar, the number on it
+	var need := xp_to_next(level)
+	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+	draw_string(font, Vector2(tx, py + 96.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.9, 0.6))
+	var xbx := tx + 130.0
+	var xbw := innerw - 130.0
+	draw_rect(Rect2(xbx, py + 82.0, xbw, 16.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(xbx, py + 82.0, xbw * xf, 16.0), Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(xbx, py + 95.0), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, xbw, 12, Color(1.0, 0.96, 0.85))
 
-	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
-		draw_string(font, Vector2(tx, py + ph - 54.0), shop_msg, HORIZONTAL_ALIGNMENT_LEFT, innerw, 13, Color(1.0, 0.62, 0.45))
-	draw_string(font, Vector2(tx, py + ph - 30.0), "press a number to buy one   -   to juggle N of a prop you must own N", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
-	draw_string(font, Vector2(px + pw - 150.0, py + ph - 30.0), "Tab / S to leave", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.8, 0.72, 0.6))
-
-
-func draw_shop_row(font: Font, x: float, y: float, w: float, kind: int, keynum: int) -> void:
-	draw_prop_icon(kind, Vector2(x + 16.0, y - 4.0))
-	var nm := String(PROPS[kind]["name"])
-	var wt := int(PROPS[kind]["weight"])
-	var req := int(PROPS[kind]["req"])
-	var cost := int(PROPS[kind]["cost"])
-	draw_string(font, Vector2(x + 48.0, y), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
-	var sub := "weight %d   throws clean at Strength %d" % [wt, req]
-	if req == 0:
-		sub = "weight %d   easy to throw" % wt
-	if kind == PROP_EGGS:
-		sub += "   (breaks on drop)"
-	draw_string(font, Vector2(x + 48.0, y + 16.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	# how many you own, then a per-unit price and the buy key (buy as many as you like)
-	var hc := Color(0.72, 0.88, 0.72) if available(kind) else Color(0.72, 0.66, 0.58)
-	draw_string(font, Vector2(x + w - 262.0, y), "own %d" % prop_count[kind], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, hc)
-	var afford := money >= cost
-	var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
-	draw_string(font, Vector2(x + w - 168.0, y), "%d g" % cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
-	draw_string(font, Vector2(x + w - 48.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
-
-
-func draw_glasses_row(font: Font, x: float, y: float, w: float, keynum: int) -> void:
-	var gc := Color(0.72, 0.86, 0.96)
-	draw_arc(Vector2(x + 8.0, y - 5.0), 6.0, 0.0, TAU, 16, gc, 2.0, true)   # spectacles
-	draw_arc(Vector2(x + 22.0, y - 5.0), 6.0, 0.0, TAU, 16, gc, 2.0, true)
-	draw_line(Vector2(x + 14.0, y - 5.0), Vector2(x + 16.0, y - 5.0), gc, 2.0)
-	draw_string(font, Vector2(x + 44.0, y), "Glasses", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
-	draw_string(font, Vector2(x + 44.0, y + 16.0), "sharper sight: a better chance on off-Perfect catches", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	if has_glasses:
-		draw_string(font, Vector2(x + w - 130.0, y), "OWNED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.6, 0.9, 0.6))
+	# the SPEND banner: impossible to miss when points are waiting, quiet otherwise
+	var by0 := py + 116.0
+	if points > 0:
+		var pa := 0.75 + 0.25 * sin(float(Time.get_ticks_msec()) * 0.006)
+		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.84, 0.4, 0.16 + 0.10 * pa))
+		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.86, 0.45, 0.7), false, 1.5)
+		draw_string(font, Vector2(tx, by0 + 23.0), "%d POINT%s TO SPEND  -  press the key on a card" % [points, "" if points == 1 else "S"],
+			HORIZONTAL_ALIGNMENT_CENTER, innerw, 16, Color(1.0, 0.92, 0.7))
 	else:
-		var afford := money >= GLASSES_COST
-		var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
-		draw_string(font, Vector2(x + w - 160.0, y), "%d g" % GLASSES_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
-		draw_string(font, Vector2(x + w - 44.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+		draw_string(font, Vector2(tx, by0 + 23.0), "Skill sets your score. Stats only ease the climb - the next point comes with the next level.",
+			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
+
+	# ---------------- four stat cards ----------------
+	var str_note := "heavy props fly higher and catch easier - %d balls now" % max_balls()
+	if next_ball_strength() > 0:
+		str_note = "heavy props steadier and easier to catch. The %d-ball unlock waits at Str %d" % [max_balls() + 1, next_ball_strength()]
+	var acc_note := "a better chance to hold off-Perfect catches, and throws land closer to the hand"
+	if accuracy > 100:
+		if focus() <= 100.0:
+			acc_note = "Focus %d - every action costs less stamina" % int(focus())
+		else:
+			acc_note = "Focus %d - minimum stamina cost, +%d ticks on the Perfect window" % [int(focus()), perfect_window() - W_PERFECT]
+	var spd_pct := speed / 8
+	var spd_note := "the world runs %d%% slower for you - 8 points per percent, capped at %d%%" % [spd_pct, SPEED_CAP / 8]
+	if speed >= SPEED_CAP:
+		spd_note = "the world runs %d%% slower for you - at the cap" % spd_pct
+	var stats: Array = [
+		["ACCURACY", accuracy, acc_note, "1", Color(0.6, 0.8, 1.0)],
+		["STRENGTH", strength, str_note, "2", Color(0.95, 0.55, 0.4)],
+		["ENDURANCE", endurance, "raises your maximum stamina, the fuel every throw and catch burns", "3", Color(0.55, 0.8, 0.6)],
+		["SPEED", speed, spd_note, "4", Color(0.8, 0.7, 0.95)],
+	]
+	var gap := 16.0
+	var cw := (innerw - gap * 3.0) / 4.0
+	var ch := 240.0
+	var y0 := py + 168.0
+	for i in stats.size():
+		var st: Array = stats[i]
+		var cx0 := tx + float(i) * (cw + gap)
+		var ac: Color = st[4]
+		hud_card(Rect2(cx0, y0, cw, ch), Color(ac.r, ac.g, ac.b, 0.45))
+		draw_string(font, Vector2(cx0, y0 + 26.0), String(st[0]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(ac.r, ac.g, ac.b, 0.95))
+		draw_string(font, Vector2(cx0, y0 + 78.0), str(int(st[1])), HORIZONTAL_ALIGNMENT_CENTER, cw, 44, Color(1.0, 0.94, 0.76))
+		draw_multiline_string(font, Vector2(cx0 + 12.0, y0 + 108.0), String(st[2]),
+			HORIZONTAL_ALIGNMENT_CENTER, cw - 24.0, 11, 5, Color(0.78, 0.72, 0.64))
+		# the invest plate: bright and green when a point can land here, quiet otherwise
+		var can := points > 0
+		var plate := Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0)
+		var bg := Color(0.16, 0.22, 0.13, 0.9) if can else Color(0.10, 0.07, 0.08, 0.7)
+		var line := Color(0.55, 0.85, 0.5, 0.55) if can else Color(0.6, 0.5, 0.45, 0.3)
+		draw_rect(plate, bg)
+		draw_rect(plate, line, false, 1.0)
+		draw_keycap(font, plate.position.x + 8.0, plate.position.y + 10.5, String(st[3]))
+		draw_string(font, Vector2(plate.position.x, plate.position.y + 26.0), "+1" if can else "invest",
+			HORIZONTAL_ALIGNMENT_RIGHT, plate.size.x - 12.0, 15, Color(0.78, 0.96, 0.72) if can else Color(0.6, 0.55, 0.5, 0.8))
+
+	# ---------------- stamina: a resource, not a stat ----------------
+	var sy := y0 + ch + 34.0
+	draw_string(font, Vector2(tx, sy), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.8, 0.9, 0.85))
+	var sbx := tx + 130.0
+	var sbw := innerw - 260.0
+	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
+	draw_rect(Rect2(sbx, sy - 12.0, sbw, 14.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(sbx, sy - 12.0, sbw * sfrac, 14.0), Color(0.55, 0.80, 0.6))
+	draw_string(font, Vector2(sbx + sbw + 14.0, sy), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.9, 0.85))
+	draw_string(font, Vector2(tx, sy + 20.0), "drains as you play; meals and sleep bring it back. Empty hands catch nothing.", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+
+	var by := py + ph - 32.0
+	if debug_mode:
+		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.9, 1.0))
+	draw_hints_row(font, px + pw * 0.5, by - 14.0, [[["Tab"], "resume"]])
 
 
-func draw_pie_row(font: Font, x: float, y: float, w: float, keynum: int) -> void:
-	# Uncle Dan's Pie: a warm slice with a steam curl for an icon
+func draw_purse(font: Font, right_x: float, y: float) -> void:
+	# the gold readout every spending screen shares: a coin, the number, and a flash
+	# whenever gold just changed hands (paired with the "money" jingle)
+	var fl := clampf(1.0 - float(int(Time.get_ticks_msec()) - shop_buy_ms) / 450.0, 0.0, 1.0)
+	var fs := 24 + int(round(6.0 * fl))
+	var gc := Color(1.0, 0.86, 0.45).lerp(Color(1.0, 0.98, 0.85), fl)
+	var txt := "%s g" % commafy(money)
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	draw_circle(Vector2(right_x - tw - 22.0, y - 8.0), 9.0, Color(1.0, 0.84, 0.4))
+	draw_circle(Vector2(right_x - tw - 25.0, y - 11.0), 3.0, Color(1.0, 0.95, 0.7))
+	draw_string(font, Vector2(right_x - tw, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
+
+
+func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, afford: bool) -> void:
+	# the buy strip at the foot of a shop card: the KEY on the left is the button, the
+	# price on the right is the ask. Green means it can happen, dim red means not yet.
+	var bg := Color(0.16, 0.22, 0.13, 0.9) if afford else Color(0.16, 0.09, 0.09, 0.85)
+	var line := Color(0.55, 0.85, 0.5, 0.55) if afford else Color(0.7, 0.35, 0.3, 0.4)
+	var cc := Color(0.78, 0.96, 0.72) if afford else Color(0.85, 0.5, 0.45)
+	draw_rect(r, bg)
+	draw_rect(r, line, false, 1.0)
+	draw_keycap(font, r.position.x + 8.0, r.position.y + r.size.y * 0.5 - 9.5, keylabel)
+	draw_string(font, Vector2(r.position.x, r.position.y + r.size.y * 0.5 + 6.0), price,
+		HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 12.0, 16, cc)
+
+
+func draw_shop(font: Font, s: Vector2) -> void:
+	# the SHOP, dealt as CARDS (Louis: Balatro look - big cards, clean zones, the buy
+	# key printed on every card). One zone of five prop cards, one zone of gear, the
+	# purse always big top-right.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.88))
+	var pw := minf(1120.0, s.x - 60.0)
+	var ph := 648.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+
+	var tx := px + 40.0
+	var innerw := pw - 80.0
+	draw_string(font, Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(tx + 118.0, py + 50.0), "to juggle N of a prop, own N of them", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
+	draw_purse(font, px + pw - 40.0, py + 52.0)
+
+	# ---------------- PROPS: five big cards in one row ----------------
+	draw_string(font, Vector2(tx, py + 96.0), "PROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+	var gap := 14.0
+	var cw := (innerw - gap * 4.0) / 5.0
+	var ch := 272.0
+	var y0 := py + 110.0
+	for i in range(1, PROPS.size()):   # balls (index 0) are free and endless: not stock
+		var cx0 := tx + float(i - 1) * (cw + gap)
+		var pcol := prop_color(i)
+		var cost := int(PROPS[i]["cost"])
+		var afford := money >= cost
+		hud_card(Rect2(cx0, y0, cw, ch), Color(pcol.r, pcol.g, pcol.b, 0.45))
+		var own := prop_count[i]
+		var oc := Color(0.75, 0.9, 0.72) if own > 0 else Color(0.6, 0.55, 0.5, 0.8)
+		draw_string(font, Vector2(cx0 + 12.0, y0 + 24.0), "own %d" % own, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, oc)
+		if available(i):
+			draw_string(font, Vector2(cx0, y0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
+		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, y0 + 92.0), 2.6)
+		draw_string(font, Vector2(cx0, y0 + 158.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
+		var req := int(PROPS[i]["req"])
+		draw_string(font, Vector2(cx0, y0 + 180.0), "weight %d" % int(PROPS[i]["weight"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 11, Color(0.75, 0.68, 0.6))
+		var reqline := "easy to throw" if req == 0 else "clean at Strength %d" % req
+		if i == PROP_EGGS:
+			reqline = "breaks on a drop"
+		var reqcol := Color(0.75, 0.68, 0.6)
+		if req > strength:
+			reqcol = Color(0.95, 0.6, 0.45)   # under-strength: flag it before the buy
+		draw_string(font, Vector2(cx0, y0 + 196.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
+		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i), "%s g" % commafy(cost), afford)
+
+	# ---------------- GEAR: two wide cards ----------------
+	var gy := y0 + ch + 30.0
+	draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+	var gw := (innerw - gap) / 2.0
+	var gh := 104.0
+	var gy0 := gy + 14.0
+	# glasses
+	var gr := Rect2(tx, gy0, gw, gh)
+	hud_card(gr, Color(0.72, 0.86, 0.96, 0.4))
+	var gcc := Color(0.72, 0.86, 0.96)
+	draw_arc(Vector2(tx + 40.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, gcc, 2.5, true)
+	draw_arc(Vector2(tx + 68.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, gcc, 2.5, true)
+	draw_line(Vector2(tx + 52.0, gy0 + 40.0), Vector2(tx + 56.0, gy0 + 40.0), gcc, 2.5)
+	draw_string(font, Vector2(tx + 96.0, gy0 + 36.0), "Glasses", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.88, 0.6))
+	draw_string(font, Vector2(tx + 96.0, gy0 + 58.0), "sharper sight: a better chance on", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(tx + 96.0, gy0 + 74.0), "off-Perfect catches", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	if has_glasses:
+		draw_string(font, Vector2(gr.position.x, gy0 + 58.0), "OWNED", HORIZONTAL_ALIGNMENT_RIGHT, gw - 24.0, 18, Color(0.6, 0.9, 0.6))
+	else:
+		draw_price_plate(font, Rect2(tx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "6", "%s g" % commafy(GLASSES_COST), money >= GLASSES_COST)
+	# Uncle Dan's Pie
+	var pxx := tx + gw + gap
+	hud_card(Rect2(pxx, gy0, gw, gh), Color(0.9, 0.62, 0.3, 0.4))
 	var pc := Color(0.9, 0.62, 0.3)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(x + 4.0, y + 2.0), Vector2(x + 28.0, y + 2.0), Vector2(x + 16.0, y - 14.0)]), pc)
-	draw_line(Vector2(x + 4.0, y + 2.0), Vector2(x + 28.0, y + 2.0), Color(0.6, 0.36, 0.16), 3.0)
-	draw_string(font, Vector2(x + 44.0, y), "Uncle Dan's Pie", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.88, 0.6))
-	draw_string(font, Vector2(x + 44.0, y + 16.0), "eat in the day hub: the whole day runs slow and clear, until you sleep", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	draw_string(font, Vector2(x + w - 262.0, y), "own %d" % pie_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.72, 0.88, 0.72) if pie_count > 0 else Color(0.72, 0.66, 0.58))
-	var afford := money >= PIE_COST
-	var cc := Color(0.75, 0.95, 0.75) if afford else Color(0.9, 0.5, 0.45)
-	draw_string(font, Vector2(x + w - 168.0, y), "%d g" % PIE_COST, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
-	draw_string(font, Vector2(x + w - 48.0, y), "[%d]" % keynum, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+		Vector2(pxx + 30.0, gy0 + 52.0), Vector2(pxx + 74.0, gy0 + 52.0), Vector2(pxx + 52.0, gy0 + 24.0)]), pc)
+	draw_line(Vector2(pxx + 30.0, gy0 + 52.0), Vector2(pxx + 74.0, gy0 + 52.0), Color(0.6, 0.36, 0.16), 4.0)
+	draw_string(font, Vector2(pxx + 96.0, gy0 + 36.0), "Uncle Dan's Pie", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.88, 0.6))
+	draw_string(font, Vector2(pxx + 96.0, gy0 + 58.0), "a whole day of slow, clear time -", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(pxx + 96.0, gy0 + 74.0), "eaten in the day hub, ends at sleep", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
+	draw_string(font, Vector2(pxx, gy0 + 20.0), "own %d" % pie_count, HORIZONTAL_ALIGNMENT_RIGHT, gw - 16.0, 12, Color(0.75, 0.9, 0.72) if pie_count > 0 else Color(0.6, 0.55, 0.5, 0.8))
+	draw_price_plate(font, Rect2(pxx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "7", "%s g" % commafy(PIE_COST), money >= PIE_COST)
+
+	# ---------------- footer: warnings, then the keys ----------------
+	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
+		draw_string(font, Vector2(px, py + ph - 58.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(1.0, 0.62, 0.45))
+	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
+		[[["1", "7"], "buy (the key on each card)"], [["Tab"], "leave"]])
 
 
 func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: Dictionary, unlocked: bool, sel: bool) -> void:
@@ -6678,18 +6913,6 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 				var zp := c + Vector2(70.0 + zt * 46.0 + float(z) * 8.0, -30.0 - zt * 70.0)
 				draw_string(font, zp, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 18 + z * 4, Color(0.9, 0.88, 0.8, (1.0 - zt) * 0.8))
 			draw_string(font, Vector2(0, c.y + 110.0), "the day ends", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.85, 0.7, ease_in))
-		"shop":
-			# the awning rolls down over the counter and the shop is open
-			var c := Vector2(s.x * 0.5, s.y * 0.5)
-			hud_panel(Rect2(c.x - 190.0, c.y - 100.0, 380.0, 190.0))
-			var drop := 64.0 * minf(t * 1.6, 1.0)
-			for st in 7:
-				var sx0 := c.x - 168.0 + float(st) * 48.0
-				var scol := Color(0.75, 0.2, 0.18) if st % 2 == 0 else Color(0.92, 0.88, 0.8)
-				draw_rect(Rect2(sx0, c.y - 86.0, 48.0, drop), scol)
-			draw_rect(Rect2(c.x - 176.0, c.y - 86.0 + drop, 352.0, 5.0), Color(0.5, 0.3, 0.16))
-			draw_rect(Rect2(c.x - 150.0, c.y + 26.0, 300.0, 34.0), Color(0.42, 0.26, 0.14))
-			draw_string(font, Vector2(c.x - 190.0, c.y + 78.0), "the shop opens", HORIZONTAL_ALIGNMENT_CENTER, 380.0, 16, Color(1.0, 0.9, 0.65, ease_in))
 
 
 func draw_menu(font: Font, s: Vector2) -> void:
@@ -7006,13 +7229,28 @@ func audio_update() -> void:
 	# crossfade, so stepping onto the stage lifts the drive and stepping off eases back.
 	var juggling := in_play and running and not results_open
 	var energy := clampf(applause * 0.65 + clampf(float(streak) / 8.0, 0.0, 1.0) * 0.55, 0.0, 1.0)
-	# the handover between the two tracks is a slow EQUAL-POWER crossfade (Louis: no
-	# hard switching): a mix value walks 0..1 over ~2.5s and each track's gain rides
-	# sin/cos of it, so both stay audible through the middle with no dip and no jump.
-	_mix = move_toward(_mix, 1.0 if juggling else 0.0, 1.0 / (2.5 * 120.0))
+	# the handover between the two tracks is STAGED now (Louis: they differ too much
+	# in tempo and volume to overlap - the crossfade read as a mashup). _mix still
+	# walks 0..1, but the gain curves carve the walk into three bands: the leaving
+	# track fades fully OUT, a breath of true silence holds, then the arriving track
+	# fades IN from nothing. Both directions get the same shape, so stepping onto the
+	# stage and stepping off both land as a quiet beat, then the other song rising.
+	_mix = move_toward(_mix, 1.0 if juggling else 0.0, 1.0 / (4.5 * 120.0))
+	var chill_g := clampf(1.0 - _mix / 0.38, 0.0, 1.0)     # gone 38% into the walk
+	var main_g := clampf((_mix - 0.62) / 0.38, 0.0, 1.0)   # enters only after the hush
+	# the stage track RESTARTS from the top whenever it returns from full silence, so
+	# every performance opens on the song's opening bars instead of joining mid-loop
+	if main_g <= 0.0:
+		_main_silent = true
+	elif _main_silent:
+		_main_silent = false
+		mus.play(0.0)
 	var main_base := (lerpf(-13.0, -9.0, energy) if perf else -14.0) - _duck * 9.0
-	var main_t := main_base + linear_to_db(maxf(sin(_mix * PI * 0.5), 0.001))
-	var chill_t := -13.0 + linear_to_db(maxf(cos(_mix * PI * 0.5), 0.001))
+	var main_t := main_base + linear_to_db(maxf(main_g, 0.001))
+	# the hub rides the chill mix at ease; the STAGE CARD hushes it low, so the walk
+	# onto the boards is already a quiet moment before the stage track breathes in
+	var chill_base := -24.0 if game_state == ST_ESTABLISH else -13.0
+	var chill_t := chill_base + linear_to_db(maxf(chill_g, 0.001))
 	if not set_music:
 		main_t = -80.0
 		chill_t = -80.0
@@ -7261,6 +7499,9 @@ func gen_sfx() -> void:
 	sfx["drop"] = _wav(_drop_sound(), false)
 	sfx["splat"] = _wav(_splat_sound(), false)
 	sfx["coin"] = _wav(_seq_bells([987.8, 1318.5], 0.09, 0.5), false)
+	# gold changing hands: a quick high jingle of coin-on-coin clinks, distinct from
+	# the two-note "coin" flourish above (which stays the lesson-complete fanfare)
+	sfx["money"] = _wav(_seq_bells([1568.0, 2093.0, 1760.0, 2637.0], 0.045, 0.42), false)
 	sfx["streak"] = _wav(_seq_bells([784.0, 987.8, 1318.5], 0.08, 0.5), false)
 	sfx["ui"] = _wav(_tone([880.0], [1.0], 0.05, 0, 0.001, 0.02, 0.3, 0.0), false)
 	sfx["ui2"] = _wav(_tone([1174.7, 1568.0], [1.0, 0.5], 0.10, 0, 0.001, 0.05, 0.35, 0.0), false)
@@ -7316,49 +7557,54 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
 
 	var tagA := clampf(float(cine_tick - 10) / 20.0, 0.0, 1.0)
-	# STAGE n of 6, then the name in lights, then the crowd blurb. These centre
-	# lines sit right over the venue portrait (the Circus tent's bright pole ran
-	# straight through them), so they get the 8-way outline treatment.
-	draw_text_shout(font, Vector2(0, s.y * 0.12), "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1], HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.78, 0.55, 0.85 * tagA))
+	# ONLY the marquee stays over the portrait: STAGE n of 6, the name in lights, the
+	# crowd blurb - text with the 8-way outline, no boxes. Everything informational
+	# (record, set, target, encore, purist) lives in two small cards at the BOTTOM
+	# corners now (Louis: the centred stack of rectangles buried the venue portrait).
+	draw_text_shout(font, Vector2(0, s.y * 0.10), "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1], HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.78, 0.55, 0.85 * tagA))
 	var vn := String(venue_data(establish_venue)["name"]).to_upper()
-	draw_title_glow(font, s.y * 0.14 + 12.0, vn, 56, Color(1.0, 0.9, 0.55), s)
-	draw_ornament(s.x * 0.5, s.y * 0.14 + 78.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
-	draw_text_shout(font, Vector2(0, s.y * 0.14 + 104.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.86, 0.78, 0.66, 0.8 * tagA))
-
-	# the record to beat here (its own board on a purist night), plus a purist tag
-	var recy := s.y * 0.14 + 140.0
-	if purist:
-		draw_text_shout(font, Vector2(0, recy), "PURIST BOOKING  -  no stat help, its own record board", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.82, 0.72, 0.85, 0.85 * tagA))
-		recy += 24.0
-	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
-		draw_text_shout(font, Vector2(0, recy), "record to beat   %s" % commafy(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.96, 0.83, 0.52, 0.85 * tagA))
-	else:
-		draw_text_shout(font, Vector2(0, recy), "no record here yet  -  set one", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.82, 0.6, 0.7 * tagA))
-
-	# THE BOOKING (Phase 2): which of the three sets you are about to walk into, the number
-	# you must beat, and - from the very first card - the Encore condition waiting at the end,
-	# so a player knows what the night wants of them before they choose to walk out.
-	if booking_active:
-		var by2 := recy + 46.0
-		var setnames := ["THE WARM-UP", "THE SET", "THE ENCORE"]
-		var target := set_target_for(establish_venue, set_index)
-		draw_string(font, Vector2(0, by2), "%s  of  %d    -    target  %s" % [setnames[clampi(set_index, 0, 2)], SETS_PER_BOOKING, commafy(target)],
-			HORIZONTAL_ALIGNMENT_CENTER, s.x, 20, Color(1.0, 0.88, 0.5, 0.9 * tagA))
-		if encore >= 0 and encore < ENCORES.size():
-			var enc: Dictionary = ENCORES[encore]
-			var pw := clampf(s.x * 0.5, 460.0, 720.0)
-			var pxx := s.x * 0.5 - pw * 0.5
-			var eyy := by2 + 24.0
-			var hot := set_index == SET_ENCORE   # the condition is live THIS set
-			var ec := Color(1.0, 0.55, 0.4) if hot else Color(0.85, 0.7, 0.55)
-			draw_rect(Rect2(pxx, eyy, pw, 52.0), Color(0.12, 0.06, 0.07, 0.55 * tagA))
-			draw_rect(Rect2(pxx, eyy, pw, 52.0), Color(ec.r, ec.g, ec.b, 0.5 * tagA), false, 1.5)
-			var etag := "TONIGHT'S ENCORE" if not hot else "THE ENCORE  -  NOW"
-			draw_string(font, Vector2(pxx, eyy + 20.0), "%s:  %s" % [etag, String(enc["name"]).to_upper()], HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(ec.r, ec.g, ec.b, 0.9 * tagA))
-			draw_string(font, Vector2(pxx + 16.0, eyy + 40.0), String(enc["desc"]), HORIZONTAL_ALIGNMENT_CENTER, pw - 32.0, 12, Color(0.9, 0.82, 0.72, 0.8 * tagA))
+	draw_title_glow(font, s.y * 0.12 + 12.0, vn, 52, Color(1.0, 0.9, 0.55), s)
+	draw_ornament(s.x * 0.5, s.y * 0.12 + 72.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_text_shout(font, Vector2(0, s.y * 0.12 + 96.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.86, 0.78, 0.66, 0.8 * tagA))
 
 	var py := s.y - 70.0
 	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
+
+	# bottom-LEFT: the record chase at this venue (its own board on a purist night)
+	var rw := 330.0
+	var rh := 96.0 if purist else 76.0
+	var rx := 18.0
+	var ry := s.y - 88.0 - rh
+	hud_panel(Rect2(rx, ry, rw, rh))
+	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
+	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
+		draw_string(font, Vector2(rx + 16.0, ry + 54.0), commafy(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.96, 0.83, 0.52, tagA))
+	else:
+		draw_string(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.82, 0.6, 0.85 * tagA))
+	if purist:
+		draw_string(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
+
+	# bottom-RIGHT: the booking's ask - which set, its target, and the waiting Encore
+	if booking_active:
+		var setnames := ["THE WARM-UP", "THE SET", "THE ENCORE"]
+		var target := set_target_for(establish_venue, set_index)
+		var has_enc := encore >= 0 and encore < ENCORES.size()
+		var bw := 400.0
+		var bh := 130.0 if has_enc else 76.0
+		var bx := s.x - 18.0 - bw
+		var by2 := s.y - 88.0 - bh
+		hud_panel(Rect2(bx, by2, bw, bh))
+		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "%s  -  set %d of %d" % [setnames[clampi(set_index, 0, 2)], set_index + 1, SETS_PER_BOOKING], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
+		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "target  %s" % commafy(target), HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.88, 0.5, tagA))
+		if has_enc:
+			var enc: Dictionary = ENCORES[encore]
+			var hot := set_index == SET_ENCORE   # the condition is live THIS set
+			var ec := Color(1.0, 0.55, 0.4) if hot else Color(0.85, 0.7, 0.55)
+			var etag := "THE ENCORE  -  NOW" if hot else "tonight's Encore"
+			draw_string(font, Vector2(bx + 16.0, by2 + 82.0), "%s:  %s" % [etag, String(enc["name"]).to_upper()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
+			draw_multiline_string(font, Vector2(bx + 16.0, by2 + 102.0), String(enc["desc"]),
+				HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 11, 2, Color(0.9, 0.82, 0.72, 0.85 * tagA))
+
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
 	draw_string(font, Vector2(0, s.y - 34.0), "press any key to begin", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
 
@@ -7736,18 +7982,6 @@ func draw_egg_shards() -> void:
 			Color(shell.r, shell.g, shell.b, a))
 		draw_line(Vector2(-4, 1), Vector2(4, 1), Color(shell_dk.r, shell_dk.g, shell_dk.b, a), 1.0)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-
-
-func draw_stat_row(font: Font, x: float, y: float, w: float, name: String, value: int, note: String, keyhint: String) -> void:
-	draw_string(font, Vector2(x, y), name, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.6))
-	var barx := x + 130.0
-	var barw := w - 260.0
-	draw_rect(Rect2(barx, y - 13.0, barw, 12.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(barx, y - 13.0, barw * clampf(float(value) / 100.0, 0.0, 1.0), 12.0), Color(0.85, 0.65, 0.35))
-	draw_string(font, Vector2(x + w - 120.0, y), "%d" % value, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.7))
-	draw_string(font, Vector2(x, y + 16.0), note, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	if (points > 0 or debug_mode) and keyhint != "":
-		draw_string(font, Vector2(x + w - 60.0, y), "[%s]+" % keyhint, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.7, 0.95, 0.7))
 
 
 func draw_text_shout(font: Font, pos: Vector2, text: String, align: int, width: float, size: int, col: Color) -> void:
