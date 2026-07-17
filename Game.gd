@@ -3105,15 +3105,11 @@ func outer_pos(h: int) -> Vector2:
 	# the catch position, a little in from a shoulder-and-a-half so the arms rest a touch
 	# less splayed (Louis). Kept 46px out from inner_pos so the crossing weave still
 	# clears (see inner_pos); pulling only this one in cramps the two roads into overlap.
-	# BIG props catch WIDER: a club is half again a ball, and the same-hand up-lane and
-	# down-lane sit (outer - inner)/2 apart at the pass, so only widening the catch
-	# point buys big props real clearance - exactly what club jugglers do with their
-	# arms. Balls are untouched (scale 1.0 adds zero).
-	# ...and the LATE-GAME counts (8+) widen too, the way real numbers jugglers
-	# open their arms: a ten-ball fountain runs five per hand, and the same-hand
-	# pass needs the extra room (it measured -1.5px edge overlap without this)
+	# The stance NEVER widens for props or counts (Louis: the wide arms looked
+	# horrible) - big loads keep their clearance by SHRINKING the props instead,
+	# see live_prop_scale.
 	var c := stage_center()
-	var dx := 100.0 + 70.0 * maxf(0.0, prop_scale(prop_type) - 1.0) + 6.0 * float(maxi(0, num_balls - 7))
+	var dx := 100.0
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
 
 
@@ -3343,15 +3339,9 @@ func count_air_scale() -> float:
 	# and up must fly higher just to have air to weave in, so even a tap lofts a big load
 	# enough to juggle. ~+45% airtime at six matches a real six-ball fountain's hold; the
 	# 8-11 late-game loads keep climbing the same curve.
-	var base := 1.0
 	if num_balls >= 5:
-		base = 1.3 + 0.15 * float(num_balls - 5)
-	# BIG props need proportionally more air on top: the same weave that clears five
-	# balls clips five clubs (a club is half again a ball's size), so from five objects
-	# up the tap floor rises with the prop's drawn size. Perfect throws should never
-	# collide, whatever is being juggled (Louis).
-	var size_lift := (prop_scale(prop_type) - 1.0) * 0.5 * clampf(float(num_balls - 4) / 3.0, 0.0, 1.0)
-	return base * (1.0 + maxf(0.0, size_lift))
+		return 1.3 + 0.15 * float(num_balls - 5)
+	return 1.0
 
 
 func start_run(n: int) -> void:
@@ -4561,16 +4551,16 @@ func catch_chance(quality: int, height: float) -> float:
 
 
 func strength_surplus() -> float:
-	# how far Strength exceeds the CURRENT prop's requirement, as a fraction of
-	# the remaining room up to the stat's own cap (100), not a fixed multiple
-	# of the requirement. A fixed multiple (the old 2x-req rule) meant every
-	# point of Strength past 96 (double a Torch's 48) did nothing at all;
-	# scaling against the stat's real ceiling instead means surplus Strength
-	# keeps paying out, however slightly, all the way to 100, for every prop.
+	# how far Strength exceeds the CURRENT prop's requirement, as a fraction of the
+	# remaining room up to the stat's REAL cap. The old hardcoded 100 here was the
+	# previous ceiling: with the cap at 200 it silently froze every benefit past
+	# Strength 100, which (with the last ball gate at 165) made points above ~170
+	# worth nothing at all (Louis). Now every point from the requirement to 200
+	# pays out the same linear slice, for every prop.
 	var req := prop_req()
 	if req <= 0 or strength <= req:
 		return 0.0
-	return clampf((float(strength) - float(req)) / maxf(1.0, 100.0 - float(req)), 0.0, 1.0)
+	return clampf((float(strength) - float(req)) / maxf(1.0, float(STR_CAP) - float(req)), 0.0, 1.0)
 
 
 func strength_catch_mod() -> float:
@@ -4785,6 +4775,24 @@ func prop_scale(kind: int) -> float:
 		PROP_TORCHES: return 1.75
 		PROP_EGGS:    return 1.1
 		_:            return 1.0
+
+
+func live_prop_scale(kind: int) -> float:
+	# the IN-PLAY prop size. From SIX objects up (Louis: six included) every prop
+	# shrinks - big props shed most of their extra bulk and everything tightens a
+	# little more per added object - so a perfect pattern keeps daylight between
+	# props without ever widening the juggler's stance. The drawn shape and the
+	# clack/collcheck radius both come from HERE, so what you see is exactly what
+	# can touch. Menus, the shop, and small loads keep the true prop_scale.
+	var sc := prop_scale(kind)
+	if num_balls < 6:
+		return sc
+	# big props flatten toward ball size fast (a six-club load reads as compact
+	# stage clubs), and the whole set then eases smaller toward eleven objects
+	var flatten := clampf(float(num_balls - 5) / 2.0, 0.0, 1.0)      # full by 7
+	var excess := (sc - 1.0) * lerpf(0.55, 0.10, flatten)
+	var whole := lerpf(1.0, 0.80, clampf(float(num_balls - 5) / 6.0, 0.0, 1.0))
+	return (1.0 + excess) * whole
 
 
 func invest(which: String) -> void:
@@ -5114,7 +5122,7 @@ func update_sim() -> void:
 		for i in fly.size():
 			for j in range(i + 1, fly.size()):
 				var d := fpos[i].distance_to(fpos[j])
-				var rr := 11.0 * (prop_scale(fly[i].kind) + prop_scale(fly[j].kind))
+				var rr := 11.0 * (live_prop_scale(fly[i].kind) + live_prop_scale(fly[j].kind))
 				if _collcheck and d - rr < _coll_min:
 					_coll_min = d - rr
 					_coll_at = "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
@@ -5831,7 +5839,8 @@ func draw_flame_in_dark(pos: Vector2) -> void:
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
-	var sc := prop_scale(b.kind)
+	var sc := live_prop_scale(b.kind)   # count-squeezed in play, so the drawn size
+										# always matches the clack/clearance radius
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
@@ -8065,7 +8074,8 @@ func draw_falling() -> void:
 			a = clampf(1.0 - float(tick - int(d["rest"])) / 70.0, 0.0, 1.0)
 		var col: Color = d["col"]
 		col.a *= a
-		var sc := prop_scale(int(d["kind"])) * 0.95
+		var sc := live_prop_scale(int(d["kind"])) * 0.95   # a dropped prop keeps the
+														   # size it flew at
 		match int(d["kind"]):
 			PROP_EGGS:
 				draw_egg(p, col, sc)
