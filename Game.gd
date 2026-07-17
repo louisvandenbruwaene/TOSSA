@@ -321,6 +321,20 @@ const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
 const TUT_SLOW_START := 0.5    # the first step of a lesson: half speed (the
 								# slow-stack cap, so lessons stay jitter-free too)
 const TUT_SLOW_END := 0.20     # the last step: nearly real time
+const TUT_SLOW_MAX := 0.7      # a LESSON may go slower than the earned stack ever can
+								# (see slow_target): the basics open here, at 30% speed,
+								# because the opening steps are not a juggle at all - they
+								# are "press this key, now press that one", and the whole
+								# point is that a first-timer can watch the ball hang and
+								# read the ring close (Louis: max slowmo at the start).
+								# The sim only moves on whole ticks, so this deep the
+								# motion does visibly step: fine for one ball drifting
+								# through a teaching beat, which is why it is scoped to
+								# the guided steps and eased away before the cascade.
+const TUT_FLOW_HOLD := 10      # ticks a GUIDED step lingers on its win before flowing to
+								# the next one - long enough to register "yes, that", short
+								# enough that the next key's prompt is up before the ball
+								# it refers to is halfway down
 const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
 							   # and brighten (at 62% slow that is about two real seconds)
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
@@ -460,6 +474,14 @@ var set_cleared := false      # this set's target has been beaten (locks true, e
 var set_collapsed := false    # this set ended by the crowd walking or the drop limit (overtime lost)
 var exhausted := false        # the collapse was caused by empty stamina: on return to the day,
 							  # steer the player straight to EAT / SLEEP (Louis)
+# WHY the set ended, in one word, set at the moment it happens and never guessed at
+# afterwards (Louis: a player must always know why they failed - and be told the ONE
+# real reason, not handed a list of the three things that could have gone wrong).
+# "" while a set is live or when it was cleared; otherwise "crowd" (the room emptied),
+# "spent" (no stamina left), "drops" (the drop limit), or "bow" (walked off under the
+# target on purpose). fail_text() turns it into words. Reset per SET, so the reason the
+# card shows is the one that actually ended the night.
+var fail_reason := ""
 var encore := -1              # index into ENCORES for this booking's third set, or -1
 var sets_cleared := 0         # how many of the three the player cleared, for pay and reputation
 var ante: Array[int] = [0, 0, 0, 0, 0, 0]   # bookings cleared per venue: the standing raised bar
@@ -2047,33 +2069,66 @@ func tut_lesson(id: String) -> Array:
 		return count_lesson_steps(int(id.substr(6)))
 	if id.begins_with("pattern_"):
 		return pattern_lesson_steps(pattern_by_id(id.substr(8)))
-	# the core progression: one ball, then two, then the three-ball cascade.
-	# Key names come from the live bindings, so a remapped player is taught
-	# THEIR keys, not the defaults. EVERY step names its keys (Louis: the throw
-	# and catch keys are shown every single time, never assumed remembered),
-	# and the floating key letters over the hands repeat them at the point of
-	# action all lesson long.
+	# THE BASICS, in two halves (reworked per Louis, who watched real people play it):
+	#
+	#   1. GUIDED. Deepest slow motion the sim has, one key at a time, named at the exact
+	#      moment it wants pressing - press J, now press D - with the ring on the hand
+	#      showing what "now" means. These steps FLOW: they carry themselves to the next
+	#      beat the instant they are done, because a scripted call-and-response that stops
+	#      to ask for Enter is not a call-and-response.
+	#   2. FREESTYLE. One ball, then two, then three, each held open for as long as the
+	#      player likes. Here - and ONLY here - Enter means something, and it means one
+	#      thing: give me another ball. Everyone tested got the juggling immediately and
+	#      then sat there, because the old lesson asked for Enter after every step and so
+	#      Enter had stopped meaning anything. Now it appears three times, it always adds
+	#      a ball, and the callout grows louder the longer it goes unanswered.
+	#
+	# The two-ball and three-ball steps gate on REAL juggling (the "juggle" key): catches
+	# that leave the air empty behind them do not count toward the goal, so nobody walks
+	# out of the basics having only ever thrown one ball at a time. Key names come from
+	# the live bindings, so a remapped player is taught THEIR keys, and every step still
+	# names them (Louis: never assumed remembered).
 	var kj := OS.get_keycode_string(K_RT)
 	var kf := OS.get_keycode_string(K_LT)
 	var kd := OS.get_keycode_string(K_LC)
 	var kk := OS.get_keycode_string(K_RC)
 	return [
-		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "throw_r", "need": 1,
-			"text": "Throw the ball from your RIGHT hand", "sub": "Tap %s. Just let it fall this time, no need to catch it yet." % kj},
-		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "throw_l", "need": 1,
-			"text": "Now throw from your LEFT hand", "sub": "Tap %s, and let it fall again. Each hand has its own throw key: %s right, %s left." % [kf, kj, kf]},
+		# --- guided: the right hand's half of the weave, one key at a time ---
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 1,
-			"text": "This time, catch it", "sub": "Throw with %s, then catch it in your LEFT hand with %s as it comes down. The letter over a hand is always the key it wants." % [kj, kd]},
+			"slow": TUT_SLOW_MAX, "flow": true, "guide": true,
+			"text": "Press %s, then press %s" % [kj, kd],
+			"sub": "%s throws from your RIGHT hand. The ball crosses to your LEFT, and a ring closes around that hand as it arrives - press %s the moment the ring flashes gold. Time is running at a third speed, so watch it come." % [kj, kd]},
+		# --- guided: the left hand's half, so both hands are taught before anything else ---
 		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "catch", "need": 1,
-			"text": "And the other way", "sub": "Throw with %s, then catch it in your RIGHT hand with %s. Catching is always %s left, %s right." % [kf, kk, kd, kk]},
+			"slow": TUT_SLOW_MAX, "flow": true, "guide": true,
+			"text": "Now the other way: %s, then %s" % [kf, kk],
+			"sub": "Every hand has its own two keys. %s throws from the LEFT, %s catches in the RIGHT. Same ring, same gold flash, same 'now'." % [kf, kk]},
+		# --- freestyle one: named honestly as NOT juggling, which is what makes the
+		#     second ball something the player wants rather than something they are given
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
-			"text": "Keep one ball going, back and forth", "sub": "%s or %s throws, %s or %s catches - press them every single time, nothing is automatic. Land four in a row." % [kj, kf, kd, kk]},
-		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "press_r", "need": 1,
-			"text": "Tangled? R starts you over", "sub": "Press R now and watch the balls come back to hand. In any practice, R re-deals - the key row at the BOTTOM of the screen always lists it."},
-		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
-			"text": "Two balls now, one in each hand", "sub": "Throw the first (%s), and as it peaks throw the second (%s) up under it. Catch with %s and %s - every catch is a press. Land four." % [kj, kf, kd, kk]},
-		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 4,
-			"text": "Three balls. The cascade", "sub": "Same four keys: %s %s throw, %s %s catch. Every time a ball falls, throw the one in the catching hand up first. Keep it weaving for four." % [kj, kf, kd, kk]},
+			"slow": 0.5, "next": "add a second ball",
+			"text": "Now play with it",
+			"sub": "Both hands, as long as you like: %s and %s throw, %s and %s catch. Nothing is automatic - every throw and every catch is a press. This is not juggling yet, though. One ball is just throwing and catching." % [kj, kf, kd, kk]},
+		# --- freestyle two: the rule arrives, and the goal enforces it ---
+		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4, "juggle": true,
+			"slow": 0.44, "next": "add the third ball",
+			"text": "Two balls - and now it is juggling",
+			"sub": "Throw the second one (%s) BEFORE you catch the first. That is the whole rule: a ball is always in the air. Throwing them one at a time is not juggling, and does not count here." % kf},
+		# --- freestyle three: the cascade, same rule, sustained ---
+		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 4, "juggle": true,
+			"slow": 0.36, "next": "learn the other keys",
+			"text": "Three balls. The cascade",
+			"sub": "As each ball comes down, throw the one waiting in that hand up under it FIRST, then catch. Keep a ball in the air the whole time and the weave carries itself. Four like that."},
+		# --- R, drilled rather than described: it is the key that rescues every tangle ---
+		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "press_r", "need": 1,
+			"slow": 0.36, "next": "see every key at once",
+			"text": "Tangled? R starts you over",
+			"sub": "Press R now and watch the balls come back to your hands. In any practice, R re-deals - on stage it does nothing, because a performance is not restartable."},
+		# --- and the whole command set, named, in one place ---
+		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "read", "need": 0,
+			"slow": 0.36, "next": "finish the lesson",
+			"text": "Every key you have",
+			"sub": "These work whenever you are juggling - practice or performance. You never need to memorise them: the row along the bottom of the screen always names the ones that matter."},
 	]
 
 
@@ -2277,6 +2332,11 @@ func tut_setup_step() -> void:
 	tut_tricks = 0
 	tut_keys = 0
 	tut_advance_at = -1
+	# a step with nothing to DO (the key legend) is already met the moment it opens, so
+	# its Enter prompt is live immediately rather than after some press that never comes.
+	# Safe to ask now: every counter above is zeroed, so a step with a real goal cannot
+	# read as done here. Must stay AFTER tut_advance_at = -1, which tut_check gates on.
+	tut_check()
 
 
 func tut_step_data() -> Dictionary:
@@ -2342,7 +2402,20 @@ func tut_on_throw(h: int) -> void:
 	tut_check()
 
 
-func tut_on_catch() -> void:
+func tut_on_catch(juggled: bool) -> void:
+	# a step marked "juggle" only accepts catches that leave a ball in the air behind
+	# them (juggling_catch): the two- and three-ball steps must not be clearable by
+	# throwing one ball at a time, which is the thing they exist to teach against
+	# (Louis). The run has to be CONSECUTIVE - a solo catch puts the count back to zero -
+	# because "there is always a ball in the air" is a property of a stretch of juggling,
+	# not a tally of good moments. The player is told why on the spot; the banner keeps
+	# saying it, and the step holds open forever, so this is a gate and never a wall.
+	if bool(tut_step_data().get("juggle", false)) and not juggled:
+		if tut_count > 0:
+			play_sfx("whiff", -14.0)
+		tut_count = 0
+		add_popup(outer_pos(RIGHT) + Vector2(0, -30), "one at a time is not juggling", Color(0.95, 0.78, 0.5))
+		return
 	tut_count += 1
 	tut_check()
 
@@ -2360,13 +2433,17 @@ func tut_check() -> void:
 		"trick_off": done = toggle_on < 0                             # ...and now switched off
 		"trick_use": done = tut_tricks >= int(step["need"])           # arm/live: reward_trick fired
 		"press_r", "press_p": done = tut_keys >= int(step["need"])   # the key itself is the goal
+		"read": done = true   # nothing to do but read it: Enter is live from the first frame
 		_: done = tut_count >= int(step["need"])
 	if done:
 		# the goal is met, but the step HOLDS OPEN: the banner flips to "good job -
 		# Enter continues, or keep trying", and only the player's Enter moves on
-		# (Louis: never cut away while they are still trying it out)
+		# (Louis: never cut away while they are still trying it out). A GUIDED step is
+		# the exception - it flows on by itself from tut_maintain, a beat later and from
+		# a safe context. A "read" step is met at setup, so it makes no noise about it.
 		tut_advance_at = tick
-		play_sfx("streak", -10.0)
+		if String(step["goal"]) != "read":
+			play_sfx("streak", -10.0)
 
 
 func tut_advance() -> void:
@@ -2383,6 +2460,18 @@ func tut_advance() -> void:
 
 
 func tut_maintain() -> void:
+	# a GUIDED step carries itself: "press J, now press D" is a call-and-response, and
+	# stopping to ask for Enter between the call and the response would break the very
+	# thing it is teaching. So the moment its goal is met it waits one beat (long enough
+	# to read as a win) and flows to the next call. This runs HERE, on the tick, rather
+	# than from inside the catch that met the goal - tut_setup_step re-deals the table,
+	# and doing that underneath on_catch would pull the ball out from under the rest of
+	# it. Enter is left alone entirely, so that when it does appear on the freestyle
+	# steps it means one thing only: give me another ball.
+	if tut_advance_at >= 0 and bool(tut_step_data().get("flow", false)) \
+			and tick - tut_advance_at >= TUT_FLOW_HOLD:
+		tut_advance()
+		return   # the table is now the NEXT step's: nothing below may touch it
 	# keep the step playable by topping the hands back up shortly after a ball is
 	# lost, so a fumble never stalls a lesson
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
@@ -2463,24 +2552,26 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	draw_multiline_string(font, Vector2(bx + 20.0, by + 70.0), String(step["sub"]),
 		HORIZONTAL_ALIGNMENT_CENTER, bw - 40.0, 14, 2, Color(0.9, 0.85, 0.78))
 	# the progress line flips to the GOOD JOB state once the goal is met: the step
-	# stays fully playable, and Enter is the player's own "I am done trying" (Louis)
+	# stays fully playable, and Enter is the player's own "I am done trying" (Louis).
+	# A guided step never says it - it is already flowing on by itself - and a read
+	# step has nothing to be proud of yet.
 	var done := tut_advance_at >= 0
-	if done:
-		var last := tut_step >= steps.size() - 1
+	var flow := bool(step.get("flow", false))
+	if done and not flow and String(step["goal"]) != "read":
 		var ga := 0.75 + 0.25 * sin(atick() * 0.1)
-		var gtext := "GOOD JOB - you got it!   Enter %s, or keep trying" % ("finishes the lesson" if last else "continues")
-		draw_string(font, Vector2(bx, by + 108.0), gtext, HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.72, 0.95, 0.7, ga))
-	else:
+		draw_string(font, Vector2(bx, by + 108.0), "GOOD JOB  -  you got it", HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.72, 0.95, 0.7, ga))
+	elif not done:
 		var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
-		if String(step["goal"]).begins_with("catch") and int(step["need"]) > 1:
-			prog += "        caught  %d / %d" % [mini(tut_count, int(step["need"])), int(step["need"])]
+		if int(step["need"]) > 1 and String(step["goal"]) == "catch":
+			# a juggle-gated step counts CONSECUTIVE juggling catches, so the label says
+			# so - otherwise a count that drops back to zero looks like a bug (Louis)
+			var lbl := "juggled in a row" if bool(step.get("juggle", false)) else "caught"
+			prog += "        %s  %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
 		draw_string(font, Vector2(bx, by + 108.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.8, 0.75, 0.68))
 	# the controls that actually WORK in a lesson, always, along the very bottom - plus
 	# the lesson's own key (trick / pattern) so every command the game has gets its
 	# moment of attention in the lesson that owns it (Louis)
 	var items: Array = []
-	if done:
-		items.append([["Enter"], "next"])
 	items.append([k_throw(), "throw"])
 	items.append([k_catch(), "catch"])
 	if tut_id.begins_with("trick_"):
@@ -2488,27 +2579,134 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		items.append([k_cycle(), "switch trick"])
 	elif tut_id.begins_with("pattern_"):
 		items.append([["P"], "pattern"])
-	items.append([["R"], "reset"])
-	items.append([k_pause(), "pause"])
+	items.append([["R"], "restart"])
+	items.append([k_pause(), "game menu"])
 	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
-	# the step's OWN key shouts for its press: Space on a trick step, P on the pattern
-	# step, R on the reset step - one pulsing line right above the key row it points
-	# at. Quiet once the goal is met (the banner's good-job line has taken over).
-	var hot_key := ""
-	if String(step.get("prompt", "")) == "trick":
-		hot_key = String(k_trick()[0])
-	elif String(step["goal"]) == "press_p":
-		hot_key = "P"
-	elif String(step["goal"]) == "press_r":
-		hot_key = "R"
-	if hot_key != "" and not done:
-		var pa := 0.55 + 0.45 * (0.5 + 0.5 * sin(atick() * 0.13))
-		draw_text_shout(font, Vector2(0, s.y - 64.0), "press %s now  -  once" % hot_key, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(1.0, 0.72, 0.4, pa))
+	# ONE shout slot above the key row, and exactly one thing may hold it - a screen that
+	# asks for two keys at once has asked for neither. Enter wins whenever it is live,
+	# because the whole point of the rework is that it stops being missable; otherwise it
+	# goes to whatever the step wants pressed right now.
+	if done and flow:
+		# the beat a guided step takes on its win before flowing to the next call: the
+		# win, and nothing else. Naming the next key here (the cue would, the ball being
+		# in the other hand already) would ask for a press the banner has not explained.
+		draw_text_shout(font, Vector2(0, s.y - 68.0), "yes  -  that's it", HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.72, 0.95, 0.7))
+	elif done:
+		draw_tut_enter_callout(font, s, step, tut_step >= steps.size() - 1)
+	else:
+		var cue := tut_cue(step)
+		if cue != "":
+			var pa := 0.62 + 0.38 * (0.5 + 0.5 * sin(atick() * 0.13))
+			draw_text_shout(font, Vector2(0, s.y - 68.0), cue, HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(1.0, 0.72, 0.4, pa))
+	if String(step["goal"]) == "read":
+		draw_tut_legend(font, s)
 	# trick feedback ("HIGH TOSS ON", or the lesson's gentle no-trick-here guidance)
 	# shows in lessons too - draw_hud, which normally carries it, never runs here
 	if trick_msg != "" and tick - trick_msg_tick < 90:
 		var ta := clampf(1.0 - float(tick - trick_msg_tick) / 90.0, 0.0, 1.0)
 		draw_text_shout(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
+
+
+func tut_cue(step: Dictionary) -> String:
+	# the ONE key the lesson wants pressed right now, named in words. A guided step reads
+	# it off the LIVE sim rather than off the step, and that is what lets a single step
+	# say "press J" and then "press D - NOW" as the ball crosses (Louis). It also means
+	# a dropped ball simply starts the call over: the cue follows the ball, so it can
+	# never end up asking for a catch that is not coming.
+	var goal := String(step["goal"])
+	if String(step.get("prompt", "")) == "trick":
+		return "press %s now  -  once" % String(k_trick()[0])
+	if goal == "press_p":
+		return "press P now  -  once"
+	if goal == "press_r":
+		return "press R now"
+	if not bool(step.get("guide", false)):
+		return ""   # freestyle: the floating keys over the hands guide, nothing shouts
+	# a ball in the air owns the cue: get ready while it climbs, then NOW across exactly
+	# the window the ring is flashing gold for, so the words and the ring never disagree
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		var h := clampi(b.to_hand, 0, 1)
+		var d := b.land_tick - tick
+		if absi(d) <= perfect_window():
+			return "press %s  -  NOW" % String(k_catch()[h])
+		if d > 0:
+			return "it is coming to your %s hand  -  catch with %s" % ["LEFT" if h == LEFT else "RIGHT", String(k_catch()[h])]
+	# nothing in the air: the hand holding the ball is the one being asked to throw
+	for hh: int in [LEFT, RIGHT]:
+		if not stack(hh).is_empty():
+			return "press %s" % String(k_throw()[hh])
+	return ""
+
+
+func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool) -> void:
+	# THE fix for the one thing every tester did (Louis): they got the juggling straight
+	# away and then just kept juggling, because "Enter continues" was a small line in a
+	# banner they had long stopped reading. So Enter gets a bar of its own above the key
+	# row; it says what it will DO ("add a second ball") rather than that it continues;
+	# and it grows and quickens for as long as it goes unanswered, so a player happily
+	# lost in the juggling is eventually, gently, unmissably told there is more.
+	var label := "finish the lesson" if last else String(step.get("next", "continue"))
+	var urg := clampf(float(tick - tut_advance_at) / 900.0, 0.0, 1.0)
+	var pulse := 0.5 + 0.5 * sin(atick() * (0.07 + 0.06 * urg))
+	var fs := int(round(lerpf(17.0, 22.0, urg)))
+	var cap := "Enter"
+	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 18.0
+	var total := cw + 14.0 + lw
+	var bh := float(fs) + 16.0
+	var bx := s.x * 0.5 - total * 0.5
+	var by := s.y - 96.0
+	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(0.16, 0.10, 0.04, 0.88))
+	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(1.0, 0.86, 0.42, 0.45 + 0.45 * pulse), false, 2.0)
+	draw_rect(Rect2(bx, by + 6.0, cw, bh - 12.0), Color(1.0, 0.86, 0.42, 0.82 + 0.18 * pulse))
+	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, fs, Color(0.12, 0.07, 0.03))
+	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.93, 0.72))
+	# ...and the other half of the deal, quieter, because the step never stops being
+	# playable and nobody should feel hurried out of the thing they just got working
+	draw_string(font, Vector2(0, by - 8.0), "or keep practising as long as you like", HORIZONTAL_ALIGNMENT_CENTER, s.x, 12, Color(0.78, 0.72, 0.64, 0.75))
+
+
+func draw_tut_legend(font: Font, s: Vector2) -> void:
+	# every command the game has, named, in one card (Louis: teach them all the buttons
+	# they can press at all times, with clear names). Two columns, sat in the clear band
+	# between the banner and the hands at 0.57, so it overlaps neither and the balls stay
+	# visible underneath it. Keys come from the live bindings, so a remapped player reads
+	# their own; the fixed ones are printed as they are.
+	var kt := k_throw()
+	var kc := k_catch()
+	var rows := [
+		[[String(kt[RIGHT]), String(kt[LEFT])], "throw", "right hand, left hand"],
+		[[String(kc[RIGHT]), String(kc[LEFT])], "catch", "right hand, left hand"],
+		[[String(k_trick()[0])], "trick", "one flourish  -  %s picks which" % String(k_cycle()[0])],
+		[["P"], "pattern", "the routine you juggle"],
+		[["O"], "object", "balls, rings, clubs, torches"],
+		[["3-9"], "how many", "props to juggle, live or fresh"],
+		[["R"], "restart", "re-deal  -  practice only, never on stage"],
+		[["S"], "the shop", "buy props and gear"],
+		[["Tab"], "your skills", "the sheet  -  spend your points"],
+		[[String(k_pause()[0])], "the game menu", "resume, back to the day, quit"],
+		[["Enter"], "finish", "take a bow on stage, or leave practice"],
+	]
+	var nrows := int(ceil(float(rows.size()) * 0.5))
+	var cw := minf(920.0, s.x - 80.0)
+	var cx := s.x * 0.5 - cw * 0.5
+	var cy := 158.0
+	var rowh := 26.0
+	var ch := 34.0 + float(nrows) * rowh
+	draw_rect(Rect2(cx, cy, cw, ch), Color(0.05, 0.03, 0.05, 0.9))
+	draw_rect(Rect2(cx, cy, cw, ch), Color(0.82, 0.62, 0.34, 0.5), false, 2.0)
+	var colw := cw * 0.5
+	for i in rows.size():
+		var row: Array = rows[i]
+		var x := cx + 20.0 + float(i / nrows) * colw
+		var y := cy + 26.0 + float(i % nrows) * rowh
+		var kx := x
+		for k in row[0]:
+			kx += draw_keycap(font, kx, y - 14.0, String(k)) + 3.0
+		draw_string(font, Vector2(x + 62.0, y), String(row[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.88, 0.58))
+		draw_string(font, Vector2(x + 168.0, y), String(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.82, 0.76, 0.68, 0.9))
 
 
 func draw_timing_ring(at: Vector2, d: int) -> void:
@@ -2571,7 +2769,12 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	for hh: int in [LEFT, RIGHT]:
 		if stack(hh).is_empty() or catching[hh]:
 			continue
-		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT)
+		# a GUIDED step is a call-and-response with one ball on the table, so the hand
+		# holding it IS the ask: its key burns as brightly as any named goal would. The
+		# step's goal there is the catch at the far end, and reading only that left the
+		# throw the whole beat depends on looking optional.
+		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT) \
+			or bool(step.get("guide", false))
 		draw_tut_key(font, hpos[hh] + Vector2(0.0, -44.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
@@ -3106,8 +3309,8 @@ func outer_pos(h: int) -> Vector2:
 	# less splayed (Louis). Kept 46px out from inner_pos so the crossing weave still
 	# clears (see inner_pos); pulling only this one in cramps the two roads into overlap.
 	# The stance NEVER widens for props or counts (Louis: the wide arms looked
-	# horrible) - big loads keep their clearance by SHRINKING the props instead,
-	# see live_prop_scale.
+	# horrible) - big loads keep their clearance by shrinking the prop HITBOX
+	# instead, the drawn prop staying its true size. See prop_hit_scale.
 	var c := stage_center()
 	var dx := 100.0
 	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
@@ -3383,6 +3586,8 @@ func start_run(n: int) -> void:
 	# so practice and a dev autoplay leave it at its harmless defaults)
 	set_cleared = false
 	set_collapsed = false
+	fail_reason = ""   # a fresh set has not failed yet: the LAST set to set this is the
+					   # one that ended the night, and the one the card explains
 	overtime = 0.0
 	running = false
 	started = false
@@ -3522,9 +3727,13 @@ func on_catch(h: int) -> void:
 		if rng.randf() > catch_chance(quality, best.height):
 			drop_ball(best, "slip")
 			return
-	# secured. Harder patterns AND harder loads pay more per catch (their base
-	# difficulty is the reward), so grinding the tamest routine is never the best.
-	# encore_score_mult zeroes light props on a "For the Danger" night.
+	# secured. Was the act actually RUNNING as this landed, or did the air just empty?
+	# (Louis: juggling is at least one prop airborne at all times; anything else is
+	# throwing one thing and catching it). Asked here, before the ball is put away.
+	var juggled := juggling_catch(best)
+	# harder patterns AND harder loads pay more per catch (their base difficulty is the
+	# reward), so grinding the tamest routine is never the best. encore_score_mult zeroes
+	# light props on a "For the Danger" night.
 	var pm := pattern_mult() * object_mult() * encore_score_mult()
 	best.state = STATE_HAND
 	stack(h).append(best)
@@ -3532,10 +3741,24 @@ func on_catch(h: int) -> void:
 	caught += 1
 	career["catches"] = int(career["catches"]) + 1
 	if tut_active:
-		tut_on_catch()   # a guided lesson counts your clean catches toward its goal
+		tut_on_catch(juggled)   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	play_sfx(_catch_sound(best.kind), -20.0)   # the prop's own timbre, now just a faint texture
 	var sc_before := score
+	if not juggled and not tut_active:
+		# NOT JUGGLING (juggling_catch): the air is bare behind this catch, so the player
+		# threw one prop and caught it again while the rest sat in their hands. The catch
+		# is real - it happened, it counts as a catch, it cost stamina, it keeps the prop
+		# off the floor - but the ACT is not running, so it earns nothing at all: no
+		# streak, no score, no crowd, no trick, no overtime. That shuts the grind where
+		# holding two and pumping the third farmed a clean Perfect every single time, and
+		# it is exactly the rule the basics lesson teaches in words before it hands over
+		# the second ball. A lesson is exempt: it runs at one and two props on purpose,
+		# scores nothing, hides the HUD, and polices the rule itself (tut_on_catch).
+		streak = 0
+		perfect_chain = 0
+		add_popup(outer_pos(h), "not juggling", Color(0.72, 0.68, 0.62))
+		return
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -4069,6 +4292,28 @@ func balls_airborne() -> int:
 	return n
 
 
+func juggling_catch(landing: Ball) -> bool:
+	# THE definition of juggling (Louis): at least one prop is in the air at ALL times.
+	# Anything less is just throwing one object and catching it again, however quickly
+	# it is done - and the game must know the difference, everywhere, not only in the
+	# lesson that teaches it.
+	#
+	# Testing that continuously would be wasted work, because the air can only ever
+	# EMPTY at a catch: a throw only adds to it, and a drop is punished on its own terms.
+	# So the whole rule reduces to one question asked at the one moment it can be
+	# broken - does this catch empty the air? If something else is still up as this
+	# lands, the air never emptied, and the pattern is live. If not, the player just
+	# threw one thing and caught it, and this catch earns nothing (see on_catch).
+	#
+	# Two props landing on the same tick do not slip through: the first sees the second
+	# still airborne and counts, the second finds the air bare behind it and does not -
+	# so "hold one, pump two together" tops out at a streak of one, which is the point.
+	for b in balls:
+		if b != landing and b.state == STATE_FLIGHT:
+			return true
+	return false
+
+
 func spinning() -> bool:
 	return tick <= spin_until
 
@@ -4377,6 +4622,8 @@ func resolve_set() -> void:
 		# banks nothing for this set. Either way the booking ends here - you did not clear.
 		if not set_collapsed:
 			booking_score += score
+			fail_reason = "bow"   # nothing fell: they chose to walk off under the number,
+								  # which the card should say plainly rather than imply
 		resolve_booking(false)
 
 
@@ -4477,8 +4724,14 @@ func slow_target() -> float:
 	if _frames < chain_until:
 		a += BURST_SLOW
 	if tut_active:
-		a = maxf(a, tut_slow())   # a lesson sets a FLOOR on slowness, never a sum: it
-								  # must not stack with a Pie into a frozen world
+		# a lesson sets a FLOOR on slowness, never a sum: it must not stack with a Pie
+		# into a frozen world. It is also the one thing allowed PAST the earned cap -
+		# the basics open at TUT_SLOW_MAX, deeper than any amount of Speed, Pie and
+		# burst can ever buy, because a first-timer being shown which key to press
+		# needs the ball to hang there while they find it. Whatever the stack was
+		# doing is clamped to its own ceiling first, so this stays a floor and never
+		# a way to smuggle bought slowness past SLOW_TOTAL_CAP.
+		return clampf(maxf(minf(a, SLOW_TOTAL_CAP), tut_slow()), 0.0, TUT_SLOW_MAX)
 	# the hard ceiling (Louis): past 50% the stepped sim reads as jitter, and 50%
 	# is the intended best case anyway - fully invested Speed plus a Pie plus one
 	# earned burst reaches it, so the stack only peaks when everything aligns
@@ -4777,13 +5030,14 @@ func prop_scale(kind: int) -> float:
 		_:            return 1.0
 
 
-func live_prop_scale(kind: int) -> float:
-	# the IN-PLAY prop size. From SIX objects up (Louis: six included) every prop
-	# shrinks - big props shed most of their extra bulk and everything tightens a
-	# little more per added object - so a perfect pattern keeps daylight between
-	# props without ever widening the juggler's stance. The drawn shape and the
-	# clack/collcheck radius both come from HERE, so what you see is exactly what
-	# can touch. Menus, the shop, and small loads keep the true prop_scale.
+func prop_hit_scale(kind: int) -> float:
+	# the prop's HITBOX, and ONLY its hitbox (Louis: the clubs, torches and knives keep
+	# their true drawn size - it was never their look that needed fixing). From six
+	# objects up a big load needs daylight between props to be juggleable at all, and
+	# the stance must not widen to buy it, so what tightens is the collision radius:
+	# big props shed most of their extra bulk quickly, and the whole set eases in a
+	# little further toward eleven. Every DRAWING reads prop_scale, the true size, so a
+	# six-club load looks exactly like a five-club load - it just forgives near misses.
 	var sc := prop_scale(kind)
 	if num_balls < 6:
 		return sc
@@ -5060,31 +5314,61 @@ func drop_ball(b: Ball, why: String) -> void:
 			# collapsing because you are SPENT, not because the crowd walked: remember it,
 			# so the day steers you to eat or sleep the moment this comes down (Louis)
 			exhausted = true
-		if dropped >= drop_limit() or stamina <= 0.0:
-			add_popup(b.to_pos + Vector2(0, -28), "SPENT  -  THAT'S THE SET" if exhausted else "THAT'S THE SET", Color(1.0, 0.5, 0.35))
-			start_collapse()
+		# ONE reason, in priority order, because only one of these actually ended the set:
+		# empty hands beat a full drop sheet (you dropped it BECAUSE you were spent), and
+		# both beat a bored room that was still, technically, watching.
+		if stamina <= 0.0:
+			add_popup(b.to_pos + Vector2(0, -28), "SPENT  -  THAT'S THE SET", Color(1.0, 0.5, 0.35))
+			start_collapse("spent")
+		elif dropped >= drop_limit():
+			add_popup(b.to_pos + Vector2(0, -28), "THAT'S THE SET", Color(1.0, 0.5, 0.35))
+			start_collapse("drops")
 		elif applause <= 0.0:
-			start_collapse()
+			start_collapse("crowd")
 	elif mode == MODE_TRAIN and not tut_active and stamina <= 0.0 and running:
 		# spent in practice too: end the session so the day can steer you to recovery
 		exhausted = true
 		running = false
 
 
-func start_collapse() -> void:
+func start_collapse(reason: String) -> void:
 	# the act falls apart: the hands give up and whatever is still held slips from them,
 	# so the player watches it all come down. The round ends only once everything has
 	# landed (see the collapse step in _physics_process). Marks set_collapsed so the set
 	# resolves as a hard ending, which is what strips a cleared set's overtime bonus.
+	# `reason` is WHY, recorded here because here is the only place that actually knows -
+	# it is carried, unedited, to the collapse banner and the results card (Louis).
 	if collapsing:
 		return
 	collapsing = true
 	set_collapsed = true
+	fail_reason = reason
 	for h in [LEFT, RIGHT]:
 		for hb in stack(h):
 			balls.erase(hb)
 			spawn_falling(hpos[h], hb.kind, hb.color)
 		stack(h).clear()
+
+
+func fail_text() -> Array:
+	# WHY the night ended, as [headline, the plain sentence and what to do about it].
+	# Strictly the one reason that actually fired (fail_reason): a player whose hands
+	# gave out is never also told the crowd was bored, because the crowd was not the
+	# problem and being handed all three possibilities teaches nothing (Louis).
+	match fail_reason:
+		"crowd":
+			return ["THE PUBLIC WASN'T HAPPY",
+				"the room ran out of patience and emptied. Catches and big throws are what keep them in their seats."]
+		"spent":
+			return ["OUT OF STAMINA",
+				"your hands had nothing left and stopped closing. Eat or sleep before the next booking."]
+		"drops":
+			return ["YOU DROPPED IT ALL",
+				"%d drops, and this house allows %d." % [dropped, drop_limit()]]
+		"bow":
+			return ["YOU BOWED OUT UNDER THE TARGET",
+				"you chose the bow before the number fell, so the night ends here. The crowd went home happy."]
+	return ["", ""]
 
 
 func update_sim() -> void:
@@ -5095,7 +5379,7 @@ func update_sim() -> void:
 	if mode == MODE_PERFORM and not tut_active and running and not collapsing:
 		applause = maxf(0.0, applause - APPL_DECAY[clampi(run_venue, 0, APPL_DECAY.size() - 1)] * encore_decay_mult())
 		if applause <= 0.0:
-			start_collapse()
+			start_collapse("crowd")   # the room emptied: nothing to do with drops or stamina
 	var lost: Array[Ball] = []
 	for b in balls:
 		if b.state == STATE_FLIGHT and tick > b.land_tick + MISS_GRACE:
@@ -5122,7 +5406,7 @@ func update_sim() -> void:
 		for i in fly.size():
 			for j in range(i + 1, fly.size()):
 				var d := fpos[i].distance_to(fpos[j])
-				var rr := 11.0 * (live_prop_scale(fly[i].kind) + live_prop_scale(fly[j].kind))
+				var rr := 11.0 * (prop_hit_scale(fly[i].kind) + prop_hit_scale(fly[j].kind))
 				if _collcheck and d - rr < _coll_min:
 					_coll_min = d - rr
 					_coll_at = "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
@@ -5839,8 +6123,8 @@ func draw_flame_in_dark(pos: Vector2) -> void:
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
-	var sc := live_prop_scale(b.kind)   # count-squeezed in play, so the drawn size
-										# always matches the clack/clearance radius
+	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
+								   # (prop_hit_scale) ever shrinks on a big load
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
@@ -6131,6 +6415,19 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
 		draw_text_shout(font, Vector2(0, s.y - 96.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
 
+	# THE COLLAPSE, as it happens: the act is coming down and the player is told the one
+	# reason WHY while the props are still in the air, which is the moment it lands
+	# emotionally (Louis). The results card repeats the same words afterwards, so the
+	# verdict never changes between the fall and the paperwork. Sits high, clear of the
+	# hands at 0.57 and of the props tumbling past them.
+	if collapsing:
+		var cft := fail_text()
+		if String(cft[0]) != "":
+			var cy := s.y * 0.22
+			draw_text_shout(font, Vector2(0, cy), String(cft[0]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.45, 0.35))
+			draw_multiline_string(font, Vector2(s.x * 0.25, cy + 28.0), String(cft[1]),
+				HORIZONTAL_ALIGNMENT_CENTER, s.x * 0.5, 14, 2, Color(0.96, 0.82, 0.74, 0.92))
+
 	# ============================ LEFT RAIL: the contest ============================
 	var LX := 18.0
 	var LW := 300.0
@@ -6342,6 +6639,12 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var htc := Color(1.0, 0.86, 0.45) if complete else Color(0.9, 0.72, 0.55)
 	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, htc)
 	draw_string(font, Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
+	# WHY the night ended, right under its name, whenever it did not end in a win: the
+	# card used to show only what was scored and left the player to guess the cause.
+	# The grade badge sits far right, so this line has the left of the card to itself.
+	var ft := fail_text()
+	if not complete and String(ft[0]) != "":
+		draw_string(font, Vector2(lx, py + 96.0), String(ft[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.42))
 	if age >= 64:
 		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
 		var sc := 1.0 + 1.1 * (1.0 - k) * (1.0 - k)   # stamps down from large to rest
@@ -6383,6 +6686,14 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
 	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
 	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%d" % run_xp, Color(0.82, 0.9, 0.7), ra.call(6)); y += rowh
+
+	# ...and the reason spelled out, in the clear space above the footer: the headline
+	# by the venue name says WHAT happened, this says what to do about it. Last to
+	# arrive, so it reads as the card's closing word rather than competing with the
+	# count-up. A complete booking has no reason to give (nothing failed).
+	if not complete and String(ft[1]) != "" and age > 74:
+		draw_multiline_string(font, Vector2(px + 34.0, py + ph - 66.0), String(ft[1]),
+			HORIZONTAL_ALIGNMENT_CENTER, pw - 68.0, 12, 2, Color(0.86, 0.72, 0.64, 0.85))
 
 	# footer: how to continue, breathing gently once everything is revealed. the
 	# shop and sheet stay keyboard names even on pad, since they have no button.
@@ -8074,8 +8385,7 @@ func draw_falling() -> void:
 			a = clampf(1.0 - float(tick - int(d["rest"])) / 70.0, 0.0, 1.0)
 		var col: Color = d["col"]
 		col.a *= a
-		var sc := live_prop_scale(int(d["kind"])) * 0.95   # a dropped prop keeps the
-														   # size it flew at
+		var sc := prop_scale(int(d["kind"])) * 0.95   # a dropped prop keeps the size it flew at
 		match int(d["kind"]):
 			PROP_EGGS:
 				draw_egg(p, col, sc)
