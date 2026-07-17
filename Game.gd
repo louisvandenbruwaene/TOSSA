@@ -87,7 +87,7 @@ const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly
 const EAT_STAM := 0.35     # a meal restores this FRACTION of max Stamina (scales with
 						   # Endurance, so it stays a meaningful top-up at 100 or at 1000)
 const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
-const INN_COST := 15       # a proper bed: full stamina on waking. It wants FULL
+const INN_COST := 30       # a proper bed: full stamina on waking. It wants FULL
 						   # payment now (Louis): a juggler who cannot afford the
 						   # bed and cannot stand to busk has reached the end of
 						   # the road, and the game says so honestly (game over)
@@ -161,15 +161,22 @@ const PATTERNS := [
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25,
 	 "desc": "The right hand throws over the top, the left keeps the weave."},
-	{"id": "shower",     "name": "Shower",      "lvl": 14, "acc": 18, "ven": 2, "mult": 1.4,
+	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
-	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 17, "acc": 22, "ven": 3, "mult": 1.45,
+	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.45,
 	 "desc": "BOTH hands throw over the top, the weave runs backward."},
 	{"id": "wfall",      "name": "Waterfall",   "lvl": 11, "str": 14, "ven": 2, "mult": 1.3,
 	 "desc": "The right hand keeps throwing over the top while the left flows low beneath it."},
-	{"id": "tennis",     "name": "Tennis",      "lvl": 20, "acc": 26, "str": 18, "ven": 4, "mult": 1.5,
+	{"id": "tennis",     "name": "Tennis",      "lvl": 1, "ven": 5, "mult": 1.5,
 	 "desc": "One marked ball sails over the top, back and forth across the weave."},
 ]
+# UNLOCK DESIGN (Louis): every skill sits behind a wall of difficulty, hard work or
+# talent - never behind raw XP alone. Each NEW STAGE guarantees exactly one arrival
+# reward, gated on the venue and nothing else (Street: Behind the Back. Theatre: Spin.
+# Circus: Shower. Championship: Reverse Cascade. World Arena: Tennis), so moving up
+# always pays. The rest carry composite stat/level walls and fill the stretches
+# BETWEEN stages; when even those run dry for too long, the pity director in
+# enter_day gifts the nearest one (see pity_grant).
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
 const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction (0.35
@@ -278,9 +285,9 @@ const TR_OVER := 3
 const TRICKS := [
 	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 3, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
 	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 9, "acc": 12, "ven": 1, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 1, "ven": 1, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 13, "acc": 16, "ven": 2, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 1, "ven": 2, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
 	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 6, "str": 10, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
@@ -321,52 +328,47 @@ const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
 const TUT_SLOW_START := 0.5    # the first step of a lesson: half speed (the
 								# slow-stack cap, so lessons stay jitter-free too)
 const TUT_SLOW_END := 0.20     # the last step: nearly real time
-const TUT_SLOW_MAX := 0.7      # a LESSON may go slower than the earned stack ever can
-								# (see slow_target): the basics open here, at 30% speed,
-								# because the opening steps are not a juggle at all - they
-								# are "press this key, now press that one", and the whole
-								# point is that a first-timer can watch the ball hang and
-								# read the ring close (Louis: max slowmo at the start).
-								# The sim only moves on whole ticks, so this deep the
-								# motion does visibly step: fine for one ball drifting
-								# through a teaching beat, which is why it is scoped to
-								# the guided steps and eased away before the cascade.
 const TUT_FLOW_HOLD := 10      # ticks a GUIDED step lingers on its win before flowing to
 								# the next one - long enough to register "yes, that", short
 								# enough that the next key's prompt is up before the ball
 								# it refers to is halfway down
+# the BASICS lesson's adaptive pace (Louis): slow motion is EARNED away, not scripted.
+# The lesson opens at the game's own 50% cap and every run of clean catches steps the
+# world faster down this ladder; a drop steps it back up, so a struggling player gets
+# their thick time back instead of drowning. The lesson only ends with ten catches of
+# a true three-ball cascade at the ladder's floor: genuine full speed.
+const TUT_PACES: Array[float] = [0.5, 0.25, 0.15, 0.0]
+const TUT_PACE_STREAK := 4     # clean catches in a row that earn the next notch down
 const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
 							   # and brighten (at 62% slow that is about two real seconds)
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
 const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
 
-# --- THE BOOKING (Phase 2) ----------------------------------------------------
-# A performance is no longer one open-ended set: it is a booking of three sets at
-# one venue, played back to back. Each set is a contest with a number to beat (the
-# TARGET), a crowd whose patience DRAINS (the applause meter, now a clock), and a
-# hard DROP LIMIT (the damage). Clear a target and you may WALK OFF to bank it, or
-# push for a growing overtime multiplier and risk the night. The third set adds a
-# named ENCORE condition drawn from a deck. This is the layer that turns a lovely
-# toy into a game with stakes, and almost all of it activates machinery Game.gd
-# already had (the collapse, the applause meter, the graceful finish, purist,
-# set_collide, the record boards) and simply never pressed on.
-const SET_WARMUP := 0
-const SET_MAIN := 1
-const SET_ENCORE := 2
-const SETS_PER_BOOKING := 3
-# the Warm-up target per venue. The whole phase lives or dies on these numbers, so
+# --- THE ACT (Phase 2, reworked per Louis) -------------------------------------
+# A performance is ONE continuous act at one venue - never phases, never a fresh
+# deal partway through. The act carries three GOALS (first, second, final - each a
+# taller number), a crowd whose patience DRAINS (the applause meter as a clock),
+# and a hard DROP LIMIT. From the moment the FIRST goal falls you may CASH IN at
+# any time - press the finish key, or simply catch every ball and hold them (the
+# air empties, the act is over, the bow is implied) - and the results card pays
+# what the whole act scored. Pushing for the next goal instead is the gamble: a
+# COLLAPSE (crowd walks, drops, or empty stamina) strips the score back to the
+# last goal actually reached. One optional CHALLENGE condition (the ENCORES deck)
+# may colour the whole act - one condition for the whole act, never a different
+# one per phase (Louis) - and the Backyard never rolls one, so the first stage
+# stays a pure lesson in juggling.
+const NUM_GOALS := 3
+# the first goal per venue. The whole phase lives or dies on these numbers, so
 # they were set against the --calib autoplayer sweep, not guessed: a flawless three-
-# ball cascade clears the Backyard Warm-up and falls well short of the Championship.
+# ball cascade clears the Backyard's first goal and falls well short of the Championship.
 const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000]
-const SET_STEP := [1.0, 1.9, 3.2]     # Warm-up, The Set, The Encore: each a taller bar
-const ANTE_STEP := 0.15               # each cleared booking at a venue raises its bar 15%
+const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
+const ANTE_STEP := 0.15               # each complete act at a venue raises its bar 15%
 # the crowd's patience bleeds this much per tick, per venue (120 ticks a second). At
 # the Backyard a still juggler loses the room in ~24s; at the World Arena in ~8. Every
 # Perfect catch pays ~0.05 back, so keeping the crowd is a matter of keeping juggling.
 const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092]
-const DROP_LIMIT := 3                 # three drops and the crowd turns (an Encore may lower it)
-const OVERTIME_PER_CATCH := 0.02      # each catch past the target grows the walk-off bonus
-const OVERTIME_MAX := 2.5             # ...capped, so pushing forever is not the play
+const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
 const APPL_THROW_HEIGHT := 0.012      # a big throw excites the crowd: patience back, scaled by height
 # the crowd's patience economy, now that it is a CLOCK rather than decoration. The
 # per-catch gains are deliberately smaller than a set's decay bleed, so steady low play
@@ -388,9 +390,9 @@ const ENCORES := [
 	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
 	{"id": "draft",     "name": "The Draft",          "desc": "A wind through the room. Every throw drifts wider."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut: nothing in flight can be seen. Only a torch's flame still burns through."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut on the way down: every prop vanishes past its apex. Only a torch's flame burns through."},
 	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
-	{"id": "long",      "name": "The Long Set",       "desc": "Twice the target, but the crowd is patient. An endurance test."},
+	{"id": "long",      "name": "The Long Set",       "desc": "The final goal is doubled, but the crowd is patient. An endurance test."},
 	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
 	{"id": "purist",    "name": "The Purist's Night", "desc": "No gear, no stats, no help. Only your hands."},
 	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives and torches score."},
@@ -466,12 +468,9 @@ var rng := RandomNumberGenerator.new()
 # of this is per-booking and deliberately NOT saved (a booking is short, and losing
 # it on quit is a fair, far simpler price than mid-booking resume). Only `ante`
 # persists, since it is the standing difficulty the venue remembers.
-var set_index := 0            # 0 Warm-up, 1 The Set, 2 The Encore
-var booking_score := 0        # banked across the booking's cleared sets (the record number)
-var booking_active := false   # true from begin_performance until the booking resolves
-var overtime := 0.0           # the walk-off multiplier, earned by catches past the target
-var set_cleared := false      # this set's target has been beaten (locks true, enables the walk-off)
-var set_collapsed := false    # this set ended by the crowd walking or the drop limit (overtime lost)
+var booking_active := false   # true from begin_performance until the act resolves
+var goals_hit := 0            # goals reached so far THIS act (monotonic; 1+ arms the cash-in)
+var set_collapsed := false    # the act ended by collapse (score strips to the last goal)
 var exhausted := false        # the collapse was caused by empty stamina: on return to the day,
 							  # steer the player straight to EAT / SLEEP (Louis)
 # WHY the set ended, in one word, set at the moment it happens and never guessed at
@@ -483,16 +482,7 @@ var exhausted := false        # the collapse was caused by empty stamina: on ret
 # card shows is the one that actually ended the night.
 var fail_reason := ""
 var encore := -1              # index into ENCORES for this booking's third set, or -1
-var sets_cleared := 0         # how many of the three the player cleared, for pay and reputation
-var ante: Array[int] = [0, 0, 0, 0, 0, 0]   # bookings cleared per venue: the standing raised bar
-# the booking's running totals, summed across its sets so the results card reads the
-# whole night, not just the last set
-var book_caught := 0
-var book_dropped := 0
-var book_best_streak := 0
-var book_tricks := 0
-var book_trick_score := 0
-var book_xp := 0
+var ante: Array[int] = [0, 0, 0, 0, 0, 0]   # complete acts per venue: the standing raised bar
 
 # progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
@@ -561,6 +551,11 @@ var trick_unlock := -1    # a newly unlocked trick to announce with a banner, or
 var trick_unlock_tick := -999
 var sheet_open := false
 var shop_open := false
+# the card CURSOR on the sheet and the shop (Louis: select with arrows / sticks / dpad,
+# so a pad player can spend points and buy props). The number keys remain the fast path
+# on a keyboard; arrows move the gold highlight and Enter (pad A) acts on it.
+var sheet_sel := 0        # 0..3 across the four stat cards
+var shop_sel := 0         # 0..5 the prop cards, 6 glasses, 7 the pie
 var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
 var skills_sel := 0        # which entry the Skills reference has expanded
 var debug_mode := false   # debug build: free stat editing in the character sheet
@@ -605,6 +600,13 @@ var establish_venue := 0  # which venue's exterior the stage card shows
 var establish_after := 3  # ball count to start the performance with once dismissed
 var seen_tuts: Array[String] = []  # lesson ids already shown, so they fire once
 var pending_tuts: Array[String] = []  # lessons queued by an unlock, taught at the hub
+# the REWARD DIRECTOR's memory (Louis: rewards spread out, never bunched or absent).
+# gifted holds skill ids the pity path granted despite their walls; the counters and
+# flags pace the gifts so a struggling player is helped and a farming player is not.
+var gifted: Array = []             # skill ids unlocked by pity (skill_req_met honours these)
+var perfs_since_unlock := 0        # acts played since ANY skill unlocked (pity trigger)
+var aid_pie_day := -1              # the day a pie was last gifted (one per day at most)
+var aid_meal_used := false         # the once-per-career stamina rescue has been spent
 									  # (an unlock happens mid-set; the lesson must wait)
 
 # --- interactive tutorial (runs on the REAL sim, guided step by step) ---------
@@ -618,6 +620,8 @@ var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw
 var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
 var tut_keys := 0         # command-key presses banked this step (the R and P teaching
 						  # goals count on their own, so a stray catch cannot clear them)
+var tut_pace := 0         # the basics lesson's rung on TUT_PACES (0 = slowest)
+var tut_flow_streak := 0  # clean catches in a row toward the next rung; drops zero it
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
@@ -697,6 +701,8 @@ var _tap := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
 var _trig := {"lt": false, "rt": false}
 var _pad_last := false
 var _joy_held := {}
+var _stick_dir := {}      # per-axis latch for left-stick menu steps (see _input):
+						  # -1 / 0 / +1, so one push is one step, never a stream
 
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
@@ -815,22 +821,16 @@ func _ready() -> void:
 		game_state = ST_PLAY
 		if ua.has("--demo"):    # dev: the auto-player performs, so we can see the booking HUD
 			mode = MODE_PERFORM
-		if ua.has("--booking"):   # dev: run a REAL booking (rolls an Encore), for shots and --calib.
-			# --encore <id> pins the condition; --set <n> jumps straight to that set (2 = the Encore).
+		if ua.has("--booking"):   # dev: run a REAL act (rolls a challenge), for shots and --calib.
+			# --encore <id> pins the condition.
 			booking_active = true
-			set_index = 0
-			booking_score = 0
-			sets_cleared = 0
-			encore = randi() % ENCORES.size()
+			goals_hit = 0
+			encore = (randi() % ENCORES.size()) if run_venue >= 1 else -1
 			var eni := ua.find("--encore")
 			if eni != -1 and eni + 1 < ua.size():
 				for ek in ENCORES.size():
 					if String(ENCORES[ek]["id"]) == ua[eni + 1]:
 						encore = ek
-			var sei := ua.find("--set")
-			if sei != -1 and sei + 1 < ua.size():
-				set_index = clampi(int(ua[sei + 1]), 0, SET_ENCORE)
-				booking_score = set_target_for(run_venue, 0) if set_index > 0 else 0
 		var ci := ua.find("--calib")   # dev: print the autoplayer's score at N ticks, then quit,
 		if ci != -1:                   # to tune VENUE_BASE against real strong-player numbers
 			_calib = true
@@ -865,10 +865,10 @@ func _ready() -> void:
 			sheet_open = true
 		if ua.has("--shop"):    # dev: open the shop for a screenshot
 			shop_open = true
-		if ua.has("--results"):   # dev: fabricate a finished booking to screenshot the card
+		if ua.has("--results"):   # dev: fabricate a finished act to screenshot the card
 			mode = MODE_PERFORM
 			run_venue = 4
-			sets_cleared = 3          # a complete night, for the card's header and grade
+			goals_hit = 3             # a complete night, for the card's header and grade
 			caught = 214; dropped = 3; best_streak = 132; score = 951875
 			peak_applause = 0.94; tricks_landed = 11; trick_score = 42600
 			last_pay = 6996; last_rep_delta = 60; run_xp = 1240; points = 3
@@ -887,16 +887,13 @@ func _ready() -> void:
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
 		begin_tutorial(id)
 	var ei := ua.find("--establish")  # dev: screenshot a venue exterior card, e.g. --establish 3.
-	if ei != -1:                      # add --booking (and optionally --set/--encore) to show the
-		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2   # booking's set/target/encore panel
+	if ei != -1:                      # add --booking (and optionally --encore) to show the
+		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2   # act's goals/challenge panel
 		if ua.has("--booking"):
 			booking_active = true
 			run_venue = establish_venue
-			set_index = SET_WARMUP
-			var esi := ua.find("--set")
-			if esi != -1 and esi + 1 < ua.size():
-				set_index = clampi(int(ua[esi + 1]), 0, SET_ENCORE)
-			encore = randi() % ENCORES.size()
+			goals_hit = 0
+			encore = (randi() % ENCORES.size()) if run_venue >= 1 else -1
 			var eei := ua.find("--encore")
 			if eei != -1 and eei + 1 < ua.size():
 				for ek2 in ENCORES.size():
@@ -984,9 +981,9 @@ func _physics_process(delta: float) -> void:
 		# scores before the crowd walks - or in _calib_ticks if it never does - at this
 		# venue / prop / count. Quitting AT the collapse captures the true reachable score,
 		# since after a collapse the halted-sim autoplayer keeps zombie-feeding itself.
-		var wt := set_target_for(run_venue, SET_WARMUP)
+		var wt := goal_for(run_venue, 0)
 		var reason := "COLLAPSE" if collapsing else "time"
-		print("CALIB venue=%d prop=%d n=%d hold=%d end=%s tick=%d score=%d caught=%d streak=%d appl=%.2f  warmup=%d clears=%s" % [
+		print("CALIB venue=%d prop=%d n=%d hold=%d end=%s tick=%d score=%d caught=%d streak=%d appl=%.2f  goal1=%d clears=%s" % [
 			run_venue, prop_type, num_balls, _demo_hold, reason, tick, score, caught, best_streak, applause, wt, str(score >= wt)])
 		get_tree().quit()
 		return
@@ -1049,6 +1046,37 @@ func _input(event: InputEvent) -> void:
 		kc = _pad_to_key(jb.button_index)
 		if kc == -1:
 			return
+	elif event is InputEventJoypadMotion:
+		# BOTH STICKS steer every list exactly like the arrows (Louis: the sticks
+		# move the focus of the selected option in menus). Each axis latches: a push
+		# past 0.6 fires ONE step and holds until the stick eases back under 0.35,
+		# so drift near centre can never scroll a menu and holding the stick does
+		# not machine-gun the cursor. The live sim ignores them entirely (throw and
+		# catch are buttons, and a stick brushed mid-juggle must not do anything).
+		var jm := event as InputEventJoypadMotion
+		if jm.axis != JOY_AXIS_LEFT_X and jm.axis != JOY_AXIS_LEFT_Y \
+				and jm.axis != JOY_AXIS_RIGHT_X and jm.axis != JOY_AXIS_RIGHT_Y:
+			return
+		var dir := 0
+		if jm.axis_value > 0.6:
+			dir = 1
+		elif jm.axis_value < -0.6:
+			dir = -1
+		elif absf(jm.axis_value) < 0.35:
+			_stick_dir[jm.axis] = 0
+			return
+		else:
+			return   # the hysteresis band: keep whatever the latch already holds
+		if int(_stick_dir.get(jm.axis, 0)) == dir:
+			return   # still held the same way: the step already fired
+		_stick_dir[jm.axis] = dir
+		if _pad_sim_live():
+			return
+		_pad_last = true
+		if jm.axis == JOY_AXIS_LEFT_X or jm.axis == JOY_AXIS_RIGHT_X:
+			kc = KEY_RIGHT if dir > 0 else KEY_LEFT
+		else:
+			kc = KEY_DOWN if dir > 0 else KEY_UP
 	else:
 		return
 	if kc == KEY_F11:
@@ -1188,7 +1216,16 @@ func _input(event: InputEvent) -> void:
 			if performing:
 				finish_performance()   # end the set on a high note, no drop needed
 			else:
-				enter_day()            # practice over: Enter steps back into the day
+				# practice over: Enter steps back into the day - and BANKS the round
+				# first (Louis: practice grants XP too). The completion bonus used to
+				# fire only on the running->false edge, so leaving mid-run with Enter
+				# quietly ate it; a round already over has already banked, so the
+				# running check keeps this from paying the same round twice.
+				if running and not tut_active:
+					running = false
+					_prev_running = false
+					on_round_end()
+				enter_day()
 		KEY_R:
 			if not performing:
 				start_run(num_balls)
@@ -1252,28 +1289,46 @@ func _input(event: InputEvent) -> void:
 			open_pause()
 
 
+func _pad_sim_live() -> bool:
+	# is the juggling sim the thing the pad is talking to right now? While it is,
+	# the polled play actions own their buttons (Y = trick) and the event path must
+	# stay out of their way; every panel over the sim hands them back.
+	return game_state == ST_PLAY and not paused and not results_open and not sheet_open and not shop_open
+
+
 func _pad_to_key(btn: int) -> int:
 	# translate a recognised pad button into the keycode the per-screen matches
 	# already understand. -1 means the button has no meaning on this screen.
+	# THE LAYOUT IS LOUIS'S OWN, verbatim: bumpers throw (F / J), triggers catch
+	# (D / K) - both polled in _read_inputs, not here - face buttons Y = Space
+	# (the trick), B = Enter, A = Escape, X = Tab, and the dpad carries the four
+	# letter commands while playing: up O (object), right P (pattern), down S
+	# (shop), left R (restart). In menus the dpad falls back to arrows and the
+	# STICKS move the focus, so navigation never fights the play commands.
 	match btn:
 		JOY_BUTTON_DPAD_UP:
-			return KEY_UP
+			return KEY_O if game_state == ST_PLAY else KEY_UP
 		JOY_BUTTON_DPAD_DOWN:
-			return KEY_DOWN
+			return KEY_S if game_state == ST_PLAY else KEY_DOWN
+		JOY_BUTTON_DPAD_LEFT:
+			return KEY_R if game_state == ST_PLAY else KEY_LEFT
+		JOY_BUTTON_DPAD_RIGHT:
+			return KEY_P if game_state == ST_PLAY else KEY_RIGHT
 		JOY_BUTTON_A:
-			# while the sim is live, A is the polled trick button, so it must not
-			# double as Enter there or every spin attempt would finish the set
-			if game_state == ST_PLAY and not paused and not results_open and not sheet_open and not shop_open:
-				return -1
-			return KEY_ENTER
+			return KEY_ESCAPE   # bottom face: back / the game menu (Louis)
 		JOY_BUTTON_B:
-			return KEY_ESCAPE
-		JOY_BUTTON_START:
-			# Start mirrors Escape inside play, so it opens and closes the pause
-			# menu. outside play Escape can mean quit, so Start stays unmapped.
-			return KEY_ESCAPE if game_state == ST_PLAY else -1
+			return KEY_ENTER    # right face: confirm / finish / take a bow (Louis)
 		JOY_BUTTON_X:
-			return KEY_X
+			return KEY_TAB      # left face: the sheet / menu (Louis)
+		JOY_BUTTON_Y:
+			# top face IS the Space key (Louis). While the sim is live it is the
+			# POLLED trick button (see _read_inputs) and must not double-fire here.
+			if _pad_sim_live():
+				return -1
+			return KEY_SPACE
+		JOY_BUTTON_START:
+			# Start also pauses inside play, the one habit every pad player has
+			return KEY_ESCAPE if game_state == ST_PLAY else -1
 	return -1
 
 
@@ -1332,12 +1387,16 @@ func pause_activate() -> void:
 		0:   # resume the run right where it froze
 			paused = false
 			play_sfx("ui2", -14.0)
-		1:   # end the session and step back out into the day (clears any panels)
+		1:   # end the session and step back out into the day (clears any panels).
+			# `collapsing` clears too: leaving a mid-collapse set through this menu
+			# used to carry the latch into the NEXT session, where it silenced every
+			# polled key (the "space does nothing in the lesson" bug, Louis)
 			paused = false
 			tut_active = false
 			results_open = false
 			sheet_open = false
 			shop_open = false
+			collapsing = false
 			enter_day()
 			play_sfx("ui", -12.0)
 		2:   # leave the game
@@ -1345,88 +1404,66 @@ func pause_activate() -> void:
 
 
 func finish_performance() -> void:
-	# TAKE A BOW (Phase 2, revised per Louis). The finish key ALWAYS ends the set
-	# gracefully - you catch what you have and bow, the crowd stays happy, nothing falls.
-	# If the target was cleared you bank it (with overtime) and advance; if not, you have
-	# chosen to bow out below the number, which banks the partial and ends the night on a
-	# high note rather than risking a collapse. A set only ever COLLAPSES involuntarily,
-	# from an emptied crowd or the drop limit. Clearing running fires on_round_end from the
-	# running->false edge, where resolve_set() banks and either advances or resolves.
+	# CASH IN. The finish key always ends the act gracefully - you catch what you
+	# have and bow, the crowd stays happy, nothing falls - and the whole score is
+	# kept (a collapse is what strips it back to the last goal). Catching every ball
+	# and holding them fires this same function from on_catch, so the two cash-in
+	# gestures Louis asked for are one path. Clearing running fires on_round_end from
+	# the running->false edge, where resolve_act() settles the night.
 	if mode != MODE_PERFORM or not running or tut_active:
 		return
-	play_sfx("streak", -6.0)   # a short rising flourish to close the set
+	play_sfx("streak", -6.0)   # a short rising flourish to close the act
 	running = false
 
 
 func begin_performance(n: int) -> void:
-	# a booking opens on an establishing shot of WHERE you are about to play, the way a
-	# film cuts to the outside of the building before the scene inside. It also rolls
-	# this booking's Encore and clears the per-booking accumulators, so the whole night
-	# is set up here and the three sets simply run.
+	# an act opens on an establishing shot of WHERE you are about to play, the way a
+	# film cuts to the outside of the building before the scene inside. The act's one
+	# optional challenge is rolled here, so the card can announce it up front.
 	mode = MODE_PERFORM
 	establish_after = n
 	establish_venue = play_venue()
-	pattern_once = -1   # a booking always performs the pattern the player chose with P
+	pattern_once = -1   # an act always performs the pattern the player chose with P
 	booking_active = true
-	set_index = SET_WARMUP
-	booking_score = 0
-	sets_cleared = 0
-	# a fresh cosmetic roll for the Encore (global randi, never the sim rng, so the
-	# deterministic catch sequence is untouched by which condition came up)
-	encore = randi() % ENCORES.size()
-	book_caught = 0
-	book_dropped = 0
-	book_best_streak = 0
-	book_tricks = 0
-	book_trick_score = 0
-	book_xp = 0
-	game_state = ST_ESTABLISH
-	cine_tick = 0
-
-
-func next_set() -> void:
-	# advance to the next set of the booking WITHOUT returning to the hub: re-establish
-	# the card (so each set gets its "here is what they want" beat), then start_run deals
-	# a fresh set that keeps the same loadout and the accumulating booking_score.
-	set_index = clampi(set_index + 1, 0, SET_ENCORE)
-	establish_after = num_balls
-	establish_venue = play_venue()
+	goals_hit = 0
+	# one challenge for the WHOLE act (Louis: never a different condition per phase),
+	# rolled with the global randi (never the sim rng, so the deterministic catch
+	# sequence is untouched). The Backyard stays pure: no conditions on stage one.
+	encore = (randi() % ENCORES.size()) if play_venue() >= 1 else -1
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
 
 func establish_key() -> void:
 	game_state = ST_PLAY
-	start_run(establish_after)   # the card dismissed: walk out and begin the set
+	start_run(establish_after)   # the card dismissed: walk out and begin the act
 
 
-# --- booking maths: the target (gate), the deck's live effects, the drop limit -----
+# --- act maths: the three goals, the deck's live effects, the drop limit -----
 
-func set_target_for(venue: int, si: int) -> int:
-	# the number to beat, scaling off the VENUE and the standing ante, never off the
-	# player's own record (scaling off your best would punish you for improving). The
-	# Encore's multiplier folds in only on the third set.
+func goal_for(venue: int, gi: int) -> int:
+	# goal number gi (0 first, 1 second, 2 final), scaling off the VENUE and the
+	# standing ante, never off the player's own record (scaling off your best would
+	# punish you for improving). A challenge that stretches the night (The Long Set)
+	# stretches only the FINAL goal - the hardest number is the one it makes harder.
 	var base := float(VENUE_BASE[clampi(venue, 0, VENUE_BASE.size() - 1)])
-	var step := float(SET_STEP[clampi(si, 0, SET_STEP.size() - 1)])
+	var step := float(GOAL_STEP[clampi(gi, 0, GOAL_STEP.size() - 1)])
 	var a := 1.0 + ANTE_STEP * float(ante[clampi(venue, 0, ante.size() - 1)])
-	var enc := encore_target_mult() if si == SET_ENCORE else 1.0
+	var enc := encore_target_mult() if gi == NUM_GOALS - 1 else 1.0
 	return int(round(base * step * a * enc))
 
 
-func set_target() -> int:
-	return set_target_for(run_venue, set_index)
-
-
-func book_total() -> int:
-	# the live running total across the booking: banked sets plus the current set's score.
-	# monotonic, so it drives the record chase and the "how close am I" HUD honestly.
-	return booking_score + score
+func next_goal() -> int:
+	# the first goal the act has NOT yet reached, or the final goal once all have
+	# fallen (the meter then shows a full bar, not a moving one)
+	return goal_for(run_venue, clampi(goals_hit, 0, NUM_GOALS - 1))
 
 
 func encore_on(id: String) -> bool:
-	# is THIS booking's Encore active right now? Only ever true on the third set of a
-	# real booking, so a warm-up and a --demo run are never touched by a condition.
-	return booking_active and mode == MODE_PERFORM and set_index == SET_ENCORE \
+	# is THIS act's challenge the named one? A challenge colours the WHOLE act - one
+	# condition from the first throw to the bow (Louis). -1 means a clean night, which
+	# is every Backyard night and any venue the roll spared.
+	return booking_active and mode == MODE_PERFORM \
 		and encore >= 0 and encore < ENCORES.size() and String(ENCORES[encore]["id"]) == id
 
 
@@ -1525,8 +1562,65 @@ func enter_day() -> void:
 				day_sel = i
 				break
 		set_day_msg("your hands gave out  -  eat or sleep to get them back")
+	reward_director()   # a stuck player gets a nudge, a gift, or an unlock - never a wall
 	save_progress()
 	check_dead_end()   # broke AND spent on arrival: the road ends here
+
+
+func reward_director() -> void:
+	# THE REWARD DIRECTOR (Louis): rewards are SPREAD - a new stage always pays (the
+	# venue-gated arrival skills in TRICKS/PATTERNS), and when the road between
+	# stages runs dry too long, help arrives instead of nothing:
+	#   - a long drought with no unlock gifts the nearest walled skill outright
+	#   - a broke player finds a pie at the door (at most one a day), so the next
+	#     act can still be earned rather than lost to the spiral
+	#   - the once-per-career meal rescue keeps empty-stamina-and-broke from being
+	#     the end of the road while any of this is still being learned
+	# It runs on ARRIVING at the hub, so a gift is always found standing up, never
+	# shoved into a set. Practice is the promoted answer for a stuck player: it
+	# costs no crowd, grants XP (same as a stage since this batch), and the pity
+	# message says so in words.
+	if perfs_since_unlock >= 6:
+		pity_grant()
+	if money < 30 and pie_count == 0 and not pie_active and day != aid_pie_day:
+		aid_pie_day = day
+		pie_count += 1
+		set_day_msg("a fan left a pie at your door  -  eat it before a big night")
+		play_sfx("coin", -10.0)
+	elif stamina <= 0.15 * stamina_max and money < EAT_COST and not aid_meal_used:
+		aid_meal_used = true
+		stamina = clampf(0.6 * stamina_max, stamina, stamina_max)
+		set_day_msg("a stranger paid for your meal  -  it will not happen twice")
+		play_sfx("coin", -10.0)
+
+
+func pity_grant() -> void:
+	# six acts without a single new skill: gift the LOCKED skill nearest its wall,
+	# provided its STAGE requirement is already met (the venue-gated arrival skills
+	# stay sacred - they are what makes reaching a stage feel like reaching it).
+	# "Nearest" is the smallest total shortfall across level, Strength and Accuracy,
+	# so the gift is always the thing the player was visibly working toward.
+	var best_id := ""
+	var best_name := ""
+	var best_gap := 1 << 30
+	for tab: Array in [TRICKS, PATTERNS]:
+		for d: Dictionary in tab:
+			var id := String(d.get("id", ""))
+			if skill_req_met(d) or venue_index() < int(d.get("ven", 0)):
+				continue
+			var gap := maxi(0, int(d.get("lvl", 1)) - level) \
+				+ maxi(0, int(d.get("str", 0)) - strength) \
+				+ maxi(0, int(d.get("acc", 0)) - accuracy)
+			if gap < best_gap:
+				best_gap = gap
+				best_id = id
+				best_name = String(d.get("name", id))
+	if best_id == "":
+		return   # nothing giftable: every remaining wall is a stage, which is right
+	gifted.append(best_id)
+	perfs_since_unlock = 0
+	announce_unlocks()   # queues the lesson and the banner through the normal path
+	set_day_msg("all that stage time paid off  -  %s just clicked. Practice is free, and it pays XP." % best_name)
 
 
 func set_day_msg(m: String) -> void:
@@ -1737,17 +1831,33 @@ func sleep_day() -> void:
 
 
 func sheet_input(kc: int) -> void:
-	# the character sheet's keys, shared by the play overlay and the day hub
+	# the character sheet's keys, shared by the play overlay and the day hub.
+	# Arrows (dpad, stick) walk the four cards and Enter invests in the lit one,
+	# so a pad spends points as freely as the number keys do; a number key also
+	# pulls the cursor onto its card, so the highlight always shows what just paid.
+	var ids := ["acc", "str", "end", "spd"]
 	match kc:
 		KEY_TAB, KEY_ESCAPE:
 			sheet_open = false
+		KEY_LEFT:
+			sheet_sel = (sheet_sel + ids.size() - 1) % ids.size()
+			play_sfx("ui", -15.0)
+		KEY_RIGHT:
+			sheet_sel = (sheet_sel + 1) % ids.size()
+			play_sfx("ui", -15.0)
+		KEY_ENTER, KEY_KP_ENTER:
+			_sheet_invest(ids[sheet_sel])
 		KEY_1:
+			sheet_sel = 0
 			_sheet_invest("acc")
 		KEY_2:
+			sheet_sel = 1
 			_sheet_invest("str")
 		KEY_3:
+			sheet_sel = 2
 			_sheet_invest("end")
 		KEY_4:
+			sheet_sel = 3
 			_sheet_invest("spd")
 		KEY_Q:
 			if debug_mode: _adjust("acc", -1)
@@ -1775,27 +1885,65 @@ func sheet_input(kc: int) -> void:
 				save_progress()
 
 
+func shop_buy_sel() -> void:
+	# Enter (pad A) acts on whichever card the cursor lights: a prop, the glasses,
+	# or the pie - the same purchases the number keys reach directly
+	if shop_sel <= 5:
+		try_buy(shop_sel)
+	elif shop_sel == 6:
+		try_buy_glasses()
+	else:
+		try_buy_pie()
+
+
 func shop_input(kc: int) -> void:
 	# the shop's keys, shared by the play overlay and the day hub. The number on
 	# each card is its buy key: 1-6 the props (balls included), 7 glasses, 8 pie.
+	# Arrows (dpad, stick) walk the cards - left/right along a row, up/down between
+	# the prop row and the gear row - and Enter buys the lit one, so a pad shops
+	# as freely as the keyboard. A number key also pulls the cursor onto its card.
 	match kc:
 		KEY_TAB, KEY_ESCAPE, KEY_S:
 			shop_open = false
+		KEY_LEFT:
+			shop_sel = (shop_sel + 7) % 8
+			play_sfx("ui", -15.0)
+		KEY_RIGHT:
+			shop_sel = (shop_sel + 1) % 8
+			play_sfx("ui", -15.0)
+		KEY_DOWN, KEY_UP:
+			# hop between the six-card prop row and the two-card gear row, landing
+			# on whichever gear/prop card sits nearest the cursor's column
+			if shop_sel <= 5:
+				shop_sel = 6 if shop_sel <= 2 else 7
+			else:
+				shop_sel = 1 if shop_sel == 6 else 4
+			play_sfx("ui", -15.0)
+		KEY_ENTER, KEY_KP_ENTER:
+			shop_buy_sel()
 		KEY_1:
+			shop_sel = 0
 			try_buy(PROP_BALLS)
 		KEY_2:
+			shop_sel = 1
 			try_buy(PROP_EGGS)
 		KEY_3:
+			shop_sel = 2
 			try_buy(PROP_RINGS)
 		KEY_4:
+			shop_sel = 3
 			try_buy(PROP_CLUBS)
 		KEY_5:
+			shop_sel = 4
 			try_buy(PROP_KNIVES)
 		KEY_6:
+			shop_sel = 5
 			try_buy(PROP_TORCHES)
 		KEY_7:
+			shop_sel = 6
 			try_buy_glasses()
 		KEY_8:
+			shop_sel = 7
 			try_buy_pie()
 
 
@@ -2092,41 +2240,47 @@ func tut_lesson(id: String) -> Array:
 	var kf := OS.get_keycode_string(K_LT)
 	var kd := OS.get_keycode_string(K_LC)
 	var kk := OS.get_keycode_string(K_RC)
+	# the ADAPTIVE pace (Louis): the guided steps are pinned at the 50% cap; every
+	# freestyle step reads the TUT_PACES ladder instead, so clean runs speed the world
+	# up (50 - 25 - 15 - 0%) and drops give thick time back. The finale only counts at
+	# the ladder's floor: ten catches of a real cascade at genuine full speed.
 	return [
 		# --- guided: the right hand's half of the weave, one key at a time ---
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 1,
-			"slow": TUT_SLOW_MAX, "flow": true, "guide": true,
+			"slow": TUT_SLOW_START, "flow": true, "guide": true,
 			"text": "Press %s, then press %s" % [kj, kd],
-			"sub": "%s throws from your RIGHT hand. The ball crosses to your LEFT, and a ring closes around that hand as it arrives - press %s the moment the ring flashes gold. Time is running at a third speed, so watch it come." % [kj, kd]},
+			"sub": "%s throws from your RIGHT hand. The ball crosses to your LEFT, and a ring closes around that hand as it arrives - press %s the moment the ring flashes gold. Time is running at half speed, so watch it come." % [kj, kd]},
 		# --- guided: the left hand's half, so both hands are taught before anything else ---
 		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "catch", "need": 1,
-			"slow": TUT_SLOW_MAX, "flow": true, "guide": true,
+			"slow": TUT_SLOW_START, "flow": true, "guide": true,
 			"text": "Now the other way: %s, then %s" % [kf, kk],
 			"sub": "Every hand has its own two keys. %s throws from the LEFT, %s catches in the RIGHT. Same ring, same gold flash, same 'now'." % [kf, kk]},
 		# --- freestyle one: named honestly as NOT juggling, which is what makes the
 		#     second ball something the player wants rather than something they are given
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
-			"slow": 0.5, "next": "add a second ball",
+			"next": "add a second ball",
 			"text": "Now play with it",
-			"sub": "Both hands, as long as you like: %s and %s throw, %s and %s catch. Nothing is automatic - every throw and every catch is a press. This is not juggling yet, though. One ball is just throwing and catching." % [kj, kf, kd, kk]},
-		# --- freestyle two: the rule arrives, and the goal enforces it ---
+			"sub": "Both hands, as long as you like: %s and %s throw, %s and %s catch. Clean catches speed the world up, a drop slows it back down. This is not juggling yet, though. One ball is just throwing and catching." % [kj, kf, kd, kk]},
+		# --- freestyle two: the rule arrives, the goal enforces it, and the throws
+		#     CROSS (a forced cascade) so two balls already rehearse the weave of three
 		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4, "juggle": true,
-			"slow": 0.44, "next": "add the third ball",
+			"pattern": CASCADE, "next": "add the third ball",
 			"text": "Two balls - and now it is juggling",
-			"sub": "Throw the second one (%s) BEFORE you catch the first. That is the whole rule: a ball is always in the air. Throwing them one at a time is not juggling, and does not count here." % kf},
-		# --- freestyle three: the cascade, same rule, sustained ---
-		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 4, "juggle": true,
-			"slow": 0.36, "next": "learn the other keys",
+			"sub": "Throw the second one (%s) BEFORE you catch the first. That is the whole rule: a ball is always in the air. Each throw CROSSES to the other hand - exactly the weave three balls will ask for." % kf},
+		# --- the finale: a real cascade, ten catches, at genuine full speed ---
+		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 10,
+			"juggle": true, "finale": true, "next": "learn the other keys",
 			"text": "Three balls. The cascade",
-			"sub": "As each ball comes down, throw the one waiting in that hand up under it FIRST, then catch. Keep a ball in the air the whole time and the weave carries itself. Four like that."},
-		# --- R, drilled rather than described: it is the key that rescues every tangle ---
+			"sub": "As each ball comes down, throw the one waiting in that hand up under it FIRST, then catch. Clean catches keep speeding the world up - once it reaches FULL SPEED, land ten in a row. That is juggling, for real."},
+		# --- R, drilled rather than described: it is the key that rescues every tangle.
+		#     Named through k_restart, so a pad player is taught THEIR button ---
 		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "press_r", "need": 1,
-			"slow": 0.36, "next": "see every key at once",
-			"text": "Tangled? R starts you over",
-			"sub": "Press R now and watch the balls come back to your hands. In any practice, R re-deals - on stage it does nothing, because a performance is not restartable."},
+			"next": "see every key at once",
+			"text": "Tangled? %s starts you over" % String(k_restart()[0]),
+			"sub": "Press %s now and watch the balls come back to your hands. In any practice it re-deals - on stage it does nothing, because a performance is not restartable." % String(k_restart()[0])},
 		# --- and the whole command set, named, in one place ---
 		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "read", "need": 0,
-			"slow": 0.36, "next": "finish the lesson",
+			"next": "finish the lesson",
 			"text": "Every key you have",
 			"sub": "These work whenever you are juggling - practice or performance. You never need to memorise them: the row along the bottom of the screen always names the ones that matter."},
 	]
@@ -2229,6 +2383,8 @@ func begin_tutorial(id: String) -> void:
 	tut_id = id
 	tut_step = 0
 	tut_active = true
+	tut_pace = 0          # the basics pace ladder re-arms: every lesson opens thick
+	tut_flow_streak = 0
 	game_state = ST_PLAY
 	started = true            # a lesson is its own thing, not the opening "first run"
 	_slow_cur = tut_slow()    # a lesson opens ALREADY thick, it does not ease in over the
@@ -2239,6 +2395,16 @@ func begin_tutorial(id: String) -> void:
 	trick_primed = false
 	tennis_ball = null
 	spin_until = -999
+	# ...and nothing LATCHED walks in either (Louis: "the tutorial is broken again -
+	# space does nothing"). A performance that ended in collapse and was left through
+	# the pause menu kept `collapsing` true forever - only start_run and the on-stage
+	# landing of the last prop ever cleared it, and a lesson passes through neither.
+	# With it stuck, _read_inputs returned immediately: Space, throws and catches all
+	# dead, while the event keys (Escape) still worked. Every flag that can gate the
+	# poll is cleared here, so a lesson always opens with live hands.
+	collapsing = false
+	results_open = false
+	falling.clear()
 	# the key that ACTIVATED the lesson (Space or Enter on the hub row) is still held
 	# right now. Without seeding, the first play frame read that held Space as a fresh
 	# edge and fired the trick BEFORE the player saw step one - the step then cleared
@@ -2332,6 +2498,8 @@ func tut_setup_step() -> void:
 	tut_tricks = 0
 	tut_keys = 0
 	tut_advance_at = -1
+	if _demo:
+		print("TUTTRACE setup step=%d goal=%s balls=%d slow=%.2f flow=%s juggle=%s tick=%d" % [tut_step, String(step["goal"]), num_balls, tut_slow(), str(step.get("flow", false)), str(step.get("juggle", false)), tick])
 	# a step with nothing to DO (the key legend) is already met the moment it opens, so
 	# its Enter prompt is live immediately rather than after some press that never comes.
 	# Safe to ask now: every counter above is zeroed, so a step with a real goal cannot
@@ -2410,11 +2578,30 @@ func tut_on_catch(juggled: bool) -> void:
 	# because "there is always a ball in the air" is a property of a stretch of juggling,
 	# not a tally of good moments. The player is told why on the spot; the banner keeps
 	# saying it, and the step holds open forever, so this is a gate and never a wall.
-	if bool(tut_step_data().get("juggle", false)) and not juggled:
+	var step := tut_step_data()
+	if bool(step.get("juggle", false)) and not juggled:
+		if _demo:
+			print("TUTTRACE solo-catch rejected at tick=%d (count was %d)" % [tick, tut_count])
 		if tut_count > 0:
 			play_sfx("whiff", -14.0)
 		tut_count = 0
+		tut_flow_streak = 0   # a solo catch is a broken rhythm for the pace ladder too
 		add_popup(outer_pos(RIGHT) + Vector2(0, -30), "one at a time is not juggling", Color(0.95, 0.78, 0.5))
+		return
+	# the PACE ladder (basics only): every TUT_PACE_STREAK clean catches in a row earn
+	# the next rung down, announced so speeding up reads as the reward it is
+	if tut_id == "balls":
+		tut_flow_streak += 1
+		if tut_flow_streak % TUT_PACE_STREAK == 0 and tut_pace < TUT_PACES.size() - 1:
+			tut_pace += 1
+			var pl := TUT_PACES[tut_pace]
+			var ptxt := "FULL SPEED" if pl <= 0.0 else "faster  -  %d%% slow" % int(round(pl * 100.0))
+			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), ptxt, Color(0.75, 0.92, 1.0))
+			play_sfx("streak", -9.0)
+	# the finale counts only at the ladder's floor (Louis: ten catches at 0 slowmo).
+	# Catches above the floor still feed the ladder - they are how the floor is
+	# reached - but the ten must all land at genuine full speed.
+	if bool(step.get("finale", false)) and tut_pace < TUT_PACES.size() - 1:
 		return
 	tut_count += 1
 	tut_check()
@@ -2472,6 +2659,17 @@ func tut_maintain() -> void:
 			and tick - tut_advance_at >= TUT_FLOW_HOLD:
 		tut_advance()
 		return   # the table is now the NEXT step's: nothing below may touch it
+	# the --demo autoplayer has no Enter: it takes each met goal after a beat, so a
+	# dev run can walk a whole lesson end to end unattended (never in normal play).
+	# It has no R or P either, so on a key-teaching step it mimes the press through
+	# the same handler a real player's key reaches.
+	if _demo and tut_advance_at >= 0 and tick - tut_advance_at >= 50:
+		tut_advance()
+		return
+	if _demo and tut_advance_at < 0 and tick % 240 == 239:
+		match String(tut_step_data().get("goal", "")):
+			"press_r": tut_demo_reset()
+			"press_p": tut_demo_pattern_off()
 	# keep the step playable by topping the hands back up shortly after a ball is
 	# lost, so a fumble never stalls a lesson
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
@@ -2504,6 +2702,8 @@ func tut_maintain() -> void:
 
 
 func tut_finish() -> void:
+	if _demo:
+		print("TUTTRACE finished id=%s tick=%d" % [tut_id, tick])
 	var was_basics := tut_id == "balls"
 	tut_active = false
 	tut_id = ""
@@ -2564,9 +2764,14 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
 		if int(step["need"]) > 1 and String(step["goal"]) == "catch":
 			# a juggle-gated step counts CONSECUTIVE juggling catches, so the label says
-			# so - otherwise a count that drops back to zero looks like a bug (Louis)
-			var lbl := "juggled in a row" if bool(step.get("juggle", false)) else "caught"
-			prog += "        %s  %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
+			# so - otherwise a count that drops back to zero looks like a bug (Louis).
+			# The finale is plainer still: its ten only run at the pace ladder's floor,
+			# so until then the label says what the catches are actually buying.
+			if bool(step.get("finale", false)) and tut_pace < TUT_PACES.size() - 1:
+				prog += "        world at %d%% slow  -  clean catches reach full speed" % int(round(TUT_PACES[tut_pace] * 100.0))
+			else:
+				var lbl := "at full speed" if bool(step.get("finale", false)) else ("juggled in a row" if bool(step.get("juggle", false)) else "caught")
+				prog += "        %s  %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
 		draw_string(font, Vector2(bx, by + 108.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.8, 0.75, 0.68))
 	# the controls that actually WORK in a lesson, always, along the very bottom - plus
 	# the lesson's own key (trick / pattern) so every command the game has gets its
@@ -2578,8 +2783,8 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		items.append([k_trick(), "trick"])
 		items.append([k_cycle(), "switch trick"])
 	elif tut_id.begins_with("pattern_"):
-		items.append([["P"], "pattern"])
-	items.append([["R"], "restart"])
+		items.append([k_pattern(), "pattern"])
+	items.append([k_restart(), "restart"])
 	items.append([k_pause(), "game menu"])
 	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
 	# ONE shout slot above the key row, and exactly one thing may hold it - a screen that
@@ -2617,9 +2822,9 @@ func tut_cue(step: Dictionary) -> String:
 	if String(step.get("prompt", "")) == "trick":
 		return "press %s now  -  once" % String(k_trick()[0])
 	if goal == "press_p":
-		return "press P now  -  once"
+		return "press %s now  -  once" % String(k_pattern()[0])
 	if goal == "press_r":
-		return "press R now"
+		return "press %s now" % String(k_restart()[0])
 	if not bool(step.get("guide", false)):
 		return ""   # freestyle: the floating keys over the hands guide, nothing shouts
 	# a ball in the air owns the cue: get ready while it climbs, then NOW across exactly
@@ -2651,7 +2856,7 @@ func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool
 	var urg := clampf(float(tick - tut_advance_at) / 900.0, 0.0, 1.0)
 	var pulse := 0.5 + 0.5 * sin(atick() * (0.07 + 0.06 * urg))
 	var fs := int(round(lerpf(17.0, 22.0, urg)))
-	var cap := "Enter"
+	var cap := String(k_finish()[0])   # Enter, or X on a pad
 	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 18.0
 	var total := cw + 14.0 + lw
@@ -2680,14 +2885,14 @@ func draw_tut_legend(font: Font, s: Vector2) -> void:
 		[[String(kt[RIGHT]), String(kt[LEFT])], "throw", "right hand, left hand"],
 		[[String(kc[RIGHT]), String(kc[LEFT])], "catch", "right hand, left hand"],
 		[[String(k_trick()[0])], "trick", "one flourish  -  %s picks which" % String(k_cycle()[0])],
-		[["P"], "pattern", "the routine you juggle"],
-		[["O"], "object", "balls, rings, clubs, torches"],
+		[[String(k_pattern()[0])], "pattern", "the routine you juggle"],
+		[[String(k_object()[0])], "object", "balls, rings, clubs, torches"],
 		[["3-9"], "how many", "props to juggle, live or fresh"],
-		[["R"], "restart", "re-deal  -  practice only, never on stage"],
-		[["S"], "the shop", "buy props and gear"],
-		[["Tab"], "your skills", "the sheet  -  spend your points"],
+		[[String(k_restart()[0])], "restart", "re-deal  -  practice only, never on stage"],
+		[[String(k_shop()[0])], "the shop", "buy props and gear"],
+		[[String(k_sheet()[0])], "your skills", "the sheet  -  spend your points"],
 		[[String(k_pause()[0])], "the game menu", "resume, back to the day, quit"],
-		[["Enter"], "finish", "take a bow on stage, or leave practice"],
+		[[String(k_finish()[0])], "finish", "take a bow on stage, or leave practice"],
 	]
 	var nrows := int(ceil(float(rows.size()) * 0.5))
 	var cw := minf(920.0, s.x - 80.0)
@@ -2989,6 +3194,10 @@ func reset_new_game() -> void:
 	seen_tuts.clear()      # a fresh slot re-teaches everything from scratch
 	pending_tuts.clear()
 	ante = [0, 0, 0, 0, 0, 0]   # every venue back to its opening bar
+	gifted.clear()              # a fresh slot earns (or is re-gifted) everything anew
+	perfs_since_unlock = 0
+	aid_pie_day = -1
+	aid_meal_used = false
 	stamina_max = 100.0 + 9.0 * float(endurance)
 	stamina = stamina_max
 	save_progress()
@@ -3145,12 +3354,14 @@ func seed_input_edges() -> void:
 	# held from the establishing card (Space especially, which would prime a
 	# trick) cannot fire a phantom edge on the first play frame
 	var dev := pad_dev()
-	_prev["lc"] = Input.is_physical_key_pressed(K_LC) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER))
-	_prev["rc"] = Input.is_physical_key_pressed(K_RC) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER))
-	_prev["lt"] = Input.is_physical_key_pressed(K_LT) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT) > 0.5)
-	_prev["rt"] = Input.is_physical_key_pressed(K_RT) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT) > 0.5)
-	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_A))
-	_prev["cycle"] = Input.is_physical_key_pressed(K_CYCLE) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_Y))
+	# pad seeds mirror Louis's layout: triggers are the catches, bumpers the throws,
+	# Y the trick (see _read_inputs)
+	_prev["lc"] = Input.is_physical_key_pressed(K_LC) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT) > 0.5)
+	_prev["rc"] = Input.is_physical_key_pressed(K_RC) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT) > 0.5)
+	_prev["lt"] = Input.is_physical_key_pressed(K_LT) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER))
+	_prev["rt"] = Input.is_physical_key_pressed(K_RT) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER))
+	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_Y))
+	_prev["cycle"] = Input.is_physical_key_pressed(K_CYCLE)
 	# drop any tap latched on a previous screen, so it cannot fire on frame one
 	for name in _tap:
 		_tap[name] = false
@@ -3166,20 +3377,24 @@ func _read_inputs() -> void:
 	var dev := pad_dev()
 	var p_lc := false
 	var p_rc := false
+	var p_lt := false
+	var p_rt := false
 	var p_tk := false
-	var p_cy := false
 	if dev >= 0:
-		p_lc = Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER)
-		p_rc = Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER)
-		p_tk = Input.is_joy_button_pressed(dev, JOY_BUTTON_A)
-		p_cy = Input.is_joy_button_pressed(dev, JOY_BUTTON_Y)
+		# Louis's own layout: the BUMPERS throw (they sit where the fingers rest,
+		# like F and J on the home row) and the TRIGGERS catch (the squeeze is the
+		# catch), Y is the trick. The trigger latch keeps its hysteresis so an
+		# analog trigger near threshold cannot flutter a catch.
+		p_lt = Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER)
+		p_rt = Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER)
+		p_tk = Input.is_joy_button_pressed(dev, JOY_BUTTON_Y)
 		_trig["lt"] = _trig_held("lt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT))
 		_trig["rt"] = _trig_held("rt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT))
 	else:
 		_trig["lt"] = false
 		_trig["rt"] = false
-	var p_lt := bool(_trig["lt"])
-	var p_rt := bool(_trig["rt"])
+	p_lc = bool(_trig["lt"])
+	p_rc = bool(_trig["rt"])
 	# take the event-latched taps FIRST (always clearing), then fold them into the
 	# polled held state, so a press the 120 Hz poll was too coarse to see still
 	# registers this frame. Taking them unconditionally means a held key never
@@ -3194,7 +3409,7 @@ func _read_inputs() -> void:
 	var k_rc := Input.is_physical_key_pressed(K_RC) or t_rc
 	var k_rt := Input.is_physical_key_pressed(K_RT) or t_rt
 	var k_tk := Input.is_physical_key_pressed(K_TRICK) or t_tk
-	_note_device(k_lc or k_lt or k_rc or k_rt or k_tk, p_lc or p_lt or p_rc or p_rt or p_tk or p_cy)
+	_note_device(k_lc or k_lt or k_rc or k_rt or k_tk, p_lc or p_lt or p_rc or p_rt or p_tk)
 	# the trick press is handled BEFORE the throw edges, so Space hit in the same
 	# frame as a throw release still empowers THAT throw (the "powerup" promise:
 	# space plus catch-throw makes exactly one trick shot, never the one after).
@@ -3206,12 +3421,10 @@ func _read_inputs() -> void:
 	_edge("lt", k_lt or p_lt, LEFT, false)
 	_edge("rc", k_rc or p_rc, RIGHT, true)
 	_edge("rt", k_rt or p_rt, RIGHT, false)
-	# the top face button mirrors the C key and steps which trick Space is loaded
-	# with. The results card locks C, and so do lessons - except a TRICK lesson,
-	# where C is part of what is being taught (same rule as the keyboard path).
-	if p_cy and not bool(_prev["cycle"]) and not results_open and (not tut_active or tut_id.begins_with("trick_")):
-		cycle_trick()
-	_prev["cycle"] = p_cy
+	# trick CYCLING stays on the keyboard's C key (the event path): Louis's pad
+	# layout assigns every button already, so the pad swaps tricks via the pause
+	# in the action instead - a deliberate gap, not an oversight.
+	_prev["cycle"] = false
 
 
 func pad_dev() -> int:
@@ -3581,14 +3794,11 @@ func start_run(n: int) -> void:
 	best_streak = 0
 	dropped = 0
 	caught = 0
-	# per-SET booking state re-arms every run (the per-BOOKING state - set_index,
-	# booking_score, encore - is owned by begin_performance and next_set, never here,
-	# so practice and a dev autoplay leave it at its harmless defaults)
-	set_cleared = false
+	# per-ACT state re-arms every run (the challenge roll is owned by
+	# begin_performance, so practice and a dev autoplay never carry one)
+	goals_hit = 0
 	set_collapsed = false
-	fail_reason = ""   # a fresh set has not failed yet: the LAST set to set this is the
-					   # one that ended the night, and the one the card explains
-	overtime = 0.0
+	fail_reason = ""   # a fresh act has not failed yet
 	running = false
 	started = false
 	stamina_max = 100.0 + 9.0 * float(endurance)
@@ -3746,15 +3956,23 @@ func on_catch(h: int) -> void:
 	play_sfx(_catch_sound(best.kind), -20.0)   # the prop's own timbre, now just a faint texture
 	var sc_before := score
 	if not juggled and not tut_active:
-		# NOT JUGGLING (juggling_catch): the air is bare behind this catch, so the player
-		# threw one prop and caught it again while the rest sat in their hands. The catch
-		# is real - it happened, it counts as a catch, it cost stamina, it keeps the prop
-		# off the floor - but the ACT is not running, so it earns nothing at all: no
-		# streak, no score, no crowd, no trick, no overtime. That shuts the grind where
-		# holding two and pumping the third farmed a clean Perfect every single time, and
-		# it is exactly the rule the basics lesson teaches in words before it hands over
-		# the second ball. A lesson is exempt: it runs at one and two props on purpose,
-		# scores nothing, hides the HUD, and polices the rule itself (tut_on_catch).
+		# NOT JUGGLING (juggling_catch): the air is bare behind this catch. On stage
+		# with a goal already reached, that IS the cash-in gesture (Louis): you caught
+		# every ball, you are holding them all, the act ends right here on your own
+		# terms - same as the finish key, and the crowd reads the stillness as the bow.
+		if mode == MODE_PERFORM and booking_active and goals_hit >= 1 \
+				and running and not collapsing and balls_airborne() == 0:
+			add_popup(outer_pos(h) + Vector2(0, -30), "CAUGHT THEM ALL", Color(1.0, 0.86, 0.42))
+			finish_performance()
+			return
+		# otherwise: the player threw one prop and caught it again while the rest sat
+		# in their hands. The catch is real - it happened, it cost stamina, it keeps
+		# the prop off the floor - but the ACT is not running, so it earns nothing at
+		# all: no streak, no score, no crowd, no trick. That shuts the grind where
+		# holding two and pumping the third farmed a clean Perfect every single time,
+		# and it is exactly the rule the basics lesson teaches in words before it
+		# hands over the second ball. A lesson is exempt: it runs at one and two props
+		# on purpose, scores nothing, and polices the rule itself (tut_on_catch).
 		streak = 0
 		perfect_chain = 0
 		add_popup(outer_pos(h), "not juggling", Color(0.72, 0.68, 0.62))
@@ -3815,11 +4033,11 @@ func on_catch(h: int) -> void:
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
-	# the record chase: passing your own best AT this venue mid-booking is a moment. The
-	# record is now the whole night's booking_score, so the live total is book_total()
-	# (banked sets plus this set), which is what a completed booking will be judged on.
+	# the record chase: passing your own best AT this venue mid-act is a moment. The
+	# act is one continuous run now, so its live score IS the number the record
+	# board will judge.
 	if mode == MODE_PERFORM and not record_broken and run_venue >= 0 and run_venue < rec_table().size() \
-			and rec_table()[run_venue] > 0 and book_total() > rec_table()[run_venue]:
+			and rec_table()[run_venue] > 0 and score > rec_table()[run_venue]:
 		record_broken = true
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.27), "NEW RECORD!", Color(1.0, 0.86, 0.42))
@@ -3840,25 +4058,28 @@ func on_catch(h: int) -> void:
 	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
 	if best.trick >= 0 and best_d <= W_GOOD:
 		reward_trick(best.trick, outer_pos(h), best.height)
-	# THE BOOKING: this catch (with any trick bonus above) may clear the set's target,
-	# unlocking the walk-off; every catch PAST the target grows the overtime multiplier
-	# you gamble by staying out for. A catch that itself crosses the line clears the set
-	# but earns no overtime yet - overtime is strictly what you catch beyond the number.
+	# THE ACT: this catch (with any trick bonus above) may carry the score across the
+	# next goal, which arms - or re-arms - the cash-in
 	if booking_active and mode == MODE_PERFORM and not tut_active:
-		if set_cleared:
-			overtime = minf(OVERTIME_MAX, overtime + OVERTIME_PER_CATCH)
-		check_set_cleared()
+		check_goals()
 
 
-func check_set_cleared() -> void:
-	# the instant the set's score reaches the target, the gate opens: the crowd roars,
-	# the HUD flips to the walk-off prompt, and finish_performance() will now bank.
-	if set_cleared or not booking_active or mode != MODE_PERFORM or tut_active:
+func check_goals() -> void:
+	# the instant the score crosses a goal it LOCKS (goals_hit is monotonic: a
+	# collapse later can strip score, never a goal already reached). Each crossing
+	# is announced by name, and from the first one on the HUD holds the cash-in
+	# offer open: bow out with the finish key, catch everything and hold, or push
+	# for the next number and risk the collapse.
+	if not booking_active or mode != MODE_PERFORM or tut_active:
 		return
-	if score >= set_target():
-		set_cleared = true
+	while goals_hit < NUM_GOALS and score >= goal_for(run_venue, goals_hit):
+		goals_hit += 1
 		var s := get_viewport_rect().size
-		add_popup(Vector2(s.x * 0.5, s.y * 0.24), "TARGET CLEARED  -  walk off, or push for more", Color(1.0, 0.86, 0.42))
+		var names := ["FIRST GOAL", "SECOND GOAL", "FINAL GOAL"]
+		var txt := "%s  -  cash in any time, or push on" % names[clampi(goals_hit - 1, 0, 2)]
+		if goals_hit >= NUM_GOALS:
+			txt = "FINAL GOAL  -  the night is yours. Cash in, or chase the record"
+		add_popup(Vector2(s.x * 0.5, s.y * 0.24), txt, Color(1.0, 0.86, 0.42))
 		play_sfx("cheer", -5.0)
 		play_sfx("record", -8.0)
 		spawn_parts(Vector2(s.x * 0.5, s.y * 0.16), Color(1.0, 0.85, 0.45), 22, 2.5, "confetti")
@@ -4174,6 +4395,8 @@ func dev_meet_req(d: Dictionary) -> void:
 
 
 func skill_req_met(d: Dictionary) -> bool:
+	if gifted.has(String(d.get("id", ""))):
+		return true   # the pity director granted it outright; the wall is forgiven
 	if level < int(d.get("lvl", 1)):
 		return false
 	if strength < int(d.get("str", 0)):
@@ -4466,7 +4689,13 @@ func add_xp(amount: int) -> void:
 	while xp >= xp_to_next(level):
 		xp -= xp_to_next(level)
 		level += 1
-		points += POINTS_PER_LEVEL
+		# points per level ACCELERATE with the level (3 early, one more per twelve
+		# levels): with 839 points across the four caps, flat 3s put the finished
+		# build at level 280 and ~20M XP - hundreds of hours, a treadmill nobody
+		# ends. This curve lands it at ~level 115 and ~2.4M XP: about 30-40 hours
+		# of skilled play, all content long since unlocked on the way (Louis asked
+		# what the completion arc should be - that is the answer it now has).
+		points += POINTS_PER_LEVEL + level / 12
 		leveled = true
 	if leveled:
 		var s := get_viewport_rect().size
@@ -4554,12 +4783,14 @@ func announce_unlocks() -> void:
 			trick_unlock_tick = tick
 			trick_sel = i
 			trick_primed = false
+			perfs_since_unlock = 0   # the reward drought counter re-arms on any unlock
 			play_sfx("streak", -5.0)
 	for i in PATTERNS.size():
 		if not pattern_unlocked(i) or skill_req_text(PATTERNS[i]) == "yours from the start":
 			continue
 		if queue_lesson("pattern_%s" % String(PATTERNS[i]["id"])):
 			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
+			perfs_since_unlock = 0
 			play_sfx("streak", -6.0)
 
 
@@ -4582,7 +4813,7 @@ func on_round_end() -> void:
 	# a set of a real booking resolves through the booking machinery (bank + advance, or
 	# end the night). Everything else - practice, a dev autoplay - just banks its XP.
 	if mode == MODE_PERFORM and booking_active and not tut_active:
-		resolve_set()
+		resolve_act()
 		return
 	var clean := 1.0
 	if caught + dropped > 0:
@@ -4593,98 +4824,67 @@ func on_round_end() -> void:
 	career["best_streak"] = maxi(int(career["best_streak"]), best_streak)
 
 
-func resolve_set() -> void:
-	# a set just ended - by a clean walk-off (finish_performance) or a collapse (the crowd
-	# walked, or the drop limit landed). Roll its play into the booking, then either bank
-	# and advance to the next set, or resolve the whole night.
-	book_caught += caught
-	book_dropped += dropped
-	book_best_streak = maxi(book_best_streak, best_streak)
-	book_tricks += tricks_landed
-	book_trick_score += trick_score
-	book_xp += run_xp
-	if set_cleared:
-		sets_cleared += 1
-		# a clean walk-off banks the score with its overtime multiplier. A cleared set that
-		# ended in COLLAPSE still counts as cleared - you beat the number - but the overtime
-		# and the raw score above the target are lost, banking only the bare target. That is
-		# the whole push-your-luck: clear it, then leave with the win or gamble for more.
-		var banked := set_target() if set_collapsed else int(round(float(score) * (1.0 + overtime)))
-		booking_score += banked
-		if set_index < SET_ENCORE:
-			play_sfx("coin", -9.0)
-			next_set()   # walk out again, one rung higher, the booking_score carried across
-		else:
-			resolve_booking(true)    # the Encore fell: a complete night
-	else:
-		# below the target. A voluntary BOW (finish, not a collapse) keeps the crowd happy
-		# and still banks the partial score toward the night's pay and record; a COLLAPSE
-		# banks nothing for this set. Either way the booking ends here - you did not clear.
-		if not set_collapsed:
-			booking_score += score
-			fail_reason = "bow"   # nothing fell: they chose to walk off under the number,
-								  # which the card should say plainly rather than imply
-		resolve_booking(false)
-
-
-func resolve_booking(complete: bool) -> void:
-	# the whole night is over. Pay, reputation, records and the win now key off the
-	# BOOKING, not a single set: a record means one complete great night, and reputation
-	# swings on how much of the booking you cleared rather than the old divide-by-your-own-
-	# record (which punished you for having a high best).
+func resolve_act() -> void:
+	# the act is over - cashed in standing up (the finish key, or every ball caught
+	# and held) or brought down by a collapse. ONE resolution for the whole night:
+	# pay, reputation, records, XP and the win all read the act's single score.
 	booking_active = false
+	var complete := goals_hit >= NUM_GOALS
+	# the push-your-luck settles here: a COLLAPSE strips the score back to the last
+	# goal actually reached (goals already reached are safe, everything past them is
+	# what you gambled), and a collapse before the first goal banks nothing at all.
+	# A cash-in keeps every point on the board - that is why cashing in is a choice
+	# worth making.
+	if set_collapsed:
+		score = goal_for(run_venue, goals_hit - 1) if goals_hit >= 1 else 0
+	elif goals_hit == 0:
+		fail_reason = "bow"   # walked off under the first goal: say so plainly
 	var purist_mult := PURIST_BONUS if purist else 1.0
-	# a completion XP bonus off the whole night's play
+	# a completion XP bonus off the whole act's play
 	var clean := 1.0
-	if book_caught + book_dropped > 0:
-		clean = float(book_caught) / float(book_caught + book_dropped)
+	if caught + dropped > 0:
+		clean = float(caught) / float(caught + dropped)
 	var diff := 1.0 + 0.25 * float(num_balls - MIN_BALLS) + 0.25 * float(prop_weight() - 1)
-	var xp_bonus := int(round((float(book_best_streak) * 4.0 + float(book_caught) * 1.5) * clean * diff))
+	var xp_bonus := int(round((float(best_streak) * 4.0 + float(caught) * 1.5) * clean * diff))
 	add_xp(xp_bonus)
-	book_xp += xp_bonus
-	# how much of the three you cleared: 0, 1/3, 2/3, or a whole night. (f*1.5 - 0.5) gives
-	# +1.0 of a swing for a complete booking, 0 for one set, -0.5 for bombing the warm-up.
-	var frac := float(sets_cleared) / float(SETS_PER_BOOKING)
+	run_xp += xp_bonus
+	# reputation swings on the goals: (g/3 * 1.5 - 0.5) gives +1.0 of a swing for a
+	# complete act, roughly nothing for one goal, -0.5 for a night with none.
+	var frac := float(goals_hit) / float(NUM_GOALS)
 	var rep_delta := int(round(float(REP_SWING) * (frac * 1.5 - 0.5) * purist_mult))
 	var cur_tier := venue_index_of(reputation)
 	if cur_tier + 2 < VENUE_REP.size():
 		rep_delta = mini(rep_delta, VENUE_REP[cur_tier + 2] - 1 - reputation)
 	reputation = maxi(0, reputation + rep_delta)
 	last_rep_delta = rep_delta
+	# the reward drought grows by one act, THEN the unlock check runs - so a night
+	# whose rep jump opens something still ends with the counter at zero
+	perfs_since_unlock += 1
 	announce_unlocks()   # a Reputation jump can open the stage a skill was waiting on
-	# PAY scales with what you banked (a partial booking pays partial; the score already
-	# scales with the venue, so no separate venue multiplier), lifted by Reputation and a
-	# Purist premium, with the busking floor so a broke juggler always leaves with something.
-	last_pay = int(round(float(booking_score) * BOOK_PAY_PER_SCORE * pay_mult() * purist_mult))
-	if money < BROKE_GOLD and booking_score > 0:
+	# PAY scales with the score that survived (the score already scales with the
+	# venue), lifted by Reputation and a Purist premium, with the busking floor so a
+	# broke juggler always leaves with something.
+	last_pay = int(round(float(score) * BOOK_PAY_PER_SCORE * pay_mult() * purist_mult))
+	if money < BROKE_GOLD and score > 0:
 		last_pay = maxi(last_pay, BUSK_FLOOR)
 	money += last_pay
 	if last_pay > 0:
 		play_sfx("coin", -8.0)
-	# a completed booking raises this venue's standing bar for next time (the ante)
+	# a complete act (all three goals) raises this venue's standing bar for next time
 	if complete and run_venue >= 0 and run_venue < ante.size():
 		ante[run_venue] += 1
 	# the career ledger remembers the night
 	career["perfs"] = int(career["perfs"]) + 1
 	career["gold_earned"] = int(career["gold_earned"]) + last_pay
-	career["tricks"] = int(career["tricks"]) + book_tricks
-	career["best_score"] = maxi(int(career["best_score"]), booking_score)
-	career["best_streak"] = maxi(int(career["best_streak"]), book_best_streak)
-	# the record board keys off the whole night's booking_score. A Purist booking writes
-	# to the Purist board and never the assisted one.
+	career["tricks"] = int(career["tricks"]) + tricks_landed
+	career["best_score"] = maxi(int(career["best_score"]), score)
+	career["best_streak"] = maxi(int(career["best_streak"]), best_streak)
+	# the record board keys off the act's score. A Purist act writes to the Purist
+	# board and never the assisted one.
 	results_record = false
-	if run_venue >= 0 and run_venue < rec_table().size() and booking_score > rec_table()[run_venue]:
-		rec_table()[run_venue] = booking_score
+	if run_venue >= 0 and run_venue < rec_table().size() and score > rec_table()[run_venue]:
+		rec_table()[run_venue] = score
 		results_record = true
-	# hand the display vars the BOOKING totals so the results card reads the whole night,
-	# not just the final set (this run is finished; these all reset on the next start_run)
-	score = booking_score
-	caught = book_caught
-	dropped = book_dropped
-	best_streak = book_best_streak
-	tricks_landed = book_tricks
-	trick_score = book_trick_score
-	run_xp = book_xp
 	# THE WIN: a record at the World Arena clears the game once, the first time, after the
 	# results card is dismissed. The career then plays on freely, records still to chase.
 	if run_venue >= TOP_VENUE and results_record and not won:
@@ -4695,11 +4895,11 @@ func resolve_booking(complete: bool) -> void:
 	results_stamped = false
 	save_progress()
 	if _demo:
-		# dev: report the whole-booking outcome and quit, so --demo --booking is a
-		# one-shot end-to-end check of the resolve path (targets, banking, pay, rep)
-		print("BOOKING venue=%d prop=%d n=%d sets=%d/%d complete=%s booking_score=%d pay=%d rep=%+d record=%s" % [
-			run_venue, prop_type, num_balls, sets_cleared, SETS_PER_BOOKING, str(complete),
-			booking_score, last_pay, last_rep_delta, str(results_record)])
+		# dev: report the whole-act outcome and quit, so --demo --booking is a
+		# one-shot end-to-end check of the resolve path (goals, stripping, pay, rep)
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s" % [
+			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
+			score, last_pay, last_rep_delta, str(results_record)])
 		get_tree().quit()
 
 
@@ -4724,14 +4924,10 @@ func slow_target() -> float:
 	if _frames < chain_until:
 		a += BURST_SLOW
 	if tut_active:
-		# a lesson sets a FLOOR on slowness, never a sum: it must not stack with a Pie
-		# into a frozen world. It is also the one thing allowed PAST the earned cap -
-		# the basics open at TUT_SLOW_MAX, deeper than any amount of Speed, Pie and
-		# burst can ever buy, because a first-timer being shown which key to press
-		# needs the ball to hang there while they find it. Whatever the stack was
-		# doing is clamped to its own ceiling first, so this stays a floor and never
-		# a way to smuggle bought slowness past SLOW_TOTAL_CAP.
-		return clampf(maxf(minf(a, SLOW_TOTAL_CAP), tut_slow()), 0.0, TUT_SLOW_MAX)
+		a = maxf(a, tut_slow())   # a lesson sets a FLOOR on slowness, never a sum: it
+								  # must not stack with a Pie into a frozen world. The
+								  # basics open AT the cap (Louis: max slowmo, and max
+								  # is the same 50% the whole game answers to)
 	# the hard ceiling (Louis): past 50% the stepped sim reads as jitter, and 50%
 	# is the intended best case anyway - fully invested Speed plus a Pie plus one
 	# earned burst reaches it, so the stack only peaks when everything aligns
@@ -4740,14 +4936,17 @@ func slow_target() -> float:
 
 func tut_slow() -> float:
 	# the lesson's own slow-motion floor. A step may pin its own value ("slow" key, e.g.
-	# a trick step stays thick while its drill step speeds up); otherwise it eases from
-	# thick to real across the lesson's steps, so the player is handed back to full speed
-	# gradually rather than dropped out of a slow world into a fast one.
+	# a trick step stays thick while its drill step speeds up). The BASICS lesson reads
+	# the earned pace ladder instead (Louis): clean catches step the world faster, drops
+	# step it slower, so the pace always matches the player rather than the script.
+	# Other lessons keep the gentle scripted ease from thick to near-real.
 	var steps := tut_lesson(tut_id)
 	if tut_step >= 0 and tut_step < steps.size():
 		var s: Dictionary = steps[tut_step]
 		if s.has("slow"):
 			return clampf(float(s["slow"]), 0.0, 1.0)
+	if tut_id == "balls":
+		return TUT_PACES[clampi(tut_pace, 0, TUT_PACES.size() - 1)]
 	if steps.size() <= 1:
 		return TUT_SLOW_START
 	var f := float(tut_step) / float(steps.size() - 1)
@@ -5215,12 +5414,21 @@ func load_progress() -> void:
 			pending_tuts.clear()
 			for v in (pt as Array):
 				pending_tuts.append(_migrate_lesson_id(String(v)))
-		# the standing ante per venue (bookings cleared there): the raised bar the venue
-		# remembers between visits. The rest of the booking is per-night and unsaved.
+		# the standing ante per venue (complete acts there): the raised bar the venue
+		# remembers between visits. The rest of the act is per-night and unsaved.
 		var an: Variant = cf.get_value("prog", "ante", [])
 		if an is Array:
 			for i in mini((an as Array).size(), ante.size()):
 				ante[i] = int((an as Array)[i])
+		# the reward director's memory: gifts stay given, the drought clock survives
+		var gf: Variant = cf.get_value("prog", "gifted", [])
+		if gf is Array:
+			gifted.clear()
+			for v in (gf as Array):
+				gifted.append(String(v))
+		perfs_since_unlock = int(cf.get_value("prog", "perfs_since_unlock", 0))
+		aid_pie_day = int(cf.get_value("prog", "aid_pie_day", -1))
+		aid_meal_used = bool(cf.get_value("prog", "aid_meal_used", false))
 		purist = bool(cf.get_value("day", "purist", false))
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
@@ -5258,6 +5466,10 @@ func save_progress() -> void:
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
 	cf.set_value("prog", "ante", ante)                  # each venue's standing raised bar
+	cf.set_value("prog", "gifted", gifted)              # pity unlocks stay unlocked
+	cf.set_value("prog", "perfs_since_unlock", perfs_since_unlock)
+	cf.set_value("prog", "aid_pie_day", aid_pie_day)
+	cf.set_value("prog", "aid_meal_used", aid_meal_used)
 	cf.set_value("day", "purist", purist)
 	cf.set_value("day", "day", day)
 	cf.set_value("day", "seg_used", seg_used)
@@ -5291,6 +5503,17 @@ func drop_ball(b: Ball, why: String) -> void:
 	perfect_chain = 0
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
+	if tut_active:
+		# a drop in the basics hands the player their thick time back (Louis: bad
+		# performances move the slowmo back up), and it breaks any in-a-row count a
+		# juggle-gated step was building - ten at full speed means ten unbroken
+		tut_flow_streak = 0
+		if bool(tut_step_data().get("juggle", false)):
+			tut_count = 0
+		if tut_id == "balls" and tut_pace > 0:
+			tut_pace -= 1
+			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30),
+				"slower  -  find the rhythm again", Color(0.95, 0.78, 0.5))
 	if set_shake:
 		shake = 5.0
 	freeze = 8   # a short hit-stop so the loss registers before play rolls on
@@ -5318,10 +5541,10 @@ func drop_ball(b: Ball, why: String) -> void:
 		# empty hands beat a full drop sheet (you dropped it BECAUSE you were spent), and
 		# both beat a bored room that was still, technically, watching.
 		if stamina <= 0.0:
-			add_popup(b.to_pos + Vector2(0, -28), "SPENT  -  THAT'S THE SET", Color(1.0, 0.5, 0.35))
+			add_popup(b.to_pos + Vector2(0, -28), "SPENT  -  THAT'S THE NIGHT", Color(1.0, 0.5, 0.35))
 			start_collapse("spent")
 		elif dropped >= drop_limit():
-			add_popup(b.to_pos + Vector2(0, -28), "THAT'S THE SET", Color(1.0, 0.5, 0.35))
+			add_popup(b.to_pos + Vector2(0, -28), "THAT'S THE NIGHT", Color(1.0, 0.5, 0.35))
 			start_collapse("drops")
 		elif applause <= 0.0:
 			start_collapse("crowd")
@@ -5334,8 +5557,8 @@ func drop_ball(b: Ball, why: String) -> void:
 func start_collapse(reason: String) -> void:
 	# the act falls apart: the hands give up and whatever is still held slips from them,
 	# so the player watches it all come down. The round ends only once everything has
-	# landed (see the collapse step in _physics_process). Marks set_collapsed so the set
-	# resolves as a hard ending, which is what strips a cleared set's overtime bonus.
+	# landed (see the collapse step in _physics_process). Marks set_collapsed so the act
+	# resolves as a hard ending, which is what strips the score to the last goal reached.
 	# `reason` is WHY, recorded here because here is the only place that actually knows -
 	# it is carried, unedited, to the collapse banner and the results card (Louis).
 	if collapsing:
@@ -6044,16 +6267,21 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 		if b.state == STATE_FLIGHT:
 			if _btb_behind(b) != behind:
 				continue
-			# BLACKOUT Encore: a prop in flight draws NOTHING - no trail, no halo, no
-			# shape, no out-of-frame tracker. (The first version ghosted only the shape,
-			# and the comet trail still traced every prop perfectly, so the blackout
-			# read as no change at all - Louis.) The one exception is a TORCH: no
-			# blackout can argue with fire, so its flame alone stays faintly visible.
-			# That is the game knowledge: bring torches to a Blackout night.
+			# BLACKOUT challenge: the throw and the apex stay VISIBLE - the lights only
+			# swallow the prop on its way down, so the challenge is catching from
+			# memory of the arc, not juggling blind (fully invisible flight was way too
+			# difficult - Louis). The cut is a hard one just past the apex: trail and
+			# shape both go (a first version ghosted only the shape and the comet trail
+			# still traced every prop). A TORCH is the exception: no blackout argues
+			# with fire, so its flame burns through the dark stretch - that is the game
+			# knowledge: bring torches to a Blackout night.
 			if encore_on("blackout"):
-				if b.kind == PROP_TORCHES:
-					draw_flame_in_dark(flight_pos(b))
-				continue
+				var bspan := maxi(1, b.land_tick - b.launch_tick)
+				var bp := clampf(float(tick - b.launch_tick) / float(bspan), 0.0, 1.0)
+				if bp > 0.68:
+					if b.kind == PROP_TORCHES:
+						draw_flame_in_dark(flight_pos(b))
+					continue
 			draw_trail(b)
 			var pos := flight_pos(b)
 			draw_prop(b, pos)
@@ -6324,33 +6552,77 @@ func pad_active() -> bool:
 
 
 func k_catch() -> Array[String]:
-	# the catch keycap labels for whichever device is active (remap-aware)
+	# the catch keycap labels for whichever device is active (remap-aware).
+	# Pad labels follow Louis's own layout: triggers catch, bumpers throw.
 	if pad_active():
-		return ["L1", "R1"]
+		return ["LT", "RT"]
 	return [OS.get_keycode_string(K_LC), OS.get_keycode_string(K_RC)]
 
 
 func k_throw() -> Array[String]:
 	if pad_active():
-		return ["L2", "R2"]
+		return ["LB", "RB"]
 	return [OS.get_keycode_string(K_LT), OS.get_keycode_string(K_RT)]
 
 
 func k_pause() -> Array[String]:
 	if pad_active():
-		return ["B"]
+		return ["A"]
 	return ["Esc"]
+
+
+func k_finish() -> Array[String]:
+	# the "I am done here" key: take a bow on stage, advance a lesson, leave
+	# practice. On a pad that is B - the right face button is Enter (Louis).
+	if pad_active():
+		return ["B"]
+	return ["Enter"]
+
+
+func k_sheet() -> Array[String]:
+	# the character-sheet key: Tab on a keyboard, X on a pad (Louis)
+	if pad_active():
+		return ["X"]
+	return ["Tab"]
+
+
+func k_restart() -> Array[String]:
+	# the practice re-deal: R on a keyboard, dpad-left on a pad (Louis)
+	if pad_active():
+		return ["◀"]
+	return ["R"]
+
+
+func k_shop() -> Array[String]:
+	# the shop: S on a keyboard, dpad-down on a pad (Louis)
+	if pad_active():
+		return ["▼"]
+	return ["S"]
+
+
+func k_object() -> Array[String]:
+	# switch the prop: O on a keyboard, dpad-up on a pad (Louis)
+	if pad_active():
+		return ["▲"]
+	return ["O"]
+
+
+func k_pattern() -> Array[String]:
+	# switch the pattern: P on a keyboard, dpad-right on a pad (Louis)
+	if pad_active():
+		return ["▶"]
+	return ["P"]
 
 
 func k_trick() -> Array[String]:
 	if pad_active():
-		return ["A"]
+		return ["Y"]
 	return [OS.get_keycode_string(K_TRICK)]
 
 
 func k_cycle() -> Array[String]:
-	if pad_active():
-		return ["Y"]
+	# switching the loaded trick stays a keyboard key: every pad button already
+	# carries one of Louis's assignments, so the label is honest about it
 	return [OS.get_keycode_string(K_CYCLE)]
 
 
@@ -6432,25 +6704,22 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	var LX := 18.0
 	var LW := 300.0
 	if performing and not results_open:
-		# --- the booking header: venue, which of the three sets, and the set dots ---
+		# --- the act header: venue, THE ACT, and one dot per goal reached ---
 		hud_card(Rect2(LX, 16, LW, 52))
 		draw_string(font, Vector2(LX + 14, 40), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, gold)
-		var setnames := ["WARM-UP", "THE SET", "THE ENCORE"]
-		var setline := "SET %d / %d   %s" % [set_index + 1, SETS_PER_BOOKING, setnames[clampi(set_index, 0, 2)]]
+		var setline := "THE ACT"
 		if purist:
 			setline += "   PURIST"
 		draw_string(font, Vector2(LX + 14, 60), setline, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
-		for i in SETS_PER_BOOKING:
-			var dotc := Vector2(LX + LW - 20.0 - float(SETS_PER_BOOKING - 1 - i) * 18.0, 34.0)
-			if i < sets_cleared:
+		for i in NUM_GOALS:
+			var dotc := Vector2(LX + LW - 20.0 - float(NUM_GOALS - 1 - i) * 18.0, 34.0)
+			if i < goals_hit:
 				draw_circle(dotc, 6.0, gold)
-			elif i == set_index:
-				draw_arc(dotc, 6.0, 0.0, TAU, 20, gold, 2.0, true)
 			else:
 				draw_circle(dotc, 5.0, Color(0.35, 0.28, 0.24, 0.8))
 
-		# --- the TARGET card: the hero. Your score climbing toward the number to beat. ---
-		var target := set_target()
+		# --- the GOALS card: the hero. One continuous score, three notches to pass. ---
+		var target := next_goal()
 		var tcard_y := 78.0
 		hud_card(Rect2(LX, tcard_y, LW, 108), Color(1.0, 0.82, 0.4, 0.4))
 		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55))
@@ -6462,25 +6731,30 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				draw_string(font, Vector2(LX + LW - 134, tcard_y + 22), "NEW RECORD", HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 11, Color(1.0, 0.86, 0.42, ra))
 			else:
 				draw_string(font, Vector2(LX + LW - 134, tcard_y + 22), "best  %s" % commafy(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 11, dim)
-		var tfrac := clampf(float(score) / float(maxi(1, target)), 0.0, 1.0)
+		# the meter runs the WHOLE act - zero to the final goal - with a notch at each
+		# goal line, so where you are and what is left both read at a glance
+		var g_final := goal_for(run_venue, NUM_GOALS - 1)
+		var tfrac := clampf(float(score) / float(maxi(1, g_final)), 0.0, 1.0)
 		var barx := LX + 14
 		var barw := LW - 28
-		if set_cleared:
-			var pl := 0.72 + 0.28 * sin(float(tick) * 0.16)
-			draw_rect(Rect2(barx - 1, tcard_y + 63, barw + 2, 20.0), Color(1.0, 0.86, 0.42, pl))
-			var otxt := "CLEARED   Enter to bank"
-			if overtime > 0.001:
-				otxt = "CLEARED  x%.2f   Enter to bank" % (1.0 + overtime)
-			draw_string(font, Vector2(barx, tcard_y + 78), otxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(0.12, 0.06, 0.03))
+		var fcol := Color(0.82, 0.5, 0.28).lerp(Color(1.0, 0.86, 0.42), tfrac)
+		draw_meter(barx, tcard_y + 63, barw, 20.0, tfrac, fcol)
+		for gi in NUM_GOALS - 1:
+			var nx := barx + barw * float(goal_for(run_venue, gi)) / float(maxi(1, g_final))
+			draw_rect(Rect2(nx - 1.0, tcard_y + 61, 2.0, 24.0), Color(1.0, 0.95, 0.8, 0.75))
+		var bartxt := "first goal  %s" % commafy(target)
+		if goals_hit >= NUM_GOALS:
+			bartxt = "ALL THREE GOALS  -  every point is yours"
+		elif goals_hit > 0:
+			bartxt = "next goal  %s" % commafy(target)
+		draw_string(font, Vector2(barx, tcard_y + 78), bartxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
+		# the standing offer: from the first goal on, the cash-in is always open
+		if goals_hit >= 1:
+			var pl := 0.7 + 0.3 * sin(float(tick) * 0.14)
+			draw_string(font, Vector2(LX + 14, tcard_y + 100), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), commafy(score)],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.95, 0.7, pl))
 		else:
-			var fcol := Color(0.82, 0.5, 0.28).lerp(Color(1.0, 0.86, 0.42), tfrac)
-			draw_meter(barx, tcard_y + 63, barw, 20.0, tfrac, fcol)
-			draw_string(font, Vector2(barx, tcard_y + 78), "target  %s" % commafy(target), HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
-		# banked-so-far and the take-a-bow hint
-		if booking_score > 0:
-			draw_string(font, Vector2(LX + 14, tcard_y + 100), "banked  %s" % commafy(booking_score), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.78, 0.6, 0.8))
-		if not set_cleared:
-			draw_string(font, Vector2(LX + LW - 134, tcard_y + 100), "Enter: take a bow", HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 10, Color(0.72, 0.66, 0.58, 0.7))
+			draw_string(font, Vector2(LX + LW - 148, tcard_y + 100), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 134.0, 10, Color(0.72, 0.66, 0.58, 0.7))
 
 		# --- the CROWD (patience clock) and the DROP limit ---
 		var ccard_y := 194.0
@@ -6492,8 +6766,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(LX + 14, ccard_y + 58), "DROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.6, 0.55))
 		draw_drop_marks(LX + 72, ccard_y + 48, drop_limit(), dropped)
 
-		# --- the ENCORE condition, only while the Encore is the set at hand ---
-		if set_index == SET_ENCORE and encore >= 0 and encore < ENCORES.size():
+		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
+		if encore >= 0 and encore < ENCORES.size():
 			var ec := Color(1.0, 0.55, 0.42)
 			hud_card(Rect2(LX, 272, LW, 66), Color(ec.r, ec.g, ec.b, 0.5))
 			draw_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, ec)
@@ -6634,8 +6908,8 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var rx := px + pw - 34.0
 
 	# header: the night's outcome and venue; the grade badge stamps in later
-	var complete := sets_cleared >= SETS_PER_BOOKING
-	var htag := "BOOKING COMPLETE" if complete else ("BOOKING  -  %d of %d cleared" % [sets_cleared, SETS_PER_BOOKING])
+	var complete := goals_hit >= NUM_GOALS
+	var htag := "THE ACT  -  ALL THREE GOALS" if complete else ("THE ACT  -  %d of %d goals" % [goals_hit, NUM_GOALS])
 	var htc := Color(1.0, 0.86, 0.45) if complete else Color(0.9, 0.72, 0.55)
 	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, htc)
 	draw_string(font, Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
@@ -6705,13 +6979,18 @@ func draw_results(font: Font, s: Vector2) -> void:
 			foot = "you have conquered the final stage  -  any key"
 		elif too_tired():
 			# the reason R will not work, in words, right where the player looks
-			foot = "too tired to go again  -  Enter back to the day, then sleep"
+			foot = "too tired to go again  -  %s back to the day, then sleep" % ("B" if pad_active() else "Enter")
 		else:
-			var kgo := "A" if pad_active() else "R"
-			var kmenu := "Enter" if not pad_active() else "B"
-			foot = "%s  go again      S  shop      %s  back to the day" % [kgo, kmenu]
+			# every slot in this footer has a real pad button (Louis's layout: Y is
+			# Space so it goes again, dpad-down is S so it shops, X is Tab for the
+			# sheet, B is Enter back) - the pad footer names only buttons it can press
+			var kgo := "Y" if pad_active() else "R"
+			var kshop := String(k_shop()[0])
+			var ksheet := String(k_sheet()[0])
+			var kmenu := "B" if pad_active() else "Enter"
+			foot = "%s  go again      %s  shop      %s  back to the day" % [kgo, kshop, kmenu]
 			if points > 0:
-				foot = "%s  go again      Tab  +%d point%s      S  shop      %s  back to the day" % [kgo, points, "" if points == 1 else "s", kmenu]
+				foot = "%s  go again      %s  +%d point%s      %s  shop      %s  back to the day" % [kgo, ksheet, points, "" if points == 1 else "s", kshop, kmenu]
 		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
 
 
@@ -6922,6 +7201,12 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 		var cx0 := tx + float(i) * (cw + gap)
 		var ac: Color = st[4]
 		hud_card(Rect2(cx0, y0, cw, ch), Color(ac.r, ac.g, ac.b, 0.45))
+		if i == sheet_sel:
+			# the card cursor: arrows / dpad / stick moved it here, Enter (pad A)
+			# invests here. A breathing gold frame, so it reads without stealing
+			# the card's own colour.
+			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
+			draw_rect(Rect2(cx0 - 4.0, y0 - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.5)
 		draw_string(font, Vector2(cx0, y0 + 26.0), String(st[0]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(ac.r, ac.g, ac.b, 0.95))
 		draw_string(font, Vector2(cx0, y0 + 78.0), str(int(st[1])), HORIZONTAL_ALIGNMENT_CENTER, cw, 44, Color(1.0, 0.94, 0.76))
 		draw_multiline_string(font, Vector2(cx0 + 12.0, y0 + 108.0), String(st[2]),
@@ -6951,7 +7236,11 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	var by := py + ph - 32.0
 	if debug_mode:
 		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.9, 1.0))
-	draw_hints_row(font, px + pw * 0.5, by - 14.0, [[["Tab"], "resume"]])
+	var sh_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "choose"]]
+	if points > 0:
+		sh_items.append([["B"] if pad_active() else ["Enter"], "invest"])
+	sh_items.append([k_sheet(), "resume"])
+	draw_hints_row(font, px + pw * 0.5, by - 14.0, sh_items)
 
 
 func draw_purse(font: Font, right_x: float, y: float) -> void:
@@ -7004,12 +7293,16 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var cw := (innerw - gap * 5.0) / 6.0
 	var ch := 272.0
 	var y0 := py + 110.0
+	var sel_a := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
 	for i in PROPS.size():   # balls included: every prop is bought stock now (Louis)
 		var cx0 := tx + float(i) * (cw + gap)
 		var pcol := prop_color(i)
 		var cost := int(PROPS[i]["cost"])
 		var afford := money >= cost
 		hud_card(Rect2(cx0, y0, cw, ch), Color(pcol.r, pcol.g, pcol.b, 0.45))
+		if i == shop_sel:
+			# the card cursor (see shop_input): Enter / pad A buys the lit card
+			draw_rect(Rect2(cx0 - 4.0, y0 - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
 		var own := prop_count[i]
 		var oc := Color(0.75, 0.9, 0.72) if own > 0 else Color(0.6, 0.55, 0.5, 0.8)
 		draw_string(font, Vector2(cx0 + 12.0, y0 + 24.0), "own %d" % own, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, oc)
@@ -7037,6 +7330,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# glasses
 	var gr := Rect2(tx, gy0, gw, gh)
 	hud_card(gr, Color(0.72, 0.86, 0.96, 0.4))
+	if shop_sel == 6:
+		draw_rect(Rect2(gr.position.x - 4.0, gr.position.y - 4.0, gr.size.x + 8.0, gr.size.y + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
 	var gcc := Color(0.72, 0.86, 0.96)
 	draw_arc(Vector2(tx + 40.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, gcc, 2.5, true)
 	draw_arc(Vector2(tx + 68.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, gcc, 2.5, true)
@@ -7051,6 +7346,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# Uncle Dan's Pie
 	var pxx := tx + gw + gap
 	hud_card(Rect2(pxx, gy0, gw, gh), Color(0.9, 0.62, 0.3, 0.4))
+	if shop_sel == 7:
+		draw_rect(Rect2(pxx - 4.0, gy0 - 4.0, gw + 8.0, gh + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
 	var pc := Color(0.9, 0.62, 0.3)
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(pxx + 30.0, gy0 + 52.0), Vector2(pxx + 74.0, gy0 + 52.0), Vector2(pxx + 52.0, gy0 + 24.0)]), pc)
@@ -7064,8 +7361,12 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# ---------------- footer: warnings, then the keys ----------------
 	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
 		draw_string(font, Vector2(px, py + ph - 58.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(1.0, 0.62, 0.45))
-	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-		[[["1", "8"], "buy (the key on each card)"], [["Tab"], "leave"]])
+	if pad_active():
+		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
+			[[["Stick"], "choose"], [["B"], "buy"], [["X"], "leave"]])
+	else:
+		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
+			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "8"], "quick buy"], [["Tab"], "leave"]])
 
 
 func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: Dictionary, unlocked: bool, sel: bool) -> void:
@@ -7291,8 +7592,12 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var ma := clampf(1.0 - float(cine_tick - day_msg_tick - 220) / 80.0, 0.0, 1.0)
 		draw_string(font, Vector2(0, s.y - 92.0), day_msg, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.88, 0.55, ma))
 
-	draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
-		[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]])
+	if pad_active():
+		draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
+			[["Stick"], "choose"], [["B"], "do it"], [["X"], "sheet"], [["A"], "menu"]])
+	else:
+		draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
+			[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]])
 
 	if day_anim != "":
 		draw_day_anim(font, s)
@@ -8007,24 +8312,24 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	if purist:
 		draw_string(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
 
-	# bottom-RIGHT: the booking's ask - which set, its target, and the waiting Encore
+	# bottom-RIGHT: the act's ask - the three goals to chase, and the whole-act
+	# challenge when one was rolled. Cash in from the first number on; each further
+	# goal is the gamble.
 	if booking_active:
-		var setnames := ["THE WARM-UP", "THE SET", "THE ENCORE"]
-		var target := set_target_for(establish_venue, set_index)
 		var has_enc := encore >= 0 and encore < ENCORES.size()
 		var bw := 400.0
 		var bh := 130.0 if has_enc else 76.0
 		var bx := s.x - 18.0 - bw
 		var by2 := s.y - 88.0 - bh
 		hud_panel(Rect2(bx, by2, bw, bh))
-		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "%s  -  set %d of %d" % [setnames[clampi(set_index, 0, 2)], set_index + 1, SETS_PER_BOOKING], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
-		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "target  %s" % commafy(target), HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(1.0, 0.88, 0.5, tagA))
+		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
+		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
+			commafy(goal_for(establish_venue, 0)), commafy(goal_for(establish_venue, 1)), commafy(goal_for(establish_venue, 2))],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.5, tagA))
 		if has_enc:
 			var enc: Dictionary = ENCORES[encore]
-			var hot := set_index == SET_ENCORE   # the condition is live THIS set
-			var ec := Color(1.0, 0.55, 0.4) if hot else Color(0.85, 0.7, 0.55)
-			var etag := "THE ENCORE  -  NOW" if hot else "tonight's Encore"
-			draw_string(font, Vector2(bx + 16.0, by2 + 82.0), "%s:  %s" % [etag, String(enc["name"]).to_upper()], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
+			var ec := Color(1.0, 0.55, 0.4)
+			draw_string(font, Vector2(bx + 16.0, by2 + 82.0), "TONIGHT'S CHALLENGE:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
 			draw_multiline_string(font, Vector2(bx + 16.0, by2 + 102.0), String(enc["desc"]),
 				HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 11, 2, Color(0.9, 0.82, 0.72, 0.85 * tagA))
 
@@ -8742,10 +9047,10 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 
 
 func _demo_step() -> void:
-	# in a --booking demo the autoplayer walks off the moment a target is cleared, banking
-	# with whatever overtime it built, so a whole booking advances cleanly and never hangs
-	# at a venue whose crowd a low routine can sustain forever (v0/v1)
-	if booking_active and set_cleared and running:
+	# in a --booking demo the autoplayer cashes in the moment the FINAL goal falls, so
+	# a whole act runs end to end (all three crossings, the resolve, the pay) and never
+	# hangs at a venue whose crowd a low routine can sustain forever (v0/v1)
+	if booking_active and goals_hit >= NUM_GOALS and running:
 		finish_performance()
 		return
 	# auto-catch: secure any ball arriving at an empty hand (the odd-columns middle
