@@ -914,7 +914,7 @@ func _ready() -> void:
 			# --encore <id> pins the condition.
 			booking_active = true
 			goals_hit = 0
-			encore = (randi() % ENCORES.size()) if run_venue >= 1 else -1
+			encore = roll_encore(run_venue)
 			var eni := ua.find("--encore")
 			if eni != -1 and eni + 1 < ua.size():
 				for ek in ENCORES.size():
@@ -990,7 +990,7 @@ func _ready() -> void:
 			booking_active = true
 			run_venue = establish_venue
 			goals_hit = 0
-			encore = (randi() % ENCORES.size()) if run_venue >= 1 else -1
+			encore = roll_encore(run_venue)
 			var eei := ua.find("--encore")
 			if eei != -1 and eei + 1 < ua.size():
 				for ek2 in ENCORES.size():
@@ -1552,7 +1552,7 @@ func begin_performance(n: int) -> void:
 	# one challenge for the WHOLE act (Louis: never a different condition per phase),
 	# rolled with the global randi (never the sim rng, so the deterministic catch
 	# sequence is untouched). The Backyard stays pure: no conditions on stage one.
-	encore = (randi() % ENCORES.size()) if play_venue() >= 1 else -1
+	encore = roll_encore(play_venue())
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -1583,6 +1583,27 @@ func next_goal() -> int:
 	# the first goal the act has NOT yet reached, or the final goal once all have
 	# fallen (the meter then shows a full bar, not a moving one)
 	return goal_for(run_venue, clampi(goals_hit, 0, NUM_GOALS - 1))
+
+
+func roll_encore(venue: int) -> int:
+	# a random challenge for the whole act - never on the Backyard (venue 0), the one
+	# pure lesson stage - and otherwise fair game, EXCEPT "For the Danger" (only clubs/
+	# knives/torches score), which needs a floor of its own (2026-07-18, Louis: it
+	# rolled before he could even afford a club, so the act was unscoreable start to
+	# finish). It is now excluded from the pool below The Circus (venue 3) AND unless
+	# the player actually owns at least one qualifying prop - a venue alone does not
+	# guarantee that, someone could reach it having spent their gold elsewhere.
+	if venue < 1:
+		return -1
+	var pool: Array[int] = []
+	for i in ENCORES.size():
+		if String(ENCORES[i]["id"]) == "fire" and (venue < 3 \
+				or (have(PROP_CLUBS) <= 0 and have(PROP_KNIVES) <= 0 and have(PROP_TORCHES) <= 0)):
+			continue
+		pool.append(i)
+	if pool.is_empty():
+		return -1
+	return int(pool[randi() % pool.size()])
 
 
 func encore_on(id: String) -> bool:
