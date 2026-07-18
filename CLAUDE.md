@@ -21,8 +21,10 @@ and deleted. History lives in git.
 ## How the game plays now
 
 - **Input:** per hand a THROW (F/J) and a CATCH (D/K), Space = trick, C = switch
-  trick, P = pattern, O = object, 3-9 = count, R = restart (practice only), S = shop,
-  Tab = sheet, Esc = game menu, Enter = finish/cash in. All remappable (six actions).
+  trick, P = pattern, O = object, 1/2 = step the count down/up (`k_count`; not one
+  of the six remappable actions - device-aware only, Back/R3 on a pad), R = restart
+  (practice only), S = shop, Tab = sheet, Esc = game menu, Enter = finish/cash in.
+  Throw/catch/trick/switch-trick/pattern/restart are the six remappable actions.
 - **Controller (Louis's own layout, X/Y and A/B swapped 2026-07-18):** bumpers
   throw, triggers catch (always fixed, never remapped), X = Space/trick, A = Enter,
   B = Escape, Y = Tab; dpad in play: up O, right P, down S, left R (menus: dpad =
@@ -70,13 +72,16 @@ and deleted. History lives in git.
   step's one-line title, and progress - the old two-line paragraph is gone from
   the live HUD. Throw/catch keys are bare letters over each hand (`draw_tut_key`
   via `draw_tut_prompts`, unboxed, no change from Louis's original approve). A
-  key with no hand of its own - trick/pattern/restart - reads off the live sim
-  (`tut_action_cue`) and shows in the same bordered-keycap slot as the Enter
-  callout, dead centre at the bottom (`draw_tut_special_cue`). A "live" trick
-  (Spin) only ever appears there when pressing it would actually fire - enough
-  balls airborne AND off cooldown - which is what fixed "I press Space, it
-  doesn't recognise": the old prompt was baked into the step text with no check
-  against on_trick()'s own gate.
+  hand still holding a ball NEVER shows a catch ring, however soon something
+  else lands there - it keeps naming its own throw key until the stack is
+  completely empty (Louis, three times: throw always outranks catch for a hand
+  with a ball still in it). A key with no hand of its own - trick/pattern/
+  restart - reads off the live sim (`tut_action_cue`) and shows in the same
+  bordered-keycap slot as the Enter callout, dead centre at the bottom
+  (`draw_tut_special_cue`). A "live" trick (Spin) only ever appears there when
+  pressing it would actually fire - enough balls airborne AND off cooldown -
+  which is what fixed "I press Space, it doesn't recognise": the old prompt was
+  baked into the step text with no check against on_trick()'s own gate.
 - **Unlocks (reward design):** never XP alone. Each new stage guarantees one arrival
   skill gated on the venue only: Street=Behind the Back, Theatre=Spin, Circus=Shower,
   Championship=Reverse Cascade, World Arena=Tennis. Composite level/stat walls fill
