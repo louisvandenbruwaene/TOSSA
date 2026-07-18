@@ -95,6 +95,8 @@ const BASE_AIR := 84       # airtime (ticks) for an instant tap-throw (snappy)
 const HOLD_MAX := 44       # holding THROW past this adds no more height
 const HOLD_GAIN := 1.9     # airtime ticks added per tick the THROW is held
 const ARC_PER_AIR := 2.15  # arc peak (px) per airtime tick; balls crest above the head
+const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_scale);
+							  # also the mid-air collision test's touching-circles radius
 
 # how much height hurts a catch, and the under-Strength penalties (ideas.rtf rule)
 const HEIGHT_CATCH_PENALTY := 0.35  # subtracted from the off-Perfect chance at max height
@@ -4829,12 +4831,23 @@ func pattern_unlocked(i: int) -> bool:
 
 
 func pattern_order() -> Array:
-	# pattern indices in UNLOCK order (by asking level): the array itself keeps
-	# indices 0..4 frozen for old saves, so display and the P cycle sort here
+	# pattern indices in the order a typical career actually reaches them. Sorting
+	# by "lvl" alone (2026-07-18, a real bug: fixed here) was wrong: Shower, Reverse
+	# Cascade and Tennis all carry "lvl": 1 but are really gated behind venue 3/4/5,
+	# so they sorted ahead of Columns/Half Shower/Waterfall, which unlock far earlier
+	# in real play on level/stat walls alone. Venue is the dominant, latest-clearing
+	# gate, so it sorts first; level breaks ties within the same venue. The array
+	# itself keeps indices 0..4 frozen for old saves, so display and the P cycle
+	# sort here instead of reordering PATTERNS.
 	var out: Array = []
 	for i in PATTERNS.size():
 		out.append(i)
-	out.sort_custom(func(a, b): return int(PATTERNS[a]["lvl"]) < int(PATTERNS[b]["lvl"]))
+	out.sort_custom(func(a, b):
+		var va: int = int(PATTERNS[a].get("ven", 0))
+		var vb: int = int(PATTERNS[b].get("ven", 0))
+		if va != vb:
+			return va < vb
+		return int(PATTERNS[a]["lvl"]) < int(PATTERNS[b]["lvl"]))
 	return out
 
 
@@ -4898,12 +4911,19 @@ func trick_unlocked(i: int) -> bool:
 
 
 func unlocked_tricks() -> Array:
-	# in unlock order (by level), so C cycles the way the player learned them
+	# in unlock order, so C cycles the way the player learned them - same (venue,
+	# then level) key as pattern_order(), for the same reason: a venue-gated
+	# trick's "lvl" alone would understate how late it actually arrives
 	var out: Array = []
 	for i in TRICKS.size():
 		if trick_unlocked(i):
 			out.append(i)
-	out.sort_custom(func(a, b): return int(TRICKS[a]["lvl"]) < int(TRICKS[b]["lvl"]))
+	out.sort_custom(func(a, b):
+		var va: int = int(TRICKS[a].get("ven", 0))
+		var vb: int = int(TRICKS[b].get("ven", 0))
+		if va != vb:
+			return va < vb
+		return int(TRICKS[a]["lvl"]) < int(TRICKS[b]["lvl"]))
 	return out
 
 
@@ -5071,13 +5091,16 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 # -----------------------------------------------------------------------------
 # Progression: XP from skilled play, levels grant stat points, stats add comfort
 # (never auto-play). Accuracy eases high throws, Endurance raises Stamina,
-# Strength adds a little height control. All effects capped (GDD 4.1 guardrails).
+# Strength adds a little height control. All effects capped (skill-first guardrail).
 # -----------------------------------------------------------------------------
 
 #endregion
 
 #region XP, LEVELING & UNLOCK ANNOUNCEMENTS
 func xp_to_next(lv: int) -> int:
+	# a power curve (exponent 1.4) plus a flat linear term: accelerates the XP cost
+	# per level to pair with POINTS_PER_LEVEL's own accelerating points-per-level -
+	# tuned to the ~level 115 / ~2.4M total XP completion arc (see CLAUDE.md)
 	return int(round(60.0 * pow(float(lv), 1.4))) + 40 * lv
 
 
@@ -5261,6 +5284,9 @@ func resolve_act() -> void:
 	# complete act, roughly nothing for one goal, -0.5 for a night with none.
 	var frac := float(goals_hit) / float(NUM_GOALS)
 	var rep_delta := int(round(float(REP_SWING) * (frac * 1.5 - 0.5) * purist_mult))
+	# a single act's rep swing is capped so it can never leap past the NEXT venue
+	# tier in one night (cur_tier + 2, since VENUE_REP[cur_tier + 1] is the tier
+	# just ahead): reaching a stage always takes at least one more act played there
 	var cur_tier := venue_index_of(reputation)
 	if cur_tier + 2 < VENUE_REP.size():
 		rep_delta = mini(rep_delta, VENUE_REP[cur_tier + 2] - 1 - reputation)
@@ -5473,7 +5499,8 @@ func perfect_window() -> int:
 
 
 func pay_mult() -> float:
-	# Reputation lifts earnings only. Score and catching are untouched (GDD 4.1).
+	# Reputation lifts earnings only. Score and catching are untouched (skill-first
+	# guardrail: rep must stay on the comfort axis, never the timing floor).
 	return 1.0 + float(reputation) / REP_PAY_DIV
 
 
@@ -5577,7 +5604,8 @@ func venue_index_of(rep: int) -> int:
 
 
 func cur_venue() -> int:
-	# cutscenes and previews can override which venue palette we render
+	# menu/results screens and previews (e.g. the Controls screen's backdrop) can
+	# override which venue palette we render; view_venue < 0 means no override
 	return view_venue if view_venue >= 0 else play_venue()
 
 
@@ -6062,7 +6090,7 @@ func update_sim() -> void:
 		if b.state == STATE_FLIGHT and tick > b.land_tick + MISS_GRACE:
 			lost.append(b)
 		elif b.state == STATE_FLIGHT and tick % 2 == 0:
-			# the flight trail (ART doc 4): sample the path so a comet tail follows the
+			# the flight trail: sample the path so a comet tail follows the
 			# prop, longer for higher (riskier) throws, so risk is legible at a glance
 			b.trail.append(flight_pos(b))
 			var maxlen := 5 + int(clampf(b.height, 0.0, 1.4) * 8.0)
@@ -6083,7 +6111,7 @@ func update_sim() -> void:
 		for i in fly.size():
 			for j in range(i + 1, fly.size()):
 				var d := fpos[i].distance_to(fpos[j])
-				var rr := 11.0 * (prop_hit_scale(fly[i].kind) + prop_hit_scale(fly[j].kind))
+				var rr := BALL_RADIUS_PX * (prop_hit_scale(fly[i].kind) + prop_hit_scale(fly[j].kind))
 				if _collcheck and d - rr < _coll_min:
 					_coll_min = d - rr
 					_coll_at = "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
@@ -6943,7 +6971,7 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 
 
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
-	draw_circle(pos, 11.0 * sc, col)
+	draw_circle(pos, BALL_RADIUS_PX * sc, col)
 	var hi := col.lightened(0.4)
 	hi.a = 0.9
 	draw_circle(pos + Vector2(-3, -3) * sc, 3.5 * sc, hi)
@@ -9021,7 +9049,8 @@ func gen_sfx() -> void:
 	sfx["splat"] = _wav(_splat_sound(), false)
 	sfx["coin"] = _wav(_seq_bells([987.8, 1318.5], 0.09, 0.5), false)
 	# gold changing hands: a quick high jingle of coin-on-coin clinks, distinct from
-	# the two-note "coin" flourish above (which stays the lesson-complete fanfare)
+	# the two-note "coin" flourish above (the lesson-complete fanfare, also reused
+	# for the reward director's pie/meal aid grants - see reward_director)
 	sfx["money"] = _wav(_seq_bells([1568.0, 2093.0, 1760.0, 2637.0], 0.045, 0.42), false)
 	sfx["streak"] = _wav(_seq_bells([784.0, 987.8, 1318.5], 0.08, 0.5), false)
 	sfx["ui"] = _wav(_tone([880.0], [1.0], 0.05, 0, 0.001, 0.02, 0.3, 0.0), false)
@@ -9048,9 +9077,9 @@ func dump_audio(dir: String) -> void:
 
 
 # =============================================================================
-# Presentation layer. Everything below is procedural (the code-only art rule,
-# ART_AND_MUSIC.md): the stage card, the victory screen, the tutorial demos, and
-# the shared "royal" polish (gradients, vignette, gold frames, drifting dust).
+# Presentation layer. Everything below is procedural (the code-only art rule):
+# the establishing card, the credits, the shared "royal" polish (gradients,
+# vignette, gold frames, drifting dust), and the venue exteriors.
 # cine_tick drives all the motion.
 # =============================================================================
 
@@ -9090,7 +9119,10 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# crowd blurb - text with the 8-way outline, no boxes. Everything informational
 	# (record, set, target, encore, purist) lives in two small cards at the BOTTOM
 	# corners now (Louis: the centred stack of rectangles buried the venue portrait).
-	draw_text_shout(font, Vector2(0, s.y * 0.10), "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1], HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.78, 0.55, 0.85 * tagA))
+	# the Midnight Show sits PAST the 6-stage ladder (TOP_VENUE), so it gets its own
+	# tag rather than a "STAGE 7 of 6" that would contradict TOP_VENUE's own meaning
+	var stage_tag := "ENCORE" if establish_venue > TOP_VENUE else "STAGE  %d  of  %d" % [establish_venue + 1, TOP_VENUE + 1]
+	draw_text_shout(font, Vector2(0, s.y * 0.10), stage_tag, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.78, 0.55, 0.85 * tagA))
 	var vn := String(venue_data(establish_venue)["name"]).to_upper()
 	draw_title_glow(font, s.y * 0.12 + 12.0, vn, 52, Color(1.0, 0.9, 0.55), s)
 	draw_ornament(s.x * 0.5, s.y * 0.12 + 72.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
@@ -9171,8 +9203,10 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 118.0; rows.append({"y": cur, "kind": "thanks", "a": "thank you for playing", "b": ""})
 	var last_y := cur
 
-	# the scroll: slow enough that the whole roll takes about 100 seconds at 60 fps
-	var speed := 0.20
+	# the scroll: slow enough that the whole roll takes about 100 seconds. cine_tick
+	# runs at 120/s (not 60 - this was tuned against the wrong rate once already,
+	# which halved the intended read time to ~50s), so speed is px per 1/120s tick
+	var speed := 0.10
 	var scroll := float(cine_tick) * speed
 	var base := s.y * 0.56   # where content y 0 rests before any scrolling
 
@@ -9582,12 +9616,17 @@ func draw_venue_exterior(s: Vector2, vi: int) -> void:
 		2: ext_theatre(s)
 		3: ext_circus(s)
 		4: ext_champ(s)
-		_: ext_arena(s)
+		5: ext_arena(s)
+		_: ext_midnight(s)   # The Midnight Show (2026-07-18): its own dim exterior, not
+							 # the World Arena's - the same "genuinely dark" promise the
+							 # stage backdrop already keeps (see draw_venue_dressing)
 
 
 func ext_backyard(s: Vector2) -> void:
-	# ext_center puts the house mid-frame (the day hub composes around it); the
-	# story scenes keep it right of frame so the figures own the middle
+	# ext_center puts the house mid-frame (the day hub, tutdone card, and
+	# establishing card all compose around it this way - draw_venue_exterior's
+	# only three call sites, all ext_center = true). The off-center branch below
+	# is currently unused by anything live; kept for a possible future layout.
 	var hx := s.x * (0.5 if ext_center else 0.74)
 	var gy := s.y * 0.66
 	draw_gradient_v(Rect2(0, 0, s.x, gy), Color(0.13, 0.15, 0.28), Color(0.72, 0.46, 0.32), 26)
@@ -9670,6 +9709,7 @@ func ext_arena(s: Vector2) -> void:
 	var gy := s.y * 0.80
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.03, 0.03, 0.08), Color(0.07, 0.05, 0.12), 26)
 	draw_stars(s, 46, 0.55)
+	# three slow-sweeping search-light beams crossing the sky above the bowl
 	for k in 3:
 		var ang := -PI * 0.5 + sin(float(cine_tick) * 0.01 + float(k) * 2.1) * 0.5
 		var src := Vector2(s.x * (0.2 + 0.3 * float(k)), gy - s.y * 0.18)
@@ -9684,6 +9724,25 @@ func ext_arena(s: Vector2) -> void:
 		var a := 0.3 + 0.4 * sin(float(cine_tick) * 0.05 + seed)
 		draw_circle(Vector2(x, y), 1.5, Color(1.0, 0.8, 0.5, clampf(a, 0.1, 0.7)))
 	draw_dust(s, 20, Color(1.0, 0.85, 0.55))
+
+
+func ext_midnight(s: Vector2) -> void:
+	# The Midnight Show's own exterior (2026-07-18): the same bowl as ext_arena
+	# above (same seed formula, same bones), but no search beams and a small
+	# fraction of the crowd lights, dimmer still - echoes venue_data's spot
+	# 0.015 (half the Backyard's) so the establishing card promises the same
+	# genuinely dark house the stage itself now delivers
+	var gy := s.y * 0.80
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.01, 0.02, 0.02), Color(0.03, 0.05, 0.04), 26)
+	draw_stars(s, 30, 0.55)
+	draw_arena_bowl(Vector2(s.x * 0.5, gy), s.x * 0.96, s.y * 0.5, Color(0.04, 0.05, 0.045), Color(0.35, 0.85, 0.55))
+	for i in 20:
+		var seed := float(i) * 17.7
+		var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.7
+		var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.26 - 12.0
+		var a := 0.12 + 0.16 * sin(float(cine_tick) * 0.05 + seed)
+		draw_circle(Vector2(x, y), 1.3, Color(0.55, 0.95, 0.65, clampf(a, 0.03, 0.3)))
+	draw_dust(s, 8, Color(0.55, 0.95, 0.65))
 
 
 # --- exterior building / prop primitives -------------------------------------
