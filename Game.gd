@@ -196,17 +196,20 @@ const COLUMNS := 2
 const HALFSHOWER := 3
 const SHOWER := 4
 const RCASC := 5
-const WFALL := 6
-const TENNIS := 7
+const TENNIS := 6
 # --- patterns as learnable content (GDD economy: harder base pays more, so one
 # tamed routine is never optimal). P cycles the unlocked patterns in training.
 # "mult" scales every catch's score, the reward for the pattern's base difficulty.
-# EXACTLY ONE pattern is active at a time (Louis): Reverse Cascade, Waterfall and
-# Tennis live HERE now, not as Space toggles, so switching patterns always switches
-# the whole routine and Columns can never run "on top of" anything.
+# EXACTLY ONE pattern is active at a time (Louis): Reverse Cascade and Tennis live
+# HERE now, not as Space toggles, so switching patterns always switches the whole
+# routine and Columns can never run "on top of" anything.
 # Unlocks are spread across the CAREER, not the first evenings (Louis): each entry
 # may ask for a level, a stat, and a stage. All present keys must be met -
 # see skill_req_met / skill_req_text. Indices 0..4 are frozen (pattern_sel saves).
+# Waterfall (2026-07-19, was index 6) was REMOVED (Louis: "identical to half
+# shower") - see load_progress for the pattern_sel migration this forced (an old
+# save's index 6 meant Waterfall; it now means Tennis, since everything after the
+# removed slot shifted down one).
 const PATTERNS := [
 	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0,
 	 "desc": "The weave. Every throw crosses to the other hand."},
@@ -215,13 +218,11 @@ const PATTERNS := [
 	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 8, "mult": 1.15,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25,
-	 "desc": "The right hand throws over the top, the left keeps the weave."},
+	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
 	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
 	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.45,
 	 "desc": "BOTH hands throw over the top, the weave runs backward."},
-	{"id": "wfall",      "name": "Waterfall",   "lvl": 11, "str": 14, "ven": 2, "mult": 1.3,
-	 "desc": "The right hand keeps throwing over the top while the left flows low beneath it."},
 	{"id": "tennis",     "name": "Tennis",      "lvl": 1, "ven": 5, "mult": 1.5,
 	 "desc": "One marked ball sails over the top, back and forth across the weave."},
 ]
@@ -237,14 +238,13 @@ const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a sho
 const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction (0.35
 							   # left its arc only ~34px above the weave where they
 							   # cross; 0.5 keeps clear air between the two roads)
+const HALFSHOWER_LOW := 0.2   # the weave side's MAXIMUM height fraction (2026-07-19,
+							   # Louis: it still crossed the over-the-top road too often
+							   # with HALFSHOWER_MIN alone raising only the high side's
+							   # floor) - a real ceiling on the low side now, the same
+							   # role WATERFALL_LOW played before that pattern was cut
 const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
 							   # Reverse Cascade, Tennis's marked ball)
-const WATERFALL_HIGH := 0.6   # Waterfall's over-the-top hand: minimum height fraction,
-							   # clearly higher than the generic over-the-top throws
-const WATERFALL_LOW := 0.15   # Waterfall's other hand: MAXIMUM height fraction, so it
-							   # visibly flows low under the over-the-top side rather
-							   # than drifting up to meet it (Louis: they read almost
-							   # the same height without a forced ceiling here)
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
 							   # lanes' running height (0 = pure hold-timing, 1 = locked)
 # --- object load (ideas.rtf comments): more balls in the air and heavier props
@@ -346,7 +346,7 @@ const HAND_INNER := 1        # the throw point, standard; also the catch point f
 # --- tricks (GDD Section 3): FLOURISHES fired with the TRICK key (Space), laid
 # OVER whatever pattern is running. C selects which trick Space is loaded with
 # (the selection persists). Anything that reshapes the whole routine (Columns,
-# Waterfall, Reverse Cascade, Tennis) is a PATTERN now, not a trick (Louis: one
+# Reverse Cascade, Tennis) is a PATTERN now, not a trick (Louis: one
 # pattern at a time, always switch-off-able with P). THREE grammars remain:
 # "toggle" switches ON with one press and OFF with the next, smoothly reshaping
 # every throw in between (High Toss, Behind the Back) - for a single flourish
@@ -1025,13 +1025,14 @@ func _ready() -> void:
 		cine_tick = 0
 	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
 		enter_day()
-	if ua.has("--skills"):            # dev: open the Skills reference for a screenshot
+	var ssi := ua.find("--skills")    # dev: open the Skills reference for a screenshot,
+	if ssi != -1:                     # optionally --skills <N> to select entry N directly
 		level = maxi(level, 7)        # enough unlocked that both ready and locked show
 		money = maxi(money, 100)
 		stamina = stamina_max
 		enter_day()
 		skills_open = true
-		skills_sel = 0
+		skills_sel = int(ua[ssi + 1]) if ssi + 1 < ua.size() and not ua[ssi + 1].begins_with("--") else 0
 	if ua.has("--eggbreak"):          # dev: exercise the egg-break effect on the stage
 		_eggdemo = true
 		prop_type = PROP_EGGS
@@ -3983,14 +3984,12 @@ func next_throw_over_top(h: int) -> bool:
 	# whether hand h's NEXT throw is an over-the-top launch. This is its own KIND
 	# of throw (Louis): no inward carry, the hand lobs straight from the OUTER
 	# catch point, which is what keeps the high road clear of the low weave. Used
-	# always (Reverse Cascade), on one hand (Waterfall's right, the other stays
-	# low), for one throw (Overthrow), or back and forth (Tennis's marked ball).
+	# always (Reverse Cascade), for one throw (Overthrow), or back and forth
+	# (Tennis's marked ball).
 	# Mirrors the over_top decision in do_throw, read BEFORE the ball is popped.
 	if trick_primed and trick_sel == TR_OVER:
 		return true
 	if pattern == RCASC:
-		return true
-	if pattern == WFALL and h == RIGHT:
 		return true
 	if pattern == TENNIS:
 		if tennis_ball == null or not balls.has(tennis_ball):
@@ -4054,8 +4053,8 @@ func catch_slot(h: int) -> int:
 # ball timed into the same corner simply cross there, exactly as two juggling balls do.
 # Good timing keeps them from occupying that corner at the SAME instant (a real player,
 # and the Phase 5 siteswap rework, throw on a rhythm that interleaves them); the naive
-# alternating autoplayer does not, so --collcheck still reports crossings on Waterfall
-# and Tennis. Those read as balls crossing, not as an impossible path, and the mid-air
+# alternating autoplayer does not, so --collcheck still reports crossings on Half
+# Shower and Tennis. Those read as balls crossing, not as an impossible path, and the mid-air
 # clack penalty only bites in hard mode - so this is left to the siteswap rework, which
 # replaces this whole hand-picked geometry with a rhythm derived from the pattern.
 func over_top_land_slot(t: int) -> int:
@@ -4562,9 +4561,9 @@ func do_throw(h: int, hold: int) -> void:
 	if pattern == SHOWER and h == LEFT and this_trick < 0:
 		air = int(round(base_air * SHOWER_FEED))
 	# the PATTERN shapes every throw (there is exactly one pattern at a time now -
-	# Louis - so Reverse Cascade, Waterfall and Tennis reshape here as patterns,
-	# never as trick toggles), and Overthrow (a one-shot) sends this single throw
-	# up and over the top of whatever pattern runs. Pattern throws are NOT tagged
+	# Louis - so Reverse Cascade and Tennis reshape here as patterns, never as
+	# trick toggles), and Overthrow (a one-shot) sends this single throw up and
+	# over the top of whatever pattern runs. Pattern throws are NOT tagged
 	# as tricks: the pattern's own score mult is its reward.
 	# The SHOWER's and HALF SHOWER's high hand ride the same over-the-top road
 	# (that is what those patterns ARE), so they inherit the outer launch, the
@@ -4572,14 +4571,6 @@ func do_throw(h: int, hold: int) -> void:
 	var over_top := this_trick == TR_OVER
 	if h == RIGHT and pattern in [SHOWER, HALFSHOWER]:
 		over_top = true
-	if pattern == WFALL:
-		if h == RIGHT:
-			over_top = true
-		elif this_trick < 0:
-			# the other hand keeps the weave, but forced LOW (a ceiling, not a floor),
-			# so it visibly flows under the over-the-top side instead of drifting up
-			# to meet it when the player holds both hands about the same
-			air = mini(air, int(round(base_air + WATERFALL_LOW * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	elif pattern == RCASC:
 		over_top = true
 	elif pattern == TENNIS:
@@ -4587,10 +4578,14 @@ func do_throw(h: int, hold: int) -> void:
 			tennis_ball = b   # the marked ball: the first one thrown under the pattern
 		if b == tennis_ball:
 			over_top = true
+	if pattern == HALFSHOWER and h == LEFT and this_trick < 0:
+		# the weave side is capped LOW (a ceiling, not a floor - 2026-07-19, Louis:
+		# it still crossed the over-the-top road too often with only HALFSHOWER_MIN
+		# raising the high side's floor), so it visibly stays clear of the over-the-
+		# top road instead of drifting up to meet it when both hands are held similarly
+		air = mini(air, int(round(base_air + HALFSHOWER_LOW * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	if over_top:
 		var high_min := OVER_TOP_MIN
-		if pattern == WFALL and h == RIGHT:
-			high_min = maxf(high_min, WATERFALL_HIGH)
 		if h == RIGHT and pattern == SHOWER:
 			high_min = maxf(high_min, SHOWER_MIN)
 		elif h == RIGHT and pattern == HALFSHOWER:
@@ -4657,10 +4652,10 @@ func do_throw(h: int, hold: int) -> void:
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
 	# landing a touch wide of the usual catch point
 	# every weaving pattern crosses hands; only Fountain and Columns keep a ball
-	# with its own hand (Reverse Cascade, Waterfall and Tennis are all woven too -
-	# their over-the-top throws force cross below anyway, but the LOW half of a
-	# Waterfall and Tennis's unmarked balls also weave, so they cross here)
-	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER, RCASC, WFALL, TENNIS]
+	# with its own hand (Reverse Cascade and Tennis are woven too - their over-
+	# the-top throws force cross below anyway, but Tennis's unmarked balls also
+	# weave, so they cross here)
+	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER, RCASC, TENNIS]
 	if over_top:
 		cross = true
 	# an over-the-top throw never joins the lane bookkeeping (it is the breakout,
@@ -4834,7 +4829,7 @@ func pattern_order() -> Array:
 	# pattern indices in the order a typical career actually reaches them. Sorting
 	# by "lvl" alone (2026-07-18, a real bug: fixed here) was wrong: Shower, Reverse
 	# Cascade and Tennis all carry "lvl": 1 but are really gated behind venue 3/4/5,
-	# so they sorted ahead of Columns/Half Shower/Waterfall, which unlock far earlier
+	# so they sorted ahead of Columns/Half Shower, which unlock far earlier
 	# in real play on level/stat walls alone. Venue is the dominant, latest-clearing
 	# gate, so it sorts first; level breaks ties within the same venue. The array
 	# itself keeps indices 0..4 frozen for old saves, so display and the P cycle
@@ -5833,7 +5828,6 @@ func _migrate_lesson_id(id: String) -> String:
 	# replaced them. Every other id passes through untouched.
 	match id:
 		"trick_cols": return "pattern_columns"
-		"trick_wfall": return "pattern_wfall"
 		"trick_rcasc": return "pattern_rcasc"
 		"trick_tennis": return "pattern_tennis"
 	return id
@@ -5872,7 +5866,14 @@ func load_progress() -> void:
 		if bp is Array:
 			for i in mini((bp as Array).size(), best_scores_purist.size()):
 				best_scores_purist[i] = int((bp as Array)[i])
-		pattern_sel = clampi(int(cf.get_value("prog", "pattern_sel", CASCADE)), 0, PATTERNS.size() - 1)
+		var raw_pattern_sel := int(cf.get_value("prog", "pattern_sel", CASCADE))
+		if raw_pattern_sel == 6:
+			# migrate (2026-07-19): index 6 used to be Waterfall, removed and merged
+			# into Half Shower - a save with it selected keeps its closest surviving
+			# relative rather than silently landing on whatever now sits at index 6
+			# (Tennis, since everything after the removed slot shifted down by one)
+			raw_pattern_sel = HALFSHOWER
+		pattern_sel = clampi(raw_pattern_sel, 0, PATTERNS.size() - 1)
 		var cr: Variant = cf.get_value("prog", "career", {})
 		if cr is Dictionary:
 			for k in career:
@@ -8011,9 +8012,12 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 # small box and driven by atick() instead of player input - so it reads as
 # THIS pattern, not a generic bouncing-ball loop. It does not touch the real
 # `balls` / `pattern` state, so it is safe to animate from any screen.
-const PREV_OUTER_DX := 34.0   # local-space stand-in for outer_pos's 100px reach
-const PREV_INNER_DX := 18.0   # keeps outer_pos:inner_pos's ~100:54 ratio, scaled down
-const PREV_ARC_SCALE := 46.0  # px of peak arc height per 1.0 of a leg's "height" units
+const PREV_OUTER_DX := 38.0   # local-space stand-in for outer_pos's 100px reach
+const PREV_INNER_DX := 20.0   # keeps outer_pos:inner_pos's ~100:54 ratio, scaled down
+const PREV_ARC_SCALE := 42.0  # px of peak arc height per 1.0 of a leg's "height" units -
+							  # sized so even the tallest leg (1.7) stays inside the box,
+							  # see draw_pattern_preview's origin placement
+const PREV_ORIGIN_Y := 100.0  # baseline's distance down from the box's own top edge
 
 func preview_hand_point(is_outer: bool, hand: int) -> Vector2:
 	var dx := PREV_OUTER_DX if is_outer else PREV_INNER_DX
@@ -8026,38 +8030,43 @@ func preview_hand_point(is_outer: bool, hand: int) -> Vector2:
 # 3-ball cascade is one L->R/R->L cycle with 3 balls a third of a cycle apart). A leg is
 # [from_outer, from_hand, to_outer, to_hand, height, duration]; height/duration are
 # preview-only units, but their ORDER mirrors the real constants: SHOWER_FEED-style
-# low feeds are short and flat, a plain weave is the baseline, and an over-the-top leg
-# (OVER_TOP_MIN / SHOWER_MIN / HALFSHOWER_MIN / WATERFALL_HIGH territory) is the
-# tallest and longest-hanging.
+# low feeds are short and near-flat, a plain weave is the baseline, and an over-the-top
+# leg (OVER_TOP_MIN / SHOWER_MIN / HALFSHOWER_MIN territory) is the tallest and
+# longest-hanging. Durations are deliberately slow (2026-07-19, Louis: too fast to
+# read) - not a literal airtime match to any one throw height, just kept in the same
+# relative order the real do_throw rules use.
 func pattern_preview_tracks(p: int) -> Array:
-	var plain_weave := [[false, LEFT, true, RIGHT, 1.0, 0.42], [false, RIGHT, true, LEFT, 1.0, 0.42]]
+	var d_plain := 1.2   # a plain weave leg
+	var d_low := 0.75    # a fast, low feed (shortest hang)
+	var d_high := 1.7    # an over-the-top launch (longest hang)
+	var plain_weave := [[false, LEFT, true, RIGHT, 1.0, d_plain], [false, RIGHT, true, LEFT, 1.0, d_plain]]
 	match p:
 		FOUNTAIN:
 			# each hand keeps its own ball, an out-and-back loop with no crossing -
 			# literally "its own circle", per the pattern's own description
-			return [[[[false, LEFT, true, LEFT, 0.9, 0.4], [true, LEFT, false, LEFT, 0.9, 0.4]], 1],
-					[[[false, RIGHT, true, RIGHT, 0.9, 0.4], [true, RIGHT, false, RIGHT, 0.9, 0.4]], 1]]
+			return [[[[false, LEFT, true, LEFT, 0.9, d_plain], [true, LEFT, false, LEFT, 0.9, d_plain]], 1],
+					[[[false, RIGHT, true, RIGHT, 0.9, d_plain], [true, RIGHT, false, RIGHT, 0.9, d_plain]], 1]]
 		COLUMNS:
 			# a degenerate from==to leg: the real flight parabola alone (flight_pos)
 			# already draws a straight vertical bounce when the endpoints match
-			return [[[[false, LEFT, false, LEFT, 1.1, 0.5]], 1],
-					[[[false, RIGHT, false, RIGHT, 1.1, 0.5]], 1]]
+			return [[[[false, LEFT, false, LEFT, 1.1, d_plain]], 1],
+					[[[false, RIGHT, false, RIGHT, 1.1, d_plain]], 1]]
 		HALFSHOWER:
-			# left keeps the plain weave, right is fixed on the over-the-top road
-			return [[[[false, LEFT, true, RIGHT, 1.0, 0.42], [true, RIGHT, true, LEFT, 1.6, 0.6]], 3]]
+			# left is capped LOW (HALFSHOWER_LOW, 2026-07-19: it crossed the high road
+			# too often before this cap existed), right is fixed on the over-the-top road
+			return [[[[false, LEFT, true, RIGHT, 0.5, d_plain], [true, RIGHT, true, LEFT, 1.6, d_high]], 3]]
 		SHOWER:
-			# left is a fast low feed (SHOWER_FEED), right rides the full high circle
-			return [[[[false, LEFT, true, RIGHT, 0.5, 0.28], [true, RIGHT, true, LEFT, 1.7, 0.62]], 3]]
+			# left is a fast, near-horizontal feed (SHOWER_FEED); right rides the full
+			# high circle - the two hands' roles never swap, unlike Half Shower's weave
+			return [[[[false, LEFT, true, RIGHT, 0.08, d_low], [true, RIGHT, true, LEFT, 1.7, d_high]], 3]]
 		RCASC:
 			# both hands fixed over-the-top: the weave runs backward, outer to outer
-			return [[[[true, LEFT, true, RIGHT, 1.6, 0.6], [true, RIGHT, true, LEFT, 1.6, 0.6]], 3]]
-		WFALL:
-			# right fixed high over-the-top, left capped low so it flows beneath it
-			return [[[[false, LEFT, true, RIGHT, 0.35, 0.3], [true, RIGHT, true, LEFT, 1.8, 0.64]], 3]]
+			return [[[[true, LEFT, true, RIGHT, 1.6, d_high], [true, RIGHT, true, LEFT, 1.6, d_high]], 3]]
 		TENNIS:
-			# two balls run the plain weave; the third (its own track) is the one
-			# marked ball, over-the-top on every throw regardless of which hand
-			return [[plain_weave, 2], [[[true, LEFT, true, RIGHT, 1.6, 0.6], [true, RIGHT, true, LEFT, 1.6, 0.6]], 1]]
+			# two balls run the plain weave; the third (its own track) is the one marked
+			# ball - SAME duration as the plain weave (Louis: uniform spread, like a real
+			# cascade), only its height differs, so it reads as "the same rhythm, just higher"
+			return [[plain_weave, 2], [[[true, LEFT, true, RIGHT, 1.6, d_plain], [true, RIGHT, true, LEFT, 1.6, d_plain]], 1]]
 		_:
 			return [[plain_weave, 3]]   # CASCADE, and a safe fallback for anything new
 
@@ -8088,10 +8097,16 @@ func draw_pattern_preview(font: Font, box: Rect2, p: int) -> void:
 	draw_rect(box, Color(0.08, 0.05, 0.06, 0.75))
 	draw_rect(box, Color(0.9, 0.6, 0.35, 0.3), false, 1.0)
 	draw_string(font, box.position + Vector2(10.0, 16.0), "PREVIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.68, 0.58, 0.8))
-	var origin := box.position + Vector2(box.size.x * 0.5, box.size.y * 0.58)
+	var origin := box.position + Vector2(box.size.x * 0.5, PREV_ORIGIN_Y)
 	var t := atick() / 120.0
 	var ball_i := 0
 	var tracks := pattern_preview_tracks(p)
+	# PREV_ARC_SCALE/PREV_ORIGIN_Y are sized so nothing should ever reach the edge,
+	# but every ball's FINAL position is also hard-clamped inside the box (minus its
+	# own radius) as a guarantee, not just an assumption - a preview that ever drew
+	# outside its own frame would be worse than no preview at all
+	var lo := box.position + Vector2(6.0, 6.0)
+	var hi := box.position + box.size - Vector2(6.0, 6.0)
 	for ti in tracks.size():
 		var legs: Array = tracks[ti][0]
 		var n: int = tracks[ti][1]
@@ -8104,10 +8119,12 @@ func draw_pattern_preview(font: Font, box: Rect2, p: int) -> void:
 		for i in n:
 			var phase := t + total * float(i) / float(n)
 			var pos := origin + pattern_preview_ball_pos(legs, phase)
+			pos.x = clampf(pos.x, lo.x, hi.x)
+			pos.y = clampf(pos.y, lo.y, hi.y)
 			draw_circle(pos, 6.0, Color(1.0, 0.85, 0.3) if marked else ball_color(ball_i))
 			ball_i += 1
-	draw_string(font, origin + Vector2(-PREV_OUTER_DX - 10.0, 30.0), "L", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
-	draw_string(font, origin + Vector2(PREV_OUTER_DX - 10.0, 30.0), "R", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
+	draw_string(font, origin + Vector2(-PREV_OUTER_DX - 10.0, 26.0), "L", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
+	draw_string(font, origin + Vector2(PREV_OUTER_DX - 10.0, 26.0), "R", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
 
 
 func draw_skills(font: Font, s: Vector2) -> void:
@@ -8153,8 +8170,8 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# (which is the taller of the two) for room, and the offset is derived from
 	# nt/row_h rather than hardcoded, so it stays clear if TRICKS ever grows
 	if skills_sel >= nt:
-		var pbox_w := 168.0
-		var pbox_h := 132.0
+		var pbox_w := 176.0
+		var pbox_h := 150.0
 		var pbox_x := col_l + (colw - pbox_w) * 0.5
 		var pbox_y := y0 + float(nt) * row_h + 20.0
 		draw_pattern_preview(font, Rect2(pbox_x, pbox_y, pbox_w, pbox_h), pattern_order()[skills_sel - nt])
