@@ -434,13 +434,17 @@ const NUM_GOALS := 3
 # the first goal per venue. The whole phase lives or dies on these numbers, so
 # they were set against the --calib autoplayer sweep, not guessed: a flawless three-
 # ball cascade clears the Backyard's first goal and falls well short of the Championship.
-const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000]
+# The 7th entry (The Midnight Show, 2026-07-18) is a first guess extrapolating the
+# same growth trend, NOT yet calib-verified like the rest - it is genuinely new,
+# post-game content with no strong-player data behind it yet.
+const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000, 200000]
 const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
 const ANTE_STEP := 0.15               # each complete act at a venue raises its bar 15%
 # the crowd's patience bleeds this much per tick, per venue (120 ticks a second). At
 # the Backyard a still juggler loses the room in ~24s; at the World Arena in ~8. Every
 # Perfect catch pays ~0.05 back, so keeping the crowd is a matter of keeping juggling.
-const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092]
+# The 7th entry continues the established +0.00012-per-venue step exactly.
+const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092, 0.00104]
 const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
 const APPL_THROW_HEIGHT := 0.012      # a big throw excites the crowd: patience back, scaled by height
 # the crowd's patience economy, now that it is a CLOCK rather than decoration. The
@@ -555,7 +559,7 @@ var exhausted := false        # the collapse was caused by empty stamina: on ret
 # card shows is the one that actually ended the night.
 var fail_reason := ""
 var encore := -1              # index into ENCORES for this booking's third set, or -1
-var ante: Array[int] = [0, 0, 0, 0, 0, 0]   # complete acts per venue: the standing raised bar
+var ante: Array[int] = [0, 0, 0, 0, 0, 0, 0]   # complete acts per venue: the standing raised bar
 
 # progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
@@ -588,13 +592,13 @@ var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
 var last_rep_delta := 0   # reputation change from the last performance, for the results screen
 var run_venue := 0        # which venue this run was performed at (records key off this)
-var best_scores: Array[int] = [0, 0, 0, 0, 0, 0]  # best performance score per venue tier
+var best_scores: Array[int] = [0, 0, 0, 0, 0, 0, 0]  # best performance score per venue tier
 # --- the Purist ladder (GDD "Purist boards"): a performance booked as PURIST
 # strips every stat comfort from the catch maths (Accuracy read as a fresh
 # juggler's, no glasses, no Focus window, no Strength steadying), so its records
 # are pure skill. Separate per-venue bests, toggled per booking in the day hub.
 var purist := false
-var best_scores_purist: Array[int] = [0, 0, 0, 0, 0, 0]
+var best_scores_purist: Array[int] = [0, 0, 0, 0, 0, 0, 0]
 # --- the career ledger (persisted per slot): lifetime numbers behind the record
 # boards, shown on the RECORDS AND HISTORY screen reached from Settings
 var career := {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
@@ -889,9 +893,11 @@ func _ready() -> void:
 			strength = maxi(strength, int(BALL_GATES[MAX_BALLS_HARD]))   # every count open
 			prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], MAX_BALLS_HARD)   # balls are stock now
 			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
-		var vfi := ua.find("--venue")   # dev: play at venue N (0..5), so booking targets and
+		var vfi := ua.find("--venue")   # dev: play at venue N (0..6), so booking targets and
 		if vfi != -1 and vfi + 1 < ua.size():   # patience decay match that stage (calibration + shots)
-			var vn := clampi(int(ua[vfi + 1]), 0, TOP_VENUE)
+			var vn := clampi(int(ua[vfi + 1]), 0, MAX_VENUE)
+			if vn >= MAX_VENUE:
+				won = true   # The Midnight Show also gates on `won`, not Reputation alone
 			reputation = VENUE_REP[vn]
 			venue_pick = vn
 		var pfi := ua.find("--prop")    # dev: juggle prop N (0..5) with enough owned + Strength
@@ -1370,7 +1376,7 @@ func _input(event: InputEvent) -> void:
 			else:
 				cycle_pattern()   # step the juggling pattern (re-deals the hands)
 		KEY_F1:
-			if debug_mode: debug_jump_venue(0)   # debug: F1..F6 jump reputation to venues 1..6
+			if debug_mode: debug_jump_venue(0)   # debug: F1..F7 jump reputation to venues 1..7
 		KEY_F2:
 			if debug_mode: debug_jump_venue(1)
 		KEY_F3:
@@ -1381,6 +1387,8 @@ func _input(event: InputEvent) -> void:
 			if debug_mode: debug_jump_venue(4)
 		KEY_F6:
 			if debug_mode: debug_jump_venue(5)
+		KEY_F7:
+			if debug_mode: debug_jump_venue(6)   # The Midnight Show (also forces `won`)
 		KEY_ESCAPE:
 			open_pause()
 
@@ -1655,9 +1663,12 @@ func seg_name() -> String:
 
 
 func next_venue_rep() -> int:
-	# the Reputation the NEXT stage opens at, or 0 when the arena is yours
-	# (mirrors venue_index_of's ladder)
-	var steps := [100, 300, 700, 1500, 3000]
+	# the Reputation the NEXT stage opens at, or 0 when there is nowhere higher
+	# left to climb (mirrors venue_index_of's ladder). At the World Arena this
+	# names The Midnight Show's Reputation gate, though that stage also needs
+	# `won` - close enough as a hint (by the time Reputation alone gets there,
+	# a win is generally close behind).
+	var steps := [100, 300, 700, 1500, 3000, 6000]
 	var vi := venue_index()
 	return int(steps[vi]) if vi < steps.size() else 0
 
@@ -3336,8 +3347,8 @@ func reset_new_game() -> void:
 	xp = 0
 	points = 0
 	won = false
-	best_scores = [0, 0, 0, 0, 0, 0]
-	best_scores_purist = [0, 0, 0, 0, 0, 0]
+	best_scores = [0, 0, 0, 0, 0, 0, 0]
+	best_scores_purist = [0, 0, 0, 0, 0, 0, 0]
 	pattern_sel = CASCADE
 	purist = false
 	career = {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
@@ -3350,7 +3361,7 @@ func reset_new_game() -> void:
 	started = false
 	seen_tuts.clear()      # a fresh slot re-teaches everything from scratch
 	pending_tuts.clear()
-	ante = [0, 0, 0, 0, 0, 0]   # every venue back to its opening bar
+	ante = [0, 0, 0, 0, 0, 0, 0]   # every venue back to its opening bar
 	gifted.clear()              # a fresh slot earns (or is re-gifted) everything anew
 	perfs_since_unlock = 0
 	aid_pie_day = -1
@@ -5414,8 +5425,15 @@ func rep_tier() -> String:
 	return "Unknown"
 
 
-const VENUE_REP := [0, 100, 300, 700, 1500, 3000]   # reputation at each venue's door
-const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the game is won
+const VENUE_REP := [0, 100, 300, 700, 1500, 3000, 6000]   # reputation at each venue's
+														   # door; 6000 is also Legend,
+														   # rep_tier()'s top rank
+const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the game is won -
+						# UNCHANGED (2026-07-18): The Midnight Show is bonus content
+						# reachable only AFTER winning, never a new win condition
+const MAX_VENUE := 6   # the last real venue index (The Midnight Show); distinct from
+						# TOP_VENUE, which specifically means "the win venue" and must
+						# never move
 
 
 #endregion
@@ -5424,7 +5442,12 @@ const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the gam
 func debug_jump_venue(i: int) -> void:
 	# debug: leap up the ladder by setting Reputation to a venue's door, then land
 	# in the day so the higher stages can be played at once (no story to replay).
-	i = clampi(i, 0, TOP_VENUE)
+	# Clamps to MAX_VENUE, not TOP_VENUE (2026-07-18: those are no longer the same
+	# thing - The Midnight Show sits past the win venue), and forces `won` too,
+	# since venue 7 is gated on both.
+	i = clampi(i, 0, MAX_VENUE)
+	if i >= MAX_VENUE:
+		won = true
 	reputation = maxi(reputation, VENUE_REP[i])
 	venue_pick = i
 	save_progress()
@@ -5436,7 +5459,12 @@ func venue_index() -> int:
 
 
 func venue_index_of(rep: int) -> int:
-	# the stage you play grows as Reputation climbs, six rungs to the World Arena
+	# the stage you play grows as Reputation climbs, six rungs to the World Arena -
+	# The Midnight Show (2026-07-18) is a 7th, bonus rung on TOP of that: it asks
+	# BOTH Legend reputation AND `won` (Louis: post-game content, never reachable
+	# before the real win, however high reputation alone happens to climb)
+	if rep >= 6000 and won:
+		return MAX_VENUE
 	if rep >= 3000:
 		return 5
 	if rep >= 1500:
@@ -5475,9 +5503,18 @@ func venue_data(i: int) -> Dictionary:
 		4:
 			return {"name": "Championship", "glow": Color(0.55, 0.68, 0.95), "floor": Color(0.06, 0.07, 0.11), "spot": 0.07,
 				"suit": Color(0.20, 0.28, 0.52), "suit_dk": Color(0.13, 0.19, 0.38), "vest": Color(0.80, 0.84, 0.92), "collar": Color(0.90, 0.93, 0.98)}
-		_:
+		5:
 			return {"name": "World Arena", "glow": Color(0.78, 0.52, 0.96), "floor": Color(0.09, 0.06, 0.12), "spot": 0.08,
 				"suit": Color(0.42, 0.20, 0.55), "suit_dk": Color(0.28, 0.12, 0.40), "vest": Color(0.96, 0.82, 0.45), "collar": Color(0.98, 0.94, 0.86)}
+		_:
+			# The Midnight Show (2026-07-18): the bonus, post-game 7th stage - a
+			# genuinely DARK house (spot half of even the Backyard's, the dimmest
+			# of the original six) so the Glow-in-the-Dark Kit has somewhere it is
+			# actually worth wearing. The costume carries the whole theme: a suit
+			# that nearly vanishes into the dark, and a vest the same phosphor
+			# green as the Kit's own halo, so the performer visibly glows.
+			return {"name": "The Midnight Show", "glow": Color(0.35, 0.85, 0.55), "floor": Color(0.02, 0.04, 0.03), "spot": 0.015,
+				"suit": Color(0.08, 0.10, 0.09), "suit_dk": Color(0.04, 0.05, 0.045), "vest": Color(0.55, 0.95, 0.65), "collar": Color(0.75, 0.92, 0.8)}
 
 
 func cur_prop() -> Dictionary:
@@ -8323,7 +8360,7 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(lx, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
 	draw_string(font, Vector2(lx + 230.0, ly), "best", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.8, 0.74, 0.66))
 	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.82, 0.72, 0.85))
-	for i in 6:
+	for i in 7:
 		var ry := ly + 34.0 + float(i) * 38.0
 		var nm := String(venue_data(i)["name"])
 		var reached := i <= venue_index()
@@ -8767,7 +8804,8 @@ func venue_blurb(i: int) -> String:
 		2: return "a ticketed house  -  quiet, paying, and quietly exacting"
 		3: return "the big top  -  loud, vast, and hungry for spectacle"
 		4: return "a scored floor  -  judged on precision, never on flash"
-		_: return "the summit  -  no help left but your own two hands"
+		5: return "the summit  -  no help left but your own two hands"
+		_: return "no lights but yours  -  the crowd that stayed after the win"
 
 
 func draw_establish(font: Font, s: Vector2) -> void:

@@ -46,7 +46,13 @@ and deleted. History lives in git.
   colours the whole act, rolled per act from The Street up, never the Backyard.
 - **Records/pay/rep:** records are the act's score per venue (assisted and Purist
   boards). Pay scales with surviving score; rep swings on goals reached (0 of 3
-  loses rep). The WIN is a record at the World Arena.
+  loses rep). The WIN is a record at the World Arena - `TOP_VENUE` (5), which
+  must never move. **The Midnight Show** (2026-07-18) is a 7th, bonus venue past
+  it: gated on `won == true` AND Reputation 6000 (Legend), not reachable before
+  the real win. A genuinely dark stage (`spot` half the Backyard's, the previous
+  dimmest) built for the Glow-in-the-Dark Kit to actually matter in - the
+  performer's suit nearly vanishes, the vest glows the Kit's own phosphor green.
+  `MAX_VENUE` (6) is the real venue-count ceiling now, distinct from `TOP_VENUE`.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter).
@@ -107,7 +113,9 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   the goal numbers enforce some of this; validate with --calib per prop/count.
 - **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST -
   makes Blackout's dark stretch a faint colour halo instead of fully invisible,
-  see `draw_glow_in_dark` / `has_glow_kit`); player/prop skins beyond it still open.
+  see `draw_glow_in_dark` / `has_glow_kit`), and so is The Midnight Show, the
+  bonus post-game venue it's really for (see the Records/pay/rep bullet above);
+  player/prop skins beyond those two still open.
 - **Settings depth:** Music/Sound are volume sliders now (not just on/off);
   separate per-channel sliders (catch/crowd/ambient) and difficulty presets
   alongside hard-mode collisions still open.
