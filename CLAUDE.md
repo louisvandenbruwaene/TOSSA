@@ -81,7 +81,9 @@ and deleted. History lives in git.
   Controls screen; `--capsule` renders pure key-art (no UI) for Steam store
   assets - capture at native 1280x720 (`--shot <path> --shotat 30`), then
   `sips --cropToHeightWidth 706 1232 <path>` for a distortion-free 2x Main
-  Capsule, `sips -z 353 616 <path>` to the real 616x353. Windowed
+  Capsule, `sips -z 353 616 <path>` to the real 616x353; `--glow` owns the
+  Glow-in-the-Dark Kit for the session (no save touched) - pair with
+  `--booking --encore blackout` to screenshot it. Windowed
   `--shot <path> --shotat <frame>` captures a frame.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
   identifiers, not just syntax).
@@ -103,10 +105,16 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 - **Rep pressure by difficulty:** make high venues effectively demand heavy props /
   high counts (Louis: "near impossible to unlock high venues with only 3 balls") -
   the goal numbers enforce some of this; validate with --calib per prop/count.
-- **Cosmetics:** player/prop skins, the Glow-in-the-Dark set (a visual challenge).
-- **Settings depth:** separate audio sliders (catch/crowd/ambient), difficulty
-  presets alongside hard-mode collisions.
-- **Steam:** Steamworks integration, capsule art. Deferred: slow-mo shader polish.
+- **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST -
+  makes Blackout's dark stretch a faint colour halo instead of fully invisible,
+  see `draw_glow_in_dark` / `has_glow_kit`); player/prop skins beyond it still open.
+- **Settings depth:** Music/Sound are volume sliders now (not just on/off);
+  separate per-channel sliders (catch/crowd/ambient) and difficulty presets
+  alongside hard-mode collisions still open.
+- **Steam:** capsule art is built (`--capsule` dev flag, see Verification workflow
+  below). Steamworks integration (achievements, cloud saves, real leaderboards off
+  the Purist boards) still needs Louis's own Partner account + App ID - not
+  something buildable without those credentials. Deferred: slow-mo shader polish.
 - **Later/maybe:** multiplayer, cross-platform saves, training-room variety,
   stage-specific music, costumes.
 
