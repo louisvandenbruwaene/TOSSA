@@ -151,10 +151,12 @@ const NUM_SLOTS := 3
 const SAVE_PATH_DEBUG := "user://iacto_debug.cfg"  # debug build: separate progress
 const SAVE_PATH_DEMO := "user://iacto_demo.cfg"     # --demo/--shot autoplay: never a real career save
 const SETTINGS_PATH := "user://iacto_settings.cfg" # global options, shared by slots
-const POINTS_PER_LEVEL := 3
+const POINTS_PER_LEVEL := 3   # base stat points per level-up; level_up() adds +level/12
+							  # on top (CLAUDE.md's "3 + level/12"), so this is only the floor
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
 							  # max-height throw always still demands a real catch
-const STAM_DRAIN_CATCH := 0.4
+const STAM_DRAIN_CATCH := 0.4 # flat stamina price of a catch, scaled by energy_mult()
+							  # and prop weight (mirrors a throw's own PROPS "stam" rate)
 # (throws price by the prop's flat "stam" rate in PROPS now, not a global const)
 const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
 const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
@@ -176,7 +178,8 @@ const START_GOLD := 100       # a fresh juggler starts with a small purse (ideas
 const ACC_CAP := 250              # Accuracy trains to 250, so Focus reaches 150
 const STR_CAP := 200              # Strength and Endurance climb to 200 now (Louis: the
 const END_CAP := 200              # late game runs deep) - same per-point effects, just
-								  # a longer road; the 8-11 ball gates live up here
+								  # a longer road; the 8-15 ball gates live up here (see
+								  # BALL_GATES, HAND GEOMETRY & BALL SLOTTING region)
 const MASTERY_GOLD := 250         # once EVERY stat is capped, each level-up point turns
 								  # to gold instead: the crowd pays for mastery itself
 const FOCUS_STAM_FLOOR := 0.25    # stamina-cost multiplier once Focus hits 100
@@ -413,7 +416,8 @@ const TUT_FLOW_HOLD := 10      # ticks a GUIDED step lingers on its win before f
 const TUT_PACES: Array[float] = [0.5, 0.25, 0.15, 0.0]
 const TUT_PACE_STREAK := 4     # clean catches in a row that earn the next notch down
 const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
-							   # and brighten (at 62% slow that is about two real seconds)
+							   # and brighten (at the 50% slow cap, SLOW_TOTAL_CAP, that
+							   # is about 1.5 real seconds)
 const SPIN_CATCH_MULT := 2.0       # every catch during a Spin scores double
 const SPIN_ACC_PENALTY := 0.28     # a Spin lowers the off-Perfect catch chance (juggling blind)
 
@@ -440,9 +444,10 @@ const NUM_GOALS := 3
 const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000, 200000]
 const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
 const ANTE_STEP := 0.15               # each complete act at a venue raises its bar 15%
-# the crowd's patience bleeds this much per tick, per venue (120 ticks a second). At
-# the Backyard a still juggler loses the room in ~24s; at the World Arena in ~8. Every
-# Perfect catch pays ~0.05 back, so keeping the crowd is a matter of keeping juggling.
+# the crowd's patience bleeds this much per tick, per venue (120 ticks a second),
+# draining from the 0.7 an act starts at. At the Backyard a still juggler (no
+# catches, pure decay) loses the room in ~17s; at the World Arena in ~6. Every
+# Perfect catch pays ~0.014 back, so keeping the crowd is a matter of keeping juggling.
 # The 7th entry continues the established +0.00012-per-venue step exactly.
 const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092, 0.00104]
 const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
@@ -732,25 +737,28 @@ var set_collide := false  # hard mode: props that clack mid-air become nearly
 						  # uncatchable (half the Perfect window, no chance roll).
 						  # A PERFECT pattern never collides, so this only ever
 						  # punishes sloppy heights that share air.
-var set_music := 1.0      # the procedural adaptive soundtrack's volume, 0..1 (was a bool)
+var set_music := 1.0      # the music tracks' shared volume, 0..1 (was a bool)
 var set_sfx := 1.0        # catch/throw/drop sound effects' volume, 0..1 (was a bool)
 var set_fullscreen := false  # borderless fullscreen (also toggled live with F11)
 
-# --- procedural audio (code-only, ART_AND_MUSIC.md): pre-rendered PCM buffers,
-# adaptive music by volume-automating looping layers. See setup_audio().
+# --- procedural SFX (code-only): pre-rendered PCM buffers synthesised at startup,
+# then just played (see setup_audio, gen_sfx). Music, below, is NOT procedural.
 const AUDIO_SR := 22050
 var _audio_ready := false
 var sfx: Dictionary = {}            # name -> AudioStreamWAV one-shot
 var sfx_pool: Array = []            # AudioStreamPlayer round-robin for one-shots
 var _sfx_next := 0
-# the game's music is Louis's own recorded track (the second deliberate exception
-# to the code-only art rule, alongside the font). One looping stream, and the game
-# rides its VOLUME per state: full while a performance cooks, easy in menus, a
-# hush under cutscenes, a dip on a drop. All in-game SFX stay procedural.
-# SHIP BLOCKER (see ART_AND_MUSIC.md Section 7): this file is a free-tier Suno
-# render, non-commercial only, until Louis re-renders it under a paid Suno
-# subscription and replaces this file under the same name. Do not release a
-# build to anyone outside personal testing while this warning is still here.
+# the game's music is Louis's own two recorded tracks (the second deliberate
+# exception to the code-only art rule, alongside the font), not synthesised. Two
+# looping streams, and the game rides their VOLUME per state: the driving track
+# from the moment the stage door opens (ST_ESTABLISH onward) through a whole
+# performance, the calmer Chill Trio mix everywhere else (menus, day hub,
+# results), a dip on a drop (see audio_update, _duck). All in-game SFX stay
+# procedural.
+# SHIP BLOCKER: this file is a free-tier Suno render, non-commercial only, until
+# Louis re-renders it under a paid Suno subscription and replaces this file under
+# the same name. Do not release a build to anyone outside personal testing while
+# this warning is still here.
 const MUSIC_PATH := "res://Juggling Game.mp3"
 # a second track (Louis) for every non-juggling moment - menus, the day hub, the
 # establishing cards, results. The two crossfade: the driving track only while you
@@ -764,7 +772,7 @@ var _main_silent := true   # the stage track sits at zero gain: restart it from 
 						   # (its opening bars) the next time the handover brings it in
 var _duck := 0.0                    # transient music dip on a drop, decays
 
-# the game's one typeface (ART doc 6): Nunito at a steady semibold weight, warm
+# the game's one typeface: Nunito at a steady semibold weight, warm
 # and humane with clear numerals. The single .ttf in fonts/ is the one deliberate
 # exception to the code-only art rule. Falls back to the engine font if missing.
 var ui_font: Font = null
