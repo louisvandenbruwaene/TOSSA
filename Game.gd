@@ -778,7 +778,7 @@ var _duck := 0.0                    # transient music dip on a drop, decays
 var ui_font: Font = null
 
 # previous-frame button states, for edge detection
-var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false, "cycle": false}
+var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
 
 # key-DOWN taps captured straight from the event stream (see _latch_tap). A press
 # and release that both fall inside one physics tick are invisible to the state
@@ -3220,8 +3220,8 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 
 #region DAY-HUB PURCHASES (PIE / GLASSES)
 func try_buy_pie() -> void:
-	# Uncle Dan's Pie: a bought minute of slow-motion clarity, eaten in the day
-	# hub to arm the next session (ideas.rtf: a temporary stimulant)
+	# Uncle Dan's Pie: bought slow-motion clarity, eaten in the day hub to arm
+	# the next session - lasts the WHOLE DAY, until sleep clears it (PIE_COST)
 	if money < PIE_COST:
 		play_sfx("whiff", -10.0)
 		return
@@ -3688,7 +3688,7 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, refy, 150.0, Color(0.82, 0.62, 0.34, 0.6))
 	draw_string(font, Vector2(0, refy + 22.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.95, 0.8, 0.55, 0.9))
 	draw_string(font, Vector2(0, refy + 46.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      -  =  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      1  2  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
 	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Tab switch device    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -3709,7 +3709,6 @@ func seed_input_edges() -> void:
 	_prev["lt"] = Input.is_physical_key_pressed(K_LT) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER))
 	_prev["rt"] = Input.is_physical_key_pressed(K_RT) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER))
 	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, PAD_TRICK))
-	_prev["cycle"] = Input.is_physical_key_pressed(K_CYCLE)
 	# drop any tap latched on a previous screen, so it cannot fire on frame one
 	for name in _tap:
 		_tap[name] = false
@@ -3736,6 +3735,10 @@ func _read_inputs() -> void:
 		p_lt = Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER)
 		p_rt = Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER)
 		p_tk = Input.is_joy_button_pressed(dev, PAD_TRICK)
+		# _trig's "lt"/"rt" name the physical LEFT/RIGHT TRIGGER, unlike every other
+		# "lt"/"rt" in this file (K_LT, _prev["lt"], p_lt above) which mean left/right
+		# THROW - a deliberate but easy-to-misread key reuse, since these two feed
+		# p_lc/p_rc (CATCH) right below, not the throw edges
 		_trig["lt"] = _trig_held("lt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT))
 		_trig["rt"] = _trig_held("rt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT))
 	else:
@@ -3770,8 +3773,7 @@ func _read_inputs() -> void:
 	_edge("rc", k_rc or p_rc, RIGHT, true)
 	_edge("rt", k_rt or p_rt, RIGHT, false)
 	# trick CYCLING is event-driven, not polled (see _pad_to_key / K_CYCLE): a
-	# discrete press, keyboard or pad, steps it. This flag is unused by that path.
-	_prev["cycle"] = false
+	# discrete press, keyboard or pad, steps it - _read_inputs never touches it
 
 
 func pad_dev() -> int:
@@ -4003,9 +4005,11 @@ func catch_slot(h: int) -> int:
 
 
 # where an over-the-top throw COMES DOWN on hand t, and the one rule that keeps the high
-# road clear of the low weave. Hand t has three fixed slots: OUTER (its normal catch, dx
-# 104), INNER (its normal throw, dx 58), VERY_INNER (dx 24). An over-the-top landing must
-# avoid every OTHER thing that occupies a slot on t, so it takes a slot nothing else uses.
+# road clear of the low weave. Hand t has two fixed slots: OUTER (its normal catch,
+# dx 100 - see outer_pos) and INNER (its normal throw, dx 54 - see inner_pos). An
+# over-the-top landing must avoid whichever of the two t's OWN throw already uses,
+# so it takes the other one (a third slot, VERY_INNER, existed once for an older
+# Columns implementation - see throw_slot's own note - but is long gone now).
 # A geometric guarantee, not a tuned gap, holding at any cadence and for patterns not yet
 # written (Phase 5).
 #
@@ -4107,7 +4111,7 @@ func count_air_scale() -> float:
 	# the tap-height FLOOR scales with the load: 3-4 balls stay snappy and low, but five
 	# and up must fly higher just to have air to weave in, so even a tap lofts a big load
 	# enough to juggle. ~+45% airtime at six matches a real six-ball fountain's hold; the
-	# 8-11 late-game loads keep climbing the same curve.
+	# 8-15 late-game loads keep climbing the same curve.
 	if num_balls >= 5:
 		return 1.3 + 0.15 * float(num_balls - 5)
 	return 1.0
