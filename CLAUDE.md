@@ -78,7 +78,11 @@ and deleted. History lives in git.
   robot's score; `--booking` runs a real act end to end and prints `ACT ...` on
   resolve; `--tutorial <id>` jumps into a lesson (the demo walks lessons end to end,
   miming Enter/R/P); `--remap` (add `--pad` for the gamepad column) opens the
-  Controls screen. Windowed `--shot <path> --shotat <frame>` captures a frame.
+  Controls screen; `--capsule` renders pure key-art (no UI) for Steam store
+  assets - capture at native 1280x720 (`--shot <path> --shotat 30`), then
+  `sips --cropToHeightWidth 706 1232 <path>` for a distortion-free 2x Main
+  Capsule, `sips -z 353 616 <path>` to the real 616x353. Windowed
+  `--shot <path> --shotat <frame>` captures a frame.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
   identifiers, not just syntax).
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
