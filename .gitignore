@@ -12,3 +12,7 @@ export/linux/
 
 # dev screenshot captures
 shot*.png
+
+# generated reference docs (not source - a formulas/mechanics writeup, kept
+# local for Louis, not tracked)
+IACTO_mechanics_reference.pdf

@@ -253,8 +253,12 @@ const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
 const MODE_PERFORM := 1   # on stage: Applause meter, energy cost, and pay
 const MIN_BALLS := 3
-const MAX_BALLS_HARD := 11   # the late game runs deep: 8-11 objects live in the
-							 # raised Strength band (100..200), for masters only
+const MAX_BALLS_HARD := 15   # the late game runs deep (2026-07-18: raised from 11 -
+							 # Louis wanted more room once throws stopped ballooning
+							 # past the intended height cap): 8-15 objects live in the
+							 # raised Strength band (100..200), for masters only. 15
+							 # itself lands exactly at STR_CAP - the ultimate object
+							 # count is also the "you've maxed Strength" milestone.
 
 # --- props / objects (GDD 2.7, 4.6; ideas.rtf object table) -------------------
 # Each prop has a weight (heavier = more stamina and more inaccuracy) and a
@@ -1338,37 +1342,21 @@ func _input(event: InputEvent) -> void:
 			if not performing:
 				start_run(num_balls)
 		# ([ and ] used to step the count too, but they are unreachable on AZERTY
-		# and other layouts (Louis: "they don't work, nor should they") - the
-		# number keys 3-7 are the one way to set the load, live or fresh
-		KEY_3:
-			if performing: set_count_live(3)
-			else: start_run(3)
-		KEY_4:
-			if performing: set_count_live(4)
-			else: start_run(4)
-		KEY_5:
-			if performing: set_count_live(5)
-			else: start_run(5)
-		KEY_6:
-			if performing: set_count_live(6)
-			else: start_run(6)
-		KEY_7:
-			if performing: set_count_live(7)
-			else: start_run(7)
-		KEY_8:
-			if performing: set_count_live(8)
-			else: start_run(8)
-		KEY_9:
-			if performing: set_count_live(9)
-			else: start_run(9)
-		KEY_0:
-			# the number row runs out at nine, so 0 reads as ten and the key right
-			# of it as eleven (physical positions, so every layout has them)
-			if performing: set_count_live(10)
-			else: start_run(10)
+		# and other layouts (Louis: "they don't work, nor should they"). ONE key
+		# per count (3-9, 0, minus) worked up to eleven, but ran out of number row
+		# at fifteen (2026-07-18: the cap rose after the throw-height clamp made
+		# room for more objects) - Minus/Equal STEP the count by one instead, the
+		# same physical keys either side of the old number row, so old muscle
+		# memory ("the keys past the numbers change the count") still roughly
+		# holds even though the exact keys and the one-key-per-count property
+		# are both gone. Both target functions clamp to [3, max_balls()] on their
+		# own, so stepping past either end is always a safe no-op, not an error.
 		KEY_MINUS:
-			if performing: set_count_live(11)
-			else: start_run(11)
+			if performing: set_count_live(num_balls - 1)
+			else: start_run(num_balls - 1)
+		KEY_EQUAL:
+			if performing: set_count_live(num_balls + 1)
+			else: start_run(num_balls + 1)
 		KEY_O:
 			# switch the object either way: live during a performance (re-skins the
 			# props in play, keeps the run), or with a fresh deal in practice
@@ -1445,6 +1433,14 @@ func _pad_to_key(btn: int) -> int:
 		JOY_BUTTON_START:
 			# Start also pauses inside play, the one habit every pad player has
 			return KEY_ESCAPE if game_state == ST_PLAY else -1
+		JOY_BUTTON_BACK:
+			# the load-count step keys (2026-07-18): a pad previously had NO way at
+			# all to change the count. Back/R3 were the two guaranteed-universal
+			# buttons left unclaimed (every bumper/trigger/face button/dpad
+			# direction/L3 already means something else in Louis's layout).
+			return KEY_MINUS if game_state == ST_PLAY else -1
+		JOY_BUTTON_RIGHT_STICK:
+			return KEY_EQUAL if game_state == ST_PLAY else -1
 	return -1
 
 
@@ -3032,7 +3028,7 @@ func draw_tut_legend(font: Font, s: Vector2) -> void:
 		[[String(k_trick()[0])], "trick", "one flourish  -  %s picks which" % String(k_cycle()[0])],
 		[[String(k_pattern()[0])], "pattern", "the routine you juggle"],
 		[[String(k_object()[0])], "object", "balls, rings, clubs, torches"],
-		[["3-9"], "how many", "props to juggle, live or fresh"],
+		[k_count(), "how many", "props to juggle, live or fresh"],
 		[[String(k_restart()[0])], "restart", "re-deal  -  practice only, never on stage"],
 		[[String(k_shop()[0])], "the shop", "buy props and gear"],
 		[[String(k_sheet()[0])], "your skills", "the sheet  -  spend your points"],
@@ -3608,7 +3604,7 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, refy, 150.0, Color(0.82, 0.62, 0.34, 0.6))
 	draw_string(font, Vector2(0, refy + 22.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.95, 0.8, 0.55, 0.9))
 	draw_string(font, Vector2(0, refy + 46.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      3 to 7  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      -  =  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
 	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Tab switch device    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -3997,9 +3993,12 @@ func ball_color(i: int) -> Color:
 # -----------------------------------------------------------------------------
 
 # the Strength each ball count asks for, indexed by count (3 is free). The first
-# rungs sit in the old 0..100 band; 8-11 climb the raised band toward the 200 cap,
-# so the late game keeps earning new loads long after the World Arena.
-const BALL_GATES := {4: 9, 5: 15, 6: 23, 7: 33, 8: 60, 9: 90, 10: 125, 11: 165}
+# rungs sit in the old 0..100 band; 8-15 climb the raised band toward the 200 cap,
+# so the late game keeps earning new loads long after the World Arena. 12-15 added
+# 2026-07-18 (Louis, after the throw-height clamp made room for more objects):
+# the last few rungs close in tight on STR_CAP, so 15 objects is earned at almost
+# exactly a maxed Strength stat, not before it.
+const BALL_GATES := {4: 9, 5: 15, 6: 23, 7: 33, 8: 60, 9: 90, 10: 125, 11: 165, 12: 175, 13: 183, 14: 191, 15: 200}
 
 
 func max_balls() -> int:
@@ -7021,6 +7020,17 @@ func k_cycle() -> Array[String]:
 	return [OS.get_keycode_string(K_CYCLE)]
 
 
+func k_count() -> Array[String]:
+	# the load-count step keys (down, then up): not one of the six remappable
+	# actions, so not remap-aware, only device-aware. Minus/Equal on keyboard
+	# (2026-07-18: replaced one-key-per-count, which ran out of number row once
+	# the cap passed eleven); Back/R3 on a pad, which previously had no way at
+	# all to change the count mid-performance.
+	if pad_active():
+		return ["Back", "R3"]
+	return ["-", "="]
+
+
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
 	# a small keyboard-key box; returns its width so hints can chain
 	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0)
@@ -7176,9 +7186,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var tl := "PRACTICE" + ("   -   DEBUG" if debug_mode else "")
 		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.72, 0.82, 0.9))
 		draw_string(font, Vector2(LX + 14, 60), "no crowd, no pay", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
-		# the count keys, said once here (the number row runs 3..9, then 0 is ten and
-		# the key right of it eleven); the bottom-left card counts the load itself
-		draw_string(font, Vector2(LX + 14, 78), "3 - 9 set the count   (0 is ten, - eleven)", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
+		# the count keys, said once here; the bottom-left card counts the load itself
+		draw_string(font, Vector2(LX + 14, 78), "%s  %s  step the count" % [String(k_count()[0]), String(k_count()[1])], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
 		if nb > 0:
 			draw_string(font, Vector2(LX + 14, 94), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
 
