@@ -63,12 +63,23 @@ and deleted. History lives in git.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter).
 - **Skills screen:** every trick and pattern, whether it's yours yet, and the exact
-  keys that pull it off. A selected PATTERN (2026-07-18) also gets a live PREVIEW box
-  (`draw_pattern_preview`): a small self-looping schematic built from the pattern's
-  real inner/outer hand points and relative throw-height rules (see
-  `pattern_preview_tracks`), not a real sim and not hooked to the live `balls`/`pattern`
-  state - safe to animate from any screen. `--skills` dev flag opens it for a
-  screenshot.
+  keys that pull it off. A selected PATTERN (2026-07-18, slowed and tightened
+  2026-07-19) also gets a live PREVIEW box (`draw_pattern_preview`): a small self-
+  looping schematic built from the pattern's real inner/outer hand points and
+  relative throw-height rules (see `pattern_preview_tracks`), not a real sim and not
+  hooked to the live `balls`/`pattern` state - safe to animate from any screen. Every
+  ball position is hard-clamped inside the box as a guarantee, not just sized to fit.
+  `--skills [N]` dev flag opens it for a screenshot, optionally selecting entry N.
+- **Patterns, current roster (2026-07-19):** Cascade, Fountain (a genuinely different
+  throw, not "cascade at 4 balls" - it doesn't cross, unlike Cascade; the auto-switch
+  by ball-count parity in `start_run`/`cycle_pattern` is deliberate and unchanged),
+  Columns, Half Shower, Shower, Reverse Cascade, Tennis. **Waterfall was removed**
+  (Louis: identical to Half Shower) - `PATTERNS` shrank from 8 to 7 entries and
+  `TENNIS` shifted from index 7 to 6; `load_progress` migrates an old save's
+  `pattern_sel == 6` (used to mean Waterfall) to Half Shower rather than letting it
+  silently become whatever now sits at that index. Half Shower's own weave side is
+  now capped LOW (`HALFSHOWER_LOW`, 0.2) - it still crossed the over-the-top road too
+  often with only `HALFSHOWER_MIN` raising the high side's floor.
 - **Tutorial (the basics):** two guided call-and-response steps at 50% slowmo, then
   freestyle 1 ball, 2 balls (forced cascade so throws cross), then the finale: ten
   consecutive juggling catches of the 3-ball cascade at genuine full speed. The pace
@@ -93,7 +104,7 @@ and deleted. History lives in git.
   skill gated on the venue only: Street=Behind the Back, Theatre=Spin, Circus=Shower,
   Championship=Reverse Cascade, World Arena=Tennis. Composite level/stat walls fill
   the stretches between (High Toss lvl 3, Columns lvl4/acc8, Overthrow lvl6/str10,
-  Half Shower lvl8/acc12/ven1, Waterfall lvl11/str14/ven2). The REWARD DIRECTOR
+  Half Shower lvl8/acc12/ven1). The REWARD DIRECTOR
   (enter_day) gifts the nearest walled skill after 6 acts without any unlock, leaves
   a pie for a broke player (one per day), and buys one once-per-career meal when
   broke and spent.
@@ -134,6 +145,10 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 ## Still open (from ideas.rtf and the old docs, worth doing)
 
 - **Teaching lessons as income** (mastered skills earn gold/rep as a day action).
+- **A crossed even-count trick** (Louis, 2026-07-19, tentative - "perhaps"): a way to
+  juggle an even ball count with Cascade-style crossing throws instead of Fountain's
+  natural same-hand pattern, maybe by borrowing the throw rhythm of count-1 or
+  count+1. Not designed or built - needs real shape/balance work first.
 - **Eating eggs** (+10 stamina food that doubles as a risky scoring prop).
 - **Rep pressure by difficulty:** make high venues effectively demand heavy props /
   high counts (Louis: "near impossible to unlock high venues with only 3 balls") -
