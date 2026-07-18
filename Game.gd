@@ -289,6 +289,13 @@ const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling: pri
 								# not a minor bonus on an already-full curve
 const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
 
+# the Glow-in-the-Dark Kit (2026-07-18, late-game gold sink - Louis: nothing left
+# to spend an "immense" late purse on): a cosmetic that is also a genuine mercy on
+# Blackout, so it is worth the price rather than a pure vanity flex. Priced well
+# past Glasses (the previous capstone) - a build with real gold to spare late is
+# exactly who this is for.
+const GLOW_KIT_COST := 60000
+
 # input map (physical keycodes; a real remap layer comes with the options menu)
 # the six remappable actions (physical keycodes, persisted in the settings
 # file). Defaults are the classic DFJK spread plus Space and C. The Controls
@@ -567,6 +574,7 @@ var prop_type := PROP_BALLS  # the object being juggled this run
 # consumed permanently when dropped; durable props are not.
 var prop_count: Array[int] = [0, 0, 0, 0, 0, 0]
 var has_glasses := false  # bought gear: raises the catch chance
+var has_glow_kit := false # bought gear: props keep a faint glow through Blackout
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
@@ -617,7 +625,7 @@ var shop_open := false
 # so a pad player can spend points and buy props). The number keys remain the fast path
 # on a keyboard; arrows move the gold highlight and Enter (pad A) acts on it.
 var sheet_sel := 0        # 0..3 across the four stat cards
-var shop_sel := 0         # 0..5 the prop cards, 6 glasses, 7 the pie
+var shop_sel := 0         # 0..5 the prop cards, 6 glasses, 7 the pie, 8 the Glow Kit
 var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
 var skills_sel := 0        # which entry the Skills reference has expanded
 var debug_mode := false   # debug build: free stat editing in the character sheet
@@ -931,6 +939,8 @@ func _ready() -> void:
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
 		if ua.has("--collide"):     # dev: force the hard-collisions toggle ON this session
 			set_collide = true
+		if ua.has("--glow"):        # dev: own the Glow Kit this session, for Blackout shots
+			has_glow_kit = true
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -2005,37 +2015,39 @@ func sheet_input(kc: int) -> void:
 
 func shop_buy_sel() -> void:
 	# Enter (pad A) acts on whichever card the cursor lights: a prop, the glasses,
-	# or the pie - the same purchases the number keys reach directly
+	# the pie, or the Glow Kit - the same purchases the number keys reach directly
 	if shop_sel <= 5:
 		try_buy(shop_sel)
 	elif shop_sel == 6:
 		try_buy_glasses()
-	else:
+	elif shop_sel == 7:
 		try_buy_pie()
+	else:
+		try_buy_glow_kit()
 
 
 func shop_input(kc: int) -> void:
 	# the shop's keys, shared by the play overlay and the day hub. The number on
-	# each card is its buy key: 1-6 the props (balls included), 7 glasses, 8 pie.
-	# Arrows (dpad, stick) walk the cards - left/right along a row, up/down between
-	# the prop row and the gear row - and Enter buys the lit one, so a pad shops
-	# as freely as the keyboard. A number key also pulls the cursor onto its card.
+	# each card is its buy key: 1-6 the props (balls included), 7 glasses, 8 pie,
+	# 9 the Glow Kit. Arrows (dpad, stick) walk the cards - left/right along a row,
+	# up/down between the six-card prop row and the three-card gear row (each pair
+	# of prop columns hops to the gear card below it) - and Enter buys the lit
+	# one, so a pad shops as freely as the keyboard. A number key also pulls the
+	# cursor onto its card.
 	match kc:
 		KEY_TAB, KEY_ESCAPE, KEY_S:
 			shop_open = false
 		KEY_LEFT:
-			shop_sel = (shop_sel + 7) % 8
+			shop_sel = (shop_sel + 8) % 9
 			play_sfx("ui", -15.0)
 		KEY_RIGHT:
-			shop_sel = (shop_sel + 1) % 8
+			shop_sel = (shop_sel + 1) % 9
 			play_sfx("ui", -15.0)
 		KEY_DOWN, KEY_UP:
-			# hop between the six-card prop row and the two-card gear row, landing
-			# on whichever gear/prop card sits nearest the cursor's column
 			if shop_sel <= 5:
-				shop_sel = 6 if shop_sel <= 2 else 7
+				shop_sel = 6 + shop_sel / 2   # props 0-1/2-3/4-5 -> gear 6/7/8
 			else:
-				shop_sel = 1 if shop_sel == 6 else 4
+				shop_sel = (shop_sel - 6) * 2   # gear 6/7/8 -> props 0/2/4
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
@@ -2063,6 +2075,9 @@ func shop_input(kc: int) -> void:
 		KEY_8:
 			shop_sel = 7
 			try_buy_pie()
+		KEY_9:
+			shop_sel = 8
+			try_buy_glow_kit()
 
 
 func skills_input(kc: int) -> void:
@@ -3151,6 +3166,18 @@ func try_buy_glasses() -> void:
 	play_sfx("money", -6.0)
 
 
+func try_buy_glow_kit() -> void:
+	if has_glow_kit or money < GLOW_KIT_COST:
+		return
+	if not confirm_spend("glow_kit", GLOW_KIT_COST, true):
+		return
+	money -= GLOW_KIT_COST
+	has_glow_kit = true
+	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -6.0)
+
+
 # -----------------------------------------------------------------------------
 # Game flow: main menu, save slots, settings, cutscenes.
 # -----------------------------------------------------------------------------
@@ -3308,6 +3335,7 @@ func reset_new_game() -> void:
 	prop_count = [3, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
 	prop_type = PROP_BALLS
 	has_glasses = false
+	has_glow_kit = false
 	level = 1
 	xp = 0
 	points = 0
@@ -5669,6 +5697,7 @@ func load_progress() -> void:
 		prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], 3)
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
 		has_glasses = bool(cf.get_value("stats", "glasses", false))
+		has_glow_kit = bool(cf.get_value("stats", "glow_kit", false))
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
@@ -5742,6 +5771,7 @@ func save_progress() -> void:
 	cf.set_value("stats", "prop_count", prop_count)
 	cf.set_value("stats", "prop_type", prop_type)
 	cf.set_value("stats", "glasses", has_glasses)
+	cf.set_value("stats", "glow_kit", has_glow_kit)
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
@@ -6615,6 +6645,11 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 				if bp > 0.68:
 					if b.kind == PROP_TORCHES:
 						draw_flame_in_dark(flight_pos(b))
+					elif has_glow_kit:
+						# the Glow-in-the-Dark Kit's mercy: a faint colour-matched halo, not
+						# the full shape and not the trail - still meaningfully harder than
+						# normal play, just never fully gone
+						draw_glow_in_dark(flight_pos(b), b.color)
 					continue
 			draw_trail(b)
 			var pos := flight_pos(b)
@@ -6682,6 +6717,19 @@ func draw_flame_in_dark(pos: Vector2) -> void:
 	draw_colored_polygon(PackedVector2Array([
 		pos + Vector2(-2.5, -5), pos + Vector2(2.5, -5), pos + Vector2(0, -12.0 * fl),
 	]), Color(1.0, 0.85, 0.4, 0.32))
+
+
+func draw_glow_in_dark(pos: Vector2, col: Color) -> void:
+	# the Glow-in-the-Dark Kit's mercy (2026-07-18): a faint colour-matched halo
+	# tracking the prop through Blackout's dark stretch - no shape, no trail, just
+	# enough presence that the position stays honest. Genuinely harder than normal
+	# play (you're still reading a smear of light, not a prop), genuinely kinder
+	# than pure Blackout (never fully gone). The pulse rate is offset by x so a
+	# whole load of glowing props doesn't flicker in lockstep.
+	var fl := 0.7 + 0.3 * sin(float(tick) * 0.4 + pos.x * 0.05)
+	draw_circle(pos, 15.0, Color(col.r, col.g, col.b, 0.09 * fl))
+	draw_circle(pos, 5.5, Color(col.r, col.g, col.b, 0.32 * fl))
+	draw_circle(pos, 1.8, Color(1.0, 1.0, 1.0, 0.35 * fl))
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
@@ -7675,42 +7723,50 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(cx0, y0 + 196.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
 		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
 
-	# ---------------- GEAR: two wide cards ----------------
+	# ---------------- GEAR: three narrow cards (2026-07-18: was two wide cards,
+	# grew a third slot for the Glow-in-the-Dark Kit - a wide horizontal layout
+	# had no room left for a third item's description, so gear now uses the same
+	# narrow vertical template the prop cards above already prove works) ----------------
 	var gy := y0 + ch + 30.0
 	draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
-	var gw := (innerw - gap) / 2.0
-	var gh := 104.0
+	var gw := (innerw - gap * 2.0) / 3.0
+	var gh := 160.0
 	var gy0 := gy + 14.0
-	# glasses
-	var gr := Rect2(tx, gy0, gw, gh)
-	hud_card(gr, Color(0.72, 0.86, 0.96, 0.4))
-	if shop_sel == 6:
-		draw_rect(Rect2(gr.position.x - 4.0, gr.position.y - 4.0, gr.size.x + 8.0, gr.size.y + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
-	var gcc := Color(0.72, 0.86, 0.96)
-	draw_arc(Vector2(tx + 40.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, gcc, 2.5, true)
-	draw_arc(Vector2(tx + 68.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, gcc, 2.5, true)
-	draw_line(Vector2(tx + 52.0, gy0 + 40.0), Vector2(tx + 56.0, gy0 + 40.0), gcc, 2.5)
-	draw_string(font, Vector2(tx + 96.0, gy0 + 36.0), "Glasses", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.88, 0.6))
-	draw_string(font, Vector2(tx + 96.0, gy0 + 58.0), "sharper sight: a better chance on", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	draw_string(font, Vector2(tx + 96.0, gy0 + 74.0), "off-Perfect catches", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	if has_glasses:
-		draw_string(font, Vector2(gr.position.x, gy0 + 58.0), "OWNED", HORIZONTAL_ALIGNMENT_RIGHT, gw - 24.0, 18, Color(0.6, 0.9, 0.6))
-	else:
-		draw_price_plate(font, Rect2(tx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "7", "%s g" % commafy(GLASSES_COST), money >= GLASSES_COST)
-	# Uncle Dan's Pie
-	var pxx := tx + gw + gap
-	hud_card(Rect2(pxx, gy0, gw, gh), Color(0.9, 0.62, 0.3, 0.4))
-	if shop_sel == 7:
-		draw_rect(Rect2(pxx - 4.0, gy0 - 4.0, gw + 8.0, gh + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
-	var pc := Color(0.9, 0.62, 0.3)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(pxx + 30.0, gy0 + 52.0), Vector2(pxx + 74.0, gy0 + 52.0), Vector2(pxx + 52.0, gy0 + 24.0)]), pc)
-	draw_line(Vector2(pxx + 30.0, gy0 + 52.0), Vector2(pxx + 74.0, gy0 + 52.0), Color(0.6, 0.36, 0.16), 4.0)
-	draw_string(font, Vector2(pxx + 96.0, gy0 + 36.0), "Uncle Dan's Pie", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.88, 0.6))
-	draw_string(font, Vector2(pxx + 96.0, gy0 + 58.0), "a whole day of slow, clear time -", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	draw_string(font, Vector2(pxx + 96.0, gy0 + 74.0), "eaten in the day hub, ends at sleep", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-	draw_string(font, Vector2(pxx, gy0 + 20.0), "own %d" % pie_count, HORIZONTAL_ALIGNMENT_RIGHT, gw - 16.0, 12, Color(0.75, 0.9, 0.72) if pie_count > 0 else Color(0.6, 0.55, 0.5, 0.8))
-	draw_price_plate(font, Rect2(pxx + gw - 170.0, gy0 + gh * 0.5 - 20.0, 156.0, 40.0), "8", "%s g" % commafy(PIE_COST), money >= PIE_COST)
+	var gear_names: Array[String] = ["Glasses", "Uncle Dan's Pie", "Glow-in-the-Dark Kit"]
+	var gear_desc: Array[String] = ["a better chance on off-Perfect catches",
+		"a whole day of slow, clear time", "props keep a faint glow through Blackout"]
+	var gear_accent := [Color(0.72, 0.86, 0.96), Color(0.9, 0.62, 0.3), Color(0.65, 0.95, 0.55)]
+	var gear_owned := [has_glasses, false, has_glow_kit]
+	var gear_count := [0, pie_count, 0]     # only the Pie is a stock item
+	var gear_cost := [GLASSES_COST, PIE_COST, GLOW_KIT_COST]
+	for i in 3:
+		var cx0 := tx + float(i) * (gw + gap)
+		var cc: Color = gear_accent[i]
+		hud_card(Rect2(cx0, gy0, gw, gh), Color(cc.r, cc.g, cc.b, 0.4))
+		if shop_sel == 6 + i:
+			draw_rect(Rect2(cx0 - 4.0, gy0 - 4.0, gw + 8.0, gh + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
+		var icx := cx0 + gw * 0.5
+		match i:
+			0:   # Glasses: two lens arcs and a bridge
+				draw_arc(Vector2(icx - 14.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, cc, 2.5, true)
+				draw_arc(Vector2(icx + 14.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, cc, 2.5, true)
+				draw_line(Vector2(icx - 2.0, gy0 + 40.0), Vector2(icx + 2.0, gy0 + 40.0), cc, 2.5)
+			1:   # Pie: a wedge with a crust line
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(icx - 22.0, gy0 + 52.0), Vector2(icx + 22.0, gy0 + 52.0), Vector2(icx, gy0 + 24.0)]), cc)
+				draw_line(Vector2(icx - 22.0, gy0 + 52.0), Vector2(icx + 22.0, gy0 + 52.0), Color(0.6, 0.36, 0.16), 4.0)
+			_:   # Glow Kit: the exact halo it buys, so the card IS a preview
+				draw_circle(Vector2(icx, gy0 + 40.0), 15.0, Color(cc.r, cc.g, cc.b, 0.22))
+				draw_circle(Vector2(icx, gy0 + 40.0), 8.0, Color(cc.r, cc.g, cc.b, 0.6))
+				draw_circle(Vector2(icx, gy0 + 40.0), 2.5, Color(1.0, 1.0, 1.0, 0.8))
+		draw_string(font, Vector2(cx0, gy0 + 74.0), gear_names[i], HORIZONTAL_ALIGNMENT_CENTER, gw, 17, Color(1.0, 0.88, 0.6))
+		_wrap_text(font, gear_desc[i], cx0 + 10.0, gy0 + 94.0, gw - 20.0, 11, Color(0.75, 0.68, 0.6))
+		if bool(gear_owned[i]):
+			draw_string(font, Vector2(cx0, gy0 + gh - 30.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, 16, Color(0.6, 0.9, 0.6))
+		else:
+			if int(gear_count[i]) > 0:
+				draw_string(font, Vector2(cx0, gy0 + 18.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
+			draw_price_plate(font, Rect2(cx0 + 12.0, gy0 + gh - 46.0, gw - 24.0, 38.0), str(7 + i), "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
 	# ---------------- footer: warnings, then the keys ----------------
 	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
@@ -7720,7 +7776,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			[[["Stick"], "choose"], [k_finish(), "buy"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "8"], "quick buy"], [["Tab"], "leave"]])
+			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "9"], "quick buy"], [["Tab"], "leave"]])
 
 
 #endregion
