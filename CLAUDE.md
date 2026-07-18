@@ -43,7 +43,10 @@ and deleted. History lives in git.
   hold them (the empty air ends the act). A collapse (crowd empties, drop limit,
   or empty stamina) strips the score back to the last goal reached, and the player
   is told the ONE real reason they failed. One optional CHALLENGE (ENCORES deck)
-  colours the whole act, rolled per act from The Street up, never the Backyard.
+  colours the whole act, rolled per act from The Street up, never the Backyard
+  (`roll_encore`). "For the Danger" (only clubs/knives/torches score) is further
+  excluded below The Circus AND unless a qualifying prop is actually owned -
+  it must never land on a player who cannot yet score anything under it.
 - **Records/pay/rep:** records are the act's score per venue (assisted and Purist
   boards). Pay scales with surviving score; rep swings on goals reached (0 of 3
   loses rep). The WIN is a record at the World Arena - `TOP_VENUE` (5), which
