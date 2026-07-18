@@ -45,8 +45,9 @@ and deleted. History lives in git.
   is told the ONE real reason they failed. One optional CHALLENGE (ENCORES deck)
   colours the whole act, rolled per act from The Street up, never the Backyard
   (`roll_encore`). "For the Danger" (only clubs/knives/torches score) is further
-  excluded below The Circus AND unless a qualifying prop is actually owned -
-  it must never land on a player who cannot yet score anything under it.
+  excluded below The Circus AND unless a qualifying prop is owned in MIN_BALLS
+  (3) quantity - owning a single club is not enough to switch to and juggle it,
+  so it must never land on a player who cannot yet field a real routine under it.
 - **Records/pay/rep:** records are the act's score per venue (assisted and Purist
   boards). Pay scales with surviving score; rep swings on goals reached (0 of 3
   loses rep). The WIN is a record at the World Arena - `TOP_VENUE` (5), which
@@ -65,6 +66,17 @@ and deleted. History lives in git.
   ladder TUT_PACES [0.5, 0.25, 0.15, 0.0] steps faster every 4 clean catches and
   back up on a drop. Enter appears ONLY between freestyle steps and always adds a
   ball. Trick/pattern/prop/count lessons queue at the hub's LEARN row on unlock.
+  **Lesson UI (2026-07-18):** a small top card carries only the kind tag, the
+  step's one-line title, and progress - the old two-line paragraph is gone from
+  the live HUD. Throw/catch keys are bare letters over each hand (`draw_tut_key`
+  via `draw_tut_prompts`, unboxed, no change from Louis's original approve). A
+  key with no hand of its own - trick/pattern/restart - reads off the live sim
+  (`tut_action_cue`) and shows in the same bordered-keycap slot as the Enter
+  callout, dead centre at the bottom (`draw_tut_special_cue`). A "live" trick
+  (Spin) only ever appears there when pressing it would actually fire - enough
+  balls airborne AND off cooldown - which is what fixed "I press Space, it
+  doesn't recognise": the old prompt was baked into the step text with no check
+  against on_trick()'s own gate.
 - **Unlocks (reward design):** never XP alone. Each new stage guarantees one arrival
   skill gated on the venue only: Street=Behind the Back, Theatre=Spin, Circus=Shower,
   Championship=Reverse Cascade, World Arena=Tennis. Composite level/stat walls fill

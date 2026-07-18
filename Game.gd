@@ -1591,14 +1591,15 @@ func roll_encore(venue: int) -> int:
 	# knives/torches score), which needs a floor of its own (2026-07-18, Louis: it
 	# rolled before he could even afford a club, so the act was unscoreable start to
 	# finish). It is now excluded from the pool below The Circus (venue 3) AND unless
-	# the player actually owns at least one qualifying prop - a venue alone does not
-	# guarantee that, someone could reach it having spent their gold elsewhere.
+	# the player owns ENOUGH of a qualifying prop to actually field the smallest real
+	# routine - MIN_BALLS (3), not just one (Louis caught this: owning a single club
+	# is not enough to switch to and juggle it at all, let alone score with it).
 	if venue < 1:
 		return -1
 	var pool: Array[int] = []
 	for i in ENCORES.size():
 		if String(ENCORES[i]["id"]) == "fire" and (venue < 3 \
-				or (have(PROP_CLUBS) <= 0 and have(PROP_KNIVES) <= 0 and have(PROP_TORCHES) <= 0)):
+				or (have(PROP_CLUBS) < MIN_BALLS and have(PROP_KNIVES) < MIN_BALLS and have(PROP_TORCHES) < MIN_BALLS)):
 			continue
 		pool.append(i)
 	if pool.is_empty():
@@ -2921,18 +2922,20 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var step := tut_step_data()
 	var steps := tut_lesson(tut_id)
 	draw_tut_prompts(font, s, step)   # a timing ring + bare handed key over the hands, no boxes
-	# the ONE rectangle at the top (Louis): the lesson kind, text and progress. Everything
-	# else lives along the bottom, so the centre - where the props fly - stays clear.
-	var bw := s.x * 0.72
+	# a SMALL rectangle at the top (2026-07-18, Louis: "not above and below, out of
+	# vision, long texts of what to do - that is bad design"): the lesson kind, its
+	# one-line title, and progress only. The old two-line "sub" paragraph explaining
+	# WHY is gone from the live HUD entirely - what to press right now belongs dead
+	# centre instead, drawn below by draw_tut_special_cue off tut_action_cue().
+	var bw := s.x * 0.6
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := 24.0
-	draw_rect(Rect2(bx, by, bw, 118.0), Color(0.05, 0.03, 0.05, 0.86))
-	draw_rect(Rect2(bx, by, bw, 118.0), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
+	var bh := 64.0
+	draw_rect(Rect2(bx, by, bw, bh), Color(0.05, 0.03, 0.05, 0.86))
+	draw_rect(Rect2(bx, by, bw, bh), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
 	var kind_col := Color(1.0, 0.72, 0.4) if tut_id.begins_with("trick_") else (Color(0.65, 0.85, 1.0) if tut_id.begins_with("pattern_") else Color(0.85, 0.75, 0.6))
-	draw_string(font, Vector2(bx, by + 20.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_CENTER, bw, 12, kind_col)
-	draw_string(font, Vector2(bx, by + 46.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 22, Color(1.0, 0.9, 0.6))
-	draw_multiline_string(font, Vector2(bx + 20.0, by + 70.0), String(step["sub"]),
-		HORIZONTAL_ALIGNMENT_CENTER, bw - 40.0, 14, 2, Color(0.9, 0.85, 0.78))
+	draw_string(font, Vector2(bx, by + 18.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_CENTER, bw, 12, kind_col)
+	draw_string(font, Vector2(bx, by + 42.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 20, Color(1.0, 0.9, 0.6))
 	# the progress line flips to the GOOD JOB state once the goal is met: the step
 	# stays fully playable, and Enter is the player's own "I am done trying" (Louis).
 	# A guided step never says it - it is already flowing on by itself - and a read
@@ -2941,7 +2944,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var flow := bool(step.get("flow", false))
 	if done and not flow and String(step["goal"]) != "read":
 		var ga := 0.75 + 0.25 * sin(atick() * 0.1)
-		draw_string(font, Vector2(bx, by + 108.0), "GOOD JOB  -  you got it", HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.72, 0.95, 0.7, ga))
+		draw_string(font, Vector2(bx, by + 58.0), "GOOD JOB  -  you got it", HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.72, 0.95, 0.7, ga))
 	elif not done:
 		var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
 		if int(step["need"]) > 1 and String(step["goal"]) == "catch":
@@ -2950,11 +2953,11 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 			# The finale is plainer still: its ten only run at the pace ladder's floor,
 			# so until then the label says what the catches are actually buying.
 			if bool(step.get("finale", false)) and tut_pace < TUT_PACES.size() - 1:
-				prog += "        world at %d%% slow  -  clean catches reach full speed" % int(round(TUT_PACES[tut_pace] * 100.0))
+				prog += "   -   %d%% slow, clean catches speed it up" % int(round(TUT_PACES[tut_pace] * 100.0))
 			else:
 				var lbl := "at full speed" if bool(step.get("finale", false)) else ("juggled in a row" if bool(step.get("juggle", false)) else "caught")
-				prog += "        %s  %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
-		draw_string(font, Vector2(bx, by + 108.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.8, 0.75, 0.68))
+				prog += "   -   %s %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
+		draw_string(font, Vector2(bx, by + 58.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 12, Color(0.8, 0.75, 0.68))
 	# the controls that actually WORK in a lesson, always, along the very bottom - plus
 	# the lesson's own key (trick / pattern) so every command the game has gets its
 	# moment of attention in the lesson that owns it (Louis)
@@ -2969,10 +2972,11 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	items.append([k_restart(), "restart"])
 	items.append([k_pause(), "game menu"])
 	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
-	# ONE shout slot above the key row, and exactly one thing may hold it - a screen that
-	# asks for two keys at once has asked for neither. Enter wins whenever it is live,
-	# because the whole point of the rework is that it stops being missable; otherwise it
-	# goes to whatever the step wants pressed right now.
+	# ONE cue slot, and exactly one thing may hold it - a screen that asks for two keys
+	# at once has asked for neither. Enter wins whenever it is live, because the whole
+	# point of its own callout is that it stops being missable; otherwise the centred
+	# keycap (Louis: dead centre, not a sentence at either edge) names whatever the
+	# live sim wants pressed right now.
 	if done and flow:
 		# the beat a guided step takes on its win before flowing to the next call: the
 		# win, and nothing else. Naming the next key here (the cue would, the ball being
@@ -2981,10 +2985,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	elif done:
 		draw_tut_enter_callout(font, s, step, tut_step >= steps.size() - 1)
 	else:
-		var cue := tut_cue(step)
-		if cue != "":
-			var pa := 0.62 + 0.38 * (0.5 + 0.5 * sin(atick() * 0.13))
-			draw_text_shout(font, Vector2(0, s.y - 68.0), cue, HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(1.0, 0.72, 0.4, pa))
+		draw_tut_special_cue(font, s, tut_action_cue(step))
 	if String(step["goal"]) == "read":
 		draw_tut_legend(font, s)
 	# trick feedback ("HIGH TOSS ON", or the lesson's gentle no-trick-here guidance)
@@ -2994,49 +2995,57 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		draw_text_shout(font, Vector2(s.x * 0.5 - 200, s.y - 128.0), trick_msg, HORIZONTAL_ALIGNMENT_CENTER, 400, 17, Color(1.0, 0.88, 0.55, ta))
 
 
-func tut_cue(step: Dictionary) -> String:
-	# the ONE key the lesson wants pressed right now, named in words. A guided step reads
-	# it off the LIVE sim rather than off the step, and that is what lets a single step
-	# say "press J" and then "press D - NOW" as the ball crosses (Louis). It also means
-	# a dropped ball simply starts the call over: the cue follows the ball, so it can
-	# never end up asking for a catch that is not coming.
+func tut_action_cue(step: Dictionary) -> Dictionary:
+	# THE one button that has no hand of its own - trick, pattern, restart - so it gets
+	# no home among the bare per-hand keys draw_tut_prompts already draws over every
+	# throw/catch, in every lesson (2026-07-18, Louis, second pass: those were already
+	# "central" enough - over the hands, bare, no box - and just wanted nudging a
+	# little further off the hands, not replacing). This is the disconnect that broke
+	# the Spin lesson: "press SPACE now" used to be baked straight into the step text
+	# with no check against whether the press would do anything. The "live" branch
+	# below asks on_trick()'s own two questions - enough in the air, not cooling down
+	# - before ever naming Space, so the game can no longer promise a press it would
+	# then silently refuse.
 	var goal := String(step["goal"])
-	if String(step.get("prompt", "")) == "trick":
-		return "press %s now  -  once" % String(k_trick()[0])
 	if goal == "press_p":
-		return "press %s now  -  once" % String(k_pattern()[0])
+		return {"key": String(k_pattern()[0]), "label": "pattern"}
 	if goal == "press_r":
-		return "press %s now" % String(k_restart()[0])
-	if not bool(step.get("guide", false)):
-		return ""   # freestyle: the floating keys over the hands guide, nothing shouts
-	# PRIORITY (2026-07-18, Louis, twice now - "it should ALWAYS say throw before
-	# catch if there is a ball left in the hand, only THEN should it say how to
-	# catch"): a held ball wins, full stop, no exception for an urgent-looking
-	# catch. The first fix still let an imminent catch preempt a pending throw,
-	# which was closer but not what Louis actually asked for - the whole guided
-	# call-and-response is scripted tight enough that a ball only ever becomes
-	# imminent AFTER the step's throws are done, so this ordering never strands a
-	# real catch: it only ever fires while a throw is still owed.
-	for hh: int in [LEFT, RIGHT]:
-		if not stack(hh).is_empty():
-			return "press %s" % String(k_throw()[hh])
-	for b in balls:
-		if b.state != STATE_FLIGHT:
-			continue
-		var h := clampi(b.to_hand, 0, 1)
-		var d := b.land_tick - tick
-		if absi(d) <= perfect_window():
-			return "press %s  -  NOW" % String(k_catch()[h])
-	# nothing urgent and no hand holds anything left to throw: a ball is still climbing
-	# or crossing, so name it early, well before its own window
-	for b in balls:
-		if b.state != STATE_FLIGHT:
-			continue
-		var h := clampi(b.to_hand, 0, 1)
-		var d := b.land_tick - tick
-		if d > 0:
-			return "it is coming to your %s hand  -  catch with %s" % ["LEFT" if h == LEFT else "RIGHT", String(k_catch()[h])]
-	return ""
+		return {"key": String(k_restart()[0]), "label": "restart"}
+	if String(step.get("prompt", "")) == "trick":
+		var ti: int = int(step.get("trick", trick_sel))
+		if ti >= 0 and ti < TRICKS.size():
+			var t: Dictionary = TRICKS[ti]
+			if String(t["kind"]) == "live":
+				if balls_airborne() >= int(t["min_air"]) and tick >= trick_ready:
+					return {"key": String(k_trick()[0]), "label": "%s  -  now" % String(t["name"]).to_upper()}
+				return {}   # not ready: the per-hand keys are already naming the catch/throw that gets there
+			var lbl := "switch on" if goal == "trick_on" else ("switch off" if goal == "trick_off" else "trick")
+			return {"key": String(k_trick()[0]), "label": lbl}
+	return {}
+
+
+func draw_tut_special_cue(font: Font, s: Vector2, cue: Dictionary) -> void:
+	# Space / P / R belong to neither hand, so they get the same central bottom slot
+	# and bordered-keycap look as the Enter callout below (Louis, 2026-07-18: "the
+	# space button should be where the enter now button is, nice and central") - the
+	# two never show at once, since this only runs while the step is NOT yet done.
+	if String(cue.get("key", "")) == "":
+		return
+	var label := String(cue.get("label", ""))
+	var pulse := 0.5 + 0.5 * sin(atick() * 0.13)
+	var fs := 19
+	var cap := String(cue["key"])
+	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 18.0
+	var total := cw + 14.0 + lw
+	var bh := float(fs) + 16.0
+	var bx := s.x * 0.5 - total * 0.5
+	var by := s.y - 96.0
+	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(0.16, 0.10, 0.04, 0.88))
+	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(1.0, 0.72, 0.4, 0.45 + 0.45 * pulse), false, 2.0)
+	draw_rect(Rect2(bx, by + 6.0, cw, bh - 12.0), Color(1.0, 0.72, 0.4, 0.82 + 0.18 * pulse))
+	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, fs, Color(0.12, 0.07, 0.03))
+	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.93, 0.72))
 
 
 func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool) -> void:
@@ -3166,7 +3175,7 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		var hp: Vector2 = hpos[h]
 		draw_timing_ring(hp, soonest[h])
 		var urg := 1.0 - float(soonest[h]) / float(lead)
-		draw_tut_key(font, hp + Vector2(0.0, -44.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
+		draw_tut_key(font, hp + Vector2(0.0, -60.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
 		catching[h] = true
 	# throw: the bare throw key over EVERY hand holding a ball, all lesson long (Louis:
 	# the keys are shown every single time, never assumed learned). It brightens when
@@ -3185,7 +3194,7 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		# the follow-up throw read as optional there too.
 		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT) \
 			or bool(step.get("guide", false)) or String(step.get("prompt", "")) == "trick"
-		draw_tut_key(font, hpos[hh] + Vector2(0.0, -44.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
+		draw_tut_key(font, hpos[hh] + Vector2(0.0, -60.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
 #endregion
