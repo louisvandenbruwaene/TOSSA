@@ -62,6 +62,13 @@ and deleted. History lives in git.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter).
+- **Skills screen:** every trick and pattern, whether it's yours yet, and the exact
+  keys that pull it off. A selected PATTERN (2026-07-18) also gets a live PREVIEW box
+  (`draw_pattern_preview`): a small self-looping schematic built from the pattern's
+  real inner/outer hand points and relative throw-height rules (see
+  `pattern_preview_tracks`), not a real sim and not hooked to the live `balls`/`pattern`
+  state - safe to animate from any screen. `--skills` dev flag opens it for a
+  screenshot.
 - **Tutorial (the basics):** two guided call-and-response steps at 50% slowmo, then
   freestyle 1 ball, 2 balls (forced cascade so throws cross), then the finale: ten
   consecutive juggling catches of the 3-ball cascade at genuine full speed. The pace
