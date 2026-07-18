@@ -6235,6 +6235,11 @@ func draw_backdrop(s: Vector2) -> void:
 	var glow: Color = v["glow"]
 	var floor_c: Color = v["floor"]
 	var spot: float = v["spot"]
+	# `spot` only scales SOME of what follows (the cone and the light pool's spot*0.9
+	# term); the floor lip's 0.10 baseline and the footlights below keep a small fixed
+	# glow regardless of venue, so even the Midnight Show's near-zero spot (0.015)
+	# reads as a dim, softly-lit dark rather than pitch black - a deliberately gentle
+	# floor, not a bug, but worth knowing if a venue is ever asked to go fully dark.
 
 	# a warm vertical gradient behind everything gives the stage depth instead of a
 	# flat black void (the biggest single "cheap look" fix on the play screen)
@@ -6350,7 +6355,7 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				draw_banner(Vector2(bx, s.y * 0.06), Color(0.3, 0.5, 0.9))
 			draw_rect(Rect2(s.x * 0.36, s.y * 0.04, s.x * 0.28, 8.0), Color(0.6, 0.8, 1.0, 0.10))
 			draw_stars(s, 14, 0.3)
-		_:   # world arena: a vast bowl of warm crowd-lights and roaming beams
+		5:   # world arena: a vast bowl of warm crowd-lights and roaming beams
 			for i in 110:
 				var seed := float(i) * 17.7
 				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x
@@ -6366,6 +6371,22 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var perp := Vector2(-dir.y, dir.x) * 30.0
 				draw_colored_polygon(PackedVector2Array([src, src + dir * 900.0 + perp, src + dir * 900.0 - perp]),
 					Color(glow.r, glow.g, glow.b, 0.05))
+		_:   # The Midnight Show (2026-07-18) and anything past it: the SAME procedural
+			# placement as the World Arena above (same seed formula, so the two still
+			# feel like kin), but a scattered handful of lights and no roaming search
+			# beams - venue_data's spot (0.015, half the Backyard's) and near-black suit
+			# already ask for a genuinely dark house, and reusing the World Arena's full
+			# 110-light bowl wholesale here (the old catch-all, before this arm existed)
+			# undercut that: a bonus venue built to make the Glow-in-the-Dark Kit matter
+			# was reading exactly as bright as the venue it is the reward for beating.
+			for i in 18:
+				var seed := float(i) * 17.7
+				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x
+				var y := fy - 30.0 - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.34
+				if absf(x - s.x * 0.5) < s.x * 0.17 and y > s.y * 0.3:
+					continue   # keep the juggling window clear
+				var a := 0.10 + 0.16 * sin(atick() * 0.05 + seed)
+				draw_circle(Vector2(x, y), 1.4, Color(1.0, 0.82, 0.52, clampf(a, 0.02, 0.24)))
 
 
 func draw_theatre_wings(s: Vector2, fy: float) -> void:
@@ -6622,6 +6643,11 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 	draw_circle(elbow, 7.0, sleeve)                    # elbow joint
 
 
+# two-bone IK: places the elbow so it sits exactly l1 from shoulder a and l2 from
+# hand b, by treating a/b/elbow as a triangle and solving it with the law of
+# cosines (x = how far along a->b the elbow's foot falls, hgt = its perpendicular
+# height off that line). `bend` (+1/-1) picks which side of the a->b line the
+# elbow bows to, since the triangle alone has two mirror-image solutions.
 func solve_elbow(a: Vector2, b: Vector2, l1: float, l2: float, bend: float) -> Vector2:
 	var ab := b - a
 	var dist := clampf(ab.length(), 0.001, l1 + l2 - 0.001)
@@ -7332,7 +7358,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
 		if pts_row:
 			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  Tab" % [points, "" if points == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
+			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360:
@@ -7357,7 +7383,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if not started:
 			var verb := "perform" if performing else "practise"
 			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
-			var tnames := "( L2 or R2 )" if pad_active() else "( %s or %s )" % [OS.get_keycode_string(K_LT), OS.get_keycode_string(K_RT)]
+			# k_throw(), not a hand-typed label: a pad throws with the BUMPERS (LB/RB),
+			# and "L2/R2" (this used to read, wrongly - trigger-style names, which are
+			# the CATCH buttons) would have sent a pad player's fingers to the wrong pair
+			var kt := k_throw()
+			var tnames := "( %s or %s )" % [kt[0], kt[1]]
 			draw_text_shout(font, Vector2(0, s.y * 0.22), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
 			draw_text_shout(font, Vector2(0, s.y * 0.22 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
@@ -8112,7 +8142,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 
 
 # -----------------------------------------------------------------------------
-# Menu, save-slot, settings, and cutscene screens.
+# Menu, save-slot, settings, and misc screens.
 # -----------------------------------------------------------------------------
 
 #endregion
@@ -8126,7 +8156,10 @@ func draw_day(font: Font, s: Vector2) -> void:
 	draw_venue_exterior(s, play_venue())
 	ext_center = false
 	# the hub darkens as the day's segments burn: DAY is open, NIGHT draws in,
-	# DEEP NIGHT is nearly black and plainly the moment to sleep
+	# DEEP NIGHT is nearly black and plainly the moment to sleep. seg_used runs
+	# 0..SEG_PER_DAY (4 values for 3 named phases, see seg_name): the 4th entry
+	# is "all segments spent", which just repeats DEEP NIGHT's darkness rather
+	# than going darker still - there is nowhere further for the hub to dim to.
 	var seg_dark: float = [0.0, 0.16, 0.32, 0.32][clampi(seg_used, 0, 3)]
 	if seg_dark > 0.0:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.01, 0.01, 0.04, seg_dark))
@@ -8134,7 +8167,10 @@ func draw_day(font: Font, s: Vector2) -> void:
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
-	# header: which day it is and how much of it is left, as three little diamonds
+	# header: which day it is, and how much of it is left told two ways below -
+	# the seg_name() label (daylight / night / deep night) and the hub's own
+	# background darkening (seg_dark, just above); the ornament here is only the
+	# plain divider used under every screen title, not a segment counter
 	draw_title_glow(font, s.y * 0.055, "DAY %d" % day, 40, Color(1.0, 0.88, 0.5), s)
 	draw_string(font, Vector2(0, s.y * 0.055 + 66.0), seg_name(), HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.8, 0.62))
 	draw_ornament(s.x * 0.5, s.y * 0.055 + 86.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
@@ -8582,11 +8618,13 @@ func draw_stats(font: Font, s: Vector2) -> void:
 
 
 # =============================================================================
-# Procedural audio (ART_AND_MUSIC.md, code-only rule). Every sound is synthesised
-# in code into an AudioStreamWAV at startup, then just played, so there is no
-# per-frame synthesis cost. Music is "adaptive" by volume-automating three
-# looping layers (a static pad drone, a bass that enters when you juggle, and an
-# arpeggio that swells with Applause) plus a crowd murmur bed.
+# Audio. The SFX below are all synthesised in code into an AudioStreamWAV at
+# startup (gen_sfx, setup_audio), then just played, so there is no per-frame
+# synthesis cost. Music is NOT synthesised: it is two of Louis's own Suno MP3
+# loops (MUSIC_PATH "juggling", MUSIC_PATH_CHILL "chill", both loaded and
+# looping from setup_audio) that audio_update volume-automates and staged-
+# crossfades between - see the _mix walk there. No crowd-murmur bed; that idea
+# was cut (2026-07-18) in favour of zero ambient noise and tonal stingers only.
 # =============================================================================
 
 #endregion
@@ -8640,9 +8678,10 @@ func _catch_sound(kind: int) -> String:
 func audio_update() -> void:
 	# runs every frame in every state: glide the track's volume to fit the moment.
 	# Louis's song IS the soundtrack, so the game never changes the material, only
-	# how much room it takes: fullest while a performance is cooking, easy in the
-	# menus and the day hub, a hush under cutscene captions, a dip when a prop
-	# hits the floor (via _duck).
+	# how much room it takes: the "juggling" loop plays whenever juggling could
+	# start (the stage door onward), the "chill" loop takes over everywhere else
+	# (menus, day hub, results), and a prop hitting the floor dips it briefly
+	# (via _duck).
 	if not _audio_ready:
 		return
 	var in_play := game_state == ST_PLAY
@@ -8783,6 +8822,8 @@ func _seq_bells(freqs: Array, gap: float, vol: float) -> PackedFloat32Array:
 
 
 func _drop_sound() -> PackedFloat32Array:
+	# a prop hitting the floor: a falling low thud (120Hz down to 55Hz) with a
+	# sharp noise click layered on top for the impact
 	var dur := 0.34
 	var n := int(AUDIO_SR * dur)
 	var out := PackedFloat32Array()
@@ -8838,6 +8879,8 @@ func _catch_perfect() -> PackedFloat32Array:
 
 
 func _splat_sound() -> PackedFloat32Array:
+	# the egg shattering on the floor (paired with spawn_egg_break, not a generic
+	# prop drop): a noisy wet burst over a low 150Hz tone, both dying out fast
 	var dur := 0.22
 	var n := int(AUDIO_SR * dur)
 	var out := PackedFloat32Array()
