@@ -13,7 +13,55 @@ extends Node2D
 ##
 ## The sim runs entirely on the fixed 120 Hz physics tick so it stays
 ## deterministic, which the production build needs for replays and fair boards.
+##
+## TABLE OF CONTENTS (2026-07-18: one file, still - see CLAUDE.md's "one file
+## until it hurts" - but every section below is a #region/#endregion block, so
+## the editor can fold each one closed. Godot's script editor and VSCode both
+## show these as a collapsible outline; click the fold arrow in the gutter, or
+## search for a heading below to jump straight to it.
+##   TUNABLES & GAME STATE              - every const/var: tuning knobs first
+##   STARTUP                            - font setup, _ready
+##   MAIN LOOP & INPUT ROUTING          - _physics_process, _input, pad<->key
+##   PAUSE & PERFORMANCE FLOW           - pause menu, finish/begin a performance
+##   ACT GOALS & ENCORES                - the three goals, challenge deck math
+##   DAY HUB LOGIC                      - enter_day, the reward director, meals
+##   SHEET / SHOP / SKILLS INPUT        - key handlers for those three screens
+##   LIVE PROP / PATTERN / COUNT SWITCHING - mid-performance O / P / number keys
+##   TUTORIAL SYSTEM                    - the whole guided-lesson engine
+##   DAY-HUB PURCHASES (PIE / GLASSES)  - the two non-prop shop items
+##   MAIN MENU / SLOTS / SETTINGS INPUT - key handlers for those three screens
+##   SAVE SLOTS                         - start/reset/delete a save slot
+##   SETTINGS PERSISTENCE & CONTROLS REMAP - options file, key + pad rebinding
+##   LOW-LEVEL INPUT POLLING (KEYBOARD + PAD) - the 120Hz catch/throw edge logic
+##   HAND GEOMETRY & BALL SLOTTING      - where hands and balls sit, per pattern
+##   ROUND START, CATCHING, GOALS       - start_run, on_catch, check_goals
+##   THROWING                           - do_throw and its press/release edges
+##   UNLOCK REQUIREMENTS & PATTERN/TRICK TABLES - who needs what to unlock what
+##   TRICKS: SPIN / CYCLE / REWARD      - the live trick, C-cycle, trick payouts
+##   XP, LEVELING & UNLOCK ANNOUNCEMENTS - add_xp, lesson queueing, banners
+##   ROUND RESOLUTION & CATCH/CHANCE MATH - on_round_end, catch_chance and kin
+##   VENUES & PROPS                     - venue lookup, prop stats/hitbox/scale
+##   STATS INVESTMENT & SAVE/LOAD       - spend points, ConfigFile save/load
+##   SIM TICK: DROPS, COLLAPSE, FLIGHT  - drop_ball, update_sim, flight_pos
+##   STAGE BACKDROP DRAWING             - the venue backdrop and crowd
+##   JUGGLER FIGURE DRAWING             - the performer's body, arms, face
+##   PROP DRAWING                       - balls/rings/clubs/knives/torches
+##   HUD HELPERS & KEY-HINT LABELS      - the k_* remap-aware button labels
+##   RESULTS CARD, PAUSE MENU, TRICK/ROUTINE HUD - end-of-act and play overlays
+##   CHARACTER SHEET SCREEN             - the stats/investment panel
+##   SHOP SCREEN                        - the Balatro-style purchase grid
+##   SKILLS SCREEN                      - the trick/pattern reference list
+##   DAY HUB SCREEN                     - the eat/sleep/perform/practice hub
+##   MAIN MENU SCREEN                   - the title screen
+##   SLOTS / SETTINGS / GAME-OVER / MISC SCREENS
+##   AUDIO SYNTHESIS (SFX)              - every sound is generated code, not a file
+##   ESTABLISHING CARD & CREDITS        - the pre-act venue card, end credits
+##   SHARED VISUAL HELPERS              - gradients, vignette, ornaments, logo
+##   PARTICLE EFFECTS & POPUPS          - sparks, egg shards, floating text
+##   VENUE EXTERIOR ART (CUTSCENES)     - the six venues' establishing exteriors
+##   DEV: AUTOPLAYER & SCREENSHOT CAPTURE - --demo, --collcheck, --shot etc.
 
+#region TUNABLES & GAME STATE
 # --- catch timing (ticks; 120 per second) -------------------------------------
 const W_PERFECT := 7      # within ~58 ms of arrival
 const W_GOOD := 10        # ~83 ms (tightened 30% from 15: Good must be earned)
@@ -98,9 +146,9 @@ const BROKE_GOLD := 20     # the busking floor applies below this purse
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
-const SAVE_PATH_DEBUG := "user://juggle_debug.cfg"  # debug build: separate progress
-const SAVE_PATH_DEMO := "user://juggle_demo.cfg"     # --demo/--shot autoplay: never a real career save
-const SETTINGS_PATH := "user://juggle_settings.cfg" # global options, shared by slots
+const SAVE_PATH_DEBUG := "user://iacto_debug.cfg"  # debug build: separate progress
+const SAVE_PATH_DEMO := "user://iacto_demo.cfg"     # --demo/--shot autoplay: never a real career save
+const SETTINGS_PATH := "user://iacto_settings.cfg" # global options, shared by slots
 const POINTS_PER_LEVEL := 3
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
 							  # max-height throw always still demands a real catch
@@ -233,10 +281,10 @@ const PROPS := [
 # never below 1. See do_throw - the old percent-of-a-percent drain is gone.
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
 
-# --- shop: spend gold on props and gear (ideas.rtf shop) ----------------------
-const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling (Section 1
-								# of README.md): priced as the capstone purchase it now
-								# functionally is, not a minor bonus on an already-full curve
+# --- shop: spend gold on props and gear ---------------------------------------
+const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling: priced
+								# as the capstone purchase it now functionally is,
+								# not a minor bonus on an already-full curve
 const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
 
 # input map (physical keycodes; a real remap layer comes with the options menu)
@@ -253,6 +301,18 @@ var K_CYCLE := KEY_C
 const REMAP_ACTS := [
 	["lc", "Left hand  CATCH"], ["lt", "Left hand  THROW"],
 	["rc", "Right hand  CATCH"], ["rt", "Right hand  THROW"],
+	["trick", "TRICK  (the one-shot powerup)"], ["cycle", "SWITCH TRICK"],
+]
+
+# gamepad face buttons (2026-07-18, per Louis): bumpers throw and triggers catch
+# always - those are hardware-natural (fingers already rest there) and stay fixed,
+# never remapped. TRICK and SWITCH TRICK are the two actions a face button actually
+# performs live in the sim, so those two ARE remappable, same Controls screen as
+# the keyboard six. Escape/Enter/Tab stay on fixed, swapped face buttons (below in
+# _pad_to_key) since keyboard Esc/Enter/Tab aren't remappable either.
+var PAD_TRICK := JOY_BUTTON_X    # was Y; swapped with Tab's old X slot
+var PAD_CYCLE := JOY_BUTTON_LEFT_STICK   # previously had NO pad button at all
+const PAD_ACTS := [
 	["trick", "TRICK  (the one-shot powerup)"], ["cycle", "SWITCH TRICK"],
 ]
 
@@ -569,8 +629,10 @@ var _prev_running := false
 var game_state := ST_MENU
 var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
-var remap_sel := 0        # cursor on the controls screen
+var remap_sel := 0        # cursor on the controls screen (keyboard column)
 var remap_wait := false   # true while the controls screen listens for the next key
+var remap_col := 0        # 0 = keyboard column has focus, 1 = gamepad column (Tab swaps)
+var pad_remap_sel := 0    # cursor on the controls screen's gamepad column
 var _confirm_id := ""     # the purchase awaiting its second, confirming press
 var _confirm_ms := 0
 var shop_msg := ""        # transient warning line inside the shop panel
@@ -643,7 +705,6 @@ var last_streak_tick := -999  # when the streak last grew, for the multiplier pu
 
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
-var set_flags := true     # show the TOO LOW / too high throw flags
 var set_collide := false  # hard mode: props that clack mid-air become nearly
 						  # uncatchable (half the Perfect window, no chance roll).
 						  # A PERFECT pattern never collides, so this only ever
@@ -729,6 +790,9 @@ var _demo_next := RIGHT
 const DEMO_BEAT := 28
 
 
+#endregion
+
+#region STARTUP
 func setup_font() -> void:
 	# one clean humane face at semibold, set up as a FontVariation so the single
 	# variable-weight file serves every size. If the file is ever missing the
@@ -882,6 +946,10 @@ func _ready() -> void:
 		game_state = ST_SETTINGS
 	if ua.has("--slots"):       # dev: screenshot the save-slot screen
 		game_state = ST_SLOTS
+	if ua.has("--remap"):       # dev: screenshot the controls screen (--remap pad
+		game_state = ST_REMAP   # focuses the gamepad column instead of keyboard)
+		if ua.has("--pad"):
+			remap_col = 1
 	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls
 	if ti != -1:
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
@@ -928,6 +996,9 @@ func _ready() -> void:
 		game_state = ST_PLAY
 
 
+#endregion
+
+#region MAIN LOOP & INPUT ROUTING
 func _physics_process(delta: float) -> void:
 	audio_update()   # pick the music theme and glide the layer volumes, every state
 	if _shot or _collcheck or _handlog:
@@ -1026,9 +1097,9 @@ func _input(event: InputEvent) -> void:
 			return
 		kc = ek.physical_keycode
 		_pad_last = false
-		# the controls screen, while listening, captures the next KEYBOARD key as
-		# the new binding (Esc cancels, F11 stays the fullscreen toggle)
-		if game_state == ST_REMAP and remap_wait:
+		# the controls screen, while listening on the KEYBOARD column, captures the
+		# next keyboard key as the new binding (Esc cancels, F11 stays fullscreen)
+		if game_state == ST_REMAP and remap_wait and remap_col == 0:
 			remap_wait = false
 			if kc != KEY_ESCAPE and kc != KEY_F11:
 				bind_action(String(REMAP_ACTS[remap_sel][0]), kc)
@@ -1041,6 +1112,16 @@ func _input(event: InputEvent) -> void:
 		var held := bool(_joy_held.get(jb.button_index, false))
 		_joy_held[jb.button_index] = jb.pressed
 		if not jb.pressed or held:
+			return
+		# the controls screen, while listening on the GAMEPAD column, captures the
+		# next RAW pad button as the new binding (Start cancels, mirrors Esc/F11
+		# above) - captured here, before _pad_to_key's translation, so the exact
+		# physical button gets bound rather than whatever it currently means
+		if game_state == ST_REMAP and remap_wait and remap_col == 1:
+			remap_wait = false
+			if jb.button_index != JOY_BUTTON_START:
+				bind_pad_action(String(PAD_ACTS[pad_remap_sel][0]), jb.button_index)
+				play_sfx("ui2", -12.0)
 			return
 		_pad_last = true
 		kc = _pad_to_key(jb.button_index)
@@ -1299,12 +1380,26 @@ func _pad_sim_live() -> bool:
 func _pad_to_key(btn: int) -> int:
 	# translate a recognised pad button into the keycode the per-screen matches
 	# already understand. -1 means the button has no meaning on this screen.
-	# THE LAYOUT IS LOUIS'S OWN, verbatim: bumpers throw (F / J), triggers catch
-	# (D / K) - both polled in _read_inputs, not here - face buttons Y = Space
-	# (the trick), B = Enter, A = Escape, X = Tab, and the dpad carries the four
-	# letter commands while playing: up O (object), right P (pattern), down S
-	# (shop), left R (restart). In menus the dpad falls back to arrows and the
-	# STICKS move the focus, so navigation never fights the play commands.
+	# LOUIS'S LAYOUT, 2026-07-18 SWAP: bumpers throw (F / J), triggers catch (D / K)
+	# - both polled in _read_inputs, not here - and A <-> B, X <-> Y swapped from
+	# the original scheme: A = Enter (confirm / finish / take a bow), B = Escape
+	# (back / the game menu), Y = Tab (the sheet), X = TRICK (remappable, see
+	# PAD_TRICK), and the dpad carries the four letter commands while playing: up O
+	# (object), right P (pattern), down S (shop), left R (restart). In menus the
+	# dpad falls back to arrows and the STICKS move the focus, so navigation never
+	# fights the play commands.
+	if game_state == ST_SLOTS and btn == JOY_BUTTON_X:
+		return KEY_X   # delete the highlighted save slot - X keeps this one job here,
+						# where it isn't already claimed by TRICK
+	if btn == PAD_TRICK:
+		# while the sim is live this is the POLLED trick button (see _read_inputs)
+		# and must not double-fire here; everywhere else it doubles as Space
+		if _pad_sim_live():
+			return -1
+		return KEY_SPACE
+	if btn == PAD_CYCLE:
+		return K_CYCLE   # which trick TRICK is loaded with - previously had no
+						  # pad button at all; now remappable alongside PAD_TRICK
 	match btn:
 		JOY_BUTTON_DPAD_UP:
 			return KEY_O if game_state == ST_PLAY else KEY_UP
@@ -1315,17 +1410,11 @@ func _pad_to_key(btn: int) -> int:
 		JOY_BUTTON_DPAD_RIGHT:
 			return KEY_P if game_state == ST_PLAY else KEY_RIGHT
 		JOY_BUTTON_A:
-			return KEY_ESCAPE   # bottom face: back / the game menu (Louis)
+			return KEY_ENTER    # bottom face: confirm / finish / take a bow (swapped)
 		JOY_BUTTON_B:
-			return KEY_ENTER    # right face: confirm / finish / take a bow (Louis)
-		JOY_BUTTON_X:
-			return KEY_TAB      # left face: the sheet / menu (Louis)
+			return KEY_ESCAPE   # right face: back / the game menu (swapped)
 		JOY_BUTTON_Y:
-			# top face IS the Space key (Louis). While the sim is live it is the
-			# POLLED trick button (see _read_inputs) and must not double-fire here.
-			if _pad_sim_live():
-				return -1
-			return KEY_SPACE
+			return KEY_TAB      # top face: the sheet / menu (swapped)
 		JOY_BUTTON_START:
 			# Start also pauses inside play, the one habit every pad player has
 			return KEY_ESCAPE if game_state == ST_PLAY else -1
@@ -1355,6 +1444,9 @@ func _on_joy_connection(_device: int, connected: bool) -> void:
 		open_pause()
 
 
+#endregion
+
+#region PAUSE & PERFORMANCE FLOW
 func open_pause() -> void:
 	paused = true
 	pause_sel = 0
@@ -1441,6 +1533,9 @@ func establish_key() -> void:
 
 # --- act maths: the three goals, the deck's live effects, the drop limit -----
 
+#endregion
+
+#region ACT GOALS & ENCORES
 func goal_for(venue: int, gi: int) -> int:
 	# goal number gi (0 first, 1 second, 2 final), scaling off the VENUE and the
 	# standing ante, never off the player's own record (scaling off your best would
@@ -1544,6 +1639,9 @@ func next_venue_rep() -> int:
 	return int(steps[vi]) if vi < steps.size() else 0
 
 
+#endregion
+
+#region DAY HUB LOGIC
 func enter_day() -> void:
 	game_state = ST_DAY
 	day_sel = 0
@@ -1830,6 +1928,9 @@ func sleep_day() -> void:
 	save_progress()
 
 
+#endregion
+
+#region SHEET / SHOP / SKILLS INPUT
 func sheet_input(kc: int) -> void:
 	# the character sheet's keys, shared by the play overlay and the day hub.
 	# Arrows (dpad, stick) walk the four cards and Enter invests in the lit one,
@@ -2029,6 +2130,9 @@ func practice_skill(idx: int) -> void:
 	play_sfx("ui2", -11.0)
 
 
+#endregion
+
+#region LIVE PROP / PATTERN / COUNT SWITCHING
 func cycle_prop(dir: int) -> void:
 	# step to the next prop you own enough of, and restart with it (per-run setting)
 	var n := PROPS.size()
@@ -2197,6 +2301,9 @@ func offer_prop_tutorial(kind: int) -> void:
 # that prop. There is no menu entry; lessons arrive when they are relevant.
 # =============================================================================
 
+#endregion
+
+#region TUTORIAL SYSTEM
 func tut_lesson(id: String) -> Array:
 	if id.begins_with("prop_"):
 		var k := int(id.substr(5))
@@ -2255,18 +2362,22 @@ func tut_lesson(id: String) -> Array:
 			"slow": TUT_SLOW_START, "flow": true, "guide": true,
 			"text": "Now the other way: %s, then %s" % [kf, kk],
 			"sub": "Every hand has its own two keys. %s throws from the LEFT, %s catches in the RIGHT. Same ring, same gold flash, same 'now'." % [kf, kk]},
-		# --- freestyle one: named honestly as NOT juggling, which is what makes the
-		#     second ball something the player wants rather than something they are given
+		# --- freestyle one: just the feel of one ball, hand to hand ---
 		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
 			"next": "add a second ball",
 			"text": "Now play with it",
-			"sub": "Both hands, as long as you like: %s and %s throw, %s and %s catch. Clean catches speed the world up, a drop slows it back down. This is not juggling yet, though. One ball is just throwing and catching." % [kj, kf, kd, kk]},
-		# --- freestyle two: the rule arrives, the goal enforces it, and the throws
-		#     CROSS (a forced cascade) so two balls already rehearse the weave of three
-		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4, "juggle": true,
+			"sub": "Both hands, as long as you like: %s and %s throw, %s and %s catch. Clean catches speed the world up, a drop slows it back down." % [kj, kf, kd, kk]},
+		# --- freestyle two: BOTH balls start stacked in one hand, so throw, throw,
+		#     catch, catch is the only sequence physically available - the player is
+		#     always juggling by construction, never scolded into it (Louis). The
+		#     throws CROSS (a forced cascade), rehearsing the weave three will ask for.
+		#     No "juggle" gate: the second catch of every pair always lands with
+		#     nothing else airborne, which is exactly the point of this drill, not
+		#     a failure of it - the finale is where that rule gets strict.
+		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
 			"pattern": CASCADE, "next": "add the third ball",
-			"text": "Two balls - and now it is juggling",
-			"sub": "Throw the second one (%s) BEFORE you catch the first. That is the whole rule: a ball is always in the air. Each throw CROSSES to the other hand - exactly the weave three balls will ask for." % kf},
+			"text": "Two balls - throw, throw, catch, catch",
+			"sub": "Both start stacked in one hand. %s throws the first, %s throws the second BEFORE it lands - now catch them as they arrive. That handover, one ball crossing right after the other, is the whole weave three balls will ask for." % [kj, kj]},
 		# --- the finale: a real cascade, ten catches, at genuine full speed ---
 		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 10,
 			"juggle": true, "finale": true, "next": "learn the other keys",
@@ -2465,7 +2576,10 @@ func tut_setup_step() -> void:
 		catch_flash = [-999, -999]
 		throw_kick = [-999, -999]
 		rng.seed = 20260705
-		# deal the balls; a single-ball step starts in the exact hand it is teaching
+		# deal the balls; a single-ball step starts in the exact hand it is teaching, and
+		# so does the two-ball step (Louis: both stacked in one hand, so throw-throw-
+		# catch-catch is the only sequence available - three and up still split 2-1,
+		# alternating, for the real cascade's starting hold)
 		for i in num_balls:
 			var b := Ball.new()
 			b.state = STATE_HAND
@@ -2473,7 +2587,7 @@ func tut_setup_step() -> void:
 			b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
 			b.spin_dir = 1.0 if i % 2 == 0 else -1.0
 			balls.append(b)
-			var to_left := (i % 2 == 1) if num_balls > 1 else (start_hand == LEFT)
+			var to_left := (i % 2 == 1) if num_balls > 2 else (start_hand == LEFT)
 			if to_left:
 				_stack_l.append(b)
 			else:
@@ -2576,8 +2690,8 @@ func tut_on_catch(juggled: bool) -> void:
 	# throwing one ball at a time, which is the thing they exist to teach against
 	# (Louis). The run has to be CONSECUTIVE - a solo catch puts the count back to zero -
 	# because "there is always a ball in the air" is a property of a stretch of juggling,
-	# not a tally of good moments. The player is told why on the spot; the banner keeps
-	# saying it, and the step holds open forever, so this is a gate and never a wall.
+	# not a tally of good moments. The banner (and the step holding open forever) is
+	# the teaching; a solo catch just quietly fails to advance, no scolding popup.
 	var step := tut_step_data()
 	if bool(step.get("juggle", false)) and not juggled:
 		if _demo:
@@ -2586,7 +2700,6 @@ func tut_on_catch(juggled: bool) -> void:
 			play_sfx("whiff", -14.0)
 		tut_count = 0
 		tut_flow_streak = 0   # a solo catch is a broken rhythm for the pace ladder too
-		add_popup(outer_pos(RIGHT) + Vector2(0, -30), "one at a time is not juggling", Color(0.95, 0.78, 0.5))
 		return
 	# the PACE ladder (basics only): every TUT_PACE_STREAK clean catches in a row earn
 	# the next rung down, announced so speeding up reads as the reward it is
@@ -2856,7 +2969,7 @@ func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool
 	var urg := clampf(float(tick - tut_advance_at) / 900.0, 0.0, 1.0)
 	var pulse := 0.5 + 0.5 * sin(atick() * (0.07 + 0.06 * urg))
 	var fs := int(round(lerpf(17.0, 22.0, urg)))
-	var cap := String(k_finish()[0])   # Enter, or X on a pad
+	var cap := String(k_finish()[0])   # Enter, or A on a pad
 	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 18.0
 	var total := cw + 14.0 + lw
@@ -2954,6 +3067,9 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# beginner reads the key well before the ball asks for it.
 	var lead := PROMPT_LEAD * 3 / 2
 	var catching := [false, false]
+	# when two balls are both bound for the same hand, only the SOONEST one gets a
+	# ring - one ring per hand, never a stack of them (Louis)
+	var soonest := [lead + 1, lead + 1]
 	for b in balls:
 		if b.state != STATE_FLIGHT:
 			continue
@@ -2961,9 +3077,14 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		if d <= 0 or d > lead:
 			continue
 		var h := clampi(b.to_hand, 0, 1)
+		if d < soonest[h]:
+			soonest[h] = d
+	for h in [LEFT, RIGHT]:
+		if soonest[h] > lead:
+			continue
 		var hp: Vector2 = hpos[h]
-		draw_timing_ring(hp, d)
-		var urg := 1.0 - float(d) / float(lead)
+		draw_timing_ring(hp, soonest[h])
+		var urg := 1.0 - float(soonest[h]) / float(lead)
 		draw_tut_key(font, hp + Vector2(0.0, -44.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
 		catching[h] = true
 	# throw: the bare throw key over EVERY hand holding a ball, all lesson long (Louis:
@@ -2983,6 +3104,9 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		draw_tut_key(font, hpos[hh] + Vector2(0.0, -44.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
+#endregion
+
+#region DAY-HUB PURCHASES (PIE / GLASSES)
 func try_buy_pie() -> void:
 	# Uncle Dan's Pie: a bought minute of slow-motion clarity, eaten in the day
 	# hub to arm the next session (ideas.rtf: a temporary stimulant)
@@ -3014,6 +3138,9 @@ func try_buy_glasses() -> void:
 # Game flow: main menu, save slots, settings, cutscenes.
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region MAIN MENU / SLOTS / SETTINGS INPUT
 func menu_options() -> Array[String]:
 	# the live main-menu list. Victory appears only once a save has conquered the
 	# top stage, so a first-time player never sees it. Both menu_input and draw_menu
@@ -3103,7 +3230,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 9   # music, sound, shake, flags, collisions, fullscreen, controls, records, Back
+	var n := 8   # music, sound, shake, collisions, fullscreen, controls, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -3120,19 +3247,17 @@ func settings_input(kc: int) -> void:
 				2:
 					set_shake = not set_shake
 				3:
-					set_flags = not set_flags
-				4:
 					set_collide = not set_collide
-				5:
+				4:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
-				6:
+				5:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				7:
+				6:
 					game_state = ST_STATS   # the career ledger, back with Esc
-				8:
+				7:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -3148,6 +3273,9 @@ func apply_fullscreen() -> void:
 		DisplayServer.WINDOW_MODE_FULLSCREEN if set_fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
 
 
+#endregion
+
+#region SAVE SLOTS
 func start_slot(i: int) -> void:
 	save_slot = i
 	var fresh := not FileAccess.file_exists(slot_path(i))
@@ -3204,7 +3332,7 @@ func reset_new_game() -> void:
 
 
 func slot_path(i: int) -> String:
-	return "user://juggle_slot%d.cfg" % i
+	return "user://iacto_slot%d.cfg" % i
 
 
 func slot_summary(i: int) -> String:
@@ -3225,16 +3353,18 @@ func slot_summary(i: int) -> String:
 
 func delete_slot(i: int) -> void:
 	var dir := DirAccess.open("user://")
-	var fn := "juggle_slot%d.cfg" % i
+	var fn := "iacto_slot%d.cfg" % i
 	if dir != null and dir.file_exists(fn):
 		dir.remove(fn)
 
 
+#endregion
+
+#region SETTINGS PERSISTENCE & CONTROLS REMAP
 func load_settings() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
-		set_flags = bool(cf.get_value("opt", "flags", true))
 		set_collide = bool(cf.get_value("opt", "collide", false))
 		set_music = bool(cf.get_value("opt", "music", true))
 		set_sfx = bool(cf.get_value("opt", "sfx", true))
@@ -3245,12 +3375,13 @@ func load_settings() -> void:
 		K_RT = int(cf.get_value("keys", "rt", KEY_J))
 		K_TRICK = int(cf.get_value("keys", "trick", KEY_SPACE))
 		K_CYCLE = int(cf.get_value("keys", "cycle", KEY_C))
+		PAD_TRICK = int(cf.get_value("keys", "pad_trick", JOY_BUTTON_X))
+		PAD_CYCLE = int(cf.get_value("keys", "pad_cycle", JOY_BUTTON_LEFT_STICK))
 
 
 func save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("opt", "shake", set_shake)
-	cf.set_value("opt", "flags", set_flags)
 	cf.set_value("opt", "collide", set_collide)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
@@ -3261,6 +3392,8 @@ func save_settings() -> void:
 	cf.set_value("keys", "rt", K_RT)
 	cf.set_value("keys", "trick", K_TRICK)
 	cf.set_value("keys", "cycle", K_CYCLE)
+	cf.set_value("keys", "pad_trick", PAD_TRICK)
+	cf.set_value("keys", "pad_cycle", PAD_CYCLE)
 	cf.save(SETTINGS_PATH)
 
 
@@ -3296,22 +3429,89 @@ func _set_action_key(id: String, kc: int) -> void:
 		"cycle": K_CYCLE = kc
 
 
+func pad_action_button(id: String) -> int:
+	return PAD_TRICK if id == "trick" else PAD_CYCLE
+
+
+func bind_pad_action(id: String, btn: int) -> void:
+	# same clash-swap rule as the keyboard six (bind_action above), scoped to the
+	# two pad-remappable actions: no press can ever mean two things.
+	var old := pad_action_button(id)
+	for a in PAD_ACTS:
+		var aid := String(a[0])
+		if aid != id and pad_action_button(aid) == btn:
+			_set_pad_action_button(aid, old)
+	_set_pad_action_button(id, btn)
+	save_settings()
+
+
+func _set_pad_action_button(id: String, btn: int) -> void:
+	if id == "trick":
+		PAD_TRICK = btn
+	else:
+		PAD_CYCLE = btn
+
+
 func remap_input(kc: int) -> void:
-	# remap_wait is handled upstream in _input (it captures the raw next key)
-	var n := REMAP_ACTS.size()
-	match kc:
-		KEY_UP, KEY_W:
-			remap_sel = (remap_sel + n - 1) % n
-			play_sfx("ui", -14.0)
-		KEY_DOWN, KEY_S:
-			remap_sel = (remap_sel + 1) % n
-			play_sfx("ui", -14.0)
-		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-			remap_wait = true
-			play_sfx("ui2", -13.0)
-		KEY_ESCAPE:
-			game_state = ST_SETTINGS
-			play_sfx("ui", -12.0)
+	# remap_wait is handled upstream in _input (it captures the raw next key or,
+	# on the gamepad column, the raw next pad button - see _input). Tab (keyboard,
+	# or the pad's own Y/sheet button) swaps which column has focus.
+	if kc == KEY_TAB:
+		remap_col = 1 - remap_col
+		remap_wait = false
+		play_sfx("ui", -14.0)
+		return
+	if remap_col == 0:
+		var n := REMAP_ACTS.size()
+		match kc:
+			KEY_UP, KEY_W:
+				remap_sel = (remap_sel + n - 1) % n
+				play_sfx("ui", -14.0)
+			KEY_DOWN, KEY_S:
+				remap_sel = (remap_sel + 1) % n
+				play_sfx("ui", -14.0)
+			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+				remap_wait = true
+				play_sfx("ui2", -13.0)
+			KEY_ESCAPE:
+				game_state = ST_SETTINGS
+				play_sfx("ui", -12.0)
+	else:
+		var m := PAD_ACTS.size()
+		match kc:
+			KEY_UP, KEY_W:
+				pad_remap_sel = (pad_remap_sel + m - 1) % m
+				play_sfx("ui", -14.0)
+			KEY_DOWN, KEY_S:
+				pad_remap_sel = (pad_remap_sel + 1) % m
+				play_sfx("ui", -14.0)
+			KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+				remap_wait = true
+				play_sfx("ui2", -13.0)
+			KEY_ESCAPE:
+				game_state = ST_SETTINGS
+				play_sfx("ui", -12.0)
+
+
+func pad_button_glyph(btn: int) -> String:
+	# short display name for a raw pad button, used only on the Controls screen's
+	# gamepad column (the k_* hint helpers elsewhere use plain "A"/"B"/... directly)
+	match btn:
+		JOY_BUTTON_A: return "A"
+		JOY_BUTTON_B: return "B"
+		JOY_BUTTON_X: return "X"
+		JOY_BUTTON_Y: return "Y"
+		JOY_BUTTON_LEFT_SHOULDER: return "LB"
+		JOY_BUTTON_RIGHT_SHOULDER: return "RB"
+		JOY_BUTTON_LEFT_STICK: return "L3"
+		JOY_BUTTON_RIGHT_STICK: return "R3"
+		JOY_BUTTON_BACK: return "Back"
+		JOY_BUTTON_START: return "Start"
+		JOY_BUTTON_DPAD_UP: return "D-Up"
+		JOY_BUTTON_DPAD_DOWN: return "D-Down"
+		JOY_BUTTON_DPAD_LEFT: return "D-Left"
+		JOY_BUTTON_DPAD_RIGHT: return "D-Right"
+		_: return "Btn %d" % btn
 
 
 func draw_remap(font: Font, s: Vector2) -> void:
@@ -3323,44 +3523,79 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, s.y * 0.06 + 62.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
 	var pw := 620.0
 	var px := s.x * 0.5 - pw * 0.5
-	var oy := s.y * 0.28
+	var kb_focus := remap_col == 0
+	var pad_focus := remap_col == 1
+
+	# --- keyboard column (the six core actions) ---
+	var oy := s.y * 0.222
+	draw_string(font, Vector2(px, oy - 22.0), "KEYBOARD", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
+		Color(0.95, 0.82, 0.5, 0.9) if kb_focus else Color(0.6, 0.56, 0.5, 0.6))
 	for i in REMAP_ACTS.size():
-		var sel := i == remap_sel
-		var ry := oy + float(i) * 52.0
+		var sel := kb_focus and i == remap_sel
+		var ry := oy + float(i) * 40.0
 		if sel:
-			hud_panel(Rect2(px - 16.0, ry - 26.0, pw + 32.0, 46.0))
+			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0))
+		var dim := 1.0 if kb_focus else 0.5
 		var nm := String(REMAP_ACTS[i][1])
-		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
+		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
+			Color(1.0, 0.9, 0.6) if sel else Color(0.8 * dim, 0.74 * dim, 0.66 * dim))
 		var kname := OS.get_keycode_string(action_key(String(REMAP_ACTS[i][0])))
 		if sel and remap_wait:
 			var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
-			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 18, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
+			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 16, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
 		else:
-			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(kname.length())), ry - 15.0, kname)
-	var refy := oy + float(REMAP_ACTS.size()) * 52.0 + 22.0
-	draw_string(font, Vector2(0, refy), "the pad is fixed: L1 R1 catch, L2 R2 throw, A trick, Y switch", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.72, 0.66, 0.6))
+			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(kname.length())), ry - 13.0, kname)
+
+	# --- gamepad column (TRICK + SWITCH TRICK only - catch/throw stay on the
+	# triggers/bumpers, always, never remapped: see PAD_ACTS) ---
+	var gy := oy + float(REMAP_ACTS.size()) * 40.0 + 30.0
+	draw_string(font, Vector2(px, gy - 22.0), "GAMEPAD", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
+		Color(0.95, 0.82, 0.5, 0.9) if pad_focus else Color(0.6, 0.56, 0.5, 0.6))
+	for i in PAD_ACTS.size():
+		var sel := pad_focus and i == pad_remap_sel
+		var ry := gy + float(i) * 40.0
+		if sel:
+			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0))
+		var dim := 1.0 if pad_focus else 0.5
+		var nm := String(PAD_ACTS[i][1])
+		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
+			Color(1.0, 0.9, 0.6) if sel else Color(0.8 * dim, 0.74 * dim, 0.66 * dim))
+		var gname := pad_button_glyph(pad_action_button(String(PAD_ACTS[i][0])))
+		if sel and remap_wait:
+			var pa2 := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
+			draw_string(font, Vector2(px + pw - 220.0, ry), "press a button...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 16, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa2))
+		else:
+			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(gname.length())), ry - 13.0, gname)
+	draw_string(font, Vector2(px, gy + float(PAD_ACTS.size()) * 40.0 + 4.0),
+		"catch and throw always stay on the triggers and bumpers",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.68, 0.63, 0.56, 0.8))
+
 	# the other in-play keys, listed here so live play never has to show them
-	draw_ornament(s.x * 0.5, refy + 26.0, 150.0, Color(0.82, 0.62, 0.34, 0.6))
-	draw_string(font, Vector2(0, refy + 50.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(0, refy + 74.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, refy + 98.0), "practice only:    R  restart      3 to 7  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	var refy := gy + float(PAD_ACTS.size()) * 40.0 + 44.0
+	draw_ornament(s.x * 0.5, refy, 150.0, Color(0.82, 0.62, 0.34, 0.6))
+	draw_string(font, Vector2(0, refy + 22.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(0, refy + 46.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      3 to 7  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Tab switch device    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
+#endregion
+
+#region LOW-LEVEL INPUT POLLING (KEYBOARD + PAD)
 func seed_input_edges() -> void:
 	# prime the edge detector with the keys' REAL current state, so a key still
 	# held from the establishing card (Space especially, which would prime a
 	# trick) cannot fire a phantom edge on the first play frame
 	var dev := pad_dev()
 	# pad seeds mirror Louis's layout: triggers are the catches, bumpers the throws,
-	# Y the trick (see _read_inputs)
+	# PAD_TRICK the trick (see _read_inputs)
 	_prev["lc"] = Input.is_physical_key_pressed(K_LC) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT) > 0.5)
 	_prev["rc"] = Input.is_physical_key_pressed(K_RC) or (dev >= 0 and Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT) > 0.5)
 	_prev["lt"] = Input.is_physical_key_pressed(K_LT) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER))
 	_prev["rt"] = Input.is_physical_key_pressed(K_RT) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER))
-	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, JOY_BUTTON_Y))
+	_prev["trick"] = Input.is_physical_key_pressed(K_TRICK) or (dev >= 0 and Input.is_joy_button_pressed(dev, PAD_TRICK))
 	_prev["cycle"] = Input.is_physical_key_pressed(K_CYCLE)
 	# drop any tap latched on a previous screen, so it cannot fire on frame one
 	for name in _tap:
@@ -3383,11 +3618,11 @@ func _read_inputs() -> void:
 	if dev >= 0:
 		# Louis's own layout: the BUMPERS throw (they sit where the fingers rest,
 		# like F and J on the home row) and the TRIGGERS catch (the squeeze is the
-		# catch), Y is the trick. The trigger latch keeps its hysteresis so an
-		# analog trigger near threshold cannot flutter a catch.
+		# catch), PAD_TRICK is the trick (remappable). The trigger latch keeps its
+		# hysteresis so an analog trigger near threshold cannot flutter a catch.
 		p_lt = Input.is_joy_button_pressed(dev, JOY_BUTTON_LEFT_SHOULDER)
 		p_rt = Input.is_joy_button_pressed(dev, JOY_BUTTON_RIGHT_SHOULDER)
-		p_tk = Input.is_joy_button_pressed(dev, JOY_BUTTON_Y)
+		p_tk = Input.is_joy_button_pressed(dev, PAD_TRICK)
 		_trig["lt"] = _trig_held("lt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT))
 		_trig["rt"] = _trig_held("rt", Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT))
 	else:
@@ -3421,9 +3656,8 @@ func _read_inputs() -> void:
 	_edge("lt", k_lt or p_lt, LEFT, false)
 	_edge("rc", k_rc or p_rc, RIGHT, true)
 	_edge("rt", k_rt or p_rt, RIGHT, false)
-	# trick CYCLING stays on the keyboard's C key (the event path): Louis's pad
-	# layout assigns every button already, so the pad swaps tricks via the pause
-	# in the action instead - a deliberate gap, not an oversight.
+	# trick CYCLING is event-driven, not polled (see _pad_to_key / K_CYCLE): a
+	# discrete press, keyboard or pad, steps it. This flag is unused by that path.
 	_prev["cycle"] = false
 
 
@@ -3494,6 +3728,9 @@ func _take_tap(name: String) -> bool:
 # the inside, falling balls arrive on the outside, so their lanes never overlap.
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region HAND GEOMETRY & BALL SLOTTING
 func stack(h: int) -> Array[Ball]:
 	return _stack_l if h == LEFT else _stack_r
 
@@ -3760,6 +3997,9 @@ func count_air_scale() -> float:
 	return 1.0
 
 
+#endregion
+
+#region ROUND START, CATCHING, GOALS
 func start_run(n: int) -> void:
 	if not available(prop_type):
 		prop_type = PROP_BALLS   # not enough of that prop owned: fall back to balls
@@ -3968,14 +4208,12 @@ func on_catch(h: int) -> void:
 		# otherwise: the player threw one prop and caught it again while the rest sat
 		# in their hands. The catch is real - it happened, it cost stamina, it keeps
 		# the prop off the floor - but the ACT is not running, so it earns nothing at
-		# all: no streak, no score, no crowd, no trick. That shuts the grind where
-		# holding two and pumping the third farmed a clean Perfect every single time,
-		# and it is exactly the rule the basics lesson teaches in words before it
-		# hands over the second ball. A lesson is exempt: it runs at one and two props
+		# all: no streak, no score, no crowd, no trick, and no popup calling it out.
+		# That shuts the grind where holding two and pumping the third farmed a clean
+		# Perfect every single time. A lesson is exempt: it runs at one and two props
 		# on purpose, scores nothing, and polices the rule itself (tut_on_catch).
 		streak = 0
 		perfect_chain = 0
-		add_popup(outer_pos(h), "not juggling", Color(0.72, 0.68, 0.62))
 		return
 	if best_d <= wperf:
 		streak += 1
@@ -4090,6 +4328,9 @@ func check_goals() -> void:
 # less accurate. Height buys airtime (thins traffic) at the cost of a harder catch.
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region THROWING
 func on_throw_press(h: int) -> void:
 	if collapsing or stack(h).is_empty():
 		return   # nothing you throw during a collapse counts; the set is already over
@@ -4359,18 +4600,15 @@ func do_throw(h: int, hold: int) -> void:
 		# on the first-ever throw), so misses stopped being cleaned up and the lesson
 		# froze with no move able to recover it.
 		running = true
-	# a clean, controlled (low) throw earns a little Applause; a very high one does not
-	# and flags itself above the stage so the player learns height control. An
-	# under-strength throw is low but sloppy, so the deficit strips most of that reward:
-	# a sagging heavy prop should not read to the crowd as tidy control.
+	# a clean, controlled (low) throw earns a little Applause; an under-strength throw
+	# is low but sloppy, so the deficit strips most of that reward: a sagging heavy
+	# prop should not read to the crowd as tidy control.
 	applause = minf(1.0, applause + 0.004 * (1.0 - clampf(frac, 0.0, 1.0)) * (1.0 - 0.8 * deficit))
 	# but now that the crowd's patience is a resource (Phase 2), a genuinely BIG throw
 	# thrills them: on stage, height feeds the meter a little, so spectacle buys time
 	# and a timid low weave slowly bores the room even as it stays tidy.
 	if mode == MODE_PERFORM and not tut_active:
 		applause = minf(1.0, applause + APPL_THROW_HEIGHT * clampf(frac, 0.0, 1.4) * (1.0 - 0.8 * deficit))
-	if set_flags and frac >= 1.0:
-		add_popup(Vector2(outer_pos(b.to_hand).x, get_viewport_rect().size.y * 0.31), "too high", Color(1.0, 0.82, 0.45, 0.9))
 	if mode == MODE_PERFORM and not tut_active and frac >= 1.1:
 		play_sfx("gasp", -13.0)   # the crowd inhales at a genuinely risky throw
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
@@ -4378,6 +4616,9 @@ func do_throw(h: int, hold: int) -> void:
 		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
 
 
+#endregion
+
+#region UNLOCK REQUIREMENTS & PATTERN/TRICK TABLES
 # --- unlock requirements: a skill (trick or pattern) may ask for a level, a
 # Strength, an Accuracy, and a stage of the career (the venue Reputation has
 # reached). ALL present keys must be met, so the content spreads over the whole
@@ -4507,6 +4748,9 @@ func unlocked_tricks() -> Array:
 	return out
 
 
+#endregion
+
+#region TRICKS: SPIN / CYCLE / REWARD
 func balls_airborne() -> int:
 	var n := 0
 	for b in balls:
@@ -4671,6 +4915,9 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 # Strength adds a little height control. All effects capped (GDD 4.1 guardrails).
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region XP, LEVELING & UNLOCK ANNOUNCEMENTS
 func xp_to_next(lv: int) -> int:
 	return int(round(60.0 * pow(float(lv), 1.4))) + 40 * lv
 
@@ -4806,6 +5053,9 @@ func energy_mult() -> float:
 	return base * focus_stam_mult()
 
 
+#endregion
+
+#region ROUND RESOLUTION & CATCH/CHANCE MATH
 func on_round_end() -> void:
 	if round_scored:
 		return
@@ -5118,6 +5368,9 @@ const VENUE_REP := [0, 100, 300, 700, 1500, 3000]   # reputation at each venue's
 const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the game is won
 
 
+#endregion
+
+#region VENUES & PROPS
 func debug_jump_venue(i: int) -> void:
 	# debug: leap up the ladder by setting Reputation to a venue's door, then land
 	# in the day so the higher stages can be played at once (no story to replay).
@@ -5229,6 +5482,11 @@ func prop_scale(kind: int) -> float:
 		_:            return 1.0
 
 
+const RING_HIT_FACTOR := 0.65  # rings are mostly hole - the true catchable rim reads far
+								# smaller than the drawn ring's full diameter (Louis), so
+								# their hitbox is always shrunk by this factor, on TOP of
+								# the many-object squeeze below. Tune here if it feels off.
+
 func prop_hit_scale(kind: int) -> float:
 	# the prop's HITBOX, and ONLY its hitbox (Louis: the clubs, torches and knives keep
 	# their true drawn size - it was never their look that needed fixing). From six
@@ -5238,16 +5496,22 @@ func prop_hit_scale(kind: int) -> float:
 	# little further toward eleven. Every DRAWING reads prop_scale, the true size, so a
 	# six-club load looks exactly like a five-club load - it just forgives near misses.
 	var sc := prop_scale(kind)
-	if num_balls < 6:
-		return sc
-	# big props flatten toward ball size fast (a six-club load reads as compact
-	# stage clubs), and the whole set then eases smaller toward eleven objects
-	var flatten := clampf(float(num_balls - 5) / 2.0, 0.0, 1.0)      # full by 7
-	var excess := (sc - 1.0) * lerpf(0.55, 0.10, flatten)
-	var whole := lerpf(1.0, 0.80, clampf(float(num_balls - 5) / 6.0, 0.0, 1.0))
-	return (1.0 + excess) * whole
+	var hit := sc
+	if num_balls >= 6:
+		# big props flatten toward ball size fast (a six-club load reads as compact
+		# stage clubs), and the whole set then eases smaller toward eleven objects
+		var flatten := clampf(float(num_balls - 5) / 2.0, 0.0, 1.0)      # full by 7
+		var excess := (sc - 1.0) * lerpf(0.55, 0.10, flatten)
+		var whole := lerpf(1.0, 0.80, clampf(float(num_balls - 5) / 6.0, 0.0, 1.0))
+		hit = (1.0 + excess) * whole
+	if kind == PROP_RINGS:
+		hit *= RING_HIT_FACTOR
+	return hit
 
 
+#endregion
+
+#region STATS INVESTMENT & SAVE/LOAD
 func invest(which: String) -> void:
 	if points <= 0:
 		return
@@ -5483,6 +5747,9 @@ func save_progress() -> void:
 # Per-tick simulation and hand animation.
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region SIM TICK: DROPS, COLLAPSE, FLIGHT
 func spawn_falling(pos: Vector2, kind: int, col: Color) -> void:
 	# a lost prop becomes a cosmetic body that FALLS to the stage floor (eggs
 	# break where they land, not at arm height, Louis's note)
@@ -5715,6 +5982,9 @@ func flight_pos(b: Ball) -> Vector2:
 # Draw order keeps balls above the figure and the HUD clear of the stage.
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region STAGE BACKDROP DRAWING
 func _draw() -> void:
 	var s := get_viewport_rect().size
 	var font := game_font()
@@ -5959,6 +6229,9 @@ func draw_circus_canopy(s: Vector2) -> void:
 		draw_circle(Vector2(hx, hemy + absf(hx - s.x * 0.5) * 0.06), 3.0, Color(0.85, 0.7, 0.4, 0.5))
 
 
+#endregion
+
+#region JUGGLER FIGURE DRAWING
 func draw_juggler(s: Vector2) -> void:
 	var cx := s.x * 0.5
 	var v := venue_data(cur_venue())
@@ -6224,28 +6497,43 @@ func draw_targets() -> void:
 	if encore_on("fright"):
 		return   # Stage Fright: the lights are in your eyes, no landing markers at all
 	var wp := perfect_window()
+	# when two balls are both bound for the same hand (a fast fountain/columns feed,
+	# or just a high count), only the SOONEST one gets a landing ring - a hand can
+	# only catch one at a time, so a second ring there is clutter, not information
+	# (mirrors the tutorial timing-ring fix)
+	var soonest: Array[Ball] = [null, null]
 	for b in balls:
-		if b.state == STATE_FLIGHT:
-			var dd := b.land_tick - tick
-			if dd >= -MISS_GRACE and dd < 46:
-				var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
-				var adiff := absi(dd)
-				var r := 22.0 * prop_scale(b.kind)
-				# a clacked ball (hard mode) catches ONLY inside the Perfect window
-				# (same frames as normal): its ring stays warning-hot outside it, so
-				# the taught timing never lies about what will actually catch
-				if adiff <= wp:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
-					draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
-				elif b.bumped:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.4, 0.3, 0.2 + 0.5 * t), 3.0, true)
-				elif adiff <= W_GOOD:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
-				elif adiff <= W_LATE and dd < 0:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.9, 0.62, 0.35, 0.7), 3.0, true)
-				else:
-					draw_arc(b.to_pos, r, 0.0, TAU, 40,
-						Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
+		if b.state != STATE_FLIGHT:
+			continue
+		var dd := b.land_tick - tick
+		if dd < -MISS_GRACE or dd >= 46:
+			continue
+		var h := clampi(b.to_hand, 0, 1)
+		if soonest[h] == null or dd < soonest[h].land_tick - tick:
+			soonest[h] = b
+	for h in [LEFT, RIGHT]:
+		var b: Ball = soonest[h]
+		if b == null:
+			continue
+		var dd := b.land_tick - tick
+		var t := clampf(1.0 - float(maxi(dd, 0)) / 46.0, 0.0, 1.0)
+		var adiff := absi(dd)
+		var r := 22.0 * prop_scale(b.kind)
+		# a clacked ball (hard mode) catches ONLY inside the Perfect window
+		# (same frames as normal): its ring stays warning-hot outside it, so
+		# the taught timing never lies about what will actually catch
+		if adiff <= wp:
+			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
+			draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
+		elif b.bumped:
+			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.4, 0.3, 0.2 + 0.5 * t), 3.0, true)
+		elif adiff <= W_GOOD:
+			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
+		elif adiff <= W_LATE and dd < 0:
+			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.9, 0.62, 0.35, 0.7), 3.0, true)
+		else:
+			draw_arc(b.to_pos, r, 0.0, TAU, 40,
+				Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
 
 
 func _btb_behind(b: Ball) -> bool:
@@ -6260,6 +6548,9 @@ func _btb_behind(b: Ball) -> bool:
 	return p < 0.35 and absf(flight_pos(b).x - stage_center().x) < 90.0
 
 
+#endregion
+
+#region PROP DRAWING
 func draw_balls_in_flight(behind: bool = false) -> void:
 	# two passes (see the play draw): the `behind` pass runs BEFORE the juggler
 	# so a Behind-the-Back throw genuinely disappears behind the body
@@ -6352,7 +6643,8 @@ func draw_flame_in_dark(pos: Vector2) -> void:
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
 	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
-								   # (prop_hit_scale) ever shrinks on a big load
+								   # (prop_hit_scale) ever shrinks - on a big load, or
+								   # always a bit for rings (mostly hollow rim)
 	# a soft halo reads the catch lane for every prop; the shape says which prop.
 	var halo := b.color
 	halo.a = 0.16
@@ -6484,6 +6776,9 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0) -> void:
 			draw_ball_shape(pos, col, sc)
 
 
+#endregion
+
+#region HUD HELPERS & KEY-HINT LABELS
 func hud_panel(r: Rect2) -> void:
 	# a soft dark card with an ember hairline, so HUD numbers sit on something
 	# instead of floating loose over the stage
@@ -6567,22 +6862,23 @@ func k_throw() -> Array[String]:
 
 func k_pause() -> Array[String]:
 	if pad_active():
-		return ["A"]
+		return ["B"]
 	return ["Esc"]
 
 
 func k_finish() -> Array[String]:
 	# the "I am done here" key: take a bow on stage, advance a lesson, leave
-	# practice. On a pad that is B - the right face button is Enter (Louis).
+	# practice. On a pad that is A - the bottom face button is Enter (Louis's
+	# 2026-07-18 swap; A used to be Escape).
 	if pad_active():
-		return ["B"]
+		return ["A"]
 	return ["Enter"]
 
 
 func k_sheet() -> Array[String]:
-	# the character-sheet key: Tab on a keyboard, X on a pad (Louis)
+	# the character-sheet key: Tab on a keyboard, Y on a pad (swapped from X)
 	if pad_active():
-		return ["X"]
+		return ["Y"]
 	return ["Tab"]
 
 
@@ -6615,14 +6911,16 @@ func k_pattern() -> Array[String]:
 
 
 func k_trick() -> Array[String]:
+	# remap-aware: PAD_TRICK defaults to X (swapped from Y) but can be rebound
 	if pad_active():
-		return ["Y"]
+		return [pad_button_glyph(PAD_TRICK)]
 	return [OS.get_keycode_string(K_TRICK)]
 
 
 func k_cycle() -> Array[String]:
-	# switching the loaded trick stays a keyboard key: every pad button already
-	# carries one of Louis's assignments, so the label is honest about it
+	# remap-aware: PAD_CYCLE previously had no pad button at all (2026-07-18 fix)
+	if pad_active():
+		return [pad_button_glyph(PAD_CYCLE)]
 	return [OS.get_keycode_string(K_CYCLE)]
 
 
@@ -6859,6 +7157,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_text_shout(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   R goes again, Enter ends the session" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
 
 
+#endregion
+
+#region RESULTS CARD, PAUSE MENU, TRICK/ROUTINE HUD
 func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0) -> void:
 	if a <= 0.0:
 		return
@@ -6969,8 +7270,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 		draw_multiline_string(font, Vector2(px + 34.0, py + ph - 66.0), String(ft[1]),
 			HORIZONTAL_ALIGNMENT_CENTER, pw - 68.0, 12, 2, Color(0.86, 0.72, 0.64, 0.85))
 
-	# footer: how to continue, breathing gently once everything is revealed. the
-	# shop and sheet stay keyboard names even on pad, since they have no button.
+	# footer: how to continue, breathing gently once everything is revealed. every
+	# slot in this footer has a real pad button - the pad footer names only
+	# buttons it can actually press, via the remap-aware k_* hint helpers.
 	if age > 80:
 		var fa := 0.7 + 0.3 * sin(float(tick) * 0.05)
 		var foot := ""
@@ -6979,15 +7281,12 @@ func draw_results(font: Font, s: Vector2) -> void:
 			foot = "you have conquered the final stage  -  any key"
 		elif too_tired():
 			# the reason R will not work, in words, right where the player looks
-			foot = "too tired to go again  -  %s back to the day, then sleep" % ("B" if pad_active() else "Enter")
+			foot = "too tired to go again  -  %s back to the day, then sleep" % String(k_finish()[0])
 		else:
-			# every slot in this footer has a real pad button (Louis's layout: Y is
-			# Space so it goes again, dpad-down is S so it shops, X is Tab for the
-			# sheet, B is Enter back) - the pad footer names only buttons it can press
-			var kgo := "Y" if pad_active() else "R"
+			var kgo := String(k_trick()[0]) if pad_active() else "R"
 			var kshop := String(k_shop()[0])
 			var ksheet := String(k_sheet()[0])
-			var kmenu := "B" if pad_active() else "Enter"
+			var kmenu := String(k_finish()[0])
 			foot = "%s  go again      %s  shop      %s  back to the day" % [kgo, kshop, kmenu]
 			if points > 0:
 				foot = "%s  go again      %s  +%d point%s      %s  shop      %s  back to the day" % [kgo, ksheet, points, "" if points == 1 else "s", kshop, kmenu]
@@ -7126,6 +7425,9 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, hand_c)
 
 
+#endregion
+
+#region CHARACTER SHEET SCREEN
 func draw_sheet(font: Font, s: Vector2) -> void:
 	# the character sheet, dealt as CARDS like the shop (Louis: Balatro look - one big
 	# card per stat, its key printed on the card, a loud banner when points wait)
@@ -7238,7 +7540,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.9, 1.0))
 	var sh_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "choose"]]
 	if points > 0:
-		sh_items.append([["B"] if pad_active() else ["Enter"], "invest"])
+		sh_items.append([k_finish(), "invest"])
 	sh_items.append([k_sheet(), "resume"])
 	draw_hints_row(font, px + pw * 0.5, by - 14.0, sh_items)
 
@@ -7269,6 +7571,9 @@ func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, aff
 		HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 12.0, 16, cc)
 
 
+#endregion
+
+#region SHOP SCREEN
 func draw_shop(font: Font, s: Vector2) -> void:
 	# the SHOP, dealt as CARDS (Louis: Balatro look - big cards, clean zones, the buy
 	# key printed on every card). One zone of five prop cards, one zone of gear, the
@@ -7363,12 +7668,15 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(px, py + ph - 58.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(1.0, 0.62, 0.45))
 	if pad_active():
 		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-			[[["Stick"], "choose"], [["B"], "buy"], [["X"], "leave"]])
+			[[["Stick"], "choose"], [k_finish(), "buy"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
 			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "8"], "quick buy"], [["Tab"], "leave"]])
 
 
+#endregion
+
+#region SKILLS SCREEN
 func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: Dictionary, unlocked: bool, sel: bool) -> void:
 	# one entry in the Skills reference: name on the left, a ready / gate badge
 	# on the right, and a soft highlight when it is the selected entry. The badge
@@ -7471,6 +7779,9 @@ func draw_skills(font: Font, s: Vector2) -> void:
 # Menu, save-slot, settings, and cutscene screens.
 # -----------------------------------------------------------------------------
 
+#endregion
+
+#region DAY HUB SCREEN
 func draw_day(font: Font, s: Vector2) -> void:
 	# the day hub: the chosen venue's exterior breathes behind a veil while the
 	# day's ledger and actions sit over it. The world is where you will play
@@ -7594,7 +7905,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 
 	if pad_active():
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
-			[["Stick"], "choose"], [["B"], "do it"], [["X"], "sheet"], [["A"], "menu"]])
+			[["Stick"], "choose"], [k_finish(), "do it"], [k_sheet(), "sheet"], [k_pause(), "menu"]])
 	else:
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
 			[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]])
@@ -7642,6 +7953,9 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(0, c.y + 110.0), "the day ends", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.85, 0.7, ease_in))
 
 
+#endregion
+
+#region MAIN MENU SCREEN
 func draw_menu(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
 	# a deep theatre backdrop: warm gradient, one spotlight, a row of footlights
@@ -7706,6 +8020,9 @@ func draw_menu_cascade(center: Vector2, sc: float) -> void:
 		draw_ball_shape(_cascade_pos(t, i, count, hl, hr, T, peak), col, 1.35)
 
 
+#endregion
+
+#region SLOTS / SETTINGS / GAME-OVER / MISC SCREENS
 func draw_slots(font: Font, s: Vector2) -> void:
 	view_venue = 2
 	draw_backdrop(s)
@@ -7747,7 +8064,7 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
-	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Throw flags (TOO LOW / high)", set_flags], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
+	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var oy := s.y * 0.28
@@ -7900,6 +8217,9 @@ func draw_stats(font: Font, s: Vector2) -> void:
 # arpeggio that swells with Applause) plus a crowd murmur bed.
 # =============================================================================
 
+#endregion
+
+#region AUDIO SYNTHESIS (SFX)
 func setup_audio() -> void:
 	gen_sfx()
 	for _i in 8:                       # a round-robin pool for overlapping one-shots
@@ -7936,7 +8256,7 @@ func play_sfx(name: String, vol_db: float = 0.0, pitch: float = 1.0) -> void:
 func _catch_sound(kind: int) -> String:
 	match kind:
 		PROP_EGGS: return "c_egg"
-		PROP_RINGS: return "c_ring"
+		# rings share the ball catch sound (Louis: didn't like the ring timbre)
 		PROP_CLUBS: return "c_club"
 		PROP_KNIVES: return "c_knife"
 		PROP_TORCHES: return "c_torch"
@@ -8237,7 +8557,6 @@ func gen_sfx() -> void:
 	sfx["groan"] = _wav(_groan_sound(), false)
 	sfx["c_ball"] = _wav(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.15), false)
 	sfx["c_egg"] = _wav(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.2), false)
-	sfx["c_ring"] = _wav(_tone([300.0, 452.0], [1.0, 0.5], 0.34, 0, 0.004, 0.22, 0.4, 0.0), false)
 	sfx["c_club"] = _wav(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.25), false)
 	sfx["c_knife"] = _wav(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0), false)
 	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
@@ -8257,6 +8576,9 @@ func dump_audio(dir: String) -> void:
 # cine_tick drives all the motion.
 # =============================================================================
 
+#endregion
+
+#region ESTABLISHING CARD & CREDITS
 func venue_blurb(i: int) -> String:
 	# one line on the crowd you are about to face, so each stage reads distinct
 	match i:
@@ -8423,6 +8745,9 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
+#endregion
+
+#region SHARED VISUAL HELPERS
 # --- shared premium-look helpers ---------------------------------------------
 
 func draw_gradient_v(r: Rect2, top: Color, bot: Color, steps: int = 22) -> void:
@@ -8534,6 +8859,9 @@ func draw_dust(s: Vector2, n: int, glow: Color) -> void:
 		draw_circle(Vector2(px, py), 1.4, Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
 
 
+#endregion
+
+#region PARTICLE EFFECTS & POPUPS
 func spawn_egg_break(at: Vector2) -> void:
 	var floor_y := get_viewport_rect().size.y * 0.80
 	for i in 8:
@@ -8763,6 +9091,9 @@ func draw_popups(font: Font) -> void:
 		draw_text_shout(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
 
 
+#endregion
+
+#region VENUE EXTERIOR ART (CUTSCENES)
 # --- venue exteriors: the "where", shared by establishing cards and wide shots -
 
 func draw_venue_exterior(s: Vector2, vi: int) -> void:
@@ -9046,6 +9377,9 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 	fill_ellipse(feet, w * 0.5, w * 0.16, Color(0, 0, 0, 0.3))
 
 
+#endregion
+
+#region DEV: AUTOPLAYER & SCREENSHOT CAPTURE
 func _demo_step() -> void:
 	# in a --booking demo the autoplayer cashes in the moment the FINAL goal falls, so
 	# a whole act runs end to end (all three crossings, the resolve, the pay) and never
@@ -9111,3 +9445,5 @@ func _capture_and_quit() -> void:
 			if img != null:
 				img.save_png(_shot_path)
 	get_tree().quit()
+
+#endregion

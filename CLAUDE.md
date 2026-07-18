@@ -23,10 +23,13 @@ and deleted. History lives in git.
 - **Input:** per hand a THROW (F/J) and a CATCH (D/K), Space = trick, C = switch
   trick, P = pattern, O = object, 3-9 = count, R = restart (practice only), S = shop,
   Tab = sheet, Esc = game menu, Enter = finish/cash in. All remappable (six actions).
-- **Controller (Louis's own layout):** bumpers throw, triggers catch, Y = Space,
-  B = Enter, A = Escape, X = Tab; dpad in play: up O, right P, down S, left R
-  (menus: dpad = arrows); both sticks move menu focus. Trick-cycling (C) has no pad
-  button by design.
+- **Controller (Louis's own layout, X/Y and A/B swapped 2026-07-18):** bumpers
+  throw, triggers catch (always fixed, never remapped), X = Space/trick, A = Enter,
+  B = Escape, Y = Tab; dpad in play: up O, right P, down S, left R (menus: dpad =
+  arrows); both sticks move menu focus. Trick-cycling (Switch Trick) now has a pad
+  button too (default Left Stick click). TRICK and Switch Trick are remappable to
+  any pad button via Settings > Controls, which now has a keyboard column and a
+  gamepad column (Tab, or the pad's own Y, swaps focus between them).
 - **Throw model:** a tap is the lowest, snappiest throw; holding lifts continuously
   toward 1.4 (1.8 for a held High Toss). Height buys airtime, costs accuracy.
   Under-Strength throws sag and wobble. (ideas.rtf's discrete five heights were
@@ -74,7 +77,8 @@ and deleted. History lives in git.
 - `--demo` autoplays; `--collcheck` audits mid-air clearance; `--calib N` prints the
   robot's score; `--booking` runs a real act end to end and prints `ACT ...` on
   resolve; `--tutorial <id>` jumps into a lesson (the demo walks lessons end to end,
-  miming Enter/R/P). Windowed `--shot <path> --shotat <frame>` captures a frame.
+  miming Enter/R/P); `--remap` (add `--pad` for the gamepad column) opens the
+  Controls screen. Windowed `--shot <path> --shotat <frame>` captures a frame.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
   identifiers, not just syntax).
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
