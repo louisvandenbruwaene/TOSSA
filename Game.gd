@@ -1351,16 +1351,16 @@ func _input(event: InputEvent) -> void:
 		# and other layouts (Louis: "they don't work, nor should they"). ONE key
 		# per count (3-9, 0, minus) worked up to eleven, but ran out of number row
 		# at fifteen (2026-07-18: the cap rose after the throw-height clamp made
-		# room for more objects) - Minus/Equal STEP the count by one instead, the
-		# same physical keys either side of the old number row, so old muscle
-		# memory ("the keys past the numbers change the count") still roughly
-		# holds even though the exact keys and the one-key-per-count property
-		# are both gone. Both target functions clamp to [3, max_balls()] on their
-		# own, so stepping past either end is always a safe no-op, not an error.
-		KEY_MINUS:
+		# room for more objects) - 1/2 STEP the count by one instead (2026-07-18,
+		# Louis: Minus/Equal were "bad choices" - swapped for 1 and 2, free here
+		# since the shop/sheet/pause handlers that also read the number row all
+		# gate and return well above this match). Both target functions clamp to
+		# [3, max_balls()] on their own, so stepping past either end is always a
+		# safe no-op, not an error.
+		KEY_1:
 			if performing: set_count_live(num_balls - 1)
 			else: start_run(num_balls - 1)
-		KEY_EQUAL:
+		KEY_2:
 			if performing: set_count_live(num_balls + 1)
 			else: start_run(num_balls + 1)
 		KEY_O:
@@ -1445,10 +1445,12 @@ func _pad_to_key(btn: int) -> int:
 			# the load-count step keys (2026-07-18): a pad previously had NO way at
 			# all to change the count. Back/R3 were the two guaranteed-universal
 			# buttons left unclaimed (every bumper/trigger/face button/dpad
-			# direction/L3 already means something else in Louis's layout).
-			return KEY_MINUS if game_state == ST_PLAY else -1
+			# direction/L3 already means something else in Louis's layout). The
+			# keyboard side moved from Minus/Equal to 1/2, but the virtual key these
+			# route to is what the count handler itself matches on, so it moves too.
+			return KEY_1 if game_state == ST_PLAY else -1
 		JOY_BUTTON_RIGHT_STICK:
-			return KEY_EQUAL if game_state == ST_PLAY else -1
+			return KEY_2 if game_state == ST_PLAY else -1
 	return -1
 
 
@@ -3152,11 +3154,20 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# keeps working until the player's Enter moves on.
 	var kc := k_catch()
 	var kt := k_throw()
-	# catch: a timing ring on the receiving hand, its bare catch key just above it.
-	# The lead runs LONGER than the in-game glow (Louis: shown early enough), so a
-	# beginner reads the key well before the ball asks for it.
+	# THROW WINS, full stop (Louis, now three times - most recently: "it should keep
+	# telling me to throw the ball until the hand is completely empty, only THEN
+	# should it say to catch"). A hand still holding a ball NEVER shows a catch ring,
+	# however soon something else is landing there - it keeps asking for its throw key
+	# until the stack is empty. Without this, throwing two balls quickly from one hand
+	# could leave the OTHER hand's still-unthrown ball hidden: that hand happened to
+	# also be where one of the two just-thrown balls was headed, so its incoming-catch
+	# ring silently won the same slot the throw key needed.
+	var holding := [not stack(LEFT).is_empty(), not stack(RIGHT).is_empty()]
+	# catch: a timing ring on the receiving hand, its bare catch key just above it -
+	# but only once that hand is empty. The lead runs LONGER than the in-game glow
+	# (Louis: shown early enough), so a beginner reads the key well before the ball
+	# asks for it.
 	var lead := PROMPT_LEAD * 3 / 2
-	var catching := [false, false]
 	# when two balls are both bound for the same hand, only the SOONEST one gets a
 	# ring - one ring per hand, never a stack of them (Louis)
 	var soonest := [lead + 1, lead + 1]
@@ -3167,6 +3178,8 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		if d <= 0 or d > lead:
 			continue
 		var h := clampi(b.to_hand, 0, 1)
+		if holding[h]:
+			continue
 		if d < soonest[h]:
 			soonest[h] = d
 	for h in [LEFT, RIGHT]:
@@ -3176,14 +3189,12 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		draw_timing_ring(hp, soonest[h])
 		var urg := 1.0 - float(soonest[h]) / float(lead)
 		draw_tut_key(font, hp + Vector2(0.0, -60.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
-		catching[h] = true
-	# throw: the bare throw key over EVERY hand holding a ball, all lesson long (Louis:
-	# the keys are shown every single time, never assumed learned). It brightens when
-	# the step's whole point is that throw, stays calm otherwise, and yields to a catch
-	# prompt already claiming the same hand.
+	# throw: the bare throw key over EVERY hand still holding a ball, all lesson long
+	# (Louis: the keys are shown every single time, never assumed learned). It
+	# brightens when the step's whole point is that throw, stays calm otherwise.
 	var goal := String(step["goal"])
 	for hh: int in [LEFT, RIGHT]:
-		if stack(hh).is_empty() or catching[hh]:
+		if not holding[hh]:
 			continue
 		# a GUIDED step is a call-and-response with one ball on the table, so the hand
 		# holding it IS the ask: its key burns as brightly as any named goal would. The
@@ -7113,13 +7124,16 @@ func k_cycle() -> Array[String]:
 
 func k_count() -> Array[String]:
 	# the load-count step keys (down, then up): not one of the six remappable
-	# actions, so not remap-aware, only device-aware. Minus/Equal on keyboard
-	# (2026-07-18: replaced one-key-per-count, which ran out of number row once
-	# the cap passed eleven); Back/R3 on a pad, which previously had no way at
-	# all to change the count mid-performance.
+	# actions, so not remap-aware, only device-aware. 1/2 on keyboard (2026-07-18:
+	# replaced one-key-per-count, which ran out of number row once the cap passed
+	# eleven; then Minus/Equal themselves were replaced same day - Louis: "bad
+	# choices" - since 1 and 2 sit unclaimed during live play, the shop/sheet/
+	# pause screens that also read the number row all being separate, gated
+	# handlers); Back/R3 on a pad, which previously had no way at all to change
+	# the count mid-performance.
 	if pad_active():
 		return ["Back", "R3"]
-	return ["-", "="]
+	return ["1", "2"]
 
 
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
