@@ -3159,31 +3159,16 @@ func try_buy_glasses() -> void:
 
 #region MAIN MENU / SLOTS / SETTINGS INPUT
 func menu_options() -> Array[String]:
-	# the live main-menu list. Victory appears only once a save has conquered the
-	# top stage, so a first-time player never sees it. Both menu_input and draw_menu
-	# build the list from here, so the cursor and the drawing can never disagree.
+	# the live main-menu list. Both menu_input and draw_menu build the list from
+	# here, so the cursor and the drawing can never disagree. (There used to be a
+	# "Victory" entry that replayed the credits once any save had won - Louis
+	# found it confusing on the START menu, a button that looked pressable but
+	# wasn't really for pressing, so it's gone; the real win still rolls credits
+	# on its own, from actually clearing the World Arena - see resolve_act/results.)
 	var opts: Array[String] = ["Play"]
-	if has_won():
-		opts.append("Victory")
 	opts.append("Settings")
 	opts.append("Quit")
 	return opts
-
-
-func has_won() -> bool:
-	# true once the climb has been completed anywhere: the currently loaded game,
-	# or any save slot on disk. Peeks the slot files the same way slot_summary does.
-	if won:
-		return true
-	for i in NUM_SLOTS:
-		if not FileAccess.file_exists(slot_path(i)):
-			continue
-		var cf := ConfigFile.new()
-		if cf.load(slot_path(i)) != OK:
-			continue
-		if bool(cf.get_value("prog", "won", false)):
-			return true
-	return false
 
 
 func menu_input(kc: int) -> void:
@@ -3205,10 +3190,6 @@ func menu_input(kc: int) -> void:
 				"Play":
 					menu_sel = 0
 					game_state = ST_SLOTS
-				"Victory":
-					menu_sel = 0
-					game_state = ST_CREDITS
-					cine_tick = 0
 				"Settings":
 					menu_sel = 0
 					game_state = ST_SETTINGS
@@ -4217,28 +4198,36 @@ func on_catch(h: int) -> void:
 	if tut_active:
 		tut_on_catch(juggled)   # a guided lesson counts your clean catches toward its goal
 	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
-	play_sfx(_catch_sound(best.kind), -20.0)   # the prop's own timbre, now just a faint texture
+	# NO per-prop catch texture here (Louis, 2026-07-18: only perfect/good/late/
+	# whiff, never a special sound per object) - it used to be
+	# `play_sfx(_catch_sound(best.kind), -20.0)` right here. The sounds themselves
+	# are still generated in gen_sfx if this ever wants to come back.
 	var sc_before := score
+	var cashing_in := false
 	if not juggled and not tut_active:
 		# NOT JUGGLING (juggling_catch): the air is bare behind this catch. On stage
 		# with a goal already reached, that IS the cash-in gesture (Louis): you caught
 		# every ball, you are holding them all, the act ends right here on your own
 		# terms - same as the finish key, and the crowd reads the stillness as the bow.
+		# It is still a REAL catch (Louis: it should show its Perfect/Good/Late and
+		# play the same sound as any other), so this falls through to the normal
+		# scoring below instead of returning early; `cashing_in` fires the actual
+		# finish only at the very end, after that scoring has happened.
 		if mode == MODE_PERFORM and booking_active and goals_hit >= 1 \
 				and running and not collapsing and balls_airborne() == 0:
 			add_popup(outer_pos(h) + Vector2(0, -30), "CAUGHT THEM ALL", Color(1.0, 0.86, 0.42))
-			finish_performance()
+			cashing_in = true
+		else:
+			# otherwise: the player threw one prop and caught it again while the rest sat
+			# in their hands. The catch is real - it happened, it cost stamina, it keeps
+			# the prop off the floor - but the ACT is not running, so it earns nothing at
+			# all: no streak, no score, no crowd, no trick, and no popup calling it out.
+			# That shuts the grind where holding two and pumping the third farmed a clean
+			# Perfect every single time. A lesson is exempt: it runs at one and two props
+			# on purpose, scores nothing, and polices the rule itself (tut_on_catch).
+			streak = 0
+			perfect_chain = 0
 			return
-		# otherwise: the player threw one prop and caught it again while the rest sat
-		# in their hands. The catch is real - it happened, it cost stamina, it keeps
-		# the prop off the floor - but the ACT is not running, so it earns nothing at
-		# all: no streak, no score, no crowd, no trick, and no popup calling it out.
-		# That shuts the grind where holding two and pumping the third farmed a clean
-		# Perfect every single time. A lesson is exempt: it runs at one and two props
-		# on purpose, scores nothing, and polices the rule itself (tut_on_catch).
-		streak = 0
-		perfect_chain = 0
-		return
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -4324,6 +4313,8 @@ func on_catch(h: int) -> void:
 	# next goal, which arms - or re-arms - the cash-in
 	if booking_active and mode == MODE_PERFORM and not tut_active:
 		check_goals()
+	if cashing_in:
+		finish_performance()   # only now, after the catch has scored like any other
 
 
 func check_goals() -> void:
@@ -4483,9 +4474,17 @@ func do_throw(h: int, hold: int) -> void:
 	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
 	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
 	# Applause, and it clamps to 0 when the prop is too heavy to loft at all. The ceiling is
-	# 1.8, which only a HELD High Toss reaches (plain throws top out at 1.4): every consumer
-	# of height that must not scale past the design cap clamps itself at 1.4 internally.
-	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.8)
+	# 1.8, reserved for a TRICK (only a held High Toss actually reaches it) - plain throws
+	# clamp at 1.4. This clamp is EXPLICIT now (2026-07-18): count_air_scale (high ball
+	# counts fly higher) and the Strength-surplus loft bonus (a heavy prop you're well
+	# over-strength for flies higher too) both push air time up independently, and at
+	# their extreme - maxed Strength, the heaviest prop, the highest count - they used to
+	# stack past 1.4 on an ordinary throw with no trick at all (measured: a PLAIN full-hold
+	# torch throw at 7 objects and max Strength hit 1.8, the trick-only ceiling, and even a
+	# bare TAP already reached 0.6). Louis noticed this as "why do Behind the Back throws
+	# with 7 torches go so high" - BTB was not the actual cause, just the visible symptom;
+	# every plain throw at that combination was already pinned near the ceiling.
+	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.8 if this_trick >= 0 else 1.4)
 	b.height = frac
 	b.trick = this_trick
 
@@ -8651,10 +8650,8 @@ func gen_sfx() -> void:
 	sfx["stamp"] = _wav(_stamp_sound(), false)
 	sfx["count"] = _wav(_tone([1318.5], [1.0], 0.05, 0, 0.001, 0.02, 0.22, 0.0), false)
 	sfx["record"] = _wav(_seq_bells([659.3, 784.0, 987.8, 1318.5], 0.09, 0.5), false)
-	sfx["good"] = _wav(_mix_into(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0),
-		_click(0.03, 0.007, 0.16)), false)
-	sfx["late"] = _wav(_mix_into(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03),
-		_click(0.03, 0.009, 0.10)), false)
+	sfx["good"] = _wav(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0), false)
+	sfx["late"] = _wav(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03), false)
 	sfx["whiff"] = _wav(_tone([520.0, 415.0], [1.0, 0.5], 0.10, 0, 0.001, 0.045, 0.18, 0.1), false)
 	sfx["throw"] = _wav(_throw_sound(), false)
 	sfx["drop"] = _wav(_drop_sound(), false)
@@ -8668,17 +8665,15 @@ func gen_sfx() -> void:
 	sfx["ui2"] = _wav(_tone([1174.7, 1568.0], [1.0, 0.5], 0.10, 0, 0.001, 0.05, 0.35, 0.0), false)
 	sfx["gasp"] = _wav(_gasp_sound(), false)
 	sfx["groan"] = _wav(_groan_sound(), false)
-	# each prop's catch texture is a tonal body plus its own material's transient
-	# click (soft rubber thud / fragile tap / wood knock / bright metal snap) -
-	# the click is the actual point of contact, the tone is what rings after it
-	sfx["c_ball"] = _wav(_mix_into(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.0),
-		_click(0.02, 0.006, 0.32)), false)
-	sfx["c_egg"] = _wav(_mix_into(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.04),
-		_click(0.015, 0.004, 0.14)), false)
-	sfx["c_club"] = _wav(_mix_into(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.12),
-		_click(0.03, 0.010, 0.26)), false)
-	sfx["c_knife"] = _wav(_mix_into(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0),
-		_click(0.012, 0.003, 0.38)), false)
+	# per-prop catch textures: NOT PLAYED right now (Louis: only perfect/good/late/
+	# whiff, no per-object sounds) - see the removed play_sfx call in on_catch.
+	# Kept generated (and the _click/_mix_into transient helpers kept defined,
+	# unused) so this whole texture layer is one commented-out line away from
+	# coming back, not deleted.
+	sfx["c_ball"] = _wav(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.15), false)
+	sfx["c_egg"] = _wav(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.2), false)
+	sfx["c_club"] = _wav(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.25), false)
+	sfx["c_knife"] = _wav(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0), false)
 	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
 
 
