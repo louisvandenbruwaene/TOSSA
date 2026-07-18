@@ -2436,11 +2436,20 @@ func tut_lesson(id: String) -> Array:
 	]
 
 
+const TRICK_TUT_SLOW := 0.55   # flat, generous slow motion for every trick-lesson step
+								# (2026-07-18, Louis: "too cumbersome... don't break it
+								# down into hundreds of small steps, that's only for the
+								# first tutorial") - a trick lesson teaches ONE new button,
+								# not the input system itself, so there is nothing to build
+								# UP to across steps and no reason to ramp the world back
+								# toward real speed the way the basics lesson does.
+
 func trick_lesson_steps(t: int) -> Array:
 	# a trick lesson mirrors the three INPUT GRAMMARS the game has, because the grammar
 	# is what confuses people, not the trick: a toggle switches on and off, an arm shot
 	# empowers one throw, a live trick acts on what is already in the air. Taught with
-	# plain balls (the trick shaping is prop-independent), slow, and drilled.
+	# plain balls (the trick shaping is prop-independent), slow throughout, shown once
+	# clearly and asked for only a couple of times - never a graduated drill.
 	if t < 0 or t >= TRICKS.size():
 		return [{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
 			"text": "Keep the cascade going", "sub": "Land three."}]   # defensive: never index []
@@ -2452,37 +2461,37 @@ func trick_lesson_steps(t: int) -> Array:
 		"toggle":
 			return [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_on", "need": 1,
-					"trick": t, "prompt": "trick", "slow": 0.62,
+					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
 					"text": "%s: switch it ON" % nm,
 					"sub": "Press %s ONCE - not repeatedly. Every throw reshapes into %s until you switch it off." % [kb, nm]},
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
-					"prompt": "catch", "slow": 0.5,
-					"text": "Now keep it going, and catch them down",
-					"sub": "Watch the weave change shape. The bottom-right card reads '%s - ON' whenever it runs. Land three." % nm.to_upper()},
+				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 2,
+					"prompt": "catch", "slow": TRICK_TUT_SLOW,
+					"text": "Now catch a couple of them",
+					"sub": "Watch the weave change shape. The bottom-right card reads '%s - ON' whenever it runs." % nm.to_upper()},
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_off", "need": 1,
-					"trick": t, "prompt": "trick", "slow": 0.35,
+					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
 					"text": "And switch it OFF",
 					"sub": "Press %s once more. One press ON, one press OFF - that is the whole toggle. %s swaps which trick %s carries." % [kb, kcy, kb]},
 			]
 		"arm":
 			return [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
-					"trick": t, "prompt": "trick", "slow": 0.55,
+					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
 					"text": "%s: arm it, then throw" % nm,
 					"sub": "Press %s once, then throw. Just that ONE next throw flies over the top, and it lands the trick." % kb},
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 2,
-					"trick": t, "prompt": "trick", "slow": 0.4,
-					"text": "Again - it is a one-shot, so arm it EVERY time",
+					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
+					"text": "Once more - it is a one-shot, so arm it every time",
 					"sub": "%s, throw, catch - each trick is its own press. The bottom-right card says READY while one is armed; %s swaps tricks." % [kb, kcy]},
 			]
 		_:  # live (Spin): acts on the balls already airborne
 			return [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 2,
-					"prompt": "catch", "slow": 0.55,
+					"prompt": "catch", "slow": TRICK_TUT_SLOW,
 					"text": "First get all three weaving",
 					"sub": "%s acts on the balls already in the air, so fill the air before you call it." % nm},
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
-					"trick": t, "prompt": "trick", "slow": 0.62,
+					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
 					"text": "Now press it, and catch through the turn",
 					"sub": "Press %s once - it fires the moment you press. Catches come while you spin; the bottom-right card shows its cooldown. %s swaps tricks." % [kb, kcy]},
 			]
@@ -2979,8 +2988,12 @@ func tut_cue(step: Dictionary) -> String:
 		return "press %s now" % String(k_restart()[0])
 	if not bool(step.get("guide", false)):
 		return ""   # freestyle: the floating keys over the hands guide, nothing shouts
-	# a ball in the air owns the cue: get ready while it climbs, then NOW across exactly
-	# the window the ring is flashing gold for, so the words and the ring never disagree
+	# PRIORITY (2026-07-18 fix, Louis: "shows catch when it should show throw first"):
+	# an imminent catch always wins - you cannot skip a real catch for a scripted throw -
+	# but a hand still HOLDING a ball it needs to throw outranks a catch that is not
+	# urgent yet. The two-ball step ("throw the second BEFORE it lands") was the tell:
+	# the instant the first ball left the hand, the old order jumped straight to "get
+	# ready to catch" and never told the player to throw the second one at all.
 	for b in balls:
 		if b.state != STATE_FLIGHT:
 			continue
@@ -2988,12 +3001,18 @@ func tut_cue(step: Dictionary) -> String:
 		var d := b.land_tick - tick
 		if absi(d) <= perfect_window():
 			return "press %s  -  NOW" % String(k_catch()[h])
-		if d > 0:
-			return "it is coming to your %s hand  -  catch with %s" % ["LEFT" if h == LEFT else "RIGHT", String(k_catch()[h])]
-	# nothing in the air: the hand holding the ball is the one being asked to throw
 	for hh: int in [LEFT, RIGHT]:
 		if not stack(hh).is_empty():
 			return "press %s" % String(k_throw()[hh])
+	# nothing urgent and no hand holds anything left to throw: a ball is still climbing
+	# or crossing, so name it early, well before its own window
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		var h := clampi(b.to_hand, 0, 1)
+		var d := b.land_tick - tick
+		if d > 0:
+			return "it is coming to your %s hand  -  catch with %s" % ["LEFT" if h == LEFT else "RIGHT", String(k_catch()[h])]
 	return ""
 
 
@@ -3137,9 +3156,12 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		# a GUIDED step is a call-and-response with one ball on the table, so the hand
 		# holding it IS the ask: its key burns as brightly as any named goal would. The
 		# step's goal there is the catch at the far end, and reading only that left the
-		# throw the whole beat depends on looking optional.
+		# throw the whole beat depends on looking optional. A TRICK step (2026-07-18
+		# fix) gets the same treatment: "arm it, then throw" landed the trick on a
+		# barely-dimmed key next to the ongoing cascade's own bright catch prompts, so
+		# the follow-up throw read as optional there too.
 		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT) \
-			or bool(step.get("guide", false))
+			or bool(step.get("guide", false)) or String(step.get("prompt", "")) == "trick"
 		draw_tut_key(font, hpos[hh] + Vector2(0.0, -44.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
@@ -9626,6 +9648,12 @@ func _demo_step() -> void:
 	if _demo_trick and pin_kind == "toggle" and toggle_on != _demo_trick_pin and tick >= 24:
 		toggle_on = _demo_trick_pin
 		toggle_scored = false
+	# a tutorial's "switch it OFF" step needs the mime to let go again - outside a
+	# lesson the point is showing the trick run, so this only fires once the lesson
+	# has actually reached that step (never mid-drill, never in a bare --trick demo)
+	if _demo_trick and tut_active and toggle_on == _demo_trick_pin \
+			and String(tut_step_data().get("goal", "")) == "trick_off":
+		toggle_on = -1
 	# metronome: every beat, release one ball from a hand that actually holds one.
 	# This can never desync because it only throws real held balls.
 	if tick >= 24 and tick % DEMO_BEAT == 0:
