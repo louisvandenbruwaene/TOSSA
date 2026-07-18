@@ -712,6 +712,9 @@ var tut_keys := 0         # command-key presses banked this step (the R and P te
 						  # goals count on their own, so a stray catch cannot clear them)
 var tut_pace := 0         # the basics lesson's rung on TUT_PACES (0 = slowest)
 var tut_flow_streak := 0  # clean catches in a row toward the next rung; drops zero it
+var tut_prev_prop := PROP_BALLS  # the prop equipped BEFORE a trick/count/pattern lesson
+								 # started (those always drill with Balls); tut_finish
+								 # restores it, so a Torches juggler comes out on Torches
 # egg-break effect: shell shards (fly with gravity) and yolk splats (spread on floor)
 var shards: Array[Dictionary] = []
 var splats: Array[Dictionary] = []
@@ -1746,12 +1749,14 @@ func reward_director() -> void:
 	# message says so in words.
 	if perfs_since_unlock >= 6:
 		pity_grant()
-	if money < 30 and pie_count == 0 and not pie_active and day != aid_pie_day:
+	if money < 30 and pie_count == 0 and not pie_active and day != aid_pie_day:   # 30: too
+		# poor to risk a shop trip, but not yet the meal-rescue's real emergency below
 		aid_pie_day = day
 		pie_count += 1
 		set_day_msg("a fan left a pie at your door  -  eat it before a big night")
 		play_sfx("coin", -10.0)
-	elif stamina <= 0.15 * stamina_max and money < EAT_COST and not aid_meal_used:
+	elif stamina <= 0.15 * stamina_max and money < EAT_COST and not aid_meal_used:   # 15%:
+		# too tired to work AND too broke to eat - the actual dead end this rescues
 		aid_meal_used = true
 		stamina = clampf(0.6 * stamina_max, stamina, stamina_max)
 		set_day_msg("a stranger paid for your meal  -  it will not happen twice")
@@ -1948,6 +1953,9 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 
 
 func day_anim_len(id: String) -> int:
+	# how long each day-action vignette holds, in cine_ticks (120/s: inn's 220 is
+	# ~1.8s, eat's 150 ~1.25s, everything else 100 is ~0.8s) - inn runs longest
+	# since sleep is the day-ending beat and earns a slower breath
 	match id:
 		"inn": return 220
 		"eat": return 150
@@ -2259,6 +2267,9 @@ func set_count_live(n: int) -> void:
 		return
 	while balls.size() < n:
 		var to_h := -1
+		# a new ball skips any hand something is already flying toward (it would
+		# arrive on top of that catch); between two free hands, tops up the one
+		# holding fewer, so the load lands balanced rather than piled on one side
 		for hh in [LEFT, RIGHT]:
 			var busy := false
 			for b in balls:
@@ -2406,8 +2417,9 @@ func tut_lesson(id: String) -> Array:
 	#      player likes. Here - and ONLY here - Enter means something, and it means one
 	#      thing: give me another ball. Everyone tested got the juggling immediately and
 	#      then sat there, because the old lesson asked for Enter after every step and so
-	#      Enter had stopped meaning anything. Now it appears three times, it always adds
-	#      a ball, and the callout grows louder the longer it goes unanswered.
+	#      Enter had stopped meaning anything. Now it appears three times here - the first
+	#      two add a ball, the third (after the finale) hands off to the R-key drill below
+	#      instead - and the callout grows louder the longer it goes unanswered.
 	#
 	# The two-ball and three-ball steps gate on REAL juggling (the "juggle" key): catches
 	# that leave the air empty behind them do not count toward the goal, so nobody walks
@@ -2571,6 +2583,7 @@ func pattern_lesson_steps(p: int) -> Array:
 
 
 func begin_tutorial(id: String) -> void:
+	tut_prev_prop = prop_type   # captured before tut_setup_step can overwrite it below
 	tut_id = id
 	tut_step = 0
 	tut_active = true
@@ -2864,7 +2877,8 @@ func tut_maintain() -> void:
 			"press_r": tut_demo_reset()
 			"press_p": tut_demo_pattern_off()
 	# keep the step playable by topping the hands back up shortly after a ball is
-	# lost, so a fumble never stalls a lesson
+	# lost, so a fumble never stalls a lesson (34 ticks, ~0.28s: enough of a beat
+	# for the drop to actually register before the ball reappears)
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
 		var step := tut_step_data()
 		var teach_hand := int(step.get("hand", RIGHT))
@@ -2898,6 +2912,7 @@ func tut_finish() -> void:
 	if _demo:
 		print("TUTTRACE finished id=%s tick=%d" % [tut_id, tick])
 	var was_basics := tut_id == "balls"
+	var was_prop_lesson := tut_id.begins_with("prop_")
 	tut_active = false
 	tut_id = ""
 	mode = MODE_TRAIN
@@ -2910,6 +2925,12 @@ func tut_finish() -> void:
 		game_state = ST_TUTDONE
 		cine_tick = 0
 		return
+	if not was_prop_lesson:
+		# trick/count/pattern lessons always drill with Balls (tut_lesson's own step
+		# data), whatever the player was actually equipped with - restore it now, so
+		# "leaves it be" (above) is actually true. A prop_ lesson is the one exception:
+		# its whole point is walking out equipped with the prop it just taught.
+		prop_type = tut_prev_prop
 	enter_day()
 	set_day_msg("lesson complete  -  your day begins")
 
