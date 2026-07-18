@@ -191,12 +191,11 @@ const FOCUS_WINDOW_MAX := 6       # hard cap on the widening (skill-first guardr
 const LEFT := 0
 const RIGHT := 1
 const CASCADE := 0
-const FOUNTAIN := 1
-const COLUMNS := 2
-const HALFSHOWER := 3
-const SHOWER := 4
-const RCASC := 5
-const TENNIS := 6
+const COLUMNS := 1
+const HALFSHOWER := 2
+const SHOWER := 3
+const RCASC := 4
+const TENNIS := 5
 # --- patterns as learnable content (GDD economy: harder base pays more, so one
 # tamed routine is never optimal). P cycles the unlocked patterns in training.
 # "mult" scales every catch's score, the reward for the pattern's base difficulty.
@@ -205,16 +204,17 @@ const TENNIS := 6
 # routine and Columns can never run "on top of" anything.
 # Unlocks are spread across the CAREER, not the first evenings (Louis): each entry
 # may ask for a level, a stat, and a stage. All present keys must be met -
-# see skill_req_met / skill_req_text. Indices 0..4 are frozen (pattern_sel saves).
+# see skill_req_met / skill_req_text.
 # Waterfall (2026-07-19, was index 6) was REMOVED (Louis: "identical to half
-# shower") - see load_progress for the pattern_sel migration this forced (an old
-# save's index 6 meant Waterfall; it now means Tennis, since everything after the
-# removed slot shifted down one).
+# shower"), and Fountain (2026-07-19 later, was index 1) was REMOVED too (Louis:
+# "fountain isn't a pattern, that's just cascade for 4 balls") - CASCADE alone now
+# covers both roles, crossing at an odd count and keeping each hand's own circle
+# at an even one (do_throw's `cross`), with one shared mult, no separate entry.
+# Indices are NOT frozen any more (both removals needed real migration) - see
+# load_progress's versioned pattern_sel migration for the full history.
 const PATTERNS := [
 	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0,
-	 "desc": "The weave. Every throw crosses to the other hand."},
-	{"id": "fountain",   "name": "Fountain",    "lvl": 1, "mult": 1.1,
-	 "desc": "Each hand juggles its own circle. Even counts feel natural."},
+	 "desc": "The weave. Odd counts cross to the other hand; even counts keep each hand's own circle."},
 	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 8, "mult": 1.15,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25,
@@ -508,6 +508,9 @@ class Ball:
 var tick := 0
 var pattern := CASCADE
 var pattern_sel := CASCADE  # the chosen pattern (persisted); start_run snaps it to what is unlocked
+var pattern_ver := 2   # PATTERNS index-migration generation this save is on (persisted);
+					   # a fresh save starts already on the latest, nothing to migrate -
+					   # see load_progress for what each generation means
 var pattern_once := -1    # a practice booked from the Skills screen runs THIS pattern for
 						  # that session only - the player's own P choice (pattern_sel) is
 						  # untouched, so trying a pattern never silently re-books the act
@@ -901,7 +904,7 @@ func _ready() -> void:
 		save_slot = 0
 		load_progress()
 		var start_n := 3
-		var bi := ua.find("--balls")   # dev: force the ball count (audit 4- and 6-ball fountains)
+		var bi := ua.find("--balls")   # dev: force the ball count (audit even-count Cascade, e.g. 4/6)
 		if bi != -1 and bi + 1 < ua.size():
 			strength = maxi(strength, int(BALL_GATES[MAX_BALLS_HARD]))   # every count open
 			prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], MAX_BALLS_HARD)   # balls are stock now
@@ -2174,8 +2177,9 @@ func practice_skill(idx: int) -> void:
 		set_day_msg("too tired to practise  -  sleep first")
 		play_sfx("whiff", -10.0)
 		return
-	# a pattern needs a matching ball count (an even fountain, odd cascade); a trick
-	# keeps the current count. The pattern rides the ONE-SESSION override, never
+	# a pattern practice keeps the current ball count as-is (Cascade reads either
+	# way, crossing odd / same-hand even; every other pattern is unlocked at its
+	# own count regardless). The pattern rides the ONE-SESSION override, never
 	# pattern_sel: trying a pattern from the Skills screen must not re-book the act
 	# (Louis) - only P, the player's own hand, changes the persistent choice.
 	if not is_trick:
@@ -2186,12 +2190,7 @@ func practice_skill(idx: int) -> void:
 	save_progress()
 	mode = MODE_TRAIN
 	game_state = ST_PLAY
-	# the fountain reads even: borrow one more ball for the session so choosing it
-	# from the Skills screen actually shows a fountain (start_run clamps safely)
-	var run_n := num_balls
-	if pattern_once == FOUNTAIN and run_n % 2 == 1:
-		run_n += 1
-	start_run(run_n)
+	start_run(num_balls)
 	# now engage the chosen trick (start_run has cleared the per-run trick state):
 	# a toggle switches ON and stays, an arm trick primes the next throw, Spin just
 	# loads. The player still throws to begin, so nothing fires unbidden.
@@ -2546,7 +2545,8 @@ func trick_lesson_steps(t: int) -> Array:
 
 func count_lesson_steps(n: int) -> Array:
 	# a new ball count: a slow drill to feel the higher, faster load, then a faster one.
-	# The pattern is left to the parity default (odd -> cascade, even -> fountain).
+	# Whatever pattern is already running keeps running; Cascade itself reads
+	# either way (crossing odd, same-hand even), so a count change never strands it.
 	return [
 		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 6,
 			"prompt": "catch", "slow": 0.6,
@@ -2567,7 +2567,8 @@ func pattern_lesson_steps(p: int) -> Array:
 	var pd: Dictionary = PATTERNS[p]
 	var nm := String(pd["name"])
 	var desc := String(pd.get("desc", "Feel out its shape."))
-	var n := 4 if p == FOUNTAIN else 3   # fountain wants an even count; the rest read at 3
+	var n := 3   # every pattern lesson reads at 3 (Cascade's own even-count face isn't
+				# taught as a separate lesson any more - it's the same skill, see PATTERNS)
 	return [
 		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p, "goal": "catch", "need": 5,
 			"prompt": "catch", "slow": 0.58,
@@ -2639,11 +2640,11 @@ func tut_setup_step() -> void:
 	# player's own P choice, the one that persists) is never touched here - a lesson
 	# demonstrating Columns must not walk out with Columns selected (Louis). A step
 	# without a "pattern" key keeps whatever is running when the juggle flows on, and
-	# falls to the parity default only on a fresh deal.
+	# falls back to Cascade only on a fresh deal.
 	if step.has("pattern"):
 		pattern = int(step["pattern"])
 	elif fresh:
-		pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+		pattern = CASCADE
 	# a trick lesson selects (and de-arms) its trick, so the step starts from a known
 	# state: Space will act on exactly this trick. A "switch it OFF" step is the one
 	# exception - it must start with the toggle RUNNING (the thing to switch off),
@@ -2763,7 +2764,7 @@ func tut_demo_pattern_off() -> void:
 	# the pattern lesson's "press P" step: one press visibly hands the routine back to
 	# the plain weave, so the player SEES that P is how patterns are chosen - without
 	# ever touching pattern_sel (their own persistent choice)
-	pattern = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	pattern = CASCADE
 	col_air_ref = -1.0
 	col_mid_ball = null
 	tennis_ball = null
@@ -4064,9 +4065,9 @@ func over_top_land_slot(t: int) -> int:
 # where hand h wants to be right now (Louis): while holding, wherever ITS OWN
 # next throw departs from; once empty, exactly where the soonest ball flying its
 # way will actually land (to_pos: the landing ring's spot), so the ring always
-# draws centred on the waiting palm - the fountain's widened landing sat 22px
-# off the slot the hand used to wait at, and its rings read as "wrong" next to
-# the cascade's. With nothing inbound, the slot the last throw aimed at.
+# draws centred on the waiting palm even when drift has nudged that landing a
+# few px off the slot's nominal centre. With nothing inbound, the slot the last
+# throw aimed at.
 func hand_target(h: int) -> Vector2:
 	var p: Vector2
 	var inc: Ball = null
@@ -4148,22 +4149,16 @@ func start_run(n: int) -> void:
 	# you cannot juggle more of a prop than you own (balls are unlimited)
 	var cap := mini(max_balls(), have(prop_type))
 	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, cap))
-	# the chosen pattern, snapped to what this level owns. The two beginner
-	# patterns still auto-match the count's parity (odd weaves, even fountains);
-	# an explicitly chosen exotic pattern sticks whatever the count.
-	if not pattern_unlocked(pattern_sel) or pattern_sel == CASCADE or pattern_sel == FOUNTAIN:
-		pattern_sel = CASCADE if num_balls % 2 == 1 else FOUNTAIN
+	# the chosen pattern, snapped to what this level owns. Cascade needs no ball-
+	# count match any more (it crosses odd, keeps each hand its own ball even, so
+	# any count works); an explicitly chosen exotic pattern sticks whatever the count.
+	if not pattern_unlocked(pattern_sel):
+		pattern_sel = CASCADE
 	pattern = pattern_sel
 	# a Skills-screen practice runs its chosen pattern for THIS session without
 	# re-booking the act: P (cycle_pattern) clears the override, an explicit choice.
-	# The two parity starters stay snapped to the count (an odd fountain has never
-	# been juggleable here, and the override must not smuggle one in).
 	if pattern_once >= 0 and pattern_unlocked(pattern_once):
 		pattern = pattern_once
-		if pattern == FOUNTAIN and num_balls % 2 == 1:
-			pattern = CASCADE
-		elif pattern == CASCADE and num_balls % 2 == 0:
-			pattern = FOUNTAIN
 	balls.clear()
 	_stack_l.clear()
 	_stack_r.clear()
@@ -4651,11 +4646,13 @@ func do_throw(h: int, hold: int) -> void:
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
 	# landing a touch wide of the usual catch point
-	# every weaving pattern crosses hands; only Fountain and Columns keep a ball
-	# with its own hand (Reverse Cascade and Tennis are woven too - their over-
-	# the-top throws force cross below anyway, but Tennis's unmarked balls also
-	# weave, so they cross here)
-	var cross := pattern in [CASCADE, HALFSHOWER, SHOWER, RCASC, TENNIS]
+	# every weaving pattern crosses hands; only Columns keeps a ball with its own
+	# hand outright (Reverse Cascade and Tennis are woven too - their over-the-top
+	# throws force cross below anyway, but Tennis's unmarked balls also weave, so
+	# they cross here). Cascade is parity-only: it crosses at an odd count, keeps
+	# each hand its own ball at an even one (the role Fountain used to play, before
+	# it was folded into Cascade, 2026-07-19).
+	var cross := (pattern == CASCADE and num_balls % 2 == 1) or pattern in [HALFSHOWER, SHOWER, RCASC, TENNIS]
 	if over_top:
 		cross = true
 	# an over-the-top throw never joins the lane bookkeeping (it is the breakout,
@@ -4727,15 +4724,16 @@ func do_throw(h: int, hold: int) -> void:
 		b.from_pos = outer_pos(h)
 		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
 	else:
-		# a plain cascade/fountain throw: inner launch, outer catch. A FOUNTAIN is
-		# same-hand, so its two balls (half a cycle apart) trace the same arc and
-		# cleared by only 5px; widening the landing outward opens the up-leg and
-		# down-leg apart so they never share air.
+		# a plain cascade throw: inner launch, outer catch - always these same two
+		# points, whichever hand it lands in (Louis, 2026-07-19: an arm only ever
+		# reaches inner or outer, a third position looks wrong; a same-hand pair
+		# at an even count used to widen its landing 22px to buy mid-air clearance,
+		# which is exactly the kind of extra position this rule now forbids).
+		# Measured cost: a same-hand (even count) pair now clears by only ~5px at
+		# worst (--collcheck), same as before that widening existed - tight, but a
+		# real gap, not an overlap, and an accepted tradeoff for the cleaner arm.
 		b.from_pos = inner_pos(h)
-		var fwide := 0.0
-		if pattern == FOUNTAIN:
-			fwide = 22.0 if b.to_hand == RIGHT else -22.0
-		b.to_pos = outer_pos(b.to_hand) + Vector2(drift + fwide, 0.0)
+		b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
 	if this_trick == TR_BTB:
 		# BEHIND THE BACK actually goes behind now (Louis: it never read as
 		# behind): the arm wraps and the ball RELEASES from behind the opposite
@@ -5195,7 +5193,7 @@ func announce_unlocks() -> void:
 	# stage reached - so after each of those this rechecks everything and announces
 	# whatever is newly open. queue_lesson's own once-ever dedupe is the memory of
 	# what was already announced, so nothing double-fires across sessions either.
-	# Skills open from the very start (Cascade, Fountain) never announce.
+	# Skills open from the very start (Cascade) never announce.
 	for i in TRICKS.size():
 		if not trick_unlocked(i) or skill_req_text(TRICKS[i]) == "yours from the start":
 			continue
@@ -5866,13 +5864,27 @@ func load_progress() -> void:
 		if bp is Array:
 			for i in mini((bp as Array).size(), best_scores_purist.size()):
 				best_scores_purist[i] = int((bp as Array)[i])
+		pattern_ver = int(cf.get_value("prog", "pattern_ver", 0))
 		var raw_pattern_sel := int(cf.get_value("prog", "pattern_sel", CASCADE))
-		if raw_pattern_sel == 6:
-			# migrate (2026-07-19): index 6 used to be Waterfall, removed and merged
-			# into Half Shower - a save with it selected keeps its closest surviving
-			# relative rather than silently landing on whatever now sits at index 6
-			# (Tennis, since everything after the removed slot shifted down by one)
-			raw_pattern_sel = HALFSHOWER
+		if pattern_ver < 2:
+			# migrate a pre-2026-07-19 save straight from PATTERNS' ORIGINAL 8-entry
+			# layout (Cascade0 Fountain1 Columns2 HalfShower3 Shower4 RCasc5
+			# Waterfall6 Tennis7) to the current one in a single jump - no real save
+			# was ever written in the brief intermediate 7-entry (Waterfall-removed-
+			# only) shape, so there is nothing between "pre-migration" and "current"
+			# worth stepping through. Fountain and Waterfall both fold into their
+			# closest surviving relative rather than silently becoming whatever now
+			# sits at their old index once (each shifted by their own amount).
+			match raw_pattern_sel:
+				0, 1: raw_pattern_sel = CASCADE       # Cascade itself, or Fountain folded in
+				2: raw_pattern_sel = COLUMNS
+				3: raw_pattern_sel = HALFSHOWER
+				4: raw_pattern_sel = SHOWER
+				5: raw_pattern_sel = RCASC
+				6: raw_pattern_sel = HALFSHOWER       # Waterfall folded into Half Shower
+				7: raw_pattern_sel = TENNIS
+				_: raw_pattern_sel = CASCADE          # anything unrecognised: the safe default
+			pattern_ver = 2
 		pattern_sel = clampi(raw_pattern_sel, 0, PATTERNS.size() - 1)
 		var cr: Variant = cf.get_value("prog", "career", {})
 		if cr is Dictionary:
@@ -5942,6 +5954,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
+	cf.set_value("prog", "pattern_ver", pattern_ver)
 	cf.set_value("prog", "career", career)
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
@@ -8020,6 +8033,8 @@ const PREV_ARC_SCALE := 42.0  # px of peak arc height per 1.0 of a leg's "height
 const PREV_ORIGIN_Y := 100.0  # baseline's distance down from the box's own top edge
 
 func preview_hand_point(is_outer: bool, hand: int) -> Vector2:
+	if hand < 0:
+		return Vector2.ZERO   # Columns' middle lane (odd counts): stage-centre, no side
 	var dx := PREV_OUTER_DX if is_outer else PREV_INNER_DX
 	return Vector2(-dx if hand == LEFT else dx, 0.0)
 
@@ -8041,16 +8056,24 @@ func pattern_preview_tracks(p: int) -> Array:
 	var d_high := 1.7    # an over-the-top launch (longest hang)
 	var plain_weave := [[false, LEFT, true, RIGHT, 1.0, d_plain], [false, RIGHT, true, LEFT, 1.0, d_plain]]
 	match p:
-		FOUNTAIN:
-			# each hand keeps its own ball, an out-and-back loop with no crossing -
-			# literally "its own circle", per the pattern's own description
-			return [[[[false, LEFT, true, LEFT, 0.9, d_plain], [true, LEFT, false, LEFT, 0.9, d_plain]], 1],
-					[[[false, RIGHT, true, RIGHT, 0.9, d_plain], [true, RIGHT, false, RIGHT, 0.9, d_plain]], 1]]
+		CASCADE:
+			# shown at 4 balls (Louis, 2026-07-19): Cascade's OTHER face at an even
+			# count - each hand keeps its own ball in a self-contained loop instead of
+			# crossing, out-and-back, no crossing - the role Fountain used to play as
+			# its own pattern, before it was folded into Cascade ("that's just cascade
+			# for 4 balls"). The odd/crossing face is already obvious from the weave
+			# shape at every other count, so it doesn't need its own preview too.
+			return [[[[false, LEFT, true, LEFT, 0.9, d_plain], [true, LEFT, false, LEFT, 0.9, d_plain]], 2],
+					[[[false, RIGHT, true, RIGHT, 0.9, d_plain], [true, RIGHT, false, RIGHT, 0.9, d_plain]], 2]]
 		COLUMNS:
-			# a degenerate from==to leg: the real flight parabola alone (flight_pos)
-			# already draws a straight vertical bounce when the endpoints match
+			# 3 balls: two side lanes (a degenerate from==to leg - flight_pos's own
+			# parabola alone already draws a straight vertical bounce when the
+			# endpoints match) plus the odd-count middle lane, hand -1 (stage-centre,
+			# no side - Columns is the one pattern exempt from the inner/outer-only
+			# rule below, per Louis, since its lanes are their own thing entirely)
 			return [[[[false, LEFT, false, LEFT, 1.1, d_plain]], 1],
-					[[[false, RIGHT, false, RIGHT, 1.1, d_plain]], 1]]
+					[[[false, RIGHT, false, RIGHT, 1.1, d_plain]], 1],
+					[[[false, -1, false, -1, 1.1, d_plain]], 1]]
 		HALFSHOWER:
 			# left is capped LOW (HALFSHOWER_LOW, 2026-07-19: it crossed the high road
 			# too often before this cap existed), right is fixed on the over-the-top road
@@ -8068,7 +8091,7 @@ func pattern_preview_tracks(p: int) -> Array:
 			# cascade), only its height differs, so it reads as "the same rhythm, just higher"
 			return [[plain_weave, 2], [[[true, LEFT, true, RIGHT, 1.6, d_plain], [true, RIGHT, true, LEFT, 1.6, d_plain]], 1]]
 		_:
-			return [[plain_weave, 3]]   # CASCADE, and a safe fallback for anything new
+			return [[plain_weave, 3]]   # a safe fallback for anything unrecognised
 
 
 func pattern_preview_ball_pos(legs: Array, tsec: float) -> Vector2:
@@ -8204,7 +8227,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		desc = String(pd2["desc"])
 		req_line = skill_req_text(pd2)
 		is_unlocked = pattern_unlocked(pattern_order()[skills_sel - nt])
-		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still). Cascade and Fountain also match the ball count." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
+		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still). Cascade also changes shape with the ball count: crossing odd, same-hand even." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
 	draw_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
 	if not is_unlocked:
 		# the full requirement, right-aligned so a long ask (level + stat + stage)

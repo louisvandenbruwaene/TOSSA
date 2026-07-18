@@ -63,23 +63,42 @@ and deleted. History lives in git.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter).
 - **Skills screen:** every trick and pattern, whether it's yours yet, and the exact
-  keys that pull it off. A selected PATTERN (2026-07-18, slowed and tightened
-  2026-07-19) also gets a live PREVIEW box (`draw_pattern_preview`): a small self-
+  keys that pull it off. A selected PATTERN (2026-07-18, slowed/tightened/rebuilt
+  2026-07-19 x2) also gets a live PREVIEW box (`draw_pattern_preview`): a small self-
   looping schematic built from the pattern's real inner/outer hand points and
   relative throw-height rules (see `pattern_preview_tracks`), not a real sim and not
   hooked to the live `balls`/`pattern` state - safe to animate from any screen. Every
   ball position is hard-clamped inside the box as a guarantee, not just sized to fit.
   `--skills [N]` dev flag opens it for a screenshot, optionally selecting entry N.
-- **Patterns, current roster (2026-07-19):** Cascade, Fountain (a genuinely different
-  throw, not "cascade at 4 balls" - it doesn't cross, unlike Cascade; the auto-switch
-  by ball-count parity in `start_run`/`cycle_pattern` is deliberate and unchanged),
-  Columns, Half Shower, Shower, Reverse Cascade, Tennis. **Waterfall was removed**
-  (Louis: identical to Half Shower) - `PATTERNS` shrank from 8 to 7 entries and
-  `TENNIS` shifted from index 7 to 6; `load_progress` migrates an old save's
-  `pattern_sel == 6` (used to mean Waterfall) to Half Shower rather than letting it
-  silently become whatever now sits at that index. Half Shower's own weave side is
-  now capped LOW (`HALFSHOWER_LOW`, 0.2) - it still crossed the over-the-top road too
-  often with only `HALFSHOWER_MIN` raising the high side's floor.
+- **Arms only ever reach two points** (Louis, 2026-07-19): `inner_pos` and
+  `outer_pos`, the same two the 3-ball Cascade always used - Columns' own lane
+  system is the one deliberate exception (its own thing entirely, per Louis, not
+  a third arm position to police). No other pattern or trick may introduce a
+  third position; a same-hand Cascade pair used to widen its landing 22px for
+  clearance and that is exactly the kind of thing this rule forbids (see below).
+- **Patterns, current roster (2026-07-19, second pass):** Cascade, Columns, Half
+  Shower, Shower, Reverse Cascade, Tennis - six now, down from eight at the start
+  of the day. **Fountain was removed** (Louis: "fountain isn't a pattern, that's
+  just cascade for 4 balls") and folded into Cascade: the mechanic is unchanged
+  (Cascade still crosses at an odd count, keeps each hand its own ball at an even
+  one - `do_throw`'s `cross`), there is just no separate PATTERNS entry, unlock, or
+  score multiplier for the even-count face any more, and its old same-hand landing
+  no longer widens 22px past `outer_pos` (see the arms rule above - measured
+  clearance dropped to ~5px via `--collcheck`, tight but real, an accepted
+  tradeoff). Its preview is now Cascade's own, shown at 4 balls specifically since
+  the odd/crossing face is already obvious from the weave shape at any other
+  count; Columns' preview now runs 3 balls (two side lanes plus the odd-count
+  middle lane) instead of 2. **Waterfall was removed** (Louis: identical to Half
+  Shower) and folded into Half Shower, whose own weave side is now capped LOW
+  (`HALFSHOWER_LOW`, 0.2) - it still crossed the over-the-top road too often with
+  only `HALFSHOWER_MIN` raising the high side's floor. `load_progress` carries a
+  versioned migration (`pattern_ver`, persisted) mapping any pre-2026-07-19 save's
+  `pattern_sel` straight from the ORIGINAL 8-entry layout to the current one in one
+  jump, folding Fountain and Waterfall into their closest surviving relative
+  rather than letting either silently become whatever now sits at their old index.
+- **A crossed even-count trick** stays a captured, unbuilt idea (see Still open
+  below) - Louis confirmed the underlying odd/even mechanic itself is correct and
+  should stay exactly as it is; only the separate "Fountain" PRESENTATION went.
 - **Tutorial (the basics):** two guided call-and-response steps at 50% slowmo, then
   freestyle 1 ball, 2 balls (forced cascade so throws cross), then the finale: ten
   consecutive juggling catches of the 3-ball cascade at genuine full speed. The pace
@@ -146,9 +165,9 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 
 - **Teaching lessons as income** (mastered skills earn gold/rep as a day action).
 - **A crossed even-count trick** (Louis, 2026-07-19, tentative - "perhaps"): a way to
-  juggle an even ball count with Cascade-style crossing throws instead of Fountain's
-  natural same-hand pattern, maybe by borrowing the throw rhythm of count-1 or
-  count+1. Not designed or built - needs real shape/balance work first.
+  juggle an even ball count with Cascade-style crossing throws instead of Cascade's
+  own natural same-hand face at that count, maybe by borrowing the throw rhythm of
+  count-1 or count+1. Not designed or built - needs real shape/balance work first.
 - **Eating eggs** (+10 stamina food that doubles as a risky scoring prop).
 - **Rep pressure by difficulty:** make high venues effectively demand heavy props /
   high counts (Louis: "near impossible to unlock high venues with only 3 balls") -
