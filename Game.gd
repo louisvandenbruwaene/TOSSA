@@ -7913,6 +7913,112 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 		draw_string(font, Vector2(x + w - 76.0, y), "Lv %d%s" % [int(req["lvl"]), "+" if more else ""], HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
 
 
+# --- pattern preview (Skills screen): a small self-looping schematic, not a real
+# sim. Each dot follows the pattern's ACTUAL inner/outer hand geometry (see
+# inner_pos/outer_pos) and the same relative height ordering do_throw uses (a
+# low/fast feed < a plain weave < an over-the-top launch), just scaled to fit a
+# small box and driven by atick() instead of player input - so it reads as
+# THIS pattern, not a generic bouncing-ball loop. It does not touch the real
+# `balls` / `pattern` state, so it is safe to animate from any screen.
+const PREV_OUTER_DX := 34.0   # local-space stand-in for outer_pos's 100px reach
+const PREV_INNER_DX := 18.0   # keeps outer_pos:inner_pos's ~100:54 ratio, scaled down
+const PREV_ARC_SCALE := 46.0  # px of peak arc height per 1.0 of a leg's "height" units
+
+func preview_hand_point(is_outer: bool, hand: int) -> Vector2:
+	var dx := PREV_OUTER_DX if is_outer else PREV_INNER_DX
+	return Vector2(-dx if hand == LEFT else dx, 0.0)
+
+
+# one pattern's choreography as a list of [legs, ball_count] tracks. Every ball on a
+# track runs the SAME repeating leg cycle, spread evenly across its total duration -
+# the trick that turns one throw-catch cycle into a continuous multi-ball loop (a real
+# 3-ball cascade is one L->R/R->L cycle with 3 balls a third of a cycle apart). A leg is
+# [from_outer, from_hand, to_outer, to_hand, height, duration]; height/duration are
+# preview-only units, but their ORDER mirrors the real constants: SHOWER_FEED-style
+# low feeds are short and flat, a plain weave is the baseline, and an over-the-top leg
+# (OVER_TOP_MIN / SHOWER_MIN / HALFSHOWER_MIN / WATERFALL_HIGH territory) is the
+# tallest and longest-hanging.
+func pattern_preview_tracks(p: int) -> Array:
+	var plain_weave := [[false, LEFT, true, RIGHT, 1.0, 0.42], [false, RIGHT, true, LEFT, 1.0, 0.42]]
+	match p:
+		FOUNTAIN:
+			# each hand keeps its own ball, an out-and-back loop with no crossing -
+			# literally "its own circle", per the pattern's own description
+			return [[[[false, LEFT, true, LEFT, 0.9, 0.4], [true, LEFT, false, LEFT, 0.9, 0.4]], 1],
+					[[[false, RIGHT, true, RIGHT, 0.9, 0.4], [true, RIGHT, false, RIGHT, 0.9, 0.4]], 1]]
+		COLUMNS:
+			# a degenerate from==to leg: the real flight parabola alone (flight_pos)
+			# already draws a straight vertical bounce when the endpoints match
+			return [[[[false, LEFT, false, LEFT, 1.1, 0.5]], 1],
+					[[[false, RIGHT, false, RIGHT, 1.1, 0.5]], 1]]
+		HALFSHOWER:
+			# left keeps the plain weave, right is fixed on the over-the-top road
+			return [[[[false, LEFT, true, RIGHT, 1.0, 0.42], [true, RIGHT, true, LEFT, 1.6, 0.6]], 3]]
+		SHOWER:
+			# left is a fast low feed (SHOWER_FEED), right rides the full high circle
+			return [[[[false, LEFT, true, RIGHT, 0.5, 0.28], [true, RIGHT, true, LEFT, 1.7, 0.62]], 3]]
+		RCASC:
+			# both hands fixed over-the-top: the weave runs backward, outer to outer
+			return [[[[true, LEFT, true, RIGHT, 1.6, 0.6], [true, RIGHT, true, LEFT, 1.6, 0.6]], 3]]
+		WFALL:
+			# right fixed high over-the-top, left capped low so it flows beneath it
+			return [[[[false, LEFT, true, RIGHT, 0.35, 0.3], [true, RIGHT, true, LEFT, 1.8, 0.64]], 3]]
+		TENNIS:
+			# two balls run the plain weave; the third (its own track) is the one
+			# marked ball, over-the-top on every throw regardless of which hand
+			return [[plain_weave, 2], [[[true, LEFT, true, RIGHT, 1.6, 0.6], [true, RIGHT, true, LEFT, 1.6, 0.6]], 1]]
+		_:
+			return [[plain_weave, 3]]   # CASCADE, and a safe fallback for anything new
+
+
+func pattern_preview_ball_pos(legs: Array, tsec: float) -> Vector2:
+	var total := 0.0
+	for leg in legs:
+		total += float(leg[5])
+	if total <= 0.0:
+		return Vector2.ZERO
+	var tloop := fmod(tsec, total)
+	var acc := 0.0
+	for idx in legs.size():
+		var leg: Array = legs[idx]
+		var dur: float = leg[5]
+		if idx == legs.size() - 1 or tloop < acc + dur:
+			var p := clampf((tloop - acc) / dur, 0.0, 1.0)
+			var from_pt := preview_hand_point(bool(leg[0]), int(leg[1]))
+			var to_pt := preview_hand_point(bool(leg[2]), int(leg[3]))
+			var pos := from_pt.lerp(to_pt, p)
+			pos.y -= 4.0 * float(leg[4]) * PREV_ARC_SCALE * p * (1.0 - p)   # flight_pos's own parabola, rescaled
+			return pos
+		acc += dur
+	return Vector2.ZERO
+
+
+func draw_pattern_preview(font: Font, box: Rect2, p: int) -> void:
+	draw_rect(box, Color(0.08, 0.05, 0.06, 0.75))
+	draw_rect(box, Color(0.9, 0.6, 0.35, 0.3), false, 1.0)
+	draw_string(font, box.position + Vector2(10.0, 16.0), "PREVIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.68, 0.58, 0.8))
+	var origin := box.position + Vector2(box.size.x * 0.5, box.size.y * 0.58)
+	var t := atick() / 120.0
+	var ball_i := 0
+	var tracks := pattern_preview_tracks(p)
+	for ti in tracks.size():
+		var legs: Array = tracks[ti][0]
+		var n: int = tracks[ti][1]
+		var total := 0.0
+		for leg in legs:
+			total += float(leg[5])
+		# Tennis's second track is the one MARKED ball - it gets its own colour
+		# (gold) rather than the shared rotation, same as the real marked ball
+		var marked := p == TENNIS and ti == 1
+		for i in n:
+			var phase := t + total * float(i) / float(n)
+			var pos := origin + pattern_preview_ball_pos(legs, phase)
+			draw_circle(pos, 6.0, Color(1.0, 0.85, 0.3) if marked else ball_color(ball_i))
+			ball_i += 1
+	draw_string(font, origin + Vector2(-PREV_OUTER_DX - 10.0, 30.0), "L", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
+	draw_string(font, origin + Vector2(PREV_OUTER_DX - 10.0, 30.0), "R", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
+
+
 func draw_skills(font: Font, s: Vector2) -> void:
 	# the Skills reference: every trick and pattern, whether it is yours yet, and
 	# the exact keys that pull it off. This is where the trimmed unlock toast now
@@ -7950,6 +8056,17 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	for j in pord.size():
 		var pd: Dictionary = PATTERNS[pord[j]]
 		_skills_row(font, col_r, y0 + float(j) * row_h, colw, String(pd["name"]), pd, pattern_unlocked(pord[j]), (nt + j) == skills_sel)
+
+	# a pattern's preview lives under the (always shorter) TRICKS list, in the
+	# left column's own empty space - it never has to fight the PATTERNS list
+	# (which is the taller of the two) for room, and the offset is derived from
+	# nt/row_h rather than hardcoded, so it stays clear if TRICKS ever grows
+	if skills_sel >= nt:
+		var pbox_w := 168.0
+		var pbox_h := 132.0
+		var pbox_x := col_l + (colw - pbox_w) * 0.5
+		var pbox_y := y0 + float(nt) * row_h + 20.0
+		draw_pattern_preview(font, Rect2(pbox_x, pbox_y, pbox_w, pbox_h), pattern_order()[skills_sel - nt])
 
 	# the detail strip: the selected entry explained, with its exact controls
 	var dy := py + ph - 118.0
