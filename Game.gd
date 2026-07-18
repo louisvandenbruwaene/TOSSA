@@ -2988,12 +2988,17 @@ func tut_cue(step: Dictionary) -> String:
 		return "press %s now" % String(k_restart()[0])
 	if not bool(step.get("guide", false)):
 		return ""   # freestyle: the floating keys over the hands guide, nothing shouts
-	# PRIORITY (2026-07-18 fix, Louis: "shows catch when it should show throw first"):
-	# an imminent catch always wins - you cannot skip a real catch for a scripted throw -
-	# but a hand still HOLDING a ball it needs to throw outranks a catch that is not
-	# urgent yet. The two-ball step ("throw the second BEFORE it lands") was the tell:
-	# the instant the first ball left the hand, the old order jumped straight to "get
-	# ready to catch" and never told the player to throw the second one at all.
+	# PRIORITY (2026-07-18, Louis, twice now - "it should ALWAYS say throw before
+	# catch if there is a ball left in the hand, only THEN should it say how to
+	# catch"): a held ball wins, full stop, no exception for an urgent-looking
+	# catch. The first fix still let an imminent catch preempt a pending throw,
+	# which was closer but not what Louis actually asked for - the whole guided
+	# call-and-response is scripted tight enough that a ball only ever becomes
+	# imminent AFTER the step's throws are done, so this ordering never strands a
+	# real catch: it only ever fires while a throw is still owed.
+	for hh: int in [LEFT, RIGHT]:
+		if not stack(hh).is_empty():
+			return "press %s" % String(k_throw()[hh])
 	for b in balls:
 		if b.state != STATE_FLIGHT:
 			continue
@@ -3001,9 +3006,6 @@ func tut_cue(step: Dictionary) -> String:
 		var d := b.land_tick - tick
 		if absi(d) <= perfect_window():
 			return "press %s  -  NOW" % String(k_catch()[h])
-	for hh: int in [LEFT, RIGHT]:
-		if not stack(hh).is_empty():
-			return "press %s" % String(k_throw()[hh])
 	# nothing urgent and no hand holds anything left to throw: a ball is still climbing
 	# or crossing, so name it early, well before its own window
 	for b in balls:
