@@ -124,6 +124,8 @@ const ST_GAMEOVER := 10   # the road's end: too tired to earn, too poor for a be
 const ST_TUTDONE := 11    # the small congrats card after the basics lesson: the
 						   # starting kit, a breath, THEN the day hub (Louis: no
 						   # hard cut from the lesson straight into a menu)
+const ST_CAPSULE := 12    # dev only (--capsule): pure key-art, no UI chrome, for
+						   # exporting Steam capsule/store images - see draw_capsule
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -627,6 +629,11 @@ var _prev_running := false
 
 # game-flow state
 var game_state := ST_MENU
+const STATE_FADE_FRAMES := 14   # ~120ms at 120Hz: every screen fades in on arrival,
+								 # detected generically (see _physics_process) so no
+								 # individual `game_state = ST_X` site needs to know
+var _fade_prev_state := -1      # -1 so even the FIRST screen (the boot menu) fades in
+var _state_fade_t := 0          # ticks since the last game_state change
 var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
 var remap_sel := 0        # cursor on the controls screen (keyboard column)
@@ -709,8 +716,8 @@ var set_collide := false  # hard mode: props that clack mid-air become nearly
 						  # uncatchable (half the Perfect window, no chance roll).
 						  # A PERFECT pattern never collides, so this only ever
 						  # punishes sloppy heights that share air.
-var set_music := true     # the procedural adaptive soundtrack
-var set_sfx := true       # catch/throw/drop sound effects and the crowd bed
+var set_music := 1.0      # the procedural adaptive soundtrack's volume, 0..1 (was a bool)
+var set_sfx := 1.0        # catch/throw/drop sound effects' volume, 0..1 (was a bool)
 var set_fullscreen := false  # borderless fullscreen (also toggled live with F11)
 
 # --- procedural audio (code-only, ART_AND_MUSIC.md): pre-rendered PCM buffers,
@@ -950,6 +957,8 @@ func _ready() -> void:
 		game_state = ST_REMAP   # focuses the gamepad column instead of keyboard)
 		if ua.has("--pad"):
 			remap_col = 1
+	if ua.has("--capsule"):     # dev: pure key-art for the Steam store, no UI chrome
+		game_state = ST_CAPSULE
 	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls
 	if ti != -1:
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
@@ -1000,6 +1009,14 @@ func _ready() -> void:
 
 #region MAIN LOOP & INPUT ROUTING
 func _physics_process(delta: float) -> void:
+	# every screen fades in on arrival: detected passively here (game_state is SET
+	# from dozens of places - menu_input, day_input, results dismissal, and more -
+	# so watching for the change in one place beats touching every call site)
+	if game_state != _fade_prev_state:
+		_fade_prev_state = game_state
+		_state_fade_t = 0
+	elif _state_fade_t < STATE_FADE_FRAMES:
+		_state_fade_t += 1
 	audio_update()   # pick the music theme and glide the layer volumes, every state
 	if _shot or _collcheck or _handlog:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
@@ -3239,11 +3256,18 @@ func settings_input(kc: int) -> void:
 			menu_sel = (menu_sel + 1) % n
 			play_sfx("ui", -14.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_LEFT, KEY_RIGHT:
+			# Music / Sound are VOLUME SLIDERS now, not on/off: Left/Right fine-tune
+			# in 10% steps, Enter/Space mutes and restores (0.0 <-> full)
+			if menu_sel == 0 or menu_sel == 1:
+				var step := 0.1 if kc == KEY_RIGHT else (-0.1 if kc == KEY_LEFT else 0.0)
+				if menu_sel == 0:
+					set_music = clampf(set_music + step, 0.0, 1.0) if step != 0.0 else (0.0 if set_music > 0.0 else 1.0)
+				else:
+					set_sfx = clampf(set_sfx + step, 0.0, 1.0) if step != 0.0 else (0.0 if set_sfx > 0.0 else 1.0)
+				play_sfx("ui2", -12.0)
+				save_settings()
+				return
 			match menu_sel:
-				0:
-					set_music = not set_music
-				1:
-					set_sfx = not set_sfx
 				2:
 					set_shake = not set_shake
 				3:
@@ -3366,8 +3390,8 @@ func load_settings() -> void:
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
 		set_collide = bool(cf.get_value("opt", "collide", false))
-		set_music = bool(cf.get_value("opt", "music", true))
-		set_sfx = bool(cf.get_value("opt", "sfx", true))
+		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
+		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
 		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
 		K_LC = int(cf.get_value("keys", "lc", KEY_D))
 		K_LT = int(cf.get_value("keys", "lt", KEY_F))
@@ -3534,7 +3558,7 @@ func draw_remap(font: Font, s: Vector2) -> void:
 		var sel := kb_focus and i == remap_sel
 		var ry := oy + float(i) * 40.0
 		if sel:
-			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0))
+			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0), true)
 		var dim := 1.0 if kb_focus else 0.5
 		var nm := String(REMAP_ACTS[i][1])
 		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
@@ -3555,7 +3579,7 @@ func draw_remap(font: Font, s: Vector2) -> void:
 		var sel := pad_focus and i == pad_remap_sel
 		var ry := gy + float(i) * 40.0
 		if sel:
-			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0))
+			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0), true)
 		var dim := 1.0 if pad_focus else 0.5
 		var nm := String(PAD_ACTS[i][1])
 		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
@@ -5986,6 +6010,23 @@ func flight_pos(b: Ball) -> Vector2:
 
 #region STAGE BACKDROP DRAWING
 func _draw() -> void:
+	_draw_screen()
+	_draw_state_fade()
+
+
+func _draw_state_fade() -> void:
+	# a short fade-in overlay drawn on top of WHATEVER screen just drew, so no
+	# individual screen's draw function needs to know about it (see the passive
+	# detector in _physics_process). A dark curtain, not pure black, so it reads
+	# as a theatrical fade rather than a hard cut to nothing.
+	if _state_fade_t >= STATE_FADE_FRAMES:
+		return
+	var s := get_viewport_rect().size
+	var a := 1.0 - float(_state_fade_t) / float(STATE_FADE_FRAMES)
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, a))
+
+
+func _draw_screen() -> void:
 	var s := get_viewport_rect().size
 	var font := game_font()
 	match game_state:
@@ -6003,6 +6044,9 @@ func _draw() -> void:
 			return
 		ST_REMAP:
 			draw_remap(font, s)
+			return
+		ST_CAPSULE:
+			draw_capsule_art(font, s)
 			return
 		ST_GAMEOVER:
 			draw_gameover(font, s)
@@ -6779,11 +6823,17 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0) -> void:
 #endregion
 
 #region HUD HELPERS & KEY-HINT LABELS
-func hud_panel(r: Rect2) -> void:
+func hud_panel(r: Rect2, glow: bool = false) -> void:
 	# a soft dark card with an ember hairline, so HUD numbers sit on something
-	# instead of floating loose over the stage
+	# instead of floating loose over the stage. `glow` breathes the hairline -
+	# for a SELECTED menu row, so the cursor reads alive, not just lit; every
+	# other (static, always-on) card leaves it off and looks exactly as before.
 	draw_rect(r, Color(0.05, 0.03, 0.045, 0.55))
-	draw_rect(r, Color(0.9, 0.6, 0.35, 0.22), false, 1.0)
+	if glow:
+		var pulse := 0.5 + 0.5 * sin(float(cine_tick) * 0.08)
+		draw_rect(r, Color(0.95, 0.7, 0.4, lerpf(0.28, 0.55, pulse)), false, 1.6)
+	else:
+		draw_rect(r, Color(0.9, 0.6, 0.35, 0.22), false, 1.0)
 
 
 func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
@@ -7846,7 +7896,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var ok := bool(r["ok"])
 		var ry := ay + float(i) * 44.0
 		if sel:
-			hud_panel(Rect2(ax - 14.0, ry - 21.0, aw, 40.0))
+			hud_panel(Rect2(ax - 14.0, ry - 21.0, aw, 40.0), true)
 		var name_c := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
 		if not ok:
 			name_c = Color(0.55, 0.5, 0.46)
@@ -8020,6 +8070,31 @@ func draw_menu_cascade(center: Vector2, sc: float) -> void:
 		draw_ball_shape(_cascade_pos(t, i, count, hl, hr, T, peak), col, 1.35)
 
 
+func draw_capsule_art(font: Font, s: Vector2) -> void:
+	# dev only (--capsule): pure key-art for the Steam store, no UI chrome at all -
+	# reuses the exact menu-screen visual language (same backdrop, ball motif,
+	# wordmark, gold frame), just bigger and centred, since that composition is
+	# already proven rather than inventing a new risk. Capture at the native
+	# 1280x720 with `--capsule --shot <path> --shotat 30`, then centre-crop to
+	# 1232x706 (2x Steam's 616x353 Main Capsule - same aspect, so no distortion):
+	#   sips --cropToHeightWidth 706 1232 <path>
+	var cx := s.x * 0.5
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.12, 0.055, 0.075), Color(0.03, 0.02, 0.03), 22)
+	draw_spotlight_cone(s, cx, 0.16)
+	for i in 20:
+		var lx := s.x * (float(i) + 0.5) / 20.0
+		var fl := 0.6 + 0.4 * sin(float(cine_tick) * 0.06 + float(i))
+		draw_circle(Vector2(lx, s.y - 20.0), 12.0, Color(1.0, 0.7, 0.3, 0.09 * fl))
+		draw_circle(Vector2(lx, s.y - 20.0), 4.0, Color(1.0, 0.72, 0.32, 0.65 * fl))
+	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
+	draw_menu_cascade(Vector2(cx, s.y * 0.34), 1.6)
+	draw_iacto_logo(font, s.y * 0.58, 112, Color(1.0, 0.88, 0.5), s)
+	draw_ornament(cx, s.y * 0.58 + 134.0, 270.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, s.y * 0.58 + 182.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 27, Color(0.88, 0.76, 0.62))
+	draw_vignette(s, 0.55)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
+
+
 #endregion
 
 #region SLOTS / SETTINGS / GAME-OVER / MISC SCREENS
@@ -8064,27 +8139,38 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
-	var rows := [["Music", set_music], ["Sound effects", set_sfx], ["Screen shake", set_shake], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
+	# Music / Sound are volume sliders (float 0..1); the rest stay plain on/off bools
+	var rows := [["Screen shake", set_shake], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var oy := s.y * 0.28
-	for i in rows.size():
+	var sliders := [["Music", set_music], ["Sound effects", set_sfx]]
+	for i in sliders.size():
 		var sel := i == menu_sel
 		var ry := oy + float(i) * 48.0
+		var nm := String(sliders[i][0])
+		var vol: float = sliders[i][1]
+		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
+		draw_meter(px + pw - 190.0, ry - 14.0, 130.0, 16.0, vol, Color(0.55, 0.80, 0.6) if vol > 0.0 else Color(0.5, 0.44, 0.4))
+		draw_string(font, Vector2(px + pw - 50.0, ry), "mute" if vol <= 0.0 else "%d%%" % int(round(vol * 100.0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.8, 0.9, 0.8))
+	for i in rows.size():
+		var sel := (i + sliders.size()) == menu_sel
+		var ry := oy + float(i + sliders.size()) * 48.0
 		var nm := String(rows[i][0])
 		var on := bool(rows[i][1])
 		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
 		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
+	var rows_total := rows.size() + sliders.size()
 
-	var csel := menu_sel == rows.size()
-	var cry := oy + float(rows.size()) * 48.0
+	var csel := menu_sel == rows_total
+	var cry := oy + float(rows_total) * 48.0
 	draw_string(font, Vector2(px, cry), ("> " if csel else "  ") + "Controls  (rebind the keys)", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if csel else Color(0.8, 0.74, 0.66))
-	var rsel := menu_sel == rows.size() + 1
+	var rsel := menu_sel == rows_total + 1
 	var rry := cry + 48.0
 	draw_string(font, Vector2(px, rry), ("> " if rsel else "  ") + "Records and history", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if rsel else Color(0.8, 0.74, 0.66))
-	var bsel := menu_sel == rows.size() + 2
+	var bsel := menu_sel == rows_total + 2
 	draw_string(font, Vector2(0, rry + 48.0 + 28.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
-	var tfoot := "Up / Down    A to toggle    B to go back" if pad_active() else "Up / Down    Enter to toggle    Esc to go back"
+	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -8243,12 +8329,14 @@ func setup_audio() -> void:
 
 
 func play_sfx(name: String, vol_db: float = 0.0, pitch: float = 1.0) -> void:
-	if not set_sfx or not _audio_ready or not sfx.has(name):
+	if set_sfx <= 0.0 or not _audio_ready or not sfx.has(name):
 		return
 	var p: AudioStreamPlayer = sfx_pool[_sfx_next]
 	_sfx_next = (_sfx_next + 1) % sfx_pool.size()
 	p.stream = sfx[name]
-	p.volume_db = vol_db
+	p.volume_db = vol_db + linear_to_db(set_sfx)   # the slider only ATTENUATES: at
+													# 1.0 every hand-tuned vol_db above
+													# is untouched, same as the old bool
 	p.pitch_scale = clampf(pitch, 0.3, 3.0)
 	p.play()
 
@@ -8297,11 +8385,11 @@ func audio_update() -> void:
 		_main_silent = false
 		mus.play(0.0)
 	var main_base := (lerpf(-13.0, -9.0, energy) if perf else -14.0) - _duck * 9.0
-	var main_t := main_base + linear_to_db(maxf(main_g, 0.001))
-	var chill_t := -13.0 + linear_to_db(maxf(chill_g, 0.001))
-	if not set_music:
-		main_t = -80.0
-		chill_t = -80.0
+	# the slider only ATTENUATES (maxf floors it at -80dB, effectively silent, so
+	# there is no separate "if muted" branch to keep in sync with this one)
+	var vol_off := linear_to_db(maxf(set_music, 0.0001))
+	var main_t := main_base + linear_to_db(maxf(main_g, 0.001)) + vol_off
+	var chill_t := -13.0 + linear_to_db(maxf(chill_g, 0.001)) + vol_off
 	# the base loudness still GLIDES (energy swells, drop ducks); only the handover
 	# itself is the timed crossfade above
 	_vol["mus"] = lerpf(_vol["mus"], main_t, 0.06)
@@ -8365,6 +8453,29 @@ func _tone(freqs: Array, amps: Array, dur: float, wave: int, atk: float, decay: 
 			s = lerpf(s, randf() * 2.0 - 1.0, noise)
 		out[i] = s * e * vol
 	return out
+
+
+func _click(dur: float, decay: float, vol: float) -> PackedFloat32Array:
+	# a short broadband noise transient: the real "point of contact" a catch or
+	# knock makes, decaying far faster than any tonal body mixed under it via
+	# _mix_into. _tone's own `noise` param blends noise for the WHOLE note (right
+	# for something airy like a whiff or a torch whoosh); this is for the crisp
+	# attack a _tone alone can't give a "something just hit my hand" sound.
+	var n := int(AUDIO_SR * dur)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in n:
+		var t := float(i) / AUDIO_SR
+		out[i] = (randf() * 2.0 - 1.0) * exp(-t / maxf(decay, 0.0001)) * vol
+	return out
+
+
+func _mix_into(base: PackedFloat32Array, extra: PackedFloat32Array) -> PackedFloat32Array:
+	# additively layers `extra` under/over `base` (e.g. a _click transient under
+	# a _tone body), sample by sample, clamped so the two can never clip together
+	for i in mini(base.size(), extra.size()):
+		base[i] = clampf(base[i] + extra[i], -1.0, 1.0)
+	return base
 
 
 func _seq_bells(freqs: Array, gap: float, vol: float) -> PackedFloat32Array:
@@ -8540,8 +8651,10 @@ func gen_sfx() -> void:
 	sfx["stamp"] = _wav(_stamp_sound(), false)
 	sfx["count"] = _wav(_tone([1318.5], [1.0], 0.05, 0, 0.001, 0.02, 0.22, 0.0), false)
 	sfx["record"] = _wav(_seq_bells([659.3, 784.0, 987.8, 1318.5], 0.09, 0.5), false)
-	sfx["good"] = _wav(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0), false)
-	sfx["late"] = _wav(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03), false)
+	sfx["good"] = _wav(_mix_into(_tone([880.0, 1318.5], [1.0, 0.45], 0.24, 0, 0.001, 0.11, 0.46, 0.0),
+		_click(0.03, 0.007, 0.16)), false)
+	sfx["late"] = _wav(_mix_into(_tone([392.0], [1.0], 0.15, 1, 0.003, 0.05, 0.34, 0.03),
+		_click(0.03, 0.009, 0.10)), false)
 	sfx["whiff"] = _wav(_tone([520.0, 415.0], [1.0, 0.5], 0.10, 0, 0.001, 0.045, 0.18, 0.1), false)
 	sfx["throw"] = _wav(_throw_sound(), false)
 	sfx["drop"] = _wav(_drop_sound(), false)
@@ -8555,10 +8668,17 @@ func gen_sfx() -> void:
 	sfx["ui2"] = _wav(_tone([1174.7, 1568.0], [1.0, 0.5], 0.10, 0, 0.001, 0.05, 0.35, 0.0), false)
 	sfx["gasp"] = _wav(_gasp_sound(), false)
 	sfx["groan"] = _wav(_groan_sound(), false)
-	sfx["c_ball"] = _wav(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.15), false)
-	sfx["c_egg"] = _wav(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.2), false)
-	sfx["c_club"] = _wav(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.25), false)
-	sfx["c_knife"] = _wav(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0), false)
+	# each prop's catch texture is a tonal body plus its own material's transient
+	# click (soft rubber thud / fragile tap / wood knock / bright metal snap) -
+	# the click is the actual point of contact, the tone is what rings after it
+	sfx["c_ball"] = _wav(_mix_into(_tone([420.0], [1.0], 0.10, 0, 0.001, 0.035, 0.5, 0.0),
+		_click(0.02, 0.006, 0.32)), false)
+	sfx["c_egg"] = _wav(_mix_into(_tone([520.0], [1.0], 0.09, 0, 0.001, 0.03, 0.45, 0.04),
+		_click(0.015, 0.004, 0.14)), false)
+	sfx["c_club"] = _wav(_mix_into(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.12),
+		_click(0.03, 0.010, 0.26)), false)
+	sfx["c_knife"] = _wav(_mix_into(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0),
+		_click(0.012, 0.003, 0.38)), false)
 	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
 
 
