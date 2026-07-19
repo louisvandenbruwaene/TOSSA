@@ -186,6 +186,37 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   something buildable without those credentials. Deferred: slow-mo shader polish.
 - **Later/maybe:** multiplayer, cross-platform saves, training-room variety,
   stage-specific music, costumes.
+- **A post-win chase (Legend runs), from a 2026-07-19 professionalism pass:** true
+  encore-stacking needs `encore` (a single int, not a list) turned into an array and
+  every `encore_*_mult` function updated to combine active challenges - a real
+  refactor, not a content change. A cheaper version gets most of the same payoff for
+  free: a Purist-only replay of the full ladder, gated on `won`, touching none of the
+  encore system.
+- **Grow the ENCORES deck:** pure content. `ENCORES` is a flat array read through the
+  single `encore_on(id)` choke point - a new challenge is one dict entry plus usually
+  one `if encore_on(...)` check in whichever multiplier function it affects.
+- **A seeded daily/weekly challenge act:** seed venue/encore/goal off the date, run
+  the existing booking flow, show a shareable score line. No server, no new save data
+  - as ephemeral as a dev `--booking` run, just seeded instead of random.
+- **The crowd reacting to a BAD night, not just a good one:** `draw_crowd` already
+  bobs harder, brightens, and throws hands up as `applause` climbs - it never shrinks
+  the head count as applause craters toward a collapse. Small, additive, not a new
+  system.
+- **Escalating streak feedback:** every `streak % 10` milestone gets the identical
+  `freeze = 4` / two rings / one popup forever, the same at streak 10 as streak 200.
+  Scaling that (and adding a confetti burst via the existing `spawn_parts` helper) by
+  milestone tier is a localized change to one block.
+- **A colorblind pass:** mostly already true. PERFECT/GOOD/late/drop popups all pair
+  a color with distinct literal text, so color is rarely the only signal - this is an
+  audit more than a redesign. The one unverified spot is the stamina bar's green-to-
+  red lerp, which does have a redundant text warning but hasn't been eye-checked.
+- **A trailer** built from the existing `--shot`/`--shotat`/`--booking` capture
+  tooling - assembly work outside the codebase, maybe one or two new shot sequences
+  for beats the current dev flags can't already stage.
+- **A scoped free demo:** `MAX_VENUE` is a `const`, so it cannot be dialed down by a
+  runtime flag. Needs a fourth export preset with its own `custom_features` tag and
+  one `OS.has_feature("demo")` check where progression should stop, showing a
+  wishlist card instead of continuing.
 
 ## Gotchas that keep biting
 
