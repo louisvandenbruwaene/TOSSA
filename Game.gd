@@ -8347,7 +8347,9 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# adds its live chase and how the NEXT stage opens. The block sits on its own
 	# card (same footprint as the row highlight): drawn bare it fought the fence
 	# pickets and the sun glow of the exterior behind it. Long subs (the inn's,
-	# the pie's) wrap inside the card instead of clipping at its edge.
+	# the pie's) wrap inside the card instead of clipping at its edge. hud_card,
+	# not hud_panel: this card sits over the brightest part of the exterior art
+	# (the sun glow), and hud_panel's 55%-opaque fill still washed out there.
 	var selr: Dictionary = rows[day_sel]
 	var suby := ay + float(rows.size()) * 44.0 + 2.0
 	var sub_text := String(selr["sub"])
@@ -8358,7 +8360,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 	var block_h := 8.0 + sub_h + 10.0
 	if is_perf:
 		block_h += 26.0 + (20.0 if nxt > 0 else 0.0)
-	hud_panel(Rect2(ax - 14.0, suby, aw, block_h))
+	hud_card(Rect2(ax - 14.0, suby, aw, block_h))
 	draw_multiline_string(font, Vector2(ax, suby + 8.0 + font.get_ascent(13)), sub_text,
 		HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, 2, Color(0.85, 0.78, 0.66))
 	if is_perf:
@@ -8457,7 +8459,8 @@ func draw_menu(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(0, oy + float(i) * 44.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
 	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
-	draw_string(font, Vector2(s.x - 120.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 12, Color(0.6, 0.55, 0.5, 0.7))
+	if OS.is_debug_build():   # a build number is dev-only furniture - a shipped title
+		draw_string(font, Vector2(s.x - 140.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 12, Color(0.6, 0.55, 0.5, 0.7))   # screen never shows one
 
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -8684,8 +8687,11 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.82, 0.72, 0.85))
 	for i in 7:
 		var ry := ly + 34.0 + float(i) * 38.0
-		var nm := String(venue_data(i)["name"])
 		var reached := i <= venue_index()
+		# an unreached venue's own NAME stays hidden, not just dimmed - The Midnight
+		# Show in particular is meant to be a surprise past the real win, and a plain
+		# "???" here can't spoil it the way printing its actual name would
+		var nm := String(venue_data(i)["name"]) if reached else "???"
 		draw_string(font, Vector2(lx, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66) if reached else Color(0.5, 0.46, 0.42))
 		var b := best_scores[i]
 		var p := best_scores_purist[i]
