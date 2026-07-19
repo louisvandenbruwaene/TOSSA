@@ -8156,7 +8156,9 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# sends the player to learn the how, so a live run is never buried in text.
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
 	var pw := 904.0
-	var ph := 626.0
+	var ph := 672.0   # was 626: the taller card is what buys the extra breathing
+					  # room below, on top of Shop's own 648 (this screen has one
+					  # more stacked header line than Shop, so it earns a bit more)
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
@@ -8165,19 +8167,24 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var kc_use := k_trick()[0]
 	var kc_sel := k_cycle()[0]
 	draw_string(font, Vector2(px + 40.0, py + 48.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(px + 40.0, py + 74.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
+	draw_string(font, Vector2(px + 40.0, py + 82.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
 	draw_string(font, Vector2(px + pw - 210.0, py + 48.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
+	# a plain hairline (the same quiet divider draw_results uses between its own
+	# sections) so TRICKS / PATTERNS reads as a new section, not a third line of
+	# the same paragraph the title started
+	draw_line(Vector2(px + 40.0, py + 98.0), Vector2(px + pw - 40.0, py + 98.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
 	var nt := TRICKS.size()
 	var col_l := px + 40.0
 	var col_r := px + pw * 0.52
 	var colw := pw * 0.44
 	var row_h := 46.0
-	var y0 := py + 132.0
+	var header_y := py + 134.0
+	var y0 := header_y + 42.0
 	# the headers sit well ABOVE the first row so the selection highlight (which
 	# reaches ~23px above a row's baseline) never touches the TRICKS / PATTERNS label
-	draw_string(font, Vector2(col_l, y0 - 42.0), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(col_r, y0 - 42.0), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_l, header_y), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_r, header_y), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
 	for i in nt:
 		var td: Dictionary = TRICKS[i]
 		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), td, trick_unlocked(i), i == skills_sel)
@@ -8194,15 +8201,12 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# nt/row_h rather than hardcoded, so it stays clear if TRICKS ever grows
 	if skills_sel >= nt:
 		var pbox_w := 176.0
-		var pbox_h := 150.0
+		var pbox_h := 130.0
 		var pbox_x := col_l + (colw - pbox_w) * 0.5
-		var pbox_y := y0 + float(nt) * row_h + 20.0
+		var pbox_y := y0 + float(nt) * row_h + 8.0
 		draw_pattern_preview(font, Rect2(pbox_x, pbox_y, pbox_w, pbox_h), pattern_order()[skills_sel - nt])
 
 	# the detail strip: the selected entry explained, with its exact controls
-	var dy := py + ph - 118.0
-	draw_rect(Rect2(px + 30.0, dy - 6.0, pw - 60.0, 80.0), Color(0.08, 0.05, 0.06, 0.7))
-	draw_rect(Rect2(px + 30.0, dy - 6.0, pw - 60.0, 80.0), Color(0.9, 0.6, 0.35, 0.28), false, 1.0)
 	var ename := ""
 	var how := ""
 	var desc := ""
@@ -8222,19 +8226,41 @@ func draw_skills(font: Font, s: Vector2) -> void:
 			_:
 				how = "%s loads it, then %s powers your NEXT throw. One press, one trick." % [kc_sel, kc_use]
 	else:
-		var pd2: Dictionary = PATTERNS[pattern_order()[skills_sel - nt]]
+		var pi2: int = pattern_order()[skills_sel - nt]
+		var pd2: Dictionary = PATTERNS[pi2]
 		ename = String(pd2["name"])
 		desc = String(pd2["desc"])
 		req_line = skill_req_text(pd2)
-		is_unlocked = pattern_unlocked(pattern_order()[skills_sel - nt])
-		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still). Cascade also changes shape with the ball count: crossing odd, same-hand even." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
+		is_unlocked = pattern_unlocked(pi2)
+		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still)." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
+		if pi2 == CASCADE:
+			# true only of Cascade itself - this used to print unconditionally on
+			# every pattern's card, so Columns/Tennis/etc. all falsely claimed it too
+			how += " Cascade also changes shape with the ball count: crossing odd, same-hand even."
+	var how_w := pw - 92.0
+	# the card is sized to what "how" and "desc" actually need (up to 2 lines each),
+	# not a fixed guess - a pattern's "how" is one sentence longer than a trick's and
+	# used to clip mid-word against a box sized for the shorter case. It is anchored
+	# to its BOTTOM (a fixed gap above the footer) and grows upward, so a taller box
+	# never encroaches on the footer no matter how much "how" needed to wrap.
+	var how_h := font.get_multiline_string_size(how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2).y
+	var desc_h := font.get_multiline_string_size(desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2).y
+	var box_h := 30.0 + how_h + 8.0 + desc_h + 12.0
+	var box_bottom := py + ph - 44.0
+	var box_top := box_bottom - box_h
+	var dy := box_top + 6.0
+	draw_rect(Rect2(px + 30.0, box_top, pw - 60.0, box_h), Color(0.08, 0.05, 0.06, 0.7))
+	draw_rect(Rect2(px + 30.0, box_top, pw - 60.0, box_h), Color(0.9, 0.6, 0.35, 0.28), false, 1.0)
 	draw_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
 	if not is_unlocked:
 		# the full requirement, right-aligned so a long ask (level + stat + stage)
 		# never collides with the name on the left
 		draw_string(font, Vector2(px + pw - 490.0, dy + 18.0), "asks for %s" % req_line, HORIZONTAL_ALIGNMENT_RIGHT, 444.0, 13, Color(0.85, 0.62, 0.5))
-	draw_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.9, 0.82, 0.66))
-	draw_string(font, Vector2(px + 46.0, dy + 62.0), desc, HORIZONTAL_ALIGNMENT_LEFT, pw - 92.0, 13, Color(0.78, 0.72, 0.64))
+	# "how" (a pattern's own version can run to two sentences) wraps instead of clipping mid-word,
+	# and "desc" is placed BELOW however tall "how" actually rendered, not at a fixed
+	# offset, so the two never overlap regardless of how much "how" needed to wrap
+	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2, Color(0.9, 0.82, 0.66))
+	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0 + how_h + 8.0), desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2, Color(0.78, 0.72, 0.64))
 
 	var foot := "arrows browse      Enter  practise this skill      Esc to leave"
 	if not is_unlocked:
