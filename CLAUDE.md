@@ -160,7 +160,10 @@ and deleted. History lives in git.
 - Dev flags MUST follow a bare `--` separator: `godot --headless -- --demo --booking
   --venue 2 --shotat 25000`. Without `--`, `OS.get_cmdline_user_args()` is empty and
   the game sits at the menu forever (looks like a hang - burned two sessions).
-- `--demo` autoplays; `--collcheck` audits mid-air clearance; `--calib N` prints the
+- `--demo` autoplays; `--collcheck` audits mid-air clearance (self-drives now: it
+  implies `--demo`, so a bare `--collcheck` actually juggles instead of reporting the
+  1000000 px sentinel - and a run that still measured nothing prints a WARNING rather
+  than a false all-clear); `--calib N` prints the
   robot's score; `--booking` runs a real act end to end and prints `ACT ...` on
   resolve; `--tutorial <id>` jumps into a lesson (the demo walks lessons end to end,
   miming Enter/R/P); `--remap` (add `--pad` for the gamepad column) opens the
