@@ -305,6 +305,21 @@ const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
 # exactly who this is for.
 const GLOW_KIT_COST := 60000
 
+# the Energy-Drink Helmet (2026-07-19, Louis): a hat that holds Energy Drinks, so
+# a well-stocked juggler never has to spend a day segment on EAT or SLEEP again -
+# buying the helmet itself instantly tops the purse's stamina up as its own
+# little bonus; the drinks bought after are the ongoing supply, each one auto-
+# poured (see spend_stamina) the instant stamina would otherwise hit empty.
+# Priced above the Glow Kit: the true late-game "never stop performing" buy.
+const ENERGY_HELMET_COST := 10000
+const ENERGY_DRINK_COST := 5        # one drink, bought one at a time
+const ENERGY_DRINK_BATCH := 10      # a bulk buy: ENERGY_DRINK_BATCH drinks for
+const ENERGY_DRINK_BATCH_COST := 40 # ENERGY_DRINK_BATCH_COST gold - a real discount
+									 # off buying the same count one at a time, exactly
+									 # the "large quantities, priced kinder" Louis asked for
+const ENERGY_DRINK_STAMINA_PCT := 0.10   # stamina restored per drink, as a
+										  # fraction of stamina_max
+
 # input map (physical keycodes; a real remap layer comes with the options menu)
 # the six remappable actions (physical keycodes, persisted in the settings
 # file). Defaults are the classic DFJK spread plus Space and C. The Controls
@@ -473,8 +488,8 @@ const BOOK_PAY_PER_SCORE := 0.0015    # gold per point banked across the booking
 const ENCORES := [
 	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
-	{"id": "draft",     "name": "The Draft",          "desc": "A wind through the room. Every throw drifts wider."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut on the way down: every prop vanishes past its apex. Only a torch's flame burns through."},
+	{"id": "gale",      "name": "The Gale",           "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut on the way down: past its apex a prop fades to a bare trail. Torches keep their flame, near enough to full sight."},
 	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
 	{"id": "long",      "name": "The Long Set",       "desc": "The final goal is doubled, but the crowd is patient. An endurance test."},
 	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
@@ -606,6 +621,8 @@ var prop_type := PROP_BALLS  # the object being juggled this run
 var prop_count: Array[int] = [0, 0, 0, 0, 0, 0]
 var has_glasses := false  # bought gear: raises the catch chance
 var has_glow_kit := false # bought gear: props keep a faint glow through Blackout
+var has_helmet := false   # bought gear: unlocks buying and auto-drinking Energy Drinks
+var energy_drinks := 0    # owned stock, automatically sipped as stamina runs out
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
@@ -1703,7 +1720,12 @@ func play_venue() -> int:
 
 func too_tired() -> bool:
 	# STAMINA is the day's limiter now (Louis: the day is spent when you have no
-	# strength left, not when a counter says so). Work as long as you can stand.
+	# strength left, not when a counter says so). Work as long as you can stand -
+	# or, with the Energy-Drink Helmet stocked, as long as the next dip has a
+	# real drink behind it: spend_stamina pours one the instant it's needed, so
+	# a stocked player is never actually stuck here, just reading a stale number.
+	if has_helmet and energy_drinks > 0:
+		return false
 	return stamina < TIRED_FLOOR
 
 
@@ -2092,39 +2114,44 @@ func sheet_input(kc: int) -> void:
 
 func shop_buy_sel() -> void:
 	# Enter (pad A) acts on whichever card the cursor lights: a prop, the glasses,
-	# the pie, or the Glow Kit - the same purchases the number keys reach directly
+	# the pie, the Glow Kit, or the helmet/drinks - the same purchases the number
+	# keys reach directly
 	if shop_sel <= 5:
 		try_buy(shop_sel)
 	elif shop_sel == 6:
 		try_buy_glasses()
 	elif shop_sel == 7:
 		try_buy_pie()
-	else:
+	elif shop_sel == 8:
 		try_buy_glow_kit()
+	elif not has_helmet:
+		try_buy_helmet()
+	else:
+		try_buy_drinks()
 
 
 func shop_input(kc: int) -> void:
 	# the shop's keys, shared by the play overlay and the day hub. The number on
 	# each card is its buy key: 1-6 the props (balls included), 7 glasses, 8 pie,
-	# 9 the Glow Kit. Arrows (dpad, stick) walk the cards - left/right along a row,
-	# up/down between the six-card prop row and the three-card gear row (each pair
-	# of prop columns hops to the gear card below it) - and Enter buys the lit
-	# one, so a pad shops as freely as the keyboard. A number key also pulls the
-	# cursor onto its card.
+	# 9 the Glow Kit, 0 the helmet (then Energy Drinks once it's owned). Arrows
+	# (dpad, stick) walk the cards - left/right along a row, up/down between the
+	# six-card prop row and the four-card gear row (each prop column hops to its
+	# nearest gear card) - and Enter buys the lit one, so a pad shops as freely
+	# as the keyboard. A number key also pulls the cursor onto its card.
 	match kc:
 		KEY_TAB, KEY_ESCAPE, KEY_S:
 			shop_open = false
 		KEY_LEFT:
-			shop_sel = (shop_sel + 8) % 9
+			shop_sel = (shop_sel + 9) % 10
 			play_sfx("ui", -15.0)
 		KEY_RIGHT:
-			shop_sel = (shop_sel + 1) % 9
+			shop_sel = (shop_sel + 1) % 10
 			play_sfx("ui", -15.0)
 		KEY_DOWN, KEY_UP:
 			if shop_sel <= 5:
-				shop_sel = 6 + shop_sel / 2   # props 0-1/2-3/4-5 -> gear 6/7/8
+				shop_sel = 6 + shop_sel * 4 / 6   # 6 props -> 4 gear cards, nearest fit
 			else:
-				shop_sel = (shop_sel - 6) * 2   # gear 6/7/8 -> props 0/2/4
+				shop_sel = (shop_sel - 6) * 6 / 4   # gear -> nearest prop column
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
@@ -2155,6 +2182,12 @@ func shop_input(kc: int) -> void:
 		KEY_9:
 			shop_sel = 8
 			try_buy_glow_kit()
+		KEY_0:
+			shop_sel = 9
+			if not has_helmet:
+				try_buy_helmet()
+			else:
+				try_buy_drinks()
 
 
 func skills_input(kc: int) -> void:
@@ -3307,6 +3340,38 @@ func try_buy_glow_kit() -> void:
 	play_sfx("money", -6.0)
 
 
+func try_buy_helmet() -> void:
+	# the helmet itself is the one purchase that pays back immediately: buying
+	# it tops the purse's stamina up on the spot, on top of unlocking Energy
+	# Drinks (Louis: "automatically refills your stamina upon buying").
+	if has_helmet or money < ENERGY_HELMET_COST:
+		return
+	if not confirm_spend("helmet", ENERGY_HELMET_COST, true):
+		return
+	money -= ENERGY_HELMET_COST
+	has_helmet = true
+	stamina = stamina_max
+	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -6.0)
+
+
+func try_buy_drinks() -> void:
+	# a bulk buy only (Louis: "bought for discount in large quantities") - ONE
+	# drink at a time never made sense for a stock meant to last whole
+	# performances. ENERGY_DRINK_BATCH_COST undercuts what ENERGY_DRINK_BATCH
+	# drinks would cost bought one at a time, the real discount asked for.
+	if not has_helmet or money < ENERGY_DRINK_BATCH_COST:
+		return
+	if not confirm_spend("drinks", ENERGY_DRINK_BATCH_COST, true):
+		return
+	money -= ENERGY_DRINK_BATCH_COST
+	energy_drinks += ENERGY_DRINK_BATCH
+	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -6.0)
+
+
 # -----------------------------------------------------------------------------
 # Game flow: main menu, save slots, settings, cutscenes.
 # -----------------------------------------------------------------------------
@@ -3465,6 +3530,8 @@ func reset_new_game() -> void:
 	prop_type = PROP_BALLS
 	has_glasses = false
 	has_glow_kit = false
+	has_helmet = false
+	energy_drinks = 0
 	level = 1
 	xp = 0
 	points = 0
@@ -4401,6 +4468,11 @@ func on_catch(h: int) -> void:
 	# so a wrong-height throw is hard to catch cleanly and easy to lose.
 	var wperf := perfect_window()
 	if best_d > wperf:
+		# The Gale: the wind gives a Good or Late catch no chance at all - the
+		# roll below never runs, so only a genuine Perfect ever lands tonight
+		if encore_on("gale"):
+			drop_ball(best, "gale")
+			return
 		var quality := 1 if best_d <= W_GOOD else 2
 		if rng.randf() > catch_chance(quality, best.height):
 			drop_ball(best, "slip")
@@ -4420,7 +4492,7 @@ func on_catch(h: int) -> void:
 	career["catches"] = int(career["catches"]) + 1
 	if tut_active:
 		tut_on_catch(juggled)   # a guided lesson counts your clean catches toward its goal
-	stamina = maxf(0.0, stamina - STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
+	spend_stamina(STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	# NO per-prop catch texture here (Louis, 2026-07-18: only perfect/good/late/
 	# whiff, never a special sound per object) - it used to be
 	# `play_sfx(_catch_sound(best.kind), -20.0)` right here. The sounds themselves
@@ -4442,12 +4514,22 @@ func on_catch(h: int) -> void:
 			cashing_in = true
 		else:
 			# otherwise: the player threw one prop and caught it again while the rest sat
-			# in their hands. The catch is real - it happened, it cost stamina, it keeps
-			# the prop off the floor - but the ACT is not running, so it earns nothing at
-			# all: no streak, no score, no crowd, no trick, and no popup calling it out.
-			# That shuts the grind where holding two and pumping the third farmed a clean
-			# Perfect every single time. A lesson is exempt: it runs at one and two props
-			# on purpose, scores nothing, and polices the rule itself (tut_on_catch).
+			# in their hands, or simply finished catching everything with the air now
+			# bare and no goal reached yet to cash in on. The catch is real - it
+			# happened, it cost stamina, it keeps the prop off the floor - but the ACT
+			# is not running (or no goal is banked), so it earns nothing at all: no
+			# streak, no score, no crowd, no trick, and no popup calling it out. That
+			# shuts the grind where holding two and pumping the third farmed a clean
+			# Perfect every single time. It still gets its catch-quality SOUND, though
+			# (Louis: catching the last object was going completely silent, which reads
+			# as broken even when the silence on everything else is deliberate) -
+			# a sound is not a score, so it costs the anti-farm rule nothing.
+			if best_d <= wperf:
+				play_sfx("perfect", -5.0)
+			elif best_d <= W_GOOD:
+				play_sfx("good", -8.0)
+			else:
+				play_sfx("late", -11.0)
 			streak = 0
 			perfect_chain = 0
 			return
@@ -4734,7 +4816,7 @@ func do_throw(h: int, hold: int) -> void:
 	# Focus, never below 1 - every throw costs at least one. Lessons stay free.
 	if not tut_active:
 		var drain := maxf(1.0, float(PROPS[b.kind]["stam"]) - floor(focus() / 20.0))
-		stamina = maxf(0.0, stamina - drain)
+		spend_stamina(drain)
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
 	# landing a touch wide of the usual catch point
@@ -5345,6 +5427,19 @@ func energy_mult() -> float:
 	return base * focus_stam_mult()
 
 
+func spend_stamina(amount: float) -> void:
+	# every throw and catch's stamina cost funnels through here (Louis,
+	# 2026-07-19): a well-stocked Energy-Drink Helmet auto-pours as many drinks
+	# as it takes the INSTANT stamina would actually hit empty, so a player who
+	# bought in bulk never sees the "hands cannot close" wall at all - that is
+	# the whole point of stocking up. Never fires without the helmet, and never
+	# invents stamina beyond what real owned drinks can cover.
+	stamina = maxf(0.0, stamina - amount)
+	while stamina <= 0.0 and has_helmet and energy_drinks > 0:
+		energy_drinks -= 1
+		stamina = minf(stamina_max, stamina + stamina_max * ENERGY_DRINK_STAMINA_PCT)
+
+
 #endregion
 
 #region ROUND RESOLUTION & CATCH/CHANCE MATH
@@ -5520,10 +5615,7 @@ func eff_accuracy() -> float:
 func inacc_factor() -> float:
 	# 1.0 of the base inaccuracy at Accuracy 0, ACC_MIN_FACTOR at Accuracy 100.
 	# Never reaches zero, so a max-height throw always still needs a real catch.
-	var f := lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
-	if encore_on("draft"):
-		f *= 2.0   # The Draft: a wind through the room, every throw drifts twice as wide
-	return f
+	return lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
 
 
 func catch_chance(quality: int, height: float) -> float:
@@ -5976,6 +6068,8 @@ func load_progress() -> void:
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
 		has_glasses = bool(cf.get_value("stats", "glasses", false))
 		has_glow_kit = bool(cf.get_value("stats", "glow_kit", false))
+		has_helmet = bool(cf.get_value("stats", "helmet", false))
+		energy_drinks = int(cf.get_value("stats", "energy_drinks", 0))
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
@@ -6071,6 +6165,8 @@ func save_progress() -> void:
 	cf.set_value("stats", "prop_type", prop_type)
 	cf.set_value("stats", "glasses", has_glasses)
 	cf.set_value("stats", "glow_kit", has_glow_kit)
+	cf.set_value("stats", "helmet", has_helmet)
+	cf.set_value("stats", "energy_drinks", energy_drinks)
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
@@ -6960,21 +7056,24 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 			# BLACKOUT challenge: the throw and the apex stay VISIBLE - the lights only
 			# swallow the prop on its way down, so the challenge is catching from
 			# memory of the arc, not juggling blind (fully invisible flight was way too
-			# difficult - Louis). The cut is a hard one just past the apex: trail and
-			# shape both go (a first version ghosted only the shape and the comet trail
-			# still traced every prop). A TORCH is the exception: no blackout argues
-			# with fire, so its flame burns through the dark stretch - that is the game
-			# knowledge: bring torches to a Blackout night.
+			# difficult - Louis). The cut is a hard one just past the apex: the SHAPE
+			# goes, but the comet trail stays lit (2026-07-19, reverted back to this:
+			# hiding the trail too was too hard for early game - the fading trail alone
+			# is exactly enough to guess where a prop still is, without seeing it
+			# outright). A TORCH is the exception: no blackout argues with fire, so its
+			# flame burns through the dark stretch nearly as visible as ever - that is
+			# the game knowledge: bring torches to a Blackout night.
 			if encore_on("blackout"):
 				var bspan := maxi(1, b.land_tick - b.launch_tick)
 				var bp := clampf(float(tick - b.launch_tick) / float(bspan), 0.0, 1.0)
 				if bp > 0.68:
+					draw_trail(b)
 					if b.kind == PROP_TORCHES:
 						draw_flame_in_dark(flight_pos(b))
 					elif has_glow_kit:
-						# the Glow-in-the-Dark Kit's mercy: a faint colour-matched halo, not
-						# the full shape and not the trail - still meaningfully harder than
-						# normal play, just never fully gone
+						# the Glow-in-the-Dark Kit's mercy: a faint colour-matched halo on
+						# top of the trail - still meaningfully harder than normal play,
+						# just never fully gone
 						draw_glow_in_dark(flight_pos(b), b.color)
 					continue
 			draw_trail(b)
@@ -7033,27 +7132,30 @@ func draw_charge_gauges() -> void:
 
 
 func draw_flame_in_dark(pos: Vector2) -> void:
-	# the Blackout's one concession: a torch's flame, faint and flickering, with no
-	# handle and no trail - a small fire moving through the dark, nothing more
+	# the Blackout's one concession: a torch's flame burns through nearly as bright
+	# as it would in plain sight (2026-07-19: "faint and flickering" was not the
+	# concession it was meant to be - a torch juggler should be able to bring fire
+	# to a Blackout night and actually see it), no handle and no trail, just a
+	# real fire moving through the dark.
 	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)
-	draw_circle(pos + Vector2(0, -10), 16.0, Color(1.0, 0.55, 0.2, 0.06))
+	draw_circle(pos + Vector2(0, -10), 16.0, Color(1.0, 0.55, 0.2, 0.20))
 	draw_colored_polygon(PackedVector2Array([
 		pos + Vector2(-5, -4), pos + Vector2(5, -4), pos + Vector2(0, -16.0 * fl),
-	]), Color(1.0, 0.5, 0.15, 0.30))
+	]), Color(1.0, 0.5, 0.15, 0.88))
 	draw_colored_polygon(PackedVector2Array([
 		pos + Vector2(-2.5, -5), pos + Vector2(2.5, -5), pos + Vector2(0, -12.0 * fl),
-	]), Color(1.0, 0.85, 0.4, 0.32))
+	]), Color(1.0, 0.85, 0.4, 0.92))
 
 
 func draw_glow_in_dark(pos: Vector2, col: Color) -> void:
-	# the Glow-in-the-Dark Kit's mercy (2026-07-18): a faint colour-matched halo
-	# tracking the prop through Blackout's dark stretch - no shape, no trail, just
-	# enough presence that the position stays honest. Genuinely harder than normal
-	# play (you're still reading a smear of light, not a prop), genuinely kinder
-	# than pure Blackout (never fully gone). The pulse rate is offset by x so a
-	# whole load of glowing props doesn't flicker in lockstep.
-	var fl := 0.7 + 0.3 * sin(float(tick) * 0.4 + pos.x * 0.05)
-	draw_circle(pos, 15.0, Color(col.r, col.g, col.b, 0.09 * fl))
+	# the Glow-in-the-Dark Kit's mercy: a colour-matched halo tracking the prop
+	# through Blackout's dark stretch, bright enough to read as ALMOST fully
+	# visible (2026-07-19: a faint 0.09-alpha smear undersold what a Kit that
+	# costs 60,000g should buy you) - no shape, no trail, but plainly there. The
+	# pulse rate is offset by x so a whole load of glowing props doesn't flicker
+	# in lockstep.
+	var fl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
+	draw_circle(pos, 15.0, Color(col.r, col.g, col.b, 0.55 * fl))
 	draw_circle(pos, 5.5, Color(col.r, col.g, col.b, 0.32 * fl))
 	draw_circle(pos, 1.8, Color(1.0, 1.0, 1.0, 0.35 * fl))
 
@@ -8066,23 +8168,30 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(cx0, y0 + 196.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
 		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
 
-	# ---------------- GEAR: three narrow cards (2026-07-18: was two wide cards,
-	# grew a third slot for the Glow-in-the-Dark Kit - a wide horizontal layout
-	# had no room left for a third item's description, so gear now uses the same
-	# narrow vertical template the prop cards above already prove works) ----------------
+	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
+	# fourth for the Energy-Drink Helmet - same narrow vertical template the
+	# prop cards above already prove works) ----------------
 	var gy := y0 + ch + 30.0
 	draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
-	var gw := (innerw - gap * 2.0) / 3.0
+	var gw := (innerw - gap * 3.0) / 4.0
 	var gh := 160.0
 	var gy0 := gy + 14.0
-	var gear_names: Array[String] = ["Glasses", "Uncle Dan's Pie", "Glow-in-the-Dark Kit"]
+	# the 4th card is two items sharing one slot: the Helmet (a one-time unlock,
+	# like Glasses/Glow Kit) until owned, then Energy Drinks (a repeat buy, like
+	# the Pie) forever after - so its name/desc/cost/count all switch on has_helmet
+	var gear_names: Array[String] = ["Glasses", "Uncle Dan's Pie", "Glow-in-the-Dark Kit",
+		"Energy Drinks" if has_helmet else "Energy-Drink Helmet"]
 	var gear_desc: Array[String] = ["a better chance on off-Perfect catches",
-		"a whole day of slow, clear time", "props keep a faint glow through Blackout"]
-	var gear_accent := [Color(0.72, 0.86, 0.96), Color(0.9, 0.62, 0.3), Color(0.65, 0.95, 0.55)]
-	var gear_owned := [has_glasses, false, has_glow_kit]
-	var gear_count := [0, pie_count, 0]     # only the Pie is a stock item
-	var gear_cost := [GLASSES_COST, PIE_COST, GLOW_KIT_COST]
-	for i in 3:
+		"a whole day of slow, clear time", "props keep a faint glow through Blackout",
+		("+%d%% stamina each, auto-sipped the instant you run low" % int(ENERGY_DRINK_STAMINA_PCT * 100.0)) if has_helmet \
+			else "a hat that never lets your stamina run out - buying it fills the tank"]
+	var gear_accent := [Color(0.72, 0.86, 0.96), Color(0.9, 0.62, 0.3), Color(0.65, 0.95, 0.55), Color(0.95, 0.75, 0.35)]
+	var gear_owned := [has_glasses, false, has_glow_kit, false]   # the helmet slot never
+		# shows OWNED - once bought it flips straight to a repeatable Energy Drinks buy
+	var gear_count := [0, pie_count, 0, energy_drinks if has_helmet else 0]
+	var gear_cost := [GLASSES_COST, PIE_COST, GLOW_KIT_COST,
+		ENERGY_DRINK_BATCH_COST if has_helmet else ENERGY_HELMET_COST]
+	for i in 4:
 		var cx0 := tx + float(i) * (gw + gap)
 		var cc: Color = gear_accent[i]
 		hud_card(Rect2(cx0, gy0, gw, gh), Color(cc.r, cc.g, cc.b, 0.4))
@@ -8098,10 +8207,19 @@ func draw_shop(font: Font, s: Vector2) -> void:
 				draw_colored_polygon(PackedVector2Array([
 					Vector2(icx - 22.0, gy0 + 52.0), Vector2(icx + 22.0, gy0 + 52.0), Vector2(icx, gy0 + 24.0)]), cc)
 				draw_line(Vector2(icx - 22.0, gy0 + 52.0), Vector2(icx + 22.0, gy0 + 52.0), Color(0.6, 0.36, 0.16), 4.0)
-			_:   # Glow Kit: the exact halo it buys, so the card IS a preview
+			2:   # Glow Kit: the exact halo it buys, so the card IS a preview
 				draw_circle(Vector2(icx, gy0 + 40.0), 15.0, Color(cc.r, cc.g, cc.b, 0.22))
 				draw_circle(Vector2(icx, gy0 + 40.0), 8.0, Color(cc.r, cc.g, cc.b, 0.6))
 				draw_circle(Vector2(icx, gy0 + 40.0), 2.5, Color(1.0, 1.0, 1.0, 0.8))
+			_:   # Helmet: a hard-hat dome, with its own energy drink can riding on
+				# top once owned - the card IS the preview, same as the Glow Kit
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(icx - 20.0, gy0 + 48.0), Vector2(icx + 20.0, gy0 + 48.0),
+					Vector2(icx + 15.0, gy0 + 26.0), Vector2(icx - 15.0, gy0 + 26.0)]), cc)
+				draw_arc(Vector2(icx, gy0 + 26.0), 15.0, PI, TAU, 16, cc, 6.0, true)
+				if has_helmet:
+					draw_rect(Rect2(icx - 5.0, gy0 + 8.0, 10.0, 15.0), Color(0.95, 0.55, 0.25, 0.95))
+					draw_rect(Rect2(icx - 5.0, gy0 + 8.0, 10.0, 4.0), Color(0.85, 0.85, 0.85, 0.95))
 		draw_string(font, Vector2(cx0, gy0 + 74.0), gear_names[i], HORIZONTAL_ALIGNMENT_CENTER, gw, 17, Color(1.0, 0.88, 0.6))
 		_wrap_text(font, gear_desc[i], cx0 + 10.0, gy0 + 94.0, gw - 20.0, 11, Color(0.75, 0.68, 0.6))
 		if bool(gear_owned[i]):
@@ -8109,7 +8227,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		else:
 			if int(gear_count[i]) > 0:
 				draw_string(font, Vector2(cx0, gy0 + 18.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
-			draw_price_plate(font, Rect2(cx0 + 12.0, gy0 + gh - 46.0, gw - 24.0, 38.0), str(7 + i), "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
+			var gkey := str(7 + i) if i < 3 else "0"
+			draw_price_plate(font, Rect2(cx0 + 12.0, gy0 + gh - 46.0, gw - 24.0, 38.0), gkey, "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
 	# ---------------- footer: warnings, then the keys ----------------
 	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
@@ -8119,7 +8238,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			[[["Stick"], "choose"], [k_finish(), "buy"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "9"], "quick buy"], [["Tab"], "leave"]])
+			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "0"], "quick buy"], [["Tab"], "leave"]])
 
 
 #endregion
