@@ -70,12 +70,29 @@ and deleted. History lives in git.
   hooked to the live `balls`/`pattern` state - safe to animate from any screen. Every
   ball position is hard-clamped inside the box as a guarantee, not just sized to fit.
   `--skills [N]` dev flag opens it for a screenshot, optionally selecting entry N.
-- **Arms only ever reach two points** (Louis, 2026-07-19): `inner_pos` and
-  `outer_pos`, the same two the 3-ball Cascade always used - Columns' own lane
-  system is the one deliberate exception (its own thing entirely, per Louis, not
-  a third arm position to police). No other pattern or trick may introduce a
-  third position; a same-hand Cascade pair used to widen its landing 22px for
-  clearance and that is exactly the kind of thing this rule forbids (see below).
+- **Arms mostly reach two points, `inner_pos` and `outer_pos`** - the same two
+  the 3-ball Cascade always used. Amended 2026-07-19 (same day, later): a
+  realistic-timing collision audit (`--latecatch`, see Verification workflow)
+  found a genuine PERFECT-catch-then-immediate-throw could overlap wherever
+  more than one ball shares a hand's own road at once - the even-count
+  Cascade same-hand pair, and (Half Shower/Shower/Tennis cross every throw
+  regardless of count, unlike Cascade) as early as four balls for those. Louis
+  authorized a THIRD kind of position for exactly this case: a straight
+  up-and-down `same_hand_lane_pool()` lane, toward centre from `inner_pos`,
+  for whichever ball isn't alone on its road (`road_lane`) - explicitly not
+  the rejected fix (the same-hand pair used to widen its landing 22px PAST
+  `outer_pos`; "outward, past the established reach" was the objection this
+  rule existed to stop). A crossing throw never gets a lane (pulling it
+  toward centre closes the gap with the opposite line it crosses, measured
+  worse not better) - that risk is carried by `prop_hit_scale` instead, whose
+  shrink now starts at 4 balls and reaches a much lower floor by 4-5 rather
+  than barely doing anything until 6+. Columns' lanes remain their own older,
+  separate thing. The goal throughout was a CONSISTENT margin comparable to
+  the Perfect catch window's own tolerance, not a hunt for exact zero on
+  every single count/pattern/prop/trick - some combinations (Half Shower/
+  Tennis around 5 balls, Cascade's highest odd counts at one specific catch
+  offset) still carry a small (a few px) residual, left as an accepted
+  tradeoff rather than chased with an ever-smaller hitbox.
 - **Patterns, current roster (2026-07-19, second pass):** Cascade, Columns, Half
   Shower, Shower, Reverse Cascade, Tennis - six now, down from eight at the start
   of the day. **Fountain was removed** (Louis: "fountain isn't a pattern, that's
@@ -157,25 +174,20 @@ and deleted. History lives in git.
   stderr for `SCRIPT ERROR`, not just the screenshot, after any risky edit.)
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
   ignore them all.
-- `--collcheck` (audits mid-air clearance) only ever exercised FRAME-PERFECT bot
-  timing: near-instant catches, throws on a fixed metronome. `--latecatch N`
-  (2026-07-19) is a realistic-timing variant: it catches N ticks LATE of a
-  ball's ideal `land_tick` - still a genuine Perfect catch as long as N is
-  within `perfect_window()` (0-7 for every player; up to 10 with enough Focus)
-  - and immediately re-throws that hand on the very same tick, so the audit
-  can finally answer "does a real, not-frame-0 Perfect catch followed by an
-  immediate throw still clear?" Sweep it alongside `--balls`: the default
-  3-ball Cascade stays a clean 16.8px across the whole N=0-7 range (matches
-  the frame-perfect baseline exactly - timing doesn't move this one). The
-  4-ball even-count face does NOT: frame-perfect is the known ~5px ("tight but
-  real, an accepted tradeoff" above), but realistic N=0-4 measures an ACTUAL
-  overlap (-2.6 to -0.7px), only clearing again (barely, <1.3px) by N=7. The
-  6-ball face is worse in a different way - its frame-perfect baseline is
-  ALREADY overlapping (-1.9px, a separate pre-existing issue, not a timing
-  one) and realistic timing pushes it further negative still (-13 to -11px).
-  No fix attempted here: the obvious one (widen the landing) is exactly what
-  the arms-only-two-positions rule above already forbids, and Louis rejected
-  it once for this exact spot - a real fix is a design call, not a code one.
+- `--collcheck` (audits mid-air clearance) used to only ever exercise
+  FRAME-PERFECT bot timing: near-instant catches, throws on a fixed metronome.
+  `--latecatch N` (2026-07-19) is a realistic-timing variant: it catches N
+  ticks LATE of a ball's ideal `land_tick` - still a genuine Perfect catch as
+  long as N is within `perfect_window()` (0-7 for every player; up to 10 with
+  enough Focus) - and immediately re-throws that hand on the very same tick,
+  so the audit can answer "does a real, not-frame-0 Perfect catch followed by
+  an immediate throw still clear?" It found real overlaps the frame-perfect
+  bot never could: Cascade's even-count same-hand face, its own high-count
+  faces of both parities, and Half Shower/Shower/Tennis's crossing weave as
+  early as four balls (see the arms-mostly-two-points entry above for the
+  fix - a `same_hand_lane_pool()` lane plus a much earlier, lower
+  `prop_hit_scale` floor). Sweep it alongside `--balls`/`--pattern`/`--prop`/
+  `--trick` - it is a permanent tool now, not a one-off finding.
 
 ## Music / audio
 

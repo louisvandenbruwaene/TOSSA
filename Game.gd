@@ -500,6 +500,19 @@ class Ball:
 	var over_top := false     # an over-the-top lob: scooped from INNER, lofted wide to OUTER
 	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
 							  # balls in one hand never stack on the same line (-1 = unset)
+	var thrown_from := -1     # which hand actually released this (LEFT/RIGHT) - only used
+							  # to group balls sharing one straight-line road (see
+							  # road_lane in do_throw), not read anywhere gameplay cares
+	var road_lane_idx := -1   # which of ROAD_LANE_INSET's slots THIS flight is using on
+							  # its road, held for its whole flight - road_lane() must
+							  # pick whichever slot ISN'T already taken by another ball
+							  # still flying the same road, not just count them: two
+							  # balls that strictly alternate flying/held (the common
+							  # case) would otherwise both keep counting "1 other
+							  # already up" forever and land on the SAME slot every
+							  # time, shifting the whole road sideways with no actual
+							  # separation ever won back (caught this via --latecatch
+							  # showing zero improvement, only a shifted collision).
 	var bumped := false       # hard mode: this ball clacked another mid-air; only a
 							  # half-Perfect-window catch can still save it
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
@@ -3949,6 +3962,73 @@ func shoulder_pos(h: int) -> Vector2:
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
+func same_hand_lane_pool() -> Array[float]:
+	# px pulled toward stage centre from inner_pos, for an EXTRA same-hand ball
+	# sharing an already-busy road (index 0 unused - lane 0 keeps the normal
+	# diagonal). Each non-zero entry is a straight VERTICAL line, not a shifted
+	# diagonal: a diagonal shift does NOT guarantee separation (the two lines'
+	# x-RANGES still overlap unless shifted the full line length, ~46px, found
+	# the hard way via --latecatch showing it could make things WORSE). Two
+	# DISTINCT verticals stay a CONSTANT x apart regardless of relative timing,
+	# unlike two diagonals - but a ball clamped onto an ALREADY-occupied
+	# vertical is worse than the original problem, not better: two balls
+	# sharing one vertical land at the exact same point whenever their flight
+	# fractions are p and 1-p (same height by the parabola's own symmetry,
+	# same x since neither moves sideways) - also found the hard way.
+	#
+	# The pool itself depends on num_balls: three-or-more balls sharing one
+	# hand's own road needs three-or-more DISTINCT lanes, but the 0-54px
+	# budget (inner_pos's own reach - past it starts overlapping the diagonal;
+	# past 0 starts entering the other hand's half) can only fit two lanes at
+	# a real ~28px hitbox-clearing gap for a base ball. Six balls (three per
+	# hand) is exactly the count where a third lane would first be needed AT
+	# that full, unshrunk hitbox size, so it gets the wide two-lane pool.
+	# Eight and up already carries prop_hit_scale's count>=6 shrink, so a
+	# tighter three-lane pool can afford to fit there instead - the smaller
+	# hitbox is what makes the closer packing safe, not a separate excuse.
+	if num_balls <= 7:
+		return [0.0, 40.0, 12.0]
+	return [0.0, 46.0, 30.0, 14.0, 4.0]
+
+
+func toward_center_x(x: float, inset: float) -> float:
+	var c := stage_center().x
+	return x + inset if x < c else x - inset
+
+
+func road_lane(from_h: int, to_h: int, ot: bool, exclude: Ball, pool_size: int) -> int:
+	# the SMALLEST slot index, WITHIN a pool of pool_size PHYSICAL lanes, not
+	# already held by another ball still in flight along this exact straight
+	# road (same origin hand, same destination hand, same over-the-top-ness).
+	# Bounded by pool_size (not an ever-growing raw count) because the mapping
+	# from index to an actual x position is itself bounded (SAME_HAND_LANE_X
+	# has only so many physically-separated verticals) - an unbounded index
+	# that later gets folded back onto a small physical pool would silently
+	# reuse a slot ANOTHER ball still thinks is its own, recreating the exact
+	# bug this function exists to avoid (see below). If every physical lane is
+	# genuinely occupied, this falls back to slot 0 rather than growing forever
+	# - accepted residual risk for the rare case that needs it, same spirit as
+	# prop_hit_scale accepting less margin for a harder load.
+	# Also: two balls that strictly alternate flying/held (the ordinary case,
+	# one road ball per hand's own same-hand rotation) would both count "1
+	# other already up" forever and land on the SAME slot every single time if
+	# this returned a raw count instead of an actually-free index - shifting
+	# the whole road sideways with the two balls exactly as close together as
+	# before (a real bug caught by --latecatch showing zero improvement). A
+	# Columns lane ball (lane_x >= 0) or the middle ball never shares a road,
+	# so they never call this. 0 (unmoved) for the common case: nothing else
+	# on this road yet.
+	var taken := {}
+	for o in balls:
+		if o != exclude and o.state == STATE_FLIGHT and o.thrown_from == from_h \
+				and o.to_hand == to_h and o.over_top == ot and o.lane_x < 0.0:
+			taken[o.road_lane_idx] = true
+	for slot in range(pool_size):
+		if not taken.has(slot):
+			return slot
+	return 0
+
+
 func columns_x(slot: int) -> float:
 	# the x of vertical column `slot` (0..num_balls-1) in a Columns pattern, spread
 	# symmetric about centre so every ball owns its own line and no two share air
@@ -4512,6 +4592,7 @@ func do_throw(h: int, hold: int) -> void:
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
 	b.bumped = false   # a fresh throw starts clean; only a NEW mid-air clack marks it
+	b.thrown_from = h
 	var weight := prop_weight()
 	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
 	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Height is set by
@@ -4732,19 +4813,44 @@ func do_throw(h: int, hold: int) -> void:
 		# the over-the-top lob leaves from the OUTER catch corner and rides a tall
 		# parabola down onto land_slot (over_top_land_slot: the complement of the
 		# receiving hand's own launch slot, so a landing never sits on a launch).
+		# This road ALWAYS crosses the centre (outer_pos of one hand to an inner
+		# slot of the other), so it is not a candidate for the toward-centre lane
+		# nudge below - shifting either end toward the middle only pulls it closer
+		# to whatever road it is crossing, worse not better. Left exactly as it was.
 		b.from_pos = outer_pos(h)
 		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
 	else:
 		# a plain cascade throw: inner launch, outer catch - always these same two
-		# points, whichever hand it lands in (Louis, 2026-07-19: an arm only ever
-		# reaches inner or outer, a third position looks wrong; a same-hand pair
-		# at an even count used to widen its landing 22px to buy mid-air clearance,
-		# which is exactly the kind of extra position this rule now forbids).
-		# Measured cost: a same-hand (even count) pair now clears by only ~5px at
-		# worst (--collcheck), same as before that widening existed - tight, but a
-		# real gap, not an overlap, and an accepted tradeoff for the cleaner arm.
-		b.from_pos = inner_pos(h)
-		b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+		# points, whichever hand it lands in. UNLESS it is a SAME-HAND throw
+		# (b.to_hand == h - the even-count Cascade face) and another ball already
+		# rides that exact road: then it rides a straight VERTICAL columns-style
+		# lane instead, pulled toward centre from inner_pos (Louis, 2026-07-19: an
+		# arm only ever reaches inner or outer was the rule when a same-hand pair
+		# widened its landing 22px PAST outer_pos to buy clearance - "outward,
+		# past the established reach" was the objection. A lane pulled TOWARD
+		# centre, never past outer_pos, is the one Louis authorized in its place
+		# once a realistic-timing audit - not just the frame-perfect one that
+		# measured this "tight but real" - found an actual overlap here). A
+		# CROSSING throw never gets a lane at all: its road already runs through
+		# the centre by design, so pulling it inward only closes the gap with the
+		# opposite-direction road it crosses - confirmed measurably worse, not
+		# better, by the same audit; a crossing road's own concurrency (5+ balls
+		# sharing one direction) needs a hitbox-scale fix instead (prop_hit_scale).
+		var lane_pool := same_hand_lane_pool()
+		if b.to_hand == h:
+			b.road_lane_idx = road_lane(h, b.to_hand, false, b, lane_pool.size())
+		if b.road_lane_idx <= 0:
+			b.from_pos = inner_pos(h)
+			b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+		else:
+			# a straight up-and-down road, like Columns' own lanes: its x never
+			# enters the diagonal's [inner_pos,outer_pos] range, so the two can
+			# never coincide no matter how their timing lines up - a DIAGONAL
+			# shift of the same size does not guarantee that (the two lines'
+			# ranges still overlap unless shifted the full ~46px line length).
+			var lx := toward_center_x(inner_pos(h).x, lane_pool[b.road_lane_idx])
+			b.from_pos = Vector2(lx, inner_pos(h).y)
+			b.to_pos = Vector2(lx + drift, inner_pos(h).y)
 	if this_trick == TR_BTB:
 		# BEHIND THE BACK actually goes behind now (Louis: it never read as
 		# behind): the arm wraps and the ball RELEASES from behind the opposite
@@ -5714,12 +5820,19 @@ func prop_hit_scale(kind: int) -> float:
 	# six-club load looks exactly like a five-club load - it just forgives near misses.
 	var sc := prop_scale(kind)
 	var hit := sc
-	if num_balls >= 6:
-		# big props flatten toward ball size fast (a six-club load reads as compact
-		# stage clubs), and the whole set then eases smaller toward eleven objects
-		var flatten := clampf(float(num_balls - 5) / 2.0, 0.0, 1.0)      # full by 7
+	if num_balls >= 4:
+		# big props flatten toward ball size fast, and the whole set then eases
+		# smaller toward fourteen objects. Starts at FOUR now, not six
+		# (2026-07-19): a realistic-timing audit (--latecatch - a genuine
+		# Perfect catch anywhere in its real window, not just a frame-perfect
+		# one) found Half Shower, Shower and Tennis crossing every throw
+		# regardless of count (unlike Cascade, which only crosses at odd
+		# counts), so their own crossing-road concurrency shows up as early as
+		# four balls - long before the old six-ball trigger, tuned only
+		# against the frame-perfect bot, ever gave it anything to work with.
+		var flatten := clampf(float(num_balls - 3) / 2.0, 0.0, 1.0)      # full by 5
 		var excess := (sc - 1.0) * lerpf(0.55, 0.10, flatten)
-		var whole := lerpf(1.0, 0.80, clampf(float(num_balls - 5) / 6.0, 0.0, 1.0))
+		var whole := lerpf(1.0, 0.06, clampf(float(num_balls - 3) / 1.0, 0.0, 1.0))   # floor by 4
 		hit = (1.0 + excess) * whole
 	if kind == PROP_RINGS:
 		hit *= RING_HIT_FACTOR
