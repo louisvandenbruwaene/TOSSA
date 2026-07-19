@@ -61,7 +61,13 @@ and deleted. History lives in git.
   `MAX_VENUE` (6) is the real venue-count ceiling now, distinct from `TOP_VENUE`.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
-  completion bonus banked even when leaving via Enter).
+  completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
+  (2026-07-19, ENERGY_HELMET_COST, 10,000g gear) is the alternative: buying it
+  tops stamina up on the spot, and Energy Drinks bought after (ENERGY_DRINK_
+  BATCH_COST, a bulk-only buy - 10 for 40g, cheaper than one at a time) sit in
+  reserve and auto-pour through `spend_stamina` the instant stamina would
+  actually hit empty, `+ENERGY_DRINK_STAMINA_PCT` (10%) each - a stocked player
+  never sees EAT or SLEEP's gate (`too_tired`) at all, by design.
 - **Skills screen:** every trick and pattern, whether it's yours yet, and the exact
   keys that pull it off. A selected PATTERN (2026-07-18, slowed/tightened/rebuilt
   2026-07-19 x2) also gets a live PREVIEW box (`draw_pattern_preview`): a small self-
@@ -209,8 +215,12 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   high counts (Louis: "near impossible to unlock high venues with only 3 balls") -
   the goal numbers enforce some of this; validate with --calib per prop/count.
 - **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST -
-  makes Blackout's dark stretch a faint colour halo instead of fully invisible,
-  see `draw_glow_in_dark` / `has_glow_kit`), and so is The Midnight Show, the
+  makes Blackout's dark stretch an almost-fully-visible colour halo, brightened
+  2026-07-19 off its original faint 0.09 alpha (too hard to actually see, not
+  the "mercy" it was meant to be), see `draw_glow_in_dark` / `has_glow_kit`;
+  Blackout itself was softened the same day - the SHAPE still goes past the
+  apex, but the comet trail stays lit for everyone, and a torch's own flame is
+  bright now too, not faint), and so is The Midnight Show, the
   bonus post-game venue it's really for (see the Records/pay/rep bullet above);
   player/prop skins beyond those two still open.
 - **Settings depth:** Music/Sound are volume sliders now (not just on/off);
