@@ -149,9 +149,33 @@ and deleted. History lives in git.
   `--booking --encore blackout` to screenshot it. Windowed
   `--shot <path> --shotat <frame>` captures a frame.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
-  identifiers, not just syntax).
+  identifiers, not just syntax; it does NOT catch a runtime type error like
+  comparing a Dictionary's String value against an int constant - that only
+  throws once the exact branch runs, and a script error mid-`_draw()` silently
+  skips the rest of that draw call rather than crashing, which can look like a
+  rendering bug rather than the type error it actually is. Check the run's
+  stderr for `SCRIPT ERROR`, not just the screenshot, after any risky edit.)
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
   ignore them all.
+- `--collcheck` (audits mid-air clearance) only ever exercised FRAME-PERFECT bot
+  timing: near-instant catches, throws on a fixed metronome. `--latecatch N`
+  (2026-07-19) is a realistic-timing variant: it catches N ticks LATE of a
+  ball's ideal `land_tick` - still a genuine Perfect catch as long as N is
+  within `perfect_window()` (0-7 for every player; up to 10 with enough Focus)
+  - and immediately re-throws that hand on the very same tick, so the audit
+  can finally answer "does a real, not-frame-0 Perfect catch followed by an
+  immediate throw still clear?" Sweep it alongside `--balls`: the default
+  3-ball Cascade stays a clean 16.8px across the whole N=0-7 range (matches
+  the frame-perfect baseline exactly - timing doesn't move this one). The
+  4-ball even-count face does NOT: frame-perfect is the known ~5px ("tight but
+  real, an accepted tradeoff" above), but realistic N=0-4 measures an ACTUAL
+  overlap (-2.6 to -0.7px), only clearing again (barely, <1.3px) by N=7. The
+  6-ball face is worse in a different way - its frame-perfect baseline is
+  ALREADY overlapping (-1.9px, a separate pre-existing issue, not a timing
+  one) and realistic timing pushes it further negative still (-13 to -11px).
+  No fix attempted here: the obvious one (widen the landing) is exactly what
+  the arms-only-two-positions rule above already forbids, and Louis rejected
+  it once for this exact spot - a real fix is a design call, not a code one.
 
 ## Music / audio
 

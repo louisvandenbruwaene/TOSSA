@@ -815,6 +815,14 @@ var _collcheck := false   # dev: --collcheck measures the tightest mid-air clear
 						  # IDEAL pattern geometry), printed on the --shot capture
 var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
 var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
+var _late_catch_n := -1     # dev: --latecatch N makes the auto-player catch N ticks LATE
+							 # of a ball's ideal land_tick (still Perfect as long as N is
+							 # within perfect_window()) and re-throw that hand on the very
+							 # next tick, instead of the near-instant catch + fixed-beat
+							 # throw --collcheck otherwise uses - the ideal-geometry audit
+							 # only ever exercised frame-perfect timing, never a realistic
+							 # "Perfect, but not frame-0" catch followed by an immediate
+							 # re-throw. -1 = off (the original --collcheck behaviour).
 var _handlog := false       # dev: --handlog prints each hand's x every tick during play,
 							  # to tell a real jitter (oscillating x) from a hand that merely
 							  # sits still but far from the ball's lane (ROADMAP 12b)
@@ -895,6 +903,9 @@ func _ready() -> void:
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
 	if ua.has("--collcheck"):   # dev: audit the ideal pattern for mid-air overlap. Read
 		_collcheck = true       # early: it stands alone, and it runs fine under --headless
+	var lci := ua.find("--latecatch")   # dev: --collcheck --latecatch N - a realistic-timing
+	if lci != -1 and lci + 1 < ua.size():   # variant of the audit (see _late_catch_n above)
+		_late_catch_n = int(ua[lci + 1])
 	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
 		_handlog = true
 	var skip_menu := _demo or _shot or _collcheck or _handlog or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
@@ -9997,14 +10008,51 @@ func _demo_step() -> void:
 	if booking_active and goals_hit >= NUM_GOALS and running:
 		finish_performance()
 		return
+	# --latecatch needs bootstrap throws before the catch-triggered loop below has
+	# anything airborne to catch: one throw per ball beyond the first, DEMO_BEAT
+	# apart, same as the metronome's own cadence, so every ball actually enters
+	# rotation instead of a couple sitting as permanent, never-thrown residents.
+	var settle_tick := 24 + (num_balls - 1) * DEMO_BEAT + 60
+	if _late_catch_n >= 0 and tick >= 24 and tick < 24 + (num_balls - 1) * DEMO_BEAT and (tick - 24) % DEMO_BEAT == 0:
+		var bh := _demo_next
+		if stack(bh).is_empty():
+			bh = other(bh)
+		if not stack(bh).is_empty():
+			do_throw(bh, _demo_hold)
+			_demo_next = other(bh)
+	# the bootstrap's own throws (fixed-beat, identical regardless of N) tend to
+	# produce the tightest clearance of the whole run purely because they are not
+	# yet on the late-catch rhythm - left alone, that bootstrap-phase minimum would
+	# dominate _coll_min and mask whatever the ACTUAL late-catch-driven steady
+	# state does, which is the only thing this mode exists to measure. One clean
+	# reset once the bootstrap is behind and the rhythm has had a cycle to settle.
+	if _late_catch_n >= 0 and tick == settle_tick:
+		_coll_min = 1000000.0
+		_coll_at = ""
 	# auto-catch: secure any ball arriving at an empty hand (the odd-columns middle
-	# ball counts for either hand, matching the either-hand rule in on_catch)
+	# ball counts for either hand, matching the either-hand rule in on_catch).
+	# --latecatch N (see _late_catch_n) instead waits until exactly N ticks AFTER
+	# the ball's ideal land_tick - still a Perfect catch as long as N is within
+	# perfect_window() - and immediately re-throws that hand on this same tick,
+	# so the audit actually exercises "a real, not-frame-0 Perfect catch followed
+	# by an immediate throw" instead of only ever the idealized frame-perfect one.
+	# Unlike the near-instant branch below, this does NOT skip a hand that
+	# already holds a ball (on_catch itself never required an empty hand - a
+	# hand legitimately holds two at a cascade's start - skipping it here once
+	# stranded a hand's leftover ball forever, since nothing else would ever
+	# ask it to catch, or to throw, again).
 	for h in [LEFT, RIGHT]:
-		if not stack(h).is_empty():
+		if _late_catch_n < 0 and not stack(h).is_empty():
 			continue
 		for b in balls:
-			if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball) and absi(b.land_tick - tick) <= 1:
+			if b.state != STATE_FLIGHT or (b.to_hand != h and b != col_mid_ball):
+				continue
+			var due := (tick == b.land_tick + _late_catch_n) if _late_catch_n >= 0 else absi(b.land_tick - tick) <= 1
+			if due:
+				var before := stack(h).size()
 				on_catch(h)
+				if _late_catch_n >= 0 and stack(h).size() > before:
+					do_throw(h, _demo_hold)   # immediate: the whole point of this mode
 				break
 	# dev trick preview: kick off a Spin whenever the pattern is full and cooled down
 	# (in unpinned mode, or when Spin itself is the pinned trick)
@@ -10025,8 +10073,11 @@ func _demo_step() -> void:
 			and String(tut_step_data().get("goal", "")) == "trick_off":
 		toggle_on = -1
 	# metronome: every beat, release one ball from a hand that actually holds one.
-	# This can never desync because it only throws real held balls.
-	if tick >= 24 and tick % DEMO_BEAT == 0:
+	# This can never desync because it only throws real held balls. Off under
+	# --latecatch, whose own catch-then-immediately-rethrow above is the only
+	# throw trigger that mode wants - the beat would otherwise fire independently
+	# and blur the very timing this mode exists to isolate.
+	if _late_catch_n < 0 and tick >= 24 and tick % DEMO_BEAT == 0:
 		var h := _demo_next
 		if stack(h).is_empty():
 			h = other(h)
