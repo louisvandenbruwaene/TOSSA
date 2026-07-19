@@ -931,8 +931,11 @@ func _ready() -> void:
 		return
 
 	# Dev/test flags jump straight into play; a normal launch opens the main menu.
-	if ua.has("--collcheck"):   # dev: audit the ideal pattern for mid-air overlap. Read
-		_collcheck = true       # early: it stands alone, and it runs fine under --headless
+	if ua.has("--collcheck"):   # dev: audit the ideal pattern for mid-air overlap. Runs
+		_collcheck = true       # fine under --headless, and IMPLIES --demo: the audit needs
+		_demo = true            # the autoplayer actually juggling or nothing is ever thrown,
+								# and the clearance stays at its sentinel - a silent no-op run
+								# (bare --collcheck used to report 1000000 px, measuring nothing)
 	var lci := ua.find("--latecatch")   # dev: --collcheck --latecatch N - a realistic-timing
 	if lci != -1 and lci + 1 < ua.size():   # variant of the audit (see _late_catch_n above)
 		_late_catch_n = int(ua[lci + 1])
@@ -5682,8 +5685,11 @@ func focus_stam_mult() -> float:
 
 func perfect_window() -> int:
 	# Stage 2: once stage 1 has bottomed out (Focus > 100), each FOCUS_WINDOW_PER
-	# of further Focus widens the Perfect band by a tick, capped so timing still
-	# rules. Never grows past the Good band, so a tier of Good always remains.
+	# of further Focus widens the Perfect band by a tick, capped at the Good band
+	# (W_GOOD) so timing still rules. At the Accuracy cap (250) the window reaches
+	# exactly W_GOOD, which FOLDS the Good tier into Perfect - those catches simply
+	# score Perfect instead, a generous reward for maxing Accuracy, not a lost tier.
+	# Below the cap a Good band still sits between Perfect and Late.
 	if tut_active:
 		return W_LATE   # in a lesson, ANY in-window press is a Perfect: a beginner
 						# should never fail a catch they reasonably attempted. The real
@@ -10332,6 +10338,12 @@ func _capture_and_quit() -> void:
 	if _collcheck:
 		# the overlap audit's verdict: the tightest edge-to-edge clearance any two
 		# airborne props reached this session (negative would be a visual overlap)
+		if _coll_min > 100000.0:
+			# still the sentinel: two props never shared the air, so nothing was
+			# actually audited. Loudly say so rather than let the absurd number read
+			# as "infinite clearance, all clear" (give the run more frames via
+			# --shotat, or a real --pattern/--balls/--prop to put props up)
+			print("collcheck WARNING: nothing measured - no two props were ever airborne together")
 		print("collcheck min clearance: %.1f px" % _coll_min)
 		print("collcheck at: %s" % _coll_at)
 	# the audit needs no picture, and a picture is the only thing --headless cannot
