@@ -59,6 +59,26 @@ and deleted. History lives in git.
   dimmest) built for the Glow-in-the-Dark Kit to actually matter in - the
   performer's suit nearly vanishes, the vest glows the Kit's own phosphor green.
   `MAX_VENUE` (6) is the real venue-count ceiling now, distinct from `TOP_VENUE`.
+- **DAILY CHALLENGE** (2026-07-24, **UNVERIFIED** - see the caveat at the end of this
+  entry): a new day-hub row beside PERFORM, same cost (a day segment) and the same
+  real booking flow end to end (goals, pay, rep, records) - the only difference is
+  WHERE and WHAT: venue and Encore are both seeded off today's date (`daily_seed`,
+  `daily_venue`, `daily_encore`) instead of chosen/rolled, so two players on the same
+  calendar day face the identical stage and challenge and only their own hands decide
+  the score. Venue is still capped at whatever THIS save's Reputation has unlocked
+  (`daily_venue`, same rule as `play_venue`), so it is comparable, not identical,
+  across two careers at different points. `roll_encore`'s exclusion rules (no Encore
+  below the Backyard, "For the Danger" gated below The Circus and MIN_BALLS) were
+  factored out into `encore_pool` so the random roll and the seeded pick can never
+  disagree. On resolve, a one-line shareable result (`daily_share` - venue, Encore,
+  goals, score, best streak) is copied to the OS clipboard immediately and then shown
+  as the day-hub's transient message on return from the results card. `--daily` (see
+  Verification workflow) jumps a headless run straight into today's seeded act.
+  **This whole entry was written and coded by Claude in a session with no Godot binary
+  available to run the parse-check, `--daily --demo --booking`, or an actual playtest
+  - none of it has been verified. Run the standard workflow below (parse-check first,
+  then `--daily --demo --booking`, then a real hands-on pass over a couple of
+  calendar-seeded venues) before trusting any of this description or the code behind it.**
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
@@ -173,7 +193,13 @@ and deleted. History lives in git.
   Capsule, `sips -z 353 616 <path>` to the real 616x353; `--glow` owns the
   Glow-in-the-Dark Kit for the session (no save touched) - pair with
   `--booking --encore blackout` to screenshot it. Windowed
-  `--shot <path> --shotat <frame>` captures a frame.
+  `--shot <path> --shotat <frame>` captures a frame. `--daily` (2026-07-24,
+  unverified - see the Daily Challenge entry above) is used the same way as
+  `--booking` but seeds today's venue/Encore instead of rolling; combine with
+  `--demo` to auto-play it end to end (prints the shareable result line on resolve,
+  same moment as `--booking`'s `ACT ...` line). Unlike `--booking`, it is not
+  wired into `--establish`'s explicit-venue screenshot path - `--establish N`
+  always means venue N specifically, which a seeded venue would fight.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
   identifiers, not just syntax; it does NOT catch a runtime type error like
   comparing a Dictionary's String value against an int constant - that only
@@ -244,21 +270,28 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 - **Grow the ENCORES deck:** pure content. `ENCORES` is a flat array read through the
   single `encore_on(id)` choke point - a new challenge is one dict entry plus usually
   one `if encore_on(...)` check in whichever multiplier function it affects.
-- **A seeded daily/weekly challenge act:** seed venue/encore/goal off the date, run
-  the existing booking flow, show a shareable score line. No server, no new save data
-  - as ephemeral as a dev `--booking` run, just seeded instead of random.
-- **The crowd reacting to a BAD night, not just a good one:** `draw_crowd` already
-  bobs harder, brightens, and throws hands up as `applause` climbs - it never shrinks
-  the head count as applause craters toward a collapse. Small, additive, not a new
-  system.
-- **Escalating streak feedback:** every `streak % 10` milestone gets the identical
-  `freeze = 4` / two rings / one popup forever, the same at streak 10 as streak 200.
-  Scaling that (and adding a confetti burst via the existing `spawn_parts` helper) by
-  milestone tier is a localized change to one block.
+- ~~A seeded daily/weekly challenge act~~ - **built 2026-07-24, UNVERIFIED** (see the
+  Daily Challenge entry above): venue/Encore seed off the date, the goal numbers
+  already fall out of venue via the existing formula so nothing separate was needed
+  there. Not yet confirmed to actually run correctly - the whole item is Claude's
+  code from a session with no Godot to check it against.
+- **The crowd reacting to a BAD night, not just a good one** - **built 2026-07-24,
+  UNVERIFIED**: `draw_crowd` now gives each seat a stable per-seat threshold
+  (`CROWD_LEAVE_BAND`) below which it goes empty as `applause` craters, on top of the
+  existing bob/brighten/hands-up as it climbs. Untested - eye-check that it actually
+  reads as "people leaving" and not as visual noise or flicker before trusting it.
+- **Escalating streak feedback** - **built 2026-07-24, UNVERIFIED**: `streak % 10`
+  milestones now scale by tier (every 50 bigger, every 100 biggest: more freeze, more
+  rings, a confetti burst via the existing `spawn_parts` "confetti" kind). Untested -
+  confirm the tiering actually feels escalating rather than just louder, and that the
+  confetti burst doesn't clutter a real multi-ball set.
 - **A colorblind pass:** mostly already true. PERFECT/GOOD/late/drop popups all pair
   a color with distinct literal text, so color is rarely the only signal - this is an
-  audit more than a redesign. The one unverified spot is the stamina bar's green-to-
-  red lerp, which does have a redundant text warning but hasn't been eye-checked.
+  audit more than a redesign. The stamina bar's green-to-red lerp got a second,
+  non-color signal (2026-07-24, UNVERIFIED: the label itself now reads "STAMINA -
+  LOW" and pulses under `STAM_LOW`) alongside its existing numeric readout - still
+  needs an actual eye-check, ideally from someone who is colorblind, not just a
+  claim that the code does the right thing.
 - **A trailer** built from the existing `--shot`/`--shotat`/`--booking` capture
   tooling - assembly work outside the codebase, maybe one or two new shot sequences
   for beats the current dev flags can't already stage.
