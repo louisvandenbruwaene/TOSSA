@@ -478,6 +478,10 @@ const APPL_GOOD := 0.007
 const APPL_LATE := -0.020
 const APPL_WHIFF := -0.040
 const APPL_SPIN := 0.010
+const CROWD_LEAVE_BAND := 0.55   # draw_crowd: only seats below this applause level ever
+								  # have anyone leaving them, so ordinary play (applause
+								  # starts at 0.7 and a healthy set holds near it) never
+								  # thins the crowd - only a real crater toward a collapse does
 const BOOK_PAY_PER_SCORE := 0.0015    # gold per point banked across the booking (score already
 									  # scales with the venue, so this needs no separate venue term)
 # The Encore deck: each is a single named twist on the third set, and each is a couple
@@ -597,6 +601,11 @@ var exhausted := false        # the collapse was caused by empty stamina: on ret
 # card shows is the one that actually ended the night.
 var fail_reason := ""
 var encore := -1              # index into ENCORES for this booking's third set, or -1
+var daily_active := false     # true from begin_daily_challenge until the NEXT real booking
+							  # (begin_performance) clears it - practice never resolves through
+							  # resolve_act, so it never needs to touch this flag
+var daily_share := ""         # the shareable score line, stamped once at resolve_act and
+							  # shown on the results card for the run that earned it
 var ante: Array[int] = [0, 0, 0, 0, 0, 0, 0]   # complete acts per venue: the standing raised bar
 
 # progression / stats (persisted per save slot, see save_file())
@@ -966,6 +975,8 @@ func _ready() -> void:
 			prop_type = pn
 			prop_count[pn] = maxi(prop_count[pn], MAX_BALLS_HARD)
 			strength = maxi(strength, int(PROPS[pn]["req"]))
+		if ua.has("--daily"):   # dev: today's seeded venue (overrides a plain --venue),
+			venue_pick = daily_venue()   # so run_venue below comes out through play_venue() as usual
 		start_run(start_n)
 		game_state = ST_PLAY
 		if ua.has("--demo"):    # dev: the auto-player performs, so we can see the booking HUD
@@ -980,6 +991,11 @@ func _ready() -> void:
 				for ek in ENCORES.size():
 					if String(ENCORES[ek]["id"]) == ua[eni + 1]:
 						encore = ek
+		if ua.has("--daily"):   # dev: today's seeded venue/Encore instead of --booking's
+			booking_active = true   # random roll - see begin_daily_challenge. A --demo run
+			goals_hit = 0            # prints the shareable line on resolve, same as --booking's ACT line
+			daily_active = true
+			encore = daily_encore(run_venue, daily_seed())
 		var ci := ua.find("--calib")   # dev: print the autoplayer's score at N ticks, then quit,
 		if ci != -1:                   # to tune VENUE_BASE against real strong-player numbers
 			_calib = true
@@ -1370,6 +1386,12 @@ func _input(event: InputEvent) -> void:
 					cine_tick = 0
 				else:
 					enter_day()
+					if daily_active:
+						# enter_day() clears day_msg first - the share line has to land
+						# after, or it never survives the trip back to the hub. Already
+						# on the clipboard too (resolve_act), for a player who quits
+						# straight from the results card instead of dismissing it here.
+						set_day_msg(daily_share)
 		return
 	# ST_PLAY: the existing in-game handling below
 	if sheet_open:
@@ -1606,6 +1628,7 @@ func begin_performance(n: int) -> void:
 	# an act opens on an establishing shot of WHERE you are about to play, the way a
 	# film cuts to the outside of the building before the scene inside. The act's one
 	# optional challenge is rolled here, so the card can announce it up front.
+	daily_active = false   # a real booking always supersedes a stale Daily Challenge flag
 	mode = MODE_PERFORM
 	establish_after = n
 	establish_venue = play_venue()
@@ -1616,6 +1639,54 @@ func begin_performance(n: int) -> void:
 	# rolled with the global randi (never the sim rng, so the deterministic catch
 	# sequence is untouched). The Backyard stays pure: no conditions on stage one.
 	encore = roll_encore(play_venue())
+	game_state = ST_ESTABLISH
+	cine_tick = 0
+
+
+func daily_seed() -> int:
+	# today's date as one int - stable for everyone playing the same calendar day,
+	# regardless of time zone precision (a day is plenty granular for a daily act)
+	var d := Time.get_date_dict_from_system()
+	return int(d["year"]) * 10000 + int(d["month"]) * 100 + int(d["day"])
+
+
+func daily_venue() -> int:
+	# never above what THIS save's own Reputation has actually unlocked (same rule
+	# play_venue() already enforces) - two players on the same day can still land on
+	# different venues early in their careers, but never a venue either could not
+	# otherwise reach
+	var cap := venue_index()
+	if cap <= 0:
+		return 0
+	return daily_seed() % (cap + 1)
+
+
+func daily_encore(venue: int, seed_val: int) -> int:
+	# the seeded twin of roll_encore: same pool, same exclusion rules, just a picked
+	# index instead of a rolled one, so the pool and the pick can never disagree
+	var pool := encore_pool(venue)
+	if pool.is_empty():
+		return -1
+	return int(pool[seed_val % pool.size()])
+
+
+func begin_daily_challenge() -> void:
+	# a repeatable, comparable act (Still open: "a seeded daily/weekly challenge"):
+	# venue and Encore are both seeded off today's date instead of chosen/rolled, so
+	# two players on the same day face the identical stage and challenge - only their
+	# own hands decide the score. Otherwise this is the real booking flow end to end
+	# (same goals, pay, rep, records) - `daily_active` only changes what the results
+	# card shows afterward, never how the act itself plays or scores.
+	var dv := daily_venue()
+	venue_pick = dv   # "tonight's stage" becomes the daily's, same as picking it by hand
+	mode = MODE_PERFORM
+	establish_after = num_balls
+	establish_venue = dv
+	pattern_once = -1
+	booking_active = true
+	goals_hit = 0
+	daily_active = true
+	encore = daily_encore(dv, daily_seed())
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -1648,23 +1719,31 @@ func next_goal() -> int:
 	return goal_for(run_venue, clampi(goals_hit, 0, NUM_GOALS - 1))
 
 
-func roll_encore(venue: int) -> int:
-	# a random challenge for the whole act - never on the Backyard (venue 0), the one
-	# pure lesson stage - and otherwise fair game, EXCEPT "For the Danger" (only clubs/
+func encore_pool(venue: int) -> Array[int]:
+	# every Encore this venue and this save's own props currently allow - the shared
+	# gate behind both a random roll (roll_encore) and a seeded pick (daily_encore),
+	# so the two can never drift apart. Never on the Backyard (venue 0), the one pure
+	# lesson stage - and otherwise fair game, EXCEPT "For the Danger" (only clubs/
 	# knives/torches score), which needs a floor of its own (2026-07-18, Louis: it
 	# rolled before he could even afford a club, so the act was unscoreable start to
-	# finish). It is now excluded from the pool below The Circus (venue 3) AND unless
-	# the player owns ENOUGH of a qualifying prop to actually field the smallest real
+	# finish). It is excluded from the pool below The Circus (venue 3) AND unless the
+	# player owns ENOUGH of a qualifying prop to actually field the smallest real
 	# routine - MIN_BALLS (3), not just one (Louis caught this: owning a single club
 	# is not enough to switch to and juggle it at all, let alone score with it).
-	if venue < 1:
-		return -1
 	var pool: Array[int] = []
+	if venue < 1:
+		return pool
 	for i in ENCORES.size():
 		if String(ENCORES[i]["id"]) == "fire" and (venue < 3 \
 				or (have(PROP_CLUBS) < MIN_BALLS and have(PROP_KNIVES) < MIN_BALLS and have(PROP_TORCHES) < MIN_BALLS)):
 			continue
 		pool.append(i)
+	return pool
+
+
+func roll_encore(venue: int) -> int:
+	# a random challenge for the whole act - see encore_pool for what is eligible
+	var pool := encore_pool(venue)
 	if pool.is_empty():
 		return -1
 	return int(pool[randi() % pool.size()])
@@ -1873,6 +1952,10 @@ func day_rows() -> Array[Dictionary]:
 		"cost": "", "ok": not tired,
 		"why": tired_why if tired else "",
 		"sub": "no crowd, no pay. Work as long as you can stand."})
+	out.append({"id": "daily", "name": "DAILY CHALLENGE  -  %s" % String(venue_data(daily_venue())["name"]),
+		"cost": "", "ok": not tired,
+		"why": tired_why if tired else "",
+		"sub": "today's stage and Encore, same for every juggler playing today. Costs a segment, same as PERFORM."})
 	var full := stamina >= stamina_max - 1.0
 	var can_eat := money >= EAT_COST and not full
 	var eat_why := ""
@@ -1962,6 +2045,11 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			seg_used += 1
 			save_progress()
 			begin_performance(num_balls)
+			play_sfx("ui2", -11.0)
+		"daily":
+			seg_used += 1
+			save_progress()
+			begin_daily_challenge()
 			play_sfx("ui2", -11.0)
 		"practice":
 			seg_used += 1
@@ -4562,11 +4650,19 @@ func on_catch(h: int) -> void:
 		spawn_parts(outer_pos(h), Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
 		spawn_parts(outer_pos(h), Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
 		if streak % 10 == 0:
-			# a milestone: a beat of hit-stop, a shock ring, a toast, the crowd lifts
-			freeze = 4
-			spawn_parts(outer_pos(h), Color(1.0, 0.82, 0.4), 2, 0.0, "ring")
+			# a milestone: a beat of hit-stop, a shock ring, a toast, the crowd lifts -
+			# scaled by tier (Still open: "Escalating streak feedback") so streak 200
+			# reads as a bigger deal than streak 10, not the identical beat forever.
+			# Every 50 steps it up, every 100 is the biggest, adding a confetti burst
+			# via spawn_parts's existing "confetti" kind (already built for the
+			# results/unlock celebrations) rather than a new effect.
+			var streak_tier := 2 if streak % 100 == 0 else (1 if streak % 50 == 0 else 0)
+			freeze = 4 + streak_tier * 2
+			spawn_parts(outer_pos(h), Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
 			var vs := get_viewport_rect().size
 			add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
+			if streak_tier >= 1:
+				spawn_parts(Vector2(vs.x * 0.5, vs.y * 0.16), Color(1.0, 0.85, 0.45), 12 + streak_tier * 10, 2.4, "confetti")
 			if mode == MODE_PERFORM:
 				play_sfx("cheer", -11.0)
 		elif streak % 5 == 0:
@@ -5533,6 +5629,17 @@ func resolve_act() -> void:
 	if run_venue >= TOP_VENUE and results_record and not won:
 		won = true
 		pending_win = true
+	daily_share = ""
+	if daily_active:
+		# stamped once, off the FINAL (post-collapse-strip) score, and pushed to the
+		# clipboard right away so a player who cashes in and quits still has it -
+		# the results card shows the same string, never a second, later computation
+		var enc_name := String(ENCORES[encore]["name"]) if encore >= 0 and encore < ENCORES.size() else "no Encore"
+		var outcome := "all 3 goals" if complete else "%d/%d goals" % [goals_hit, NUM_GOALS]
+		daily_share = "IACTO Daily %d-%02d-%02d  -  %s, %s  -  %s  -  %s pts  -  best streak %d" % [
+			int(daily_seed() / 10000), int(daily_seed() / 100) % 100, daily_seed() % 100,
+			String(venue_data(run_venue)["name"]), enc_name, outcome, commafy(score), best_streak]
+		DisplayServer.clipboard_set(daily_share)
 	results_open = true
 	results_tick = tick
 	results_stamped = false
@@ -5543,6 +5650,8 @@ func resolve_act() -> void:
 		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
 			score, last_pay, last_rep_delta, str(results_record)])
+		if daily_active:
+			print(daily_share)
 		get_tree().quit()
 
 
@@ -6615,6 +6724,15 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 		var base_y := fy + 14.0 + float(r) * 21.0
 		var row_lit := lit * (1.0 - 0.35 * float(r))
 		for i in heads:
+			# a BAD night empties seats too, not just a good one lighting up (Still open:
+			# "the crowd reacting to a BAD night") - each seat has its own stable leave
+			# threshold (no randf, so it never flickers frame to frame), and only gives up
+			# on the act once applause drops below CROWD_LEAVE_BAND, so a healthy set
+			# never sees anyone walk out - only a real crater toward a collapse does.
+			if performing:
+				var leave_t := fposmod(float(i) * 0.371 + float(r) * 0.193, 1.0)
+				if applause <= leave_t * CROWD_LEAVE_BAND:
+					continue
 			var hx := s.x * (float(i) + 0.5) / float(heads) + float(r) * 7.0
 			var bob := sin(atick() * 0.045 + float(i) * 1.31 + float(r) * 2.2) * bob_amp
 			var hy := base_y + fmod(float(i) * 1.7, 5.0) + bob
@@ -7657,10 +7775,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-		draw_string(font, Vector2(sx, 96), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.85, 0.9, 0.85, 0.85))
+		# a colorblind pass (Still open): the green-to-red lerp below was the one
+		# unverified spot, since the number readout beside it is small and easy to
+		# miss mid-set. Under STAM_LOW the label itself now says so and pulses, a
+		# second, non-color signal right where the eye already is (Louis's pattern
+		# elsewhere: the last drop mark and the capped streak label both do the same).
+		var stam_low := sfrac < STAM_LOW
+		var stam_a := 0.55 + 0.45 * sin(float(tick) * 0.3) if stam_low else 0.85
+		draw_string(font, Vector2(sx, 96), "STAMINA  -  LOW" if stam_low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.55, 0.42, stam_a) if stam_low else Color(0.85, 0.9, 0.85, 0.85))
 		draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 11, Color(0.85, 0.9, 0.85, 0.85))
 		var stcol := Color(0.55, 0.80, 0.6)
-		if sfrac < STAM_LOW:
+		if stam_low:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 		draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
 		if pts_row:
