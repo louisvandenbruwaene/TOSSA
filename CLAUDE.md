@@ -243,6 +243,11 @@ and deleted. History lives in git.
   same moment as `--booking`'s `ACT ...` line). Unlike `--booking`, it is not
   wired into `--establish`'s explicit-venue screenshot path - `--establish N`
   always means venue N specifically, which a seeded venue would fight.
+  `--demowall` (2026-07-25, unverified - see the scoped free demo entry above)
+  flips `in_demo_build()` true for the session without needing a real "demo"-tagged
+  export: pair with `--debug` and an F-key venue jump (F1..F7) to push Reputation
+  past `DEMO_MAX_VENUE`, then `--booking` a real act and let it resolve - the demo
+  wall should fire exactly as it would in the real export.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
   identifiers, not just syntax; it does NOT catch a runtime type error like
   comparing a Dictionary's String value against an int constant - that only
@@ -349,10 +354,31 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 - **A trailer** built from the existing `--shot`/`--shotat`/`--booking` capture
   tooling - assembly work outside the codebase, maybe one or two new shot sequences
   for beats the current dev flags can't already stage.
-- **A scoped free demo:** `MAX_VENUE` is a `const`, so it cannot be dialed down by a
-  runtime flag. Needs a fourth export preset with its own `custom_features` tag and
-  one `OS.has_feature("demo")` check where progression should stop, showing a
-  wishlist card instead of continuing.
+- ~~A scoped free demo~~ - **built 2026-07-25, UNVERIFIED, and the export preset is
+  still an open step (see below):** `venue_index()` now caps at `DEMO_MAX_VENUE` (a
+  tunable `const`, currently 1 - Backyard + Street Corner) whenever `in_demo_build()`
+  is true, which reaches every real gate for free (`play_venue`, the hub's venue
+  picker, `daily_venue`, a skill's own venue requirement) since they all read
+  `venue_index()` and not the raw Reputation math. Reputation itself is never capped
+  - only the venue tier it can spend - so the moment it would have bought a venue past
+  the cap, `resolve_act()` sets `pending_demo_wall` once (mirrors `pending_win`'s own
+  shape) and the results card rolls into `ST_DEMO_WALL` (`draw_demo_wall`) instead of
+  the day: a stat recap, "WISHLIST IACTO ON STEAM", then back into the SAME career -
+  never a lockout, since this is the last impression a demo player gets before
+  deciding whether to buy (the calm-first-impression pillar applies here too).
+  `demo_wall_seen` persists so it never shows twice. **`in_demo_build()` is the one
+  choke point every check reads - never `OS.has_feature("demo")` directly** - because
+  that engine call only ever sees a REAL export's `custom_features` tag, which cannot
+  be faked from an editor or `--headless` debug run; the dev-only `--demowall` flag
+  sets `_force_demo` instead, so the whole path is actually exercisable before a real
+  export exists (see Verification workflow). **What's still missing, and NOT
+  something this session could safely do by hand:** the fourth export preset itself.
+  `export_presets.cfg` is Godot-editor-generated config that a blind hand-edit risks
+  malforming in a way that would only surface at export time, with nothing here able
+  to catch it - Louis needs to do this step himself: Project > Export > Add... > pick
+  a platform (or duplicate an existing preset) > Options > Features > add the custom
+  feature tag `demo`, and set a distinct `export_path` (e.g. `export/demo/...`) so it
+  never collides with the real Windows/macOS/Linux presets already there.
 
 ## Gotchas that keep biting
 

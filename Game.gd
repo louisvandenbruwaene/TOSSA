@@ -128,6 +128,9 @@ const ST_TUTDONE := 11    # the small congrats card after the basics lesson: the
 						   # hard cut from the lesson straight into a menu)
 const ST_CAPSULE := 12    # dev only (--capsule): pure key-art, no UI chrome, for
 						   # exporting Steam capsule/store images - see draw_capsule
+const ST_DEMO_WALL := 13  # a scoped free demo's own "that's everything" card, shown once
+						   # reputation would have unlocked a venue past DEMO_MAX_VENUE -
+						   # see the Still open "scoped free demo" entry and OS.has_feature("demo")
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -744,6 +747,9 @@ var day_anim := ""        # a short hub vignette playing: "eat", "inn" or "shop"
 var day_anim_start := 0   # cine_tick it began; its effect applies when it ends
 var won := false          # the climb is complete: a record set at the top stage
 var pending_win := false  # show the victory screen once the results card is dismissed
+var demo_wall_seen := false   # persisted: this save has already seen the demo-wall
+							   # card once - it never shows twice in the same career
+var pending_demo_wall := false   # show the demo-wall card once the results card is dismissed
 var view_venue := -1      # preview override of which venue palette to draw
 var ext_center := false   # exterior hero objects (house, lamp) compose mid-frame
 						  # for the day hub card; story scenes keep them offset
@@ -866,6 +872,11 @@ var _stick_dir := {}      # per-axis latch for left-stick menu steps (see _input
 
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
+var _force_demo := false  # dev: --demowall makes in_demo_build() true without a real
+						   # export - a genuine "demo" custom_features export tag is the
+						   # only thing OS.has_feature("demo") ever sees, and that can't
+						   # be faked from inside a normal debug/editor run, so testing
+						   # the demo wall needs this side door instead
 var _demo_trick := false  # dev: the auto-player also performs tricks, to screenshot them
 var _demo_trick_pin := -1 # dev: --trick <id> pins ONE trick (so toggles and held arm
 						  # tricks can be watched); -1 alternates High Toss / BTB + Spin
@@ -947,6 +958,8 @@ func _ready() -> void:
 		_demo = true
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
+	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
+		_force_demo = true     # "demo"-tagged export - see in_demo_build()
 	var si := ua.find("--shot")
 	if si != -1 and si + 1 < ua.size():
 		_shot = true
@@ -1345,6 +1358,14 @@ func _input(event: InputEvent) -> void:
 				set_day_msg("your first day begins  -  the stage is yours")
 				play_sfx("ui2", -11.0)
 			return
+		ST_DEMO_WALL:
+			# the demo's own "that's everything" card - same shape as ST_TUTDONE:
+			# reads itself out for a beat, then any key drops back into the day, the
+			# player free to keep playing whatever venues the demo already gave them
+			if cine_tick > 60 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
+				enter_day()
+				play_sfx("ui2", -11.0)
+			return
 		ST_ESTABLISH:
 			establish_key()
 			return
@@ -1412,10 +1433,15 @@ func _input(event: InputEvent) -> void:
 			KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE:
 				results_open = false
 				# clearing the top stage this set rolls straight into the victory
-				# screen; otherwise the card dismisses back into the day as normal
+				# screen; hitting the demo's own ceiling rolls into its wishlist card
+				# instead; otherwise the card dismisses back into the day as normal
 				if pending_win:
 					pending_win = false
 					game_state = ST_CREDITS
+					cine_tick = 0
+				elif pending_demo_wall:
+					pending_demo_wall = false
+					game_state = ST_DEMO_WALL
 					cine_tick = 0
 				else:
 					enter_day()
@@ -5708,6 +5734,15 @@ func resolve_act() -> void:
 	if run_venue >= TOP_VENUE and results_record and not won:
 		won = true
 		pending_win = true
+	# THE DEMO WALL: venue_index() is capped inside a demo build, but Reputation
+	# keeps climbing underneath regardless (nothing about earning it is scoped) -
+	# the moment it would have unlocked a venue the demo does not have, say so
+	# once, the same shape as the win above, then let the player keep playing
+	# whatever they already have. venue_index_of(reputation) here is deliberately
+	# the UNCAPPED tier - venue_index() itself would never trip this check.
+	if in_demo_build() and not demo_wall_seen and venue_index_of(reputation) > DEMO_MAX_VENUE:
+		demo_wall_seen = true
+		pending_demo_wall = true
 	daily_share = ""
 	if daily_active:
 		# stamped once, off the FINAL (post-collapse-strip) score, and pushed to the
@@ -5955,6 +5990,13 @@ const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the gam
 const MAX_VENUE := 6   # the last real venue index (The Midnight Show); distinct from
 						# TOP_VENUE, which specifically means "the win venue" and must
 						# never move
+const DEMO_MAX_VENUE := 1   # a SCOPED FREE DEMO (Still open) never lets venue_index() go
+							 # past this, however high Reputation actually climbs - only
+							 # inside a build exported with the custom_features "demo" tag
+							 # (OS.has_feature("demo")), never a real release. Tunable: 1
+							 # is Backyard + Street Corner, enough to feel the loop and the
+							 # first couple of unlocks without giving away the game - Louis's
+							 # call, change the one number to give away more or less.
 
 
 #endregion
@@ -5975,8 +6017,25 @@ func debug_jump_venue(i: int) -> void:
 	enter_day()
 
 
+func in_demo_build() -> bool:
+	# true in a real export tagged with the "demo" custom feature, OR under the
+	# dev-only --demowall override (see _force_demo) - every demo-scoping check
+	# reads THIS, never OS.has_feature("demo") directly, so the dev flag actually
+	# exercises the same code path a real demo export would.
+	return OS.has_feature("demo") or _force_demo
+
+
 func venue_index() -> int:
-	return venue_index_of(reputation)
+	# the ONE gameplay-facing "how far can you go right now" - every real gate
+	# (play_venue, the venue picker, a skill's own venue requirement, daily_venue)
+	# reads THIS, not venue_index_of directly, so a demo cap here reaches every one
+	# of them for free. venue_index_of(rep) itself stays uncapped on purpose - the
+	# rep-swing math and the demo-wall detection in resolve_act() both need the
+	# TRUE tier Reputation has actually earned, capped or not.
+	var idx := venue_index_of(reputation)
+	if in_demo_build():
+		idx = mini(idx, DEMO_MAX_VENUE)
+	return idx
 
 
 func venue_index_of(rep: int) -> int:
@@ -6268,6 +6327,7 @@ func load_progress() -> void:
 		xp = int(cf.get_value("prog", "xp", 0))
 		points = int(cf.get_value("prog", "points", 0))
 		won = bool(cf.get_value("prog", "won", false))
+		demo_wall_seen = bool(cf.get_value("prog", "demo_wall_seen", false))
 		var bs: Variant = cf.get_value("prog", "best_scores", [])
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
@@ -6365,6 +6425,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
 	cf.set_value("prog", "won", won)
+	cf.set_value("prog", "demo_wall_seen", demo_wall_seen)
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
@@ -6675,6 +6736,9 @@ func _draw_screen() -> void:
 			return
 		ST_TUTDONE:
 			draw_tutdone(font, s)
+			return
+		ST_DEMO_WALL:
+			draw_demo_wall(font, s)
 			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
@@ -9349,6 +9413,41 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 	if cine_tick > 90:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
 		draw_string(font, Vector2(0, s.y * 0.80), "any key  -  a new juggler picks up the balls", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.8, 0.72, 0.6, 0.4 + 0.5 * pa))
+	draw_vignette(s, 0.7)
+
+
+func draw_demo_wall(font: Font, s: Vector2) -> void:
+	# a SCOPED FREE DEMO's own "that's everything" card (Still open), shown once
+	# Reputation would have unlocked a venue past DEMO_MAX_VENUE. Deliberately NOT
+	# framed as a lockout (Louis's pillars: the first impression is calm, never
+	# flash, and this is the LAST impression a demo player gets before deciding
+	# whether to buy) - it leads with what they already did, same stat-recap shape
+	# as draw_gameover, and the door stays open: enter_day() afterward, no game_state
+	# that strands them anywhere but back in the career they were already playing.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.04))
+	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
+	draw_title_glow(font, s.y * 0.20, "THAT'S THE DEMO", 42, Color(1.0, 0.86, 0.5, fin), s)
+	draw_ornament(s.x * 0.5, s.y * 0.20 + 68.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
+	draw_string(font, Vector2(0, s.y * 0.34),
+		"You've earned your way past what this demo has to give. The full climb keeps going.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.88, 0.8, 0.68, fin))
+	var lines := [
+		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
+		"%d performances,  %d catches,  best streak %d" % [int(career["perfs"]), int(career["catches"]), int(career["best_streak"])],
+		"highest score  %s" % commafy(int(career["best_score"])),
+	]
+	for i in lines.size():
+		var la := clampf(float(cine_tick - 70 - i * 25) / 40.0, 0.0, 1.0)
+		draw_string(font, Vector2(0, s.y * 0.48 + float(i) * 28.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.85, 0.8, 0.7, la))
+	if cine_tick > 90:
+		var wa := 0.6 + 0.4 * sin(float(cine_tick) * 0.05)
+		draw_string(font, Vector2(0, s.y * 0.68), "WISHLIST IACTO ON STEAM", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(1.0, 0.9, 0.55, wa))
+		draw_string(font, Vector2(0, s.y * 0.68 + 30.0), "to keep climbing when it ships",
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(0.8, 0.76, 0.68, 0.85))
+	if cine_tick > 120:
+		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
+		draw_string(font, Vector2(0, s.y * 0.84), "any key  -  keep playing what you've already got",
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.75, 0.7, 0.62, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.7)
 
 
