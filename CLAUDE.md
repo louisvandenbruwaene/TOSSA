@@ -79,6 +79,38 @@ and deleted. History lives in git.
   - none of it has been verified. Run the standard workflow below (parse-check first,
   then `--daily --demo --booking`, then a real hands-on pass over a couple of
   calendar-seeded venues) before trusting any of this description or the code behind it.**
+- **EXPERIMENTS panel** (2026-07-25, **UNVERIFIED**): F9, from anywhere, opens a small
+  debug-only overlay (`debug_panel_open`, `draw_debug_panel`) listing named toggles
+  (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an
+  alternate version of a screen on or off live, no restart and no code edit - the
+  point being to compare two real implementations side by side rather than guess from
+  a description. Persisted in the settings file so a choice survives a relaunch, but
+  the PANEL that can ever flip one is gated behind `OS.is_debug_build()` like every
+  other dev surface here, so a release export always runs every experiment at its
+  shipped default. Adding a second experiment later is one `EXPERIMENT_DEFS` entry
+  plus whatever `if experiments.get("id", false):` branch it actually switches -
+  `talent_tree` below is the template.
+- **TALENT TREE stat screen** (2026-07-25, **UNVERIFIED**, behind the `talent_tree`
+  experiment, off by default): an alternate version of the character sheet (Tab) -
+  the classic four-card version (`draw_sheet`) is untouched and stays the default.
+  `draw_sheet_screen` is now the one call site every screen uses to open "the sheet";
+  it routes to `draw_talent_tree` when the experiment is on, `draw_sheet` otherwise.
+  Both draw functions share `sheet_sel`/`sheet_input`/`invest()`/`_adjust()` completely
+  unchanged - the tree is a different PICTURE of the same four stats, spending the
+  same points against the same caps through the same keys, never a second stat
+  system. What it adds over the cards: a hub with four lane-branches (one per stat,
+  fixed rows inside the panel so nothing can ever draw outside it, regardless of
+  angle math), each branch's nodes pulled from the REAL thresholds `PATTERNS`/
+  `TRICKS` already gate on that stat (`talent_nodes` - e.g. Columns at Accuracy 8,
+  Overthrow at Strength 10), so a node names the actual skill your next point buys
+  instead of just a bigger number. Endurance and Speed gate no skill directly, so
+  their branches get three even milestones instead, purely to keep all four branches
+  looking alike - the real value is still exactly what the classic sheet shows.
+  **Written and coded by Claude in a session with no Godot binary - the layout
+  numbers were sanity-checked by hand (an earlier trig-fan version was caught and
+  replaced with fixed lanes specifically because the math sent two branches off the
+  panel), but nothing has actually been drawn on screen. Toggle it on via F9 and look
+  at it before trusting the geometry.**
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
@@ -180,6 +212,11 @@ and deleted. History lives in git.
 - Dev flags MUST follow a bare `--` separator: `godot --headless -- --demo --booking
   --venue 2 --shotat 25000`. Without `--`, `OS.get_cmdline_user_args()` is empty and
   the game sits at the menu forever (looks like a hang - burned two sessions).
+- **F9** (a real key, not a `--` dev flag - works in any debug run, editor or export)
+  opens the EXPERIMENTS panel from anywhere and pauses the sim while it's up, same as
+  the pause menu. Toggle `talent_tree` there, then open the sheet (Tab) to compare it
+  against the classic cards live, no relaunch. Debug builds only, per `OS.is_debug_
+  build()` - see the EXPERIMENTS panel entry above.
 - `--demo` autoplays; `--collcheck` audits mid-air clearance (self-drives now: it
   implies `--demo`, so a bare `--collcheck` actually juggles instead of reporting the
   1000000 px sentinel - and a run that still measured nothing prints a WARNING rather
