@@ -119,7 +119,13 @@ and deleted. History lives in git.
   BATCH_COST, a bulk-only buy - 10 for 40g, cheaper than one at a time) sit in
   reserve and auto-pour through `spend_stamina` the instant stamina would
   actually hit empty, `+ENERGY_DRINK_STAMINA_PCT` (10%) each - a stocked player
-  never sees EAT or SLEEP's gate (`too_tired`) at all, by design.
+  never sees EAT or SLEEP's gate (`too_tired`) at all, by design. **EAT a raw egg**
+  (2026-07-25, UNVERIFIED - see Still open's old "Eating eggs" entry) is a third,
+  smaller option beside a hot meal and the inn: it spends one OWNED egg (props are
+  already owned by quantity, eggs included) for a flat `EGG_EAT_STAM` (10) stamina -
+  no gold, no Strength tick, and the egg is gone either way (it already broke for
+  good on a drop; now it can also just be eaten) - the real tradeoff is the egg you
+  no longer have in hand to juggle for score.
 - **Skills screen:** every trick and pattern, whether it's yours yet, and the exact
   keys that pull it off. A selected PATTERN (2026-07-18, slowed/tightened/rebuilt
   2026-07-19 x2) also gets a live PREVIEW box (`draw_pattern_preview`): a small self-
@@ -276,7 +282,11 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   juggle an even ball count with Cascade-style crossing throws instead of Cascade's
   own natural same-hand face at that count, maybe by borrowing the throw rhythm of
   count-1 or count+1. Not designed or built - needs real shape/balance work first.
-- **Eating eggs** (+10 stamina food that doubles as a risky scoring prop).
+- ~~Eating eggs~~ - **built 2026-07-25, UNVERIFIED** (see the Day loop entry below):
+  eggs already juggled and already broke for good on a drop (`PROP_EGGS`) - this adds
+  the other half, a day-hub row that spends one OWNED egg for a flat `EGG_EAT_STAM`
+  (10) stamina, no gold, no Strength tick. Not yet confirmed the flat number actually
+  feels worthwhile early and irrelevant late the way it was intended to.
 - **Rep pressure by difficulty:** make high venues effectively demand heavy props /
   high counts (Louis: "near impossible to unlock high venues with only 3 balls") -
   the goal numbers enforce some of this; validate with --calib per prop/count.
@@ -307,6 +317,13 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 - **Grow the ENCORES deck:** pure content. `ENCORES` is a flat array read through the
   single `encore_on(id)` choke point - a new challenge is one dict entry plus usually
   one `if encore_on(...)` check in whichever multiplier function it affects.
+  **The Critic** (2026-07-25, UNVERIFIED) is a first concrete example: only a Perfect
+  catch scores, Good and Late pay nothing - gated inline at `on_catch`'s two non-
+  Perfect score lines (never through `pm`/`encore_score_mult()`, since that multiplier
+  is shared with the Perfect branch and zeroing it there would have muted Perfect too,
+  which is exactly backwards for this one). Streak, applause, XP, and the catch popup
+  are all untouched - only the score line is gated. No exclusion rule of its own
+  (unlike "fire"), so it can roll at any venue past the Backyard like most of the deck.
 - ~~A seeded daily/weekly challenge act~~ - **built 2026-07-24, UNVERIFIED** (see the
   Daily Challenge entry above): venue/Encore seed off the date, the goal numbers
   already fall out of venue via the existing formula so nothing separate was needed

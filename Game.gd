@@ -139,6 +139,13 @@ const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly
 const EAT_STAM := 0.35     # a meal restores this FRACTION of max Stamina (scales with
 						   # Endurance, so it stays a meaningful top-up at 100 or at 1000)
 const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
+const EGG_EAT_STAM := 10.0 # eating an OWNED egg (Still open: "eating eggs"): a flat, not
+							# scaled, stamina top-up - no gold, no Strength tick (it is a raw
+							# snack, not a hot meal), and it costs the egg itself: one fewer
+							# to juggle. Flat on purpose: at low Endurance it is a real, if
+							# small, top-up; at high Endurance (stamina_max in the hundreds)
+							# it is a rounding error, same as a real snack ought to fade in
+							# relevance - it can never substitute for a real meal or the inn.
 const INN_COST := 30       # a proper bed: full stamina on waking. It wants FULL
 						   # payment now (Louis): a juggler who cannot afford the
 						   # bed and cannot stand to busk has reached the end of
@@ -500,6 +507,7 @@ const ENCORES := [
 	{"id": "purist",    "name": "The Purist's Night", "desc": "No gear, no stats, no help. Only your hands."},
 	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives and torches score."},
 	{"id": "tight",     "name": "Close Quarters",     "desc": "The stage is cramped. Props that clip mid-air turn treacherous."},
+	{"id": "critic",    "name": "The Critic",         "desc": "This crowd applauds nothing short of flawless. Only a Perfect catch pays."},
 ]
 
 
@@ -2024,6 +2032,11 @@ func day_rows() -> Array[Dictionary]:
 		out.append({"id": "pie", "name": "EAT  Uncle Dan's Pie",
 			"cost": "own %d" % pie_count, "ok": not pie_active, "why": "one is already working" if pie_active else "",
 			"sub": "a stimulant slice: the whole day runs a quarter slower, until you sleep."})
+	if have(PROP_EGGS) > 0:
+		var egg_full := stamina >= stamina_max - 1.0
+		out.append({"id": "egg", "name": "EAT  a raw egg",
+			"cost": "own %d" % have(PROP_EGGS), "ok": not egg_full, "why": "not hungry yet" if egg_full else "",
+			"sub": "no gold, no Strength tick - just +%d stamina and one fewer egg to juggle." % int(EGG_EAT_STAM)})
 	out.append({"id": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
 		"sub": "props and gear. New props teach themselves."})
@@ -2128,6 +2141,12 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			set_day_msg("the pie hums in your blood  -  the world runs slow until you sleep")
 			save_progress()
 			play_sfx("ui2", -11.0)
+		"egg":
+			prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
+			stamina = minf(stamina_max, stamina + EGG_EAT_STAM)
+			set_day_msg("a raw egg down the hatch  -  a little stamina back, one fewer to juggle")
+			save_progress()
+			play_sfx("c_egg", -10.0)   # the same crack the stage already uses when one breaks
 		"skills":
 			skills_open = true          # a reference card, no cost, no vignette
 			skills_sel = 0
@@ -4729,7 +4748,10 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		score += int(round(50.0 * streak_mult() * pm))
+		# The Critic: nothing short of a Perfect pays - everything else about a
+		# Good/Late catch (streak, applause, XP, the popup itself) is untouched,
+		# only the score line is gated, same choke point "fire"/For the Danger uses
+		score += 0 if encore_on("critic") else int(round(50.0 * streak_mult() * pm))
 		applause = minf(1.0, applause + APPL_GOOD)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
@@ -4740,7 +4762,7 @@ func on_catch(h: int) -> void:
 	else:
 		streak = 0
 		perfect_chain = 0
-		score += int(round(10.0 * pm))
+		score += 0 if encore_on("critic") else int(round(10.0 * pm))
 		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
