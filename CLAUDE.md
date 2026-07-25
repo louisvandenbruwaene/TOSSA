@@ -305,8 +305,23 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   bonus post-game venue it's really for (see the Records/pay/rep bullet above);
   player/prop skins beyond those two still open.
 - **Settings depth:** Music/Sound are volume sliders now (not just on/off);
-  separate per-channel sliders (catch/crowd/ambient) and difficulty presets
-  alongside hard-mode collisions still open.
+  difficulty presets alongside hard-mode collisions still open. **Per-channel sliders
+  (catch/crowd/ambient), looked into 2026-07-25, PLANNED NOT BUILT:** the premise
+  doesn't match what actually exists any more. There is no crowd or ambient audio bed
+  to split out - `gen_sfx`'s own header is explicit that the crowd-murmur bed was cut
+  2026-07-18 in favour of zero ambient noise, tonal stingers only (`draw_crowd` is
+  purely visual). Building sliders for categories with no content behind them would
+  be misleading UI, not depth. What COULD split cleanly, if it's still wanted: catch
+  feedback (`perfect`/`good`/`late`/`whiff`/the `c_*` prop sounds - by far the most
+  repeated SFX in a real set) versus everything else (UI blips, coin/money, streak
+  stingers). That split is real and would need one new persisted slider var plus
+  swapping roughly a dozen `play_sfx(...)` call sites (several inside `on_catch`,
+  recently touched by The Critic/streak-escalation work) to a `play_catch_sfx(...)`
+  twin that reads it - a bigger, more scattered diff than anything else on this list,
+  so it was deliberately left as a plan rather than guessed at blind. Needs Louis's
+  call either way: is "catch vs everything else" the split he actually wants, or does
+  he want the crowd bed rebuilt first so the original three-way split has real content
+  to attach to?
 - **Steam:** capsule art is built (`--capsule` dev flag, see Verification workflow
   below). Steamworks integration (achievements, cloud saves, real leaderboards off
   the Purist boards) still needs Louis's own Partner account + App ID - not

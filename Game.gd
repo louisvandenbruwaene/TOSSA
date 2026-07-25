@@ -131,6 +131,9 @@ const ST_CAPSULE := 12    # dev only (--capsule): pure key-art, no UI chrome, fo
 const ST_DEMO_WALL := 13  # a scoped free demo's own "that's everything" card, shown once
 						   # reputation would have unlocked a venue past DEMO_MAX_VENUE -
 						   # see the Still open "scoped free demo" entry and OS.has_feature("demo")
+const ST_PURIST_LEGEND := 14  # the post-win chase's own payoff card (Still open, cheap
+							   # version): shown once a Purist record stands at every
+							   # venue - see purist_legend_complete() and resolve_act()
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -750,6 +753,9 @@ var pending_win := false  # show the victory screen once the results card is dis
 var demo_wall_seen := false   # persisted: this save has already seen the demo-wall
 							   # card once - it never shows twice in the same career
 var pending_demo_wall := false   # show the demo-wall card once the results card is dismissed
+var purist_legend_seen := false   # persisted: this save has already seen the Purist
+								   # Legend card once - it never shows twice in the same career
+var pending_purist_legend := false   # show the Purist Legend card once results is dismissed
 var view_venue := -1      # preview override of which venue palette to draw
 var ext_center := false   # exterior hero objects (house, lamp) compose mid-frame
 						  # for the day hub card; story scenes keep them offset
@@ -1366,6 +1372,13 @@ func _input(event: InputEvent) -> void:
 				enter_day()
 				play_sfx("ui2", -11.0)
 			return
+		ST_PURIST_LEGEND:
+			# the post-win chase's payoff card - same shape again: a beat, then any
+			# key back into the day, the career playing on same as after the real win
+			if cine_tick > 60 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
+				enter_day()
+				play_sfx("ui2", -11.0)
+			return
 		ST_ESTABLISH:
 			establish_key()
 			return
@@ -1433,8 +1446,9 @@ func _input(event: InputEvent) -> void:
 			KEY_ENTER, KEY_KP_ENTER, KEY_ESCAPE:
 				results_open = false
 				# clearing the top stage this set rolls straight into the victory
-				# screen; hitting the demo's own ceiling rolls into its wishlist card
-				# instead; otherwise the card dismisses back into the day as normal
+				# screen; hitting the demo's own ceiling rolls into its wishlist card,
+				# completing the Purist board into its own payoff card; otherwise the
+				# card dismisses back into the day as normal
 				if pending_win:
 					pending_win = false
 					game_state = ST_CREDITS
@@ -1442,6 +1456,10 @@ func _input(event: InputEvent) -> void:
 				elif pending_demo_wall:
 					pending_demo_wall = false
 					game_state = ST_DEMO_WALL
+					cine_tick = 0
+				elif pending_purist_legend:
+					pending_purist_legend = false
+					game_state = ST_PURIST_LEGEND
 					cine_tick = 0
 				else:
 					enter_day()
@@ -3722,6 +3740,8 @@ func reset_new_game() -> void:
 	xp = 0
 	points = 0
 	won = false
+	demo_wall_seen = false   # fixing a gap from when this flag was first added: a
+	purist_legend_seen = false   # fresh slot must not inherit a previous career's flags
 	best_scores = [0, 0, 0, 0, 0, 0, 0]
 	best_scores_purist = [0, 0, 0, 0, 0, 0, 0]
 	pattern_sel = CASCADE
@@ -5282,6 +5302,18 @@ func rec_table() -> Array[int]:
 	return best_scores_purist if purist else best_scores
 
 
+func purist_legend_complete() -> bool:
+	# the post-win chase's cheap version (Still open): a Purist record standing at
+	# EVERY venue, Midnight Show included - touches none of the encore-stacking
+	# refactor that idea originally wanted, since the payoff here is just noticing
+	# the Purist board (already fully tracked by rec_table/best_scores_purist) has
+	# no empty rows left, not a new system.
+	for v in best_scores_purist:
+		if int(v) <= 0:
+			return false
+	return true
+
+
 func cycle_pattern() -> void:
 	# P steps the pattern in training (a performance is committed to its routine).
 	# Restarts the run so the hands are re-dealt for the new choreography.
@@ -5743,6 +5775,14 @@ func resolve_act() -> void:
 	if in_demo_build() and not demo_wall_seen and venue_index_of(reputation) > DEMO_MAX_VENUE:
 		demo_wall_seen = true
 		pending_demo_wall = true
+	# THE POST-WIN CHASE, cheap version (Still open): gated on won so it can only ever
+	# land as a NEXT challenge, never as a surprise substitute for the real win. This
+	# act may have just written the final missing Purist record into best_scores_purist
+	# above (rec_table() returns that same array by reference when purist is set), so
+	# the completion check belongs here, after that write, not before it.
+	if won and not purist_legend_seen and purist_legend_complete():
+		purist_legend_seen = true
+		pending_purist_legend = true
 	daily_share = ""
 	if daily_active:
 		# stamped once, off the FINAL (post-collapse-strip) score, and pushed to the
@@ -6328,6 +6368,7 @@ func load_progress() -> void:
 		points = int(cf.get_value("prog", "points", 0))
 		won = bool(cf.get_value("prog", "won", false))
 		demo_wall_seen = bool(cf.get_value("prog", "demo_wall_seen", false))
+		purist_legend_seen = bool(cf.get_value("prog", "purist_legend_seen", false))
 		var bs: Variant = cf.get_value("prog", "best_scores", [])
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
@@ -6426,6 +6467,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "points", points)
 	cf.set_value("prog", "won", won)
 	cf.set_value("prog", "demo_wall_seen", demo_wall_seen)
+	cf.set_value("prog", "purist_legend_seen", purist_legend_seen)
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
@@ -6739,6 +6781,9 @@ func _draw_screen() -> void:
 			return
 		ST_DEMO_WALL:
 			draw_demo_wall(font, s)
+			return
+		ST_PURIST_LEGEND:
+			draw_purist_legend(font, s)
 			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
@@ -9448,6 +9493,32 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
 		draw_string(font, Vector2(0, s.y * 0.84), "any key  -  keep playing what you've already got",
 			HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.75, 0.7, 0.62, 0.4 + 0.5 * pa))
+	draw_vignette(s, 0.7)
+
+
+func draw_purist_legend(font: Font, s: Vector2) -> void:
+	# the post-win chase's payoff card, cheap version (Still open): no gear, no
+	# stats, no help, at every single venue - the Purist board (already tracked in
+	# full on the Records screen) has no empty rows left. Same shape as
+	# draw_demo_wall: lead with what was actually done, list it, then straight back
+	# into the same career - a payoff, not a new ending.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.05, 0.03, 0.05))
+	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
+	draw_title_glow(font, s.y * 0.14, "PURIST LEGEND", 42, Color(0.86, 0.78, 1.0, fin), s)
+	draw_ornament(s.x * 0.5, s.y * 0.14 + 68.0, 220.0, Color(0.7, 0.6, 0.9, 0.85 * fin))
+	draw_string(font, Vector2(0, s.y * 0.27),
+		"No gear. No stats. No help. A record stands at every stage on your own hands alone.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.88, 0.84, 0.94, fin))
+	var lx := s.x * 0.5 - 160.0
+	for i in best_scores_purist.size():
+		var ry := s.y * 0.40 + float(i) * 30.0
+		var la := clampf(float(cine_tick - 60 - i * 12) / 30.0, 0.0, 1.0)
+		draw_string(font, Vector2(lx, ry), String(venue_data(i)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 240.0, 15, Color(0.85, 0.8, 0.9, la))
+		draw_string(font, Vector2(lx + 240.0, ry), commafy(int(best_scores_purist[i])), HORIZONTAL_ALIGNMENT_RIGHT, 100.0, 15, Color(0.86, 0.78, 1.0, la))
+	if cine_tick > 90:
+		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
+		draw_string(font, Vector2(0, s.y * 0.88), "any key  -  the career plays on, records still to chase",
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.75, 0.7, 0.8, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.7)
 
 
