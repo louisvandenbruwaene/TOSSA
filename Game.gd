@@ -686,6 +686,19 @@ var shop_sel := 0         # 0..5 the prop cards, 6 glasses, 7 the pie, 8 the Glo
 var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
 var skills_sel := 0        # which entry the Skills reference has expanded
 var debug_mode := false   # debug build: free stat editing in the character sheet
+# EXPERIMENTS (2026-07-25): a small, debug-only toggle panel (F9) for trying an
+# alternate version of a screen without touching code each time - see
+# debug_panel_input/draw_debug_panel and EXPERIMENT_DEFS. Persisted (settings file,
+# same as set_shake/set_collide) so a chosen experiment survives a relaunch, but the
+# panel that can ever FLIP one is gated behind OS.is_debug_build() same as every
+# other dev surface - a release export always sees every experiment at its default.
+var experiments := {"talent_tree": false}
+var debug_panel_open := false
+var debug_panel_sel := 0
+const EXPERIMENT_DEFS := [
+	{"id": "talent_tree", "name": "Talent tree stat screen",
+	 "desc": "Replaces the four stat cards (Tab) with a node graph along four branches - same accuracy/strength/endurance/speed underneath, same points, same caps. Purely how it's drawn and navigated, nothing it does."},
+]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
 var _repeat_key := 0      # the debug stat-adjust key currently held for auto-repeat, 0 = none
@@ -1129,10 +1142,10 @@ func _physics_process(delta: float) -> void:
 									 #      --demo --booking runs a whole booking end to end
 		queue_redraw()
 		return
-	if sheet_open or shop_open or paused:
-		if sheet_open and debug_mode:
+	if sheet_open or shop_open or paused or debug_panel_open:
+		if sheet_open and debug_mode and not experiments.get("talent_tree", false):
 			sheet_repeat(delta)   # debug build only: holding a stat key keeps stepping it
-		queue_redraw()   # the sheet, shop, and pause menu all halt the sim; nothing advances
+		queue_redraw()   # the sheet, shop, pause menu, and debug panel all halt the sim
 		return
 	if freeze > 0:
 		# hit-stop: the world holds its breath for a few ticks so a drop lands with
@@ -1279,6 +1292,18 @@ func _input(event: InputEvent) -> void:
 		set_fullscreen = not set_fullscreen
 		apply_fullscreen()
 		save_settings()
+		return
+	if kc == KEY_F9 and OS.is_debug_build():
+		# the EXPERIMENTS panel, available from every screen exactly like F11 above -
+		# a safe place to flip an alternate version of a screen on or off without
+		# ever touching the code. Release exports never see this key at all.
+		debug_panel_open = not debug_panel_open
+		debug_panel_sel = 0
+		play_sfx("ui2", -12.0)
+		save_settings()
+		return
+	if debug_panel_open:
+		debug_panel_input(kc)
 		return
 	match game_state:
 		ST_MENU:
@@ -1567,6 +1592,31 @@ func open_pause() -> void:
 	paused = true
 	pause_sel = 0
 	play_sfx("ui", -12.0)
+
+
+func debug_panel_input(kc: int) -> void:
+	# EXPERIMENTS: a tiny, debug-only list (F9 opens/closes it from anywhere, live
+	# over whatever screen is already open) - up/down picks one, Enter/Space flips
+	# it on the spot, and the change is visible the next time that screen draws
+	# (no restart, no code edit). See EXPERIMENT_DEFS for what's on it.
+	var n := EXPERIMENT_DEFS.size()
+	match kc:
+		KEY_UP:
+			debug_panel_sel = (debug_panel_sel + n - 1) % n
+			play_sfx("ui", -16.0)
+		KEY_DOWN:
+			debug_panel_sel = (debug_panel_sel + 1) % n
+			play_sfx("ui", -16.0)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			var eid := String(EXPERIMENT_DEFS[debug_panel_sel]["id"])
+			experiments[eid] = not bool(experiments.get(eid, false))
+			save_settings()
+			play_sfx("ui2", -13.0)
+		KEY_ESCAPE:
+			# F9 also closes it, but that's caught globally above _input's state
+			# dispatch (same spot F11 is), so it never reaches this match at all
+			debug_panel_open = false
+			play_sfx("ui2", -14.0)
 
 
 func pause_input(kc: int) -> void:
@@ -3697,6 +3747,12 @@ func load_settings() -> void:
 		K_CYCLE = int(cf.get_value("keys", "cycle", KEY_C))
 		PAD_TRICK = int(cf.get_value("keys", "pad_trick", JOY_BUTTON_X))
 		PAD_CYCLE = int(cf.get_value("keys", "pad_cycle", JOY_BUTTON_LEFT_STICK))
+		var loaded_exp = cf.get_value("opt", "experiments", experiments)
+		if loaded_exp is Dictionary:
+			for def in EXPERIMENT_DEFS:   # merge onto the defaults, so a NEW experiment
+				var eid := String(def["id"])   # added later always starts at its own
+				if loaded_exp.has(eid):        # default rather than a missing key
+					experiments[eid] = bool(loaded_exp[eid])
 
 
 func save_settings() -> void:
@@ -3714,6 +3770,7 @@ func save_settings() -> void:
 	cf.set_value("keys", "cycle", K_CYCLE)
 	cf.set_value("keys", "pad_trick", PAD_TRICK)
 	cf.set_value("keys", "pad_cycle", PAD_CYCLE)
+	cf.set_value("opt", "experiments", experiments)
 	cf.save(SETTINGS_PATH)
 
 
@@ -6552,6 +6609,9 @@ func flight_pos(b: Ball) -> Vector2:
 func _draw() -> void:
 	_draw_screen()
 	_draw_state_fade()
+	if debug_panel_open:
+		draw_debug_panel()   # same trick as _draw_state_fade: drawn on top of WHATEVER
+							  # screen just drew, so no screen needs to know about it
 
 
 func _draw_state_fade() -> void:
@@ -6603,7 +6663,7 @@ func _draw_screen() -> void:
 		ST_DAY:
 			draw_day(font, s)
 			if sheet_open:
-				draw_sheet(font, s)
+				draw_sheet_screen(font, s)
 			if shop_open:
 				draw_shop(font, s)
 			if skills_open:
@@ -6632,7 +6692,7 @@ func _draw_screen() -> void:
 		draw_results(font, s)   # the end-of-performance card, over the frozen stage
 	draw_parts()           # sparks and confetti ride above the stage and the card
 	if sheet_open:
-		draw_sheet(font, s)
+		draw_sheet_screen(font, s)
 	if shop_open:
 		draw_shop(font, s)
 	if paused:
@@ -7987,6 +8047,42 @@ func draw_pause(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px, py + ph - 20.0), pfoot, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
+func draw_debug_panel() -> void:
+	# EXPERIMENTS (F9): a small, always-on-top list of alternate screens/behaviours
+	# that can be flipped on without ever touching the code - see debug_panel_input
+	# and EXPERIMENT_DEFS. Computes its own font/size like _draw_state_fade does,
+	# since it draws on top of whatever screen _draw_screen already drew this frame.
+	var s := get_viewport_rect().size
+	var font := game_font()
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.55))
+	var pw := 560.0
+	var row_h := 68.0
+	var ph := 100.0 + row_h * float(EXPERIMENT_DEFS.size())
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.07, 0.09, 0.13, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.5, 0.8, 1.0, 0.6), false, 2.0)
+	draw_string(font, Vector2(px, py + 34.0), "EXPERIMENTS", HORIZONTAL_ALIGNMENT_CENTER, pw, 22, Color(0.7, 0.9, 1.0))
+	draw_string(font, Vector2(px, py + 54.0), "debug build only  -  never reaches a release export", HORIZONTAL_ALIGNMENT_CENTER, pw, 11, Color(0.55, 0.65, 0.7))
+	var oy := py + 76.0
+	for i in EXPERIMENT_DEFS.size():
+		var edef: Dictionary = EXPERIMENT_DEFS[i]
+		var eid := String(edef["id"])
+		var on := bool(experiments.get(eid, false))
+		var sel := i == debug_panel_sel
+		var ry := oy + float(i) * row_h
+		if sel:
+			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, row_h - 8.0), Color(0.5, 0.8, 1.0, 0.10))
+			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, row_h - 8.0), Color(0.5, 0.8, 1.0, 0.5), false, 1.5)
+		var namecol := Color(1.0, 0.95, 0.8) if sel else Color(0.8, 0.78, 0.72)
+		draw_string(font, Vector2(px + 20.0, ry + 16.0), String(edef["name"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 140.0, 15, namecol)
+		var statecol := Color(0.55, 0.95, 0.55) if on else Color(0.7, 0.6, 0.55)
+		draw_string(font, Vector2(px + pw - 100.0, ry + 16.0), "ON" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 15, statecol)
+		draw_multiline_string(font, Vector2(px + 20.0, ry + 34.0), String(edef["desc"]),
+			HORIZONTAL_ALIGNMENT_LEFT, pw - 40.0, 10, 3, Color(0.62, 0.6, 0.58))
+	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.6, 0.68, 0.72))
+
+
 func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	# a small, non-intrusive toast: it names the skill and points to the SKILLS
 	# screen for how to use it, instead of the old page-wide how-to card. The
@@ -8216,6 +8312,214 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 		sh_items.append([k_finish(), "invest"])
 	sh_items.append([k_sheet(), "resume"])
 	draw_hints_row(font, px + pw * 0.5, by - 14.0, sh_items)
+
+
+func draw_sheet_screen(font: Font, s: Vector2) -> void:
+	# the ONE call site every screen uses to open "the sheet" (Tab) - routes to
+	# whichever version the talent_tree EXPERIMENT currently points at. Both
+	# versions share sheet_sel/sheet_input/invest()/_adjust() untouched, so this
+	# function is the entire difference between them: draw_sheet never changes.
+	if experiments.get("talent_tree", false):
+		draw_talent_tree(font, s)
+	else:
+		draw_sheet(font, s)
+
+
+func talent_nodes(which: String) -> Array[Dictionary]:
+	# every threshold along one branch that the GAME ITSELF actually gates on this
+	# stat - pulled straight from PATTERNS/TRICKS' own "acc"/"str" fields, never
+	# invented - plus the stat's cap as the final node. Endurance and Speed gate no
+	# skill directly (they only raise max stamina / permanent slow-mo), so they get
+	# three even milestones instead, purely so all four branches have SOMETHING to
+	# show - the real number is still exactly what draw_sheet already displays.
+	var cap := ACC_CAP
+	if which == "str":
+		cap = STR_CAP
+	elif which == "end":
+		cap = END_CAP
+	elif which == "spd":
+		cap = SPEED_CAP
+	var by_val: Dictionary = {}
+	if which == "acc" or which == "str":
+		for p in PATTERNS:
+			if p.has(which):
+				var v := int(p[which])
+				by_val[v] = String(by_val.get(v, "")) + (", " if by_val.has(v) else "") + String(p["name"])
+		for t in TRICKS:
+			if t.has(which):
+				var v2 := int(t[which])
+				by_val[v2] = String(by_val.get(v2, "")) + (", " if by_val.has(v2) else "") + String(t["name"])
+	var out: Array[Dictionary] = []
+	var vals := by_val.keys()
+	vals.sort()
+	for v in vals:
+		out.append({"val": int(v), "label": String(by_val[v])})
+	if which == "end" or which == "spd":
+		for frac in [0.25, 0.5, 0.75]:
+			out.append({"val": int(round(float(cap) * frac)), "label": ""})
+	out.append({"val": cap, "label": "MAX"})
+	return out
+
+
+func draw_talent_tree(font: Font, s: Vector2) -> void:
+	# the TALENT TREE (experimental, F9 to toggle): the exact same four stats as
+	# draw_sheet, laid out as a node graph fanning out from one hub instead of four
+	# flat cards. Nothing about WHAT a point buys changes - sheet_sel picks the
+	# active branch and Enter invests through the same invest()/_adjust() the
+	# classic sheet uses, so the two screens can never drift apart on what a point
+	# is worth. What the tree adds: each node is a REAL threshold pulled from
+	# PATTERNS/TRICKS (see talent_nodes), so you can see exactly which skill your
+	# next point actually buys, not just a bigger number.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
+	var pw := minf(1100.0, s.x - 60.0)
+	var ph := minf(600.0, s.y - 60.0)
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.08, 0.06, 0.10, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.55, 0.75, 0.95, 0.5), false, 2.0)
+
+	var tx := px + 40.0
+	var innerw := pw - 80.0
+
+	# ---------------- header: same content as draw_sheet's own ----------------
+	draw_string(font, Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(tx + 168.0, py + 50.0), "TALENT TREE  -  EXPERIMENTAL (F9)", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.85, 1.0))
+	draw_purse(font, px + pw - 40.0, py + 52.0)
+	draw_string(font, Vector2(px, py + 74.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 13, Color(0.82, 0.72, 0.85))
+	var need := xp_to_next(level)
+	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
+	draw_string(font, Vector2(tx, py + 96.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.9, 0.6))
+	var xbx := tx + 130.0
+	var xbw := innerw - 130.0
+	draw_rect(Rect2(xbx, py + 82.0, xbw, 16.0), Color(0.2, 0.14, 0.11, 0.8))
+	draw_rect(Rect2(xbx, py + 82.0, xbw * xf, 16.0), Color(0.9, 0.7, 0.35))
+	draw_string(font, Vector2(xbx, py + 95.0), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, xbw, 12, Color(1.0, 0.96, 0.85))
+	var by0 := py + 116.0
+	if points > 0:
+		var pa := 0.75 + 0.25 * sin(float(Time.get_ticks_msec()) * 0.006)
+		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.84, 0.4, 0.16 + 0.10 * pa))
+		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.86, 0.45, 0.7), false, 1.5)
+		draw_string(font, Vector2(tx, by0 + 23.0), "%d POINT%s TO SPEND  -  press the key on the lit branch" % [points, "" if points == 1 else "S"],
+			HORIZONTAL_ALIGNMENT_CENTER, innerw, 16, Color(1.0, 0.92, 0.7))
+	elif all_stats_capped():
+		draw_string(font, Vector2(tx, by0 + 23.0), "MASTERY - every branch is at its ceiling. Each new level now pays gold instead.",
+			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
+	else:
+		draw_string(font, Vector2(tx, by0 + 23.0), "Skill sets your score. Stats only ease the climb - the next point comes with the next level.",
+			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
+
+	# ---------------- the tree: a hub, four branches fanning right ----------------
+	# LANE layout, not free trig angles: each branch owns a fixed horizontal row
+	# inside the graph area, so nothing it draws can ever land outside the panel
+	# no matter how far a node sits toward its cap. The "fan" look still happens
+	# for free - each branch's short elbow, from the shared hub to where its own
+	# lane begins, naturally slopes up or down by however far that lane sits from
+	# the hub's own (vertically centred) height.
+	var branches := [
+		{"id": "acc", "name": "ACCURACY", "val": accuracy, "cap": ACC_CAP, "col": Color(0.6, 0.8, 1.0), "key": "1"},
+		{"id": "str", "name": "STRENGTH", "val": strength, "cap": STR_CAP, "col": Color(0.95, 0.55, 0.4), "key": "2"},
+		{"id": "end", "name": "ENDURANCE", "val": endurance, "cap": END_CAP, "col": Color(0.55, 0.8, 0.6), "key": "3"},
+		{"id": "spd", "name": "SPEED", "val": speed, "cap": SPEED_CAP, "col": Color(0.8, 0.7, 0.95), "key": "4"},
+	]
+	var gy0 := by0 + 46.0
+	var gh := py + ph - 122.0 - gy0
+	var hub := Vector2(tx + 60.0, gy0 + gh * 0.5)
+	var branch_len := innerw - 260.0
+
+	draw_circle(hub, 22.0, Color(0.05, 0.03, 0.04, 1.0))
+	draw_arc(hub, 22.0, 0.0, TAU, 32, Color(1.0, 0.9, 0.7, 0.85), 2.0, true)
+	draw_string(font, hub + Vector2(-40.0, 38.0), "YOU", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 11, Color(0.85, 0.8, 0.7))
+
+	var active_note := ""
+	for bi in branches.size():
+		var b: Dictionary = branches[bi]
+		var active := bi == sheet_sel
+		var bcol: Color = b["col"]
+		var val := int(b["val"])
+		var cap := int(b["cap"])
+		var nodes := talent_nodes(String(b["id"]))
+
+		# this branch's own row, evenly spaced inside the graph band - always
+		# inside [gy0, gy0 + gh] by construction, whatever bi is
+		var lane_y := gy0 + gh * (float(bi) + 0.5) / float(branches.size())
+		var lane_start := Vector2(hub.x + 110.0, lane_y)
+		draw_line(hub, lane_start, Color(bcol.r, bcol.g, bcol.b, 0.5 if active else 0.25), 3.0 if active else 2.0)
+
+		# node screen positions, spaced along the lane by how far into the cap
+		# each threshold actually sits - not evenly, so the graph shows WHERE the
+		# skills really cluster (early gates read close together, MAX sits far out)
+		var pts: Array[Vector2] = [lane_start]
+		for node in nodes:
+			var t := clampf(float(node["val"]) / float(maxi(1, cap)), 0.0, 1.0)
+			pts.append(lane_start + Vector2(branch_len * t, 0.0))
+
+		# the branch: one segment per node, solid once you've actually reached it,
+		# dim ahead of it - the fill visibly crawls outward as the stat climbs
+		for si in range(1, pts.size()):
+			var reached: bool = val >= int(nodes[si - 1]["val"])
+			var segcol := Color(bcol.r, bcol.g, bcol.b, (0.9 if active else 0.55) if reached else (0.22 if active else 0.12))
+			draw_line(pts[si - 1], pts[si], segcol, 4.0 if active else 2.5)
+
+		draw_string(font, Vector2(lane_start.x - 100.0, lane_y - 4.0), "%s  %d" % [String(b["name"]), val],
+			HORIZONTAL_ALIGNMENT_RIGHT, 96.0, 16 if active else 13, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.65))
+
+		# the next un-reached node is the one point actually FOR SALE on this
+		# branch right now - it gets the pulsing ring and, on the active branch,
+		# names what it buys in the detail line below the tree
+		var next_i := -1
+		for ni in nodes.size():
+			if int(nodes[ni]["val"]) > val:
+				next_i = ni
+				break
+		for ni in nodes.size():
+			var node: Dictionary = nodes[ni]
+			var reached: bool = val >= int(node["val"])
+			var is_next := ni == next_i
+			var p := pts[ni + 1]
+			var r := 9.0 if active else 6.0
+			if reached:
+				draw_circle(p, r, Color(bcol.r, bcol.g, bcol.b, 0.95))
+				draw_arc(p, r, 0.0, TAU, 16, Color(1.0, 1.0, 0.95, 0.8), 1.5, true)
+			else:
+				draw_circle(p, r, Color(0.1, 0.09, 0.11, 0.9))
+				draw_arc(p, r, 0.0, TAU, 16, Color(bcol.r, bcol.g, bcol.b, 0.85 if is_next else 0.35), 1.5, true)
+				if is_next and active and points > 0:
+					var pulse := 0.5 + 0.5 * sin(float(tick) * 0.15)
+					draw_arc(p, r + 4.0 + 3.0 * pulse, 0.0, TAU, 20, Color(bcol.r, bcol.g, bcol.b, 0.5 * (1.0 - pulse)), 2.0, true)
+			var lbl := String(node["label"])
+			if lbl != "" and (reached or is_next or active):
+				draw_string(font, p + Vector2(-60.0, r + 16.0), lbl, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 10,
+					Color(0.9, 0.88, 0.8, 0.95) if (reached or is_next) else Color(0.6, 0.58, 0.55, 0.6))
+			elif active:
+				draw_string(font, p + Vector2(-30.0, r + 16.0), str(int(node["val"])), HORIZONTAL_ALIGNMENT_CENTER, 60.0, 10, Color(0.65, 0.62, 0.58, 0.7))
+		if active and next_i >= 0:
+			var nn: Dictionary = nodes[next_i]
+			var need_pts := int(nn["val"]) - val
+			var what := String(nn["label"]) if String(nn["label"]) != "" else "the next milestone"
+			active_note = "%s branch: %d points from %s (%s at %d)" % [String(b["name"]), need_pts, what, String(b["name"]).to_lower(), int(nn["val"])]
+		elif active:
+			active_note = "%s branch: fully grown, at its cap (%d)" % [String(b["name"]), cap]
+
+	# ---------------- detail line + invest plate for the active branch ----------------
+	var dy := py + ph - 96.0
+	draw_string(font, Vector2(tx, dy), active_note, HORIZONTAL_ALIGNMENT_LEFT, innerw - 160.0, 13, Color(0.85, 0.82, 0.76))
+	var active_b: Dictionary = branches[sheet_sel]
+	var can := points > 0
+	var plate := Rect2(px + pw - 40.0 - 160.0, dy - 20.0, 160.0, 36.0)
+	draw_rect(plate, Color(0.16, 0.22, 0.13, 0.9) if can else Color(0.10, 0.07, 0.08, 0.7))
+	draw_rect(plate, Color(0.55, 0.85, 0.5, 0.55) if can else Color(0.6, 0.5, 0.45, 0.3), false, 1.0)
+	draw_keycap(font, plate.position.x + 8.0, plate.position.y + 8.5, String(active_b["key"]))
+	draw_string(font, Vector2(plate.position.x, plate.position.y + 23.0), "+1" if can else "invest",
+		HORIZONTAL_ALIGNMENT_RIGHT, plate.size.x - 12.0, 15, Color(0.78, 0.96, 0.72) if can else Color(0.6, 0.55, 0.5, 0.8))
+
+	var by := py + ph - 32.0
+	if debug_mode:
+		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.9, 1.0))
+	var th_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "branch"]]
+	if points > 0:
+		th_items.append([k_finish(), "invest"])
+	th_items.append([k_sheet(), "resume"])
+	draw_hints_row(font, px + pw * 0.5, by - 14.0, th_items)
 
 
 func draw_purse(font: Font, right_x: float, y: float) -> void:
