@@ -8753,173 +8753,149 @@ func talent_nodes(which: String) -> Array[Dictionary]:
 
 
 func draw_talent_tree(font: Font, s: Vector2) -> void:
-	# the TALENT TREE (experimental, F9 to toggle): the exact same four stats as
-	# draw_sheet, laid out as a node graph fanning out from one hub instead of four
-	# flat cards. Nothing about WHAT a point buys changes - sheet_sel picks the
-	# active branch and Enter invests through the same invest()/_adjust() the
-	# classic sheet uses, so the two screens can never drift apart on what a point
-	# is worth. What the tree adds: each node is a REAL threshold pulled from
-	# PATTERNS/TRICKS (see talent_nodes), so you can see exactly which skill your
-	# next point actually buys, not just a bigger number.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
-	var pw := minf(1100.0, s.x - 60.0)
-	var ph := minf(600.0, s.y - 60.0)
+	# the TALENT TREE (experimental, F9): the same four stats as draw_sheet, drawn as four
+	# GROWTH COLUMNS that fill upward as you invest, each milestone pip a REAL PATTERNS/
+	# TRICKS threshold. Same sheet_sel / invest() / caps as the classic sheet - only the
+	# picture differs, so the two can never disagree on what a point is worth.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.035, 0.9))
+	var pw := minf(1080.0, s.x - 48.0)
+	var ph := minf(662.0, s.y - 26.0)
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	soft_card(Rect2(px, py, pw, ph), Color(0.08, 0.06, 0.10, 0.98), Color(0.55, 0.75, 0.95, 0.5), 2.0, 16.0, 22.0)
-
+	soft_card(Rect2(px, py, pw, ph), Color(0.09, 0.07, 0.115, 0.99), Color(0.55, 0.72, 0.95, 0.5), 2.0, 18.0, 26.0)
 	var tx := px + 40.0
 	var innerw := pw - 80.0
 
-	# ---------------- header: same content as draw_sheet's own ----------------
-	draw_string(title_font(), Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(tx + 168.0, py + 50.0), "TALENT TREE  -  EXPERIMENTAL (F9)", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.85, 1.0))
-	draw_purse(font, px + pw - 40.0, py + 52.0)
-	draw_string(font, Vector2(px, py + 74.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 13, Color(0.82, 0.72, 0.85))
+	# ---- header: title, purse, level + xp, and the points banner ----
+	draw_string(title_font(), Vector2(tx, py + 50.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(tx + 156.0, py + 48.0), "TALENT TREE", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 0.82, 1.0))
+	draw_purse(font, px + pw - 40.0, py + 50.0)
+	draw_string(font, Vector2(px, py + 70.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 12, Color(0.82, 0.72, 0.85))
 	var need := xp_to_next(level)
 	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_string(font, Vector2(tx, py + 96.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.9, 0.6))
-	var xbx := tx + 130.0
-	var xbw := innerw - 130.0
-	draw_rect(Rect2(xbx, py + 82.0, xbw, 16.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(xbx, py + 82.0, xbw * xf, 16.0), Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(xbx, py + 95.0), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, xbw, 12, Color(1.0, 0.96, 0.85))
-	var by0 := py + 116.0
+	draw_string(font, Vector2(tx, py + 93.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
+	var xbx := tx + 118.0
+	var xbw := innerw - 118.0
+	draw_meter(xbx, py + 81.0, xbw, 15.0, xf, Color(0.92, 0.72, 0.36))
+	draw_string(font, Vector2(xbx, py + 92.0), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, xbw, 11, Color(0.06, 0.04, 0.03, 0.9))
+	var by0 := py + 110.0
 	if points > 0:
-		var pa := 0.75 + 0.25 * sin(float(Time.get_ticks_msec()) * 0.006)
-		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.84, 0.4, 0.16 + 0.10 * pa))
-		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.86, 0.45, 0.7), false, 1.5)
-		draw_string(font, Vector2(tx, by0 + 23.0), "%d POINT%s TO SPEND  -  press the key on the lit branch" % [points, "" if points == 1 else "S"],
-			HORIZONTAL_ALIGNMENT_CENTER, innerw, 16, Color(1.0, 0.92, 0.7))
+		var pa := 0.72 + 0.28 * sin(float(Time.get_ticks_msec()) * 0.006)
+		soft_card(Rect2(tx, by0, innerw, 32.0), Color(0.22, 0.17, 0.06, 0.45 + 0.2 * pa), Color(1.0, 0.86, 0.45, 0.75), 1.5, 9.0, 6.0)
+		draw_string(font, Vector2(tx, by0 + 22.0), "%d POINT%s TO SPEND  -  press a column's number, or Left / Right then Enter" % [points, "" if points == 1 else "S"], HORIZONTAL_ALIGNMENT_CENTER, innerw, 15, Color(1.0, 0.92, 0.7))
 	elif all_stats_capped():
-		draw_string(font, Vector2(tx, by0 + 23.0), "MASTERY - every branch is at its ceiling. Each new level now pays gold instead.",
-			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
+		draw_string(font, Vector2(tx, by0 + 22.0), "MASTERY  -  every stat at its ceiling. New levels now pay gold.", HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
 	else:
-		draw_string(font, Vector2(tx, by0 + 23.0), "Skill sets your score. Stats only ease the climb - the next point comes with the next level.",
-			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
+		draw_string(font, Vector2(tx, by0 + 22.0), "Skill sets your score; stats ease the climb. The next point comes with the next level.", HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
 
-	# ---------------- the tree: a hub, four branches fanning right ----------------
-	# LANE layout, not free trig angles: each branch owns a fixed horizontal row
-	# inside the graph area, so nothing it draws can ever land outside the panel
-	# no matter how far a node sits toward its cap. The "fan" look still happens
-	# for free - each branch's short elbow, from the shared hub to where its own
-	# lane begins, naturally slopes up or down by however far that lane sits from
-	# the hub's own (vertically centred) height.
+	# ---- four growth columns ----
 	var branches := [
-		{"id": "acc", "name": "ACCURACY", "val": accuracy, "cap": ACC_CAP, "col": Color(0.6, 0.8, 1.0), "key": "1"},
-		{"id": "str", "name": "STRENGTH", "val": strength, "cap": STR_CAP, "col": Color(0.95, 0.55, 0.4), "key": "2"},
-		{"id": "end", "name": "ENDURANCE", "val": endurance, "cap": END_CAP, "col": Color(0.55, 0.8, 0.6), "key": "3"},
-		{"id": "spd", "name": "SPEED", "val": speed, "cap": SPEED_CAP, "col": Color(0.8, 0.7, 0.95), "key": "4"},
+		{"id": "acc", "name": "ACCURACY",  "val": accuracy,  "cap": ACC_CAP,   "col": Color(0.55, 0.78, 1.0),  "key": "1", "role": "off-Perfect catches"},
+		{"id": "str", "name": "STRENGTH",  "val": strength,  "cap": STR_CAP,   "col": Color(0.97, 0.55, 0.42), "key": "2", "role": "prop weight & loft"},
+		{"id": "end", "name": "ENDURANCE", "val": endurance, "cap": END_CAP,   "col": Color(0.55, 0.85, 0.62), "key": "3", "role": "stamina pool"},
+		{"id": "spd", "name": "SPEED",     "val": speed,     "cap": SPEED_CAP, "col": Color(0.82, 0.70, 0.97), "key": "4", "role": "slow-motion"},
 	]
-	var gy0 := by0 + 46.0
-	var gh := py + ph - 122.0 - gy0
-	var hub := Vector2(tx + 60.0, gy0 + gh * 0.5)
-	var branch_len := innerw - 260.0
-
-	draw_circle(hub, 22.0, Color(0.05, 0.03, 0.04, 1.0))
-	draw_arc(hub, 22.0, 0.0, TAU, 32, Color(1.0, 0.9, 0.7, 0.85), 2.0, true)
-	draw_string(font, hub + Vector2(-40.0, 38.0), "YOU", HORIZONTAL_ALIGNMENT_CENTER, 80.0, 11, Color(0.85, 0.8, 0.7))
-
-	var active_note := ""
+	var gap := 16.0
+	var colw := (innerw - gap * 3.0) / 4.0
+	var coly := by0 + 46.0
+	var colh := py + ph - 92.0 - coly
 	for bi in branches.size():
 		var b: Dictionary = branches[bi]
 		var active := bi == sheet_sel
 		var bcol: Color = b["col"]
 		var val := int(b["val"])
 		var cap := int(b["cap"])
+		var cx := tx + float(bi) * (colw + gap)
+		var frac := clampf(float(val) / float(maxi(1, cap)), 0.0, 1.0)
+		# the column card: tinted and brighter-bordered when it is the active branch
+		var cardfill := Color(bcol.r * 0.14, bcol.g * 0.14, bcol.b * 0.16, 0.92) if active else Color(0.11, 0.09, 0.12, 0.85)
+		soft_card(Rect2(cx, coly, colw, colh), cardfill, Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.28), 2.0 if active else 1.0, 13.0, 14.0, 0.06 if active else 0.0)
+		# name, role, current value
+		draw_string(title_font(), Vector2(cx, coly + 32.0), String(b["name"]), HORIZONTAL_ALIGNMENT_CENTER, colw, 17, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.82))
+		draw_string(font, Vector2(cx, coly + 50.0), String(b["role"]), HORIZONTAL_ALIGNMENT_CENTER, colw, 11, Color(0.72, 0.68, 0.62))
+		draw_string(title_font(), Vector2(cx, coly + 98.0), str(val), HORIZONTAL_ALIGNMENT_CENTER, colw, 42, Color(1.0, 0.95, 0.82))
+		# the vertical GROWTH track: fills from the bottom up to val/cap, milestone pips
+		# at the real thresholds, the next one pulsing while a point is unspent
+		var trk_w := 15.0
+		var trk_x := cx + colw * 0.5 - trk_w * 0.5
+		var trk_top := coly + 122.0
+		var trk_bot := coly + colh - 76.0
+		var trk_h := maxf(20.0, trk_bot - trk_top)
+		var trbg := StyleBoxFlat.new()
+		trbg.bg_color = Color(0.15, 0.11, 0.10, 0.92)
+		trbg.set_corner_radius_all(int(trk_w * 0.5))
+		trbg.border_color = Color(0.0, 0.0, 0.0, 0.5)
+		trbg.set_border_width_all(1)
+		trbg.anti_aliasing = true
+		draw_style_box(trbg, Rect2(trk_x, trk_top, trk_w, trk_h))
+		var fh := trk_h * frac
+		if fh > 2.0:
+			var trf := StyleBoxFlat.new()
+			trf.bg_color = bcol
+			trf.set_corner_radius_all(int(trk_w * 0.5))
+			trf.anti_aliasing = true
+			draw_style_box(trf, Rect2(trk_x, trk_bot - fh, trk_w, fh))
 		var nodes := talent_nodes(String(b["id"]))
-
-		# this branch's own row, evenly spaced inside the graph band - always
-		# inside [gy0, gy0 + gh] by construction, whatever bi is
-		var lane_y := gy0 + gh * (float(bi) + 0.5) / float(branches.size())
-		var lane_start := Vector2(hub.x + 110.0, lane_y)
-		draw_line(hub, lane_start, Color(bcol.r, bcol.g, bcol.b, 0.5 if active else 0.25), 3.0 if active else 2.0)
-
-		# node screen positions, spaced along the lane by how far into the cap
-		# each threshold actually sits - not evenly, so the graph shows WHERE the
-		# skills really cluster (early gates read close together, MAX sits far out).
-		# A minimum centre-to-centre gap is enforced so two thresholds that sit close
-		# RELATIVE TO THE CAP (Columns at Accuracy 8 and Half Shower at 12, both a
-		# sliver of the 250 cap) can never overprint their ~120px-wide labels - the
-		# proportional look is kept wherever there is room, legibility wins where there
-		# is not, and nothing is ever pushed past the cap node's far end.
-		var min_gap := 74.0
-		var pts: Array[Vector2] = [lane_start]
-		for node in nodes:
-			var t := clampf(float(node["val"]) / float(maxi(1, cap)), 0.0, 1.0)
-			var nx := lane_start.x + branch_len * t
-			nx = maxf(nx, pts[pts.size() - 1].x + min_gap)
-			nx = minf(nx, lane_start.x + branch_len)
-			pts.append(Vector2(nx, lane_y))
-
-		# the branch: one segment per node, solid once you've actually reached it,
-		# dim ahead of it - the fill visibly crawls outward as the stat climbs
-		for si in range(1, pts.size()):
-			var reached: bool = val >= int(nodes[si - 1]["val"])
-			var segcol := Color(bcol.r, bcol.g, bcol.b, (0.9 if active else 0.55) if reached else (0.22 if active else 0.12))
-			draw_line(pts[si - 1], pts[si], segcol, 4.0 if active else 2.5)
-
-		draw_string(font, Vector2(lane_start.x - 100.0, lane_y - 4.0), "%s  %d" % [String(b["name"]), val],
-			HORIZONTAL_ALIGNMENT_RIGHT, 96.0, 16 if active else 13, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.65))
-
-		# the next un-reached node is the one point actually FOR SALE on this
-		# branch right now - it gets the pulsing ring and, on the active branch,
-		# names what it buys in the detail line below the tree
 		var next_i := -1
 		for ni in nodes.size():
 			if int(nodes[ni]["val"]) > val:
 				next_i = ni
 				break
 		for ni in nodes.size():
-			var node: Dictionary = nodes[ni]
-			var reached: bool = val >= int(node["val"])
-			var is_next := ni == next_i
-			var p := pts[ni + 1]
-			var r := 9.0 if active else 6.0
+			var nd: Dictionary = nodes[ni]
+			var nf := clampf(float(nd["val"]) / float(maxi(1, cap)), 0.0, 1.0)
+			var ppos := Vector2(trk_x + trk_w * 0.5, trk_bot - trk_h * nf)
+			var reached: bool = val >= int(nd["val"])
+			var isnext := ni == next_i
 			if reached:
-				draw_circle(p, r, Color(bcol.r, bcol.g, bcol.b, 0.95))
-				draw_arc(p, r, 0.0, TAU, 16, Color(1.0, 1.0, 0.95, 0.8), 1.5, true)
+				draw_circle(ppos, 5.0, Color(1.0, 1.0, 0.96, 0.95))
 			else:
-				draw_circle(p, r, Color(0.1, 0.09, 0.11, 0.9))
-				draw_arc(p, r, 0.0, TAU, 16, Color(bcol.r, bcol.g, bcol.b, 0.85 if is_next else 0.35), 1.5, true)
-				if is_next and active and points > 0:
-					var pulse := 0.5 + 0.5 * sin(float(tick) * 0.15)
-					draw_arc(p, r + 4.0 + 3.0 * pulse, 0.0, TAU, 20, Color(bcol.r, bcol.g, bcol.b, 0.5 * (1.0 - pulse)), 2.0, true)
-			var lbl := String(node["label"])
-			if lbl != "" and (reached or is_next or active):
-				draw_string(font, p + Vector2(-60.0, r + 16.0), lbl, HORIZONTAL_ALIGNMENT_CENTER, 120.0, 10,
-					Color(0.9, 0.88, 0.8, 0.95) if (reached or is_next) else Color(0.6, 0.58, 0.55, 0.6))
-			elif active:
-				draw_string(font, p + Vector2(-30.0, r + 16.0), str(int(node["val"])), HORIZONTAL_ALIGNMENT_CENTER, 60.0, 10, Color(0.65, 0.62, 0.58, 0.7))
-		if active and next_i >= 0:
-			var nn: Dictionary = nodes[next_i]
-			var need_pts := int(nn["val"]) - val
-			var what := String(nn["label"]) if String(nn["label"]) != "" else "the next milestone"
-			active_note = "%s branch: %d points from %s (%s at %d)" % [String(b["name"]), need_pts, what, String(b["name"]).to_lower(), int(nn["val"])]
-		elif active:
-			active_note = "%s branch: fully grown, at its cap (%d)" % [String(b["name"]), cap]
+				draw_circle(ppos, 4.5, Color(0.09, 0.08, 0.10, 1.0))
+				draw_arc(ppos, 4.5, 0.0, TAU, 14, Color(bcol.r, bcol.g, bcol.b, 0.95 if isnext else 0.45), 1.5, true)
+				if isnext and active and points > 0:
+					var pp := 0.5 + 0.5 * sin(float(tick) * 0.15)
+					draw_arc(ppos, 7.0 + 3.0 * pp, 0.0, TAU, 18, Color(bcol.r, bcol.g, bcol.b, 0.55 * (1.0 - pp)), 2.0, true)
+		# what the NEXT point in this column works toward - a real skill for acc/str, the
+		# live effect for end/spd (which gate no named skill)
+		var nl1 := ""
+		var nl2 := ""
+		if String(b["id"]) == "end":
+			nl1 = "max stamina"
+			nl2 = "%d" % int(round(100.0 + 9.0 * float(endurance)))
+		elif String(b["id"]) == "spd":
+			nl1 = "slow motion"
+			nl2 = "%d%%" % int(mini(speed, SPEED_CAP) / 8)
+		elif next_i >= 0:
+			nl1 = "next: %s" % (String(nodes[next_i]["label"]) if String(nodes[next_i]["label"]) != "" else "the cap")
+			nl2 = "at %d  (+%d)" % [int(nodes[next_i]["val"]), int(nodes[next_i]["val"]) - val]
+		else:
+			nl1 = "at the cap"
+		draw_string(font, Vector2(cx + 6.0, trk_bot + 16.0), nl1, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, 11, Color(0.86, 0.82, 0.74))
+		if nl2 != "":
+			draw_string(font, Vector2(cx + 6.0, trk_bot + 31.0), nl2, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, 11, Color(0.66, 0.62, 0.58))
+		# the invest plate at the foot of the column
+		var can := points > 0 and val < cap
+		var pl := Rect2(cx + colw * 0.5 - 48.0, coly + colh - 40.0, 96.0, 30.0)
+		soft_card(pl, Color(0.15, 0.22, 0.12, 0.92) if can else Color(0.11, 0.08, 0.09, 0.7), Color(0.55, 0.85, 0.5, 0.6) if can else Color(0.5, 0.45, 0.42, 0.3), 1.0, 7.0, 5.0)
+		draw_keycap(font, pl.position.x + 9.0, pl.position.y + 6.0, String(b["key"]))
+		draw_string(font, Vector2(pl.position.x, pl.position.y + 20.0), ("+1" if can else ("MAX" if val >= cap else "-")), HORIZONTAL_ALIGNMENT_RIGHT, pl.size.x - 12.0, 15, Color(0.8, 0.96, 0.74) if can else Color(0.62, 0.57, 0.52, 0.85))
 
-	# ---------------- detail line + invest plate for the active branch ----------------
-	var dy := py + ph - 96.0
-	draw_string(font, Vector2(tx, dy), active_note, HORIZONTAL_ALIGNMENT_LEFT, innerw - 160.0, 13, Color(0.85, 0.82, 0.76))
-	var active_b: Dictionary = branches[sheet_sel]
-	var can := points > 0
-	var plate := Rect2(px + pw - 40.0 - 160.0, dy - 20.0, 160.0, 36.0)
-	draw_rect(plate, Color(0.16, 0.22, 0.13, 0.9) if can else Color(0.10, 0.07, 0.08, 0.7))
-	draw_rect(plate, Color(0.55, 0.85, 0.5, 0.55) if can else Color(0.6, 0.5, 0.45, 0.3), false, 1.0)
-	draw_keycap(font, plate.position.x + 8.0, plate.position.y + 8.5, String(active_b["key"]))
-	draw_string(font, Vector2(plate.position.x, plate.position.y + 23.0), "+1" if can else "invest",
-		HORIZONTAL_ALIGNMENT_RIGHT, plate.size.x - 12.0, 15, Color(0.78, 0.96, 0.72) if can else Color(0.6, 0.55, 0.5, 0.8))
-
-	var by := py + ph - 32.0
+	# ---- the active branch's effect, spelled out, and the footer keys ----
+	var eff := ""
+	match String(branches[sheet_sel]["id"]):
+		"acc": eff = "ACCURACY: off-Perfect catches hold more often. Past 100 it becomes Focus - a wider Perfect window and cheaper stamina."
+		"str": eff = "STRENGTH: heavier props fly cleaner and sit steadier in the hand, and higher object counts open up."
+		"end": eff = "ENDURANCE: raises your maximum stamina, the fuel every throw and catch spends."
+		"spd": eff = "SPEED: bends the whole act toward slow motion, so every catch window stretches (capped at 25%)."
+	var dy := py + ph - 62.0
+	draw_string(font, Vector2(tx, dy), eff, HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.82, 0.79, 0.72))
 	if debug_mode:
-		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.9, 1.0))
+		draw_string(font, Vector2(tx, dy + 16.0), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.6, 0.9, 1.0))
 	var th_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "branch"]]
 	if points > 0:
 		th_items.append([k_finish(), "invest"])
 	th_items.append([k_sheet(), "resume"])
-	draw_hints_row(font, px + pw * 0.5, by - 14.0, th_items)
-
+	draw_hints_row(font, px + pw * 0.5, py + ph - 34.0, th_items)
 
 func draw_purse(font: Font, right_x: float, y: float) -> void:
 	# the gold readout every spending screen shares: a coin, the number, and a flash
