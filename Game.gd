@@ -8123,6 +8123,168 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 	draw_rect(Rect2(r.position.x + 10.0, r.position.y + 4.0, r.size.x - 20.0, 2.0), Color(accent.r, accent.g, accent.b, 0.65))
 
 
+func draw_money_hat(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
+	# THE HAT: the act's score requirement as an object that FILLS, not a bar with a
+	# percentage (Louis, 2026-07-27: "a sort of hat of money being filled (and special
+	# effects for overfilled)", with Balatro as the stated bar).
+	#
+	# It is a busker's top hat lying the way a busker leaves it: turned over, brim ring
+	# up in the air, crown hanging down to the ground, the night's take piling up inside
+	# from the closed end toward the brim. The crown is drawn as a SOLID object with a
+	# cutaway interior - walls you can see the thickness of, and the take visible inside
+	# them - because the first version drew it as a thin outline with a transparent
+	# middle and read as a glass jar with a lid, not a hat.
+	#
+	# `frac` is 0..1 to the final goal, `over` is 0..1 past it (what drives the
+	# overflow), `marks` are the earlier goals' fractions, `accent` is the venue's colour
+	# for the hat band. All of it is derived per frame from `score`; nothing is stored.
+	var cx := box.position.x + box.size.x * 0.5
+	var brim_y := box.position.y + box.size.y * 0.30
+	var ground := box.position.y + box.size.y * 0.95
+	var half := box.size.x * 0.32          # the crown's outer half-width
+	var wall := 6.0                        # felt thickness, so the crown has substance
+	var brim_rx := box.size.x * 0.48
+	var brim_ry := box.size.x * 0.085
+	var felt := Color(0.17, 0.12, 0.14)
+	var felt_dk := Color(0.10, 0.07, 0.085)
+	# the interior is deliberately LIGHTER than the card behind it: at near-black it read
+	# as a hole cut in the rail rather than the inside of a hat
+	var cavity := Color(0.13, 0.095, 0.105)
+	var gold := Color(1.0, 0.84, 0.40)
+	var pulse := 0.5 + 0.5 * sin(float(tick) * 0.09)
+
+	# a warm glow behind the whole hat once it is overflowing, so the moment carries
+	# past the hat's own outline
+	if over > 0.0:
+		for gi in 4:
+			draw_circle(Vector2(cx, (brim_y + ground) * 0.5), box.size.x * (0.36 + 0.11 * float(gi)) * (1.0 + 0.04 * pulse),
+				Color(1.0, 0.78, 0.35, 0.055 * over * (1.0 - float(gi) / 4.0)))
+	draw_shadow(Vector2(cx, ground + 3.0), brim_rx * 1.6)
+
+	# the crown, outer then hollow: a tapered body with a rounded foot
+	_hat_vessel(Rect2(cx - half, brim_y, half * 2.0, ground - brim_y), felt, Color(0.30, 0.21, 0.20, 0.9), 1.0, half * 0.28)
+	_hat_vessel(Rect2(cx - half + wall, brim_y, (half - wall) * 2.0, ground - brim_y - wall), cavity, Color(0, 0, 0, 0), 0.0, (half - wall) * 0.28)
+	# a silk sheen down the left wall, so the felt reads as cloth rather than plastic
+	draw_rect(Rect2(cx - half + 1.5, brim_y + 6.0, 2.0, ground - brim_y - 22.0), Color(1.0, 0.92, 0.8, 0.07))
+
+	# THE TAKE. Rises from the foot to the brim inside the cavity, in the same rounded
+	# shape, so a nearly-empty hat still looks like coins sitting in the bottom of a hat.
+	var in_half := half - wall
+	var fill_top := lerpf(ground - wall, brim_y, clampf(frac, 0.0, 1.0))
+	if frac > 0.004:
+		_hat_vessel(Rect2(cx - in_half, fill_top, in_half * 2.0, ground - wall - fill_top), gold, Color(0, 0, 0, 0), 0.0, in_half * 0.28)
+		# the surface of the pile, and coins sitting on it - what makes it money and not
+		# a liquid. Their x is fixed so the pile never jitters; only the level moves.
+		fill_ellipse(Vector2(cx, fill_top + 1.0), in_half - 1.0, 5.0, Color(1.0, 0.93, 0.62))
+		# (typed arrays: an array-indexed numeric literal infers Variant, see Gotchas)
+		var coin_x := PackedFloat32Array([-0.52, 0.06, 0.55])
+		var coin_y := PackedFloat32Array([1.5, -2.0, 2.5])
+		for ci in 3:
+			var cp := Vector2(cx + coin_x[ci] * (in_half - 4.0), fill_top + coin_y[ci])
+			draw_circle(cp, 4.2, Color(1.0, 0.90, 0.52))
+			draw_circle(cp - Vector2(1.2, 1.2), 1.5, Color(1.0, 1.0, 0.9, 0.8))
+		# one slow glint travelling across the gold, so a filling hat is never static
+		var gx := cx - in_half + fmod(float(tick) * 0.55, in_half * 2.0)
+		draw_line(Vector2(gx, fill_top + 5.0), Vector2(gx - 5.0, minf(ground - wall - 4.0, fill_top + 24.0)),
+			Color(1.0, 1.0, 0.85, 0.20), 2.0)
+
+	# the earlier goals, marked on the crown's own walls, lit once passed
+	for m in marks:
+		var my := lerpf(ground - wall, brim_y, clampf(m, 0.0, 1.0))
+		var mc := Color(1.0, 0.95, 0.8, 0.95) if frac >= m else Color(0.72, 0.60, 0.50, 0.6)
+		draw_rect(Rect2(cx - in_half, my - 0.5, in_half * 2.0, 1.0), Color(mc.r, mc.g, mc.b, mc.a * 0.28))
+		draw_rect(Rect2(cx - half - 5.0, my - 1.5, 7.0, 3.0), mc)
+		draw_rect(Rect2(cx + half - 2.0, my - 1.5, 7.0, 3.0), mc)
+
+	# the hat BAND in the venue's colour, on the two walls only - it must not cross the
+	# cutaway, or it reads as a lid across the opening rather than a band round the crown
+	# (the band itself is drawn with the brim below, as a ribbon trim round its edge: two
+	# marks on the cut-away walls read as rivets, not as a band going round a crown)
+
+	# the BRIM, over the crown's top so the pile reads as being INSIDE the hat. Two
+	# stacked ellipses give it a lit upper face, and the mouth is the cavity's own colour
+	# so the opening and the interior are plainly the same hole. NOT draw_arc, whose
+	# radius is circular - "a highlight along the brim" ballooned into a 66px dome out
+	# through the top of the card.
+	fill_ellipse(Vector2(cx, brim_y + 1.0), brim_rx, brim_ry, felt_dk)
+	fill_ellipse(Vector2(cx, brim_y - 1.0), brim_rx * 0.99, brim_ry * 0.92, Color(0.21, 0.15, 0.17))
+	ellipse_outline(Vector2(cx, brim_y - 1.0), brim_rx * 0.99, brim_ry * 0.92, Color(1.0, 0.86, 0.55, 0.30), 1.2)
+	ellipse_outline(Vector2(cx, brim_y - 1.0), brim_rx * 0.84, brim_ry * 0.78, Color(accent.r, accent.g, accent.b, 0.85), 2.2)
+	fill_ellipse(Vector2(cx, brim_y - 1.0), in_half * 0.94, brim_ry * 0.58, cavity)
+	if frac >= 0.995:
+		fill_ellipse(Vector2(cx, brim_y - 1.0), in_half * 0.90, brim_ry * 0.50, Color(1.0, 0.90, 0.55))
+
+	# OVERFLOWING: the take mounds up out of the opening, coins tumble over both sides of
+	# the brim, and the whole thing throws sparks. This is the payoff for pushing past the
+	# final goal instead of cashing in, so it is deliberately the loudest thing in the rail.
+	if over > 0.0:
+		# a HEAP, not a pancake: three stacked ellipses of shrinking width, with loose
+		# coins riding the top so the pile reads as coins all the way up
+		var mound := 6.0 + 26.0 * over
+		fill_ellipse(Vector2(cx, brim_y - 1.0 - mound * 0.22), in_half * 1.02, mound * 0.46, gold)
+		fill_ellipse(Vector2(cx, brim_y - 2.0 - mound * 0.52), in_half * 0.78, mound * 0.40, gold.lerp(Color(1.0, 0.92, 0.62), 0.5))
+		fill_ellipse(Vector2(cx, brim_y - 3.0 - mound * 0.80), in_half * 0.46, mound * 0.30, Color(1.0, 0.94, 0.68))
+		for ci in 5:
+			var a := float(ci) * 1.7
+			draw_circle(Vector2(cx + cos(a) * in_half * 0.62, brim_y - 3.0 - mound * (0.30 + 0.42 * absf(sin(a)))), 3.8, Color(1.0, 0.90, 0.52))
+		# coins spilling down both sides, on a loop: each one falls, fades, and restarts
+		for ci in 6:
+			var side := -1.0 if ci % 2 == 0 else 1.0
+			var ph := fmod(float(tick) * 0.028 + float(ci) * 0.37, 1.0)
+			var sp := Vector2(cx + side * (brim_rx * 0.60 + ph * brim_rx * 0.28), brim_y + ph * ph * (ground - brim_y + 10.0))
+			draw_circle(sp, 3.6 * (1.0 - ph * 0.35), Color(1.0, 0.88, 0.48, (1.0 - ph) * 0.95))
+			draw_circle(sp - Vector2(1.0, 1.0), 1.2 * (1.0 - ph * 0.35), Color(1.0, 1.0, 0.92, (1.0 - ph) * 0.7))
+		# sparks: a slow ring of four-point STARS (two crossed lines read as plus signs),
+		# offset so they never blink in lockstep, and kept inside the hat's own box so the
+		# celebration cannot spill out of the card it lives in
+		for ci in 5:
+			var sa := float(tick) * 0.035 + float(ci) * (TAU / 5.0)
+			var sr := brim_rx * (0.72 + 0.20 * sin(float(tick) * 0.06 + float(ci)))
+			var sp2 := Vector2(clampf(cx + cos(sa) * sr, box.position.x + 6.0, box.position.x + box.size.x - 6.0),
+				clampf(brim_y - 13.0 + sin(sa) * brim_ry * 2.6, box.position.y + 6.0, ground))
+			var sz := 3.2 + 2.6 * (0.5 + 0.5 * sin(float(tick) * 0.13 + float(ci) * 2.1))
+			draw_star4(sp2, sz, Color(1.0, 0.95, 0.7, 0.32 + 0.5 * over))
+
+
+func draw_star4(c: Vector2, r: float, col: Color) -> void:
+	# a four-point sparkle: a filled star, because two crossed LINES of equal length and
+	# width read as a plus sign, which is what the hat's overflow sparks looked like
+	var i := r * 0.26
+	draw_colored_polygon(PackedVector2Array([
+		c + Vector2(0.0, -r), c + Vector2(i, -i), c + Vector2(r, 0.0), c + Vector2(i, i),
+		c + Vector2(0.0, r), c + Vector2(-i, i), c + Vector2(-r, 0.0), c + Vector2(-i, -i),
+	]), col)
+
+
+func ellipse_outline(c: Vector2, rx: float, ry: float, col: Color, w: float) -> void:
+	# a closed ELLIPTICAL outline. draw_arc cannot do this: its radius is circular, so it
+	# is only ever a circle's arc however you scale the caller's idea of the shape.
+	var pts := PackedVector2Array()
+	for i in 25:
+		var a := TAU * float(i) / 24.0
+		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
+	draw_polyline(pts, col, w, true)
+
+
+func _hat_vessel(r: Rect2, fill: Color, border: Color, bw: float, rad: float) -> void:
+	# a rounded-FOOT box: square at the top (an opening), rounded at the bottom (a hat's
+	# crown, and the shape the take settles into). StyleBoxFlat can round two corners
+	# only, which is exactly this shape, and it anti-aliases for free.
+	if r.size.y <= 0.5:
+		return
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.corner_radius_top_left = 0
+	sb.corner_radius_top_right = 0
+	sb.corner_radius_bottom_left = int(minf(rad, r.size.y))
+	sb.corner_radius_bottom_right = int(minf(rad, r.size.y))
+	sb.border_color = border
+	sb.set_border_width_all(int(ceil(bw)))
+	sb.border_width_top = 0
+	sb.anti_aliasing = true
+	draw_style_box(sb, r)
+
+
 func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color, label := "") -> void:
 	# a labelled progress bar used across the rails (target / crowd / stamina / xp).
 	# Rounded track and fill with a soft top highlight on the fill, so it reads like a
@@ -8442,57 +8604,64 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			else:
 				draw_circle(dotc, 5.0, Color(0.35, 0.28, 0.24, 0.8))
 
-		# --- the GOALS card: the hero. One continuous score, three notches to pass. ---
+		# --- the GOALS card: the hero. The score on the left, THE HAT on the right. ---
+		# Louis, 2026-07-27: the requirement should be a thing that fills, "a sort of hat
+		# of money being filled", with real effects once it overflows. The old horizontal
+		# meter is gone; the hat carries the same information on the same concave curve.
 		var target := next_goal()
 		var tcard_y := 78.0
-		hud_card(Rect2(LX, tcard_y, LW, 108), Color(1.0, 0.82, 0.4, 0.4))
+		var tcard_h := 196.0
+		hud_card(Rect2(LX, tcard_y, LW, tcard_h), Color(1.0, 0.82, 0.4, 0.4))
 		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55))
-		draw_string(title_font(), Vector2(LX + 14, tcard_y + 52), commafy(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.94, 0.76))
+		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), commafy(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.94, 0.76))
 		# the record chase, top-right of the card
 		if run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
 			if record_broken:
 				var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
-				draw_string(font, Vector2(LX + LW - 134, tcard_y + 22), "NEW RECORD", HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 11, Color(1.0, 0.86, 0.42, ra))
+				draw_string(font, Vector2(LX + 14, tcard_y + 78), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(1.0, 0.86, 0.42, ra))
 			else:
-				draw_string(font, Vector2(LX + LW - 134, tcard_y + 22), "best  %s" % commafy(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_RIGHT, 120.0, 11, dim)
-		# the meter runs the WHOLE act - zero to the final goal - with a notch at each
-		# goal line, so where you are and what is left both read at a glance
+				draw_string(font, Vector2(LX + 14, tcard_y + 78), "best  %s" % commafy(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, dim)
+		# THE HAT runs the WHOLE act - zero to the final goal - with a mark on the crown
+		# at each goal line, so where you are and what is left both read at a glance. It
+		# rises on the same concave curve (goal_bar_pos) the horizontal meter used, so
+		# nothing about the PACING of an act changed here, only the picture of it.
 		var g_final := goal_for(run_venue, NUM_GOALS - 1)
-		var tfrac := goal_bar_pos(float(score), float(g_final))   # concave: even over time
-		var barx := LX + 14
-		var barw := LW - 28
-		var fcol := Color(0.82, 0.5, 0.28).lerp(Color(1.0, 0.86, 0.42), tfrac)
-		draw_meter(barx, tcard_y + 63, barw, 20.0, tfrac, fcol)
+		var tfrac := goal_bar_pos(float(score), float(g_final))
+		var marks := PackedFloat32Array()
 		for gi in NUM_GOALS - 1:
-			var nx := barx + barw * goal_bar_pos(float(goal_for(run_venue, gi)), float(g_final))
-			draw_rect(Rect2(nx - 1.0, tcard_y + 61, 2.0, 24.0), Color(1.0, 0.95, 0.8, 0.75))
-		var bartxt := "first goal  %s" % commafy(target)
+			marks.append(goal_bar_pos(float(goal_for(run_venue, gi)), float(g_final)))
+		var over := 0.0 if score <= g_final else clampf(float(score - g_final) / float(maxi(g_final, 1)), 0.0, 1.0)
+		draw_money_hat(Rect2(LX + 148.0, tcard_y + 8.0, 138.0, 162.0), tfrac, over, marks,
+			Color(venue_data(run_venue)["glow"]))
+		# the ask, and the gamble, in the card's left column beside the hat
+		var goal_head := "FIRST GOAL"
+		if goals_hit >= NUM_GOALS:
+			goal_head = "ALL CLEARED"
+		elif goals_hit > 0:
+			goal_head = "NEXT GOAL"
+		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(0.85, 0.72, 0.55))
+		if goals_hit < NUM_GOALS:
+			draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), commafy(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
+		else:
+			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, 12, Color(1.0, 0.88, 0.5))
 		if goals_hit > 0:
 			# from the first goal on, spell out the gamble: a collapse strips the score
 			# back to the last goal's value (goal_for(goals_hit-1)), so everything earned
 			# ABOVE that is what you are risking by pushing on - true even after all three
 			# goals, while you chase a record (the old "every point is yours" was wrong).
 			var banked := goal_for(run_venue, mini(goals_hit, NUM_GOALS) - 1)
-			var at_risk := maxi(0, score - banked)
-			if goals_hit >= NUM_GOALS:
-				bartxt = "all goals cleared  -  risking  %s" % commafy(at_risk)
-			else:
-				bartxt = "next goal  %s      risking  %s" % [commafy(target), commafy(at_risk)]
-		# outlined, because this label sits ON the meter: a goal NOTCH lands in the middle
-		# of it at most scores and was drawing a white line straight through the lettering
-		# ("first goa|l"). The outline lifts the words off both the notch and the bar fill
-		# without moving them somewhere they read as less attached to the bar.
-		draw_text_shout(font, Vector2(barx, tcard_y + 78), bartxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
+			draw_fit_string(font, Vector2(LX + 14, tcard_y + 158), "risking  %s" % commafy(maxi(0, score - banked)),
+				HORIZONTAL_ALIGNMENT_LEFT, 136.0, 12, Color(1.0, 0.72, 0.55))
 		# the standing offer: from the first goal on, the cash-in is always open
 		if goals_hit >= 1:
 			var pl := 0.7 + 0.3 * sin(float(tick) * 0.14)
-			draw_string(font, Vector2(LX + 14, tcard_y + 100), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), commafy(score)],
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.95, 0.7, pl))
+			draw_fit_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), commafy(score)],
+				HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 11, Color(0.75, 0.95, 0.7, pl))
 		else:
-			draw_string(font, Vector2(LX + LW - 148, tcard_y + 100), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 134.0, 10, Color(0.72, 0.66, 0.58, 0.7))
+			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, 10, Color(0.72, 0.66, 0.58, 0.7))
 
 		# --- the CROWD (patience clock) and the DROP limit ---
-		var ccard_y := 194.0
+		var ccard_y := 286.0
 		hud_card(Rect2(LX, ccard_y, LW, 70), Color(0.95, 0.5, 0.4, 0.35))
 		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.72, 0.62))
 		var pcol := Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.85, 0.42), applause)
@@ -8508,9 +8677,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# 15px line each), so a longer challenge is never clipped by its own border
 			var edesc := String(ENCORES[encore]["desc"])
 			var elines := _wrap_lines(font, edesc, LW - 28, 11)
-			hud_card(Rect2(LX, 272, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
-			draw_fit_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
-			_wrap_text(font, edesc, LX + 14, 312, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+			hud_card(Rect2(LX, 364, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
+			draw_fit_string(font, Vector2(LX + 14, 386), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
+			_wrap_text(font, edesc, LX + 14, 404, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
 		# here (Louis: no redundancy) - the routine card at the foot of the stage

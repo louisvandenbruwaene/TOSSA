@@ -83,6 +83,30 @@ and deleted. History lives in git.
   `soft_card`, not a bare `draw_rect`. The shop gained a detail strip that names the
   selected prop's signature edge and a "pays xN.NN" line per card (the reward, legible at
   the point of choice).
+- **THE HAT** (2026-07-27, `draw_money_hat`, verified on screen empty, part-filled, brim-
+  full and overflowing): the act's score requirement is a busker's top hat, turned over
+  the way a busker leaves it, filling with the night's take. It replaced the horizontal
+  goal meter in the left rail's SCORE card (now 196px tall, two columns: the numbers left,
+  the hat right; the crowd and Encore cards moved down to 286 and 364 to suit). Louis
+  asked for exactly this - "a sort of hat of money being filled (and special effects for
+  overfilled)" - with **Balatro named as the bar for the whole game, visually, musically
+  and for enjoyment**, so when a number drives tension here, prefer a drawn OBJECT that
+  fills, glints and overflows to a rectangle with a percentage.
+  It rises on `goal_bar_pos`, the same concave curve the old meter used, so no act's
+  PACING changed, only the picture: the earlier goals are marks on the crown (lit once
+  passed), the mouth lights gold at the brim, and past the final goal the take heaps up
+  out of the opening, coins tumble down both sides on a loop, sparks ring it and a warm
+  glow sits behind - the payoff for pushing on instead of cashing in.
+  What it took to make it read as a HAT and not a jar: the crown is a SOLID body with a
+  visible felt thickness and a cutaway interior (a thin outline with a transparent middle
+  read as a glass jar with a lid); the interior is LIGHTER than the card behind it, or it
+  reads as a hole cut in the rail; the venue's colour is a ribbon round the brim, pulled
+  40% toward the house gold so a cool venue palette does not put a green stripe on a gold
+  hat, and NOT a band across the crown, which reads as a lid over the cutaway. Two Godot
+  traps met on the way, both now shared helpers: `draw_arc`'s radius is circular, so a
+  "highlight along the brim" ballooned into a 66px dome out through the top of the card
+  (`ellipse_outline`), and two crossed equal lines read as a plus sign, not a sparkle
+  (`draw_star4`).
 - **THE ACT (performances):** one continuous act at the chosen venue, three GOALS
   (first/second/final = VENUE_BASE x GOAL_STEP [1.0, 1.9, 3.2] x ante). From the
   first goal on you may CASH IN at any time: press Enter, or catch every ball and
@@ -429,6 +453,15 @@ and deleted. History lives in git.
   the parse check that counts.
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
   ignore them all.
+- **ALWAYS TEST MUTED AND IN THE BACKGROUND** (Louis, 2026-07-27: sound suddenly playing
+  while he works "disturbs me a lot"). Put `--audio-driver Dummy` BEFORE the bare `--`:
+  `godot --path . --audio-driver Dummy -- --demo --booking --venue 2 --shot /tmp/x.png
+  --shotat 700`. It is an engine flag, so no game code is involved and it cannot leak
+  into a build. Launch the run detached and kill it after, rather than waiting on it in
+  the foreground.
+- A `--booking --demo` run QUITS when the act resolves, so a `--shotat` past the resolve
+  never captures anything (silently: no error, no file). If a capture comes back missing,
+  check the log for the `ACT ...` line before assuming a draw bug.
 - `--collcheck` (audits mid-air clearance) used to only ever exercise
   FRAME-PERFECT bot timing: near-instant catches, throws on a fixed metronome.
   `--latecatch N` (2026-07-19) is a realistic-timing variant: it catches N
