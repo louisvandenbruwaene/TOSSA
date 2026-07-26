@@ -106,12 +106,15 @@ and deleted. History lives in git.
   across day/results/booking/daily also came up clean. What is still NOT done is a real
   HANDS-ON human pass over a couple of calendar-seeded venues and a check that the shared
   result line actually lands on the clipboard - do that before calling it shipping-ready.
-- **EXPERIMENTS panel** (2026-07-25, **UNVERIFIED**): F9, from anywhere, opens a small
+- **EXPERIMENTS panel** (2026-07-25): F9, from anywhere, opens a small
   debug-only overlay (`debug_panel_open`, `draw_debug_panel`) listing named toggles
   (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an
   alternate version of a screen on or off live, no restart and no code edit - the
   point being to compare two real implementations side by side rather than guess from
-  a description. Persisted in the settings file so a choice survives a relaunch, but
+  a description. **2026-07-26: the reworked variants were all polished and three
+  (`talent_tree`, `settings_cards`, `pause_cards`) now DEFAULT ON - they are the shipped
+  look, F9 toggles each OFF to compare with the classic. `slot_cards` (Save files as
+  portrait cards) is a fourth, added the same day, default OFF for Louis to choose.** Persisted in the settings file so a choice survives a relaunch, but
   the PANEL that can ever flip one is gated behind `OS.is_debug_build()` like every
   other dev surface here, so a release export always runs every experiment at its
   shipped default. Adding a second experiment later is one `EXPERIMENT_DEFS` entry
