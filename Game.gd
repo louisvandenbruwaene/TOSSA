@@ -9011,7 +9011,10 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	var xbw := innerw - 130.0
 	draw_rect(Rect2(xbx, py + 82.0, xbw, 16.0), Color(0.2, 0.14, 0.11, 0.8))
 	draw_rect(Rect2(xbx, py + 82.0, xbw * xf, 16.0), Color(0.9, 0.7, 0.35))
-	draw_string(font, Vector2(xbx, py + 95.0), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, xbw, 12, Color(1.0, 0.96, 0.85))
+	# outlined: this label sits ON the xp meter, so a single flat colour was always
+	# unreadable over half of it (dark text vanishes on the dark track, light text on
+	# the lit fill) - and the bar's fill moves as you level, so neither half is safe
+	draw_text_shout(font, Vector2(xbx, py + 95.0), "%s / %s xp" % [commafy(xp), commafy(need)], HORIZONTAL_ALIGNMENT_CENTER, xbw, 12, Color(1.0, 0.96, 0.85))
 
 	# the SPEND banner: impossible to miss when points are waiting, quiet otherwise
 	var by0 := py + 116.0
@@ -9183,7 +9186,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	var xbx := tx + 118.0
 	var xbw := innerw - 118.0
 	draw_meter(xbx, py + 81.0, xbw, 15.0, xf, Color(0.92, 0.72, 0.36))
-	draw_string(font, Vector2(xbx, py + 92.0), "%d / %d xp" % [xp, need], HORIZONTAL_ALIGNMENT_CENTER, xbw, 11, Color(0.06, 0.04, 0.03, 0.9))
+	draw_text_shout(font, Vector2(xbx, py + 92.0), "%s / %s xp" % [commafy(xp), commafy(need)], HORIZONTAL_ALIGNMENT_CENTER, xbw, 11, Color(1.0, 0.96, 0.85))
 	var by0 := py + 110.0
 	if points > 0:
 		var pa := 0.72 + 0.28 * sin(float(Time.get_ticks_msec()) * 0.006)
