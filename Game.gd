@@ -263,9 +263,10 @@ const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward th
 # --- object load (ideas.rtf comments): more balls in the air and heavier props
 # both raise the score multiplier, ON TOP OF the pattern's own "mult" above, so
 # climbing to five clubs or three torches always outpays grinding an easy three-
-# ball routine forever, however long the streak. See object_mult().
+# ball routine forever, however long the streak. See object_mult(). The WEIGHT half
+# is now per-prop ("smult" in PROPS, read via prop_score_mult) so each class pays its
+# own rate and can carry a context bonus, replacing the old flat per-weight-step const.
 const OBJ_BALL_BONUS := 0.12    # per ball above MIN_BALLS
-const OBJ_WEIGHT_BONUS := 0.15  # per weight step above a ball/egg's weight of 1
 const STATE_FLIGHT := 0
 const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
@@ -292,18 +293,39 @@ const PROP_KNIVES := 4
 const PROP_TORCHES := 5
 const PROPS := [
 	# balls are REAL STOCK too (Louis: they don't appear out of thin air): a fresh
-	# juggler starts with three, and the fourth ball onward is bought like any prop
-	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 20,   "stam": 1, "spins": false},
-	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "stam": 2, "spins": false},
-	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "stam": 3, "spins": false},
-	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "stam": 4, "spins": true},
-	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "stam": 5, "spins": true},
-	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "stam": 6, "spins": true},
+	# juggler starts with three, and the fourth ball onward is bought like any prop.
+	#
+	# PER-PROP CHARACTER (2026-07-26): every class is a real CHOICE, not just a heavier
+	# ball, across four levers - so a matched choice is rewarded and a mismatched one is
+	# punished (the balance goal). "pwin" tightens the Perfect window (difficulty; clubs
+	# stay forgiving for their weight); "smult" is the prop's own score multiplier
+	# (reward, on top of object_mult's ball-count term); "stam" is the throw's flat
+	# stamina price (the early limiter - rings are deliberately cheap for their weight);
+	# "fgive" nudges the off-Perfect catch odds (clubs are forgiving). Signature
+	# advantages that depend on CONTEXT live in code, never a flat field: torches score
+	# more where the stage is dark (is_dark_context), knives before a hard-to-please crowd
+	# (is_picky_crowd), eggs are a near-free gamble that shatters on any drop. See
+	# prop_score_mult / prop_thrill / perfect_window / catch_chance for where each is read.
+	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 20,   "stam": 1, "spins": false, "pwin": 0,  "smult": 1.00, "fgive": 0.0,  "trait": "the honest baseline - cheapest, steadiest, easiest to catch clean"},
+	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "stam": 2, "spins": false, "pwin": 0,  "smult": 1.10, "fgive": 0.0,  "trait": "a gamble - nearly free and worth a touch more, but ONE drop and it is gone for good"},
+	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "stam": 2, "spins": false, "pwin": 0,  "smult": 1.15, "fgive": 0.0,  "trait": "low stamina for their weight - the endurance prop, built for the longest sets"},
+	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "stam": 4, "spins": true,  "pwin": -1, "smult": 1.32, "fgive": 0.12, "trait": "forgiving - a wider catch than their weight asks (still shy of balls and rings)"},
+	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "stam": 5, "spins": true,  "pwin": -2, "smult": 1.55, "fgive": 0.0,  "trait": "high score, high danger - a demanding crowd pays extra for the risk"},
+	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "stam": 6, "spins": true,  "pwin": -3, "smult": 1.70, "fgive": 0.0,  "trait": "self-lit - they shine when the stage goes dark, where any other prop is a guess"},
 ]
 # "stam" is a throw's FLAT stamina price (Louis): every throw costs at least 1,
-# heavier props cost their own rate, and Focus shaves one point per 20 Focus,
-# never below 1. See do_throw - the old percent-of-a-percent drain is gone.
-const WEIGHT_STAM := 0.25    # each weight step adds this fraction of stamina cost
+# heavier props cost their own rate (balls 1, eggs 2, rings 2, clubs 4, knives 5,
+# torches 6 - rings cut to 2 as their signature low-stamina edge), and Focus shaves
+# one point per 20 Focus, never below 1. See do_throw - the old percent drain is gone.
+const WEIGHT_STAM := 0.25    # each weight step adds this fraction of a CATCH's stamina cost
+const PWIN_FLOOR := 3          # the Perfect window never tightens below this many ticks, whatever
+							   # the prop, the Cold Hands encore, or their sum - always hittable
+const DARK_PROP_BONUS := 0.30  # torches score this much more where the stage is dark (Blackout,
+							   # Stage Fright, the Midnight Show): the right tool for bad light
+const PICKY_PROP_BONUS := 0.30 # knives score this much more before a hard-to-please crowd (The
+							   # Critic, The Hecklers): a demanding room pays for the danger
+const THRILL_PERFECT := 0.010  # a heavy prop's Perfect catch feeds the crowd extra patience,
+							   # scaled by weight (knives doubled before a picky crowd) - danger thrills
 
 # --- shop: spend gold on props and gear ---------------------------------------
 const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling: priced
@@ -1049,6 +1071,15 @@ func _ready() -> void:
 			_calib = true
 			if ci + 1 < ua.size() and not ua[ci + 1].begins_with("--"):
 				_calib_ticks = maxi(120, int(ua[ci + 1]))
+		if ua.has("--maxstats"):   # dev: model a fully INVESTED master, not just the demo save's
+			# stats - the honest test for whether a heavy prop pays for a player who earned
+			# the Endurance/Accuracy to field it (a bare-Strength calib undersells them badly).
+			accuracy = ACC_CAP
+			strength = STR_CAP
+			endurance = END_CAP
+			speed = SPEED_CAP
+			stamina_max = 100.0 + 9.0 * float(endurance)
+			stamina = stamina_max
 		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
 		if pi != -1 and pi + 1 < ua.size():
 			for pj in PATTERNS.size():
@@ -4763,7 +4794,7 @@ func on_catch(h: int) -> void:
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
 		score += int(round(100.0 * streak_mult() * pm))
-		applause = minf(1.0, applause + APPL_PERFECT)
+		applause = minf(1.0, applause + APPL_PERFECT + prop_thrill())   # danger thrills the room
 		add_xp(3)
 		# the slow-motion earn, only when a REAL pattern is up (three props or
 		# more, so two lazy balls cannot farm it): a FRAME-perfect catch is an
@@ -5308,12 +5339,55 @@ func pattern_mult() -> float:
 func object_mult() -> float:
 	# harder LOADS pay more, independent of which pattern they are juggled in
 	# (ideas.rtf: using more objects should give score a good boost compared to
-	# just spamming three balls). Balls and weight compound, so five clubs and
-	# three torches land in the same neighbourhood - both genuinely harder than
-	# an easy three-ball routine, whatever pattern it is run in.
+	# just spamming three balls). The ball-count term and the prop's own score
+	# multiplier compound, so climbing BOTH axes (more props AND heavier ones)
+	# is the way to a big number - e.g. seven torches far outpays three balls,
+	# but only a player who can actually sustain them gets there.
 	var ball_step := float(num_balls - MIN_BALLS)
-	var weight_step := float(prop_weight() - 1)
-	return (1.0 + OBJ_BALL_BONUS * ball_step) * (1.0 + OBJ_WEIGHT_BONUS * weight_step)
+	return (1.0 + OBJ_BALL_BONUS * ball_step) * prop_score_mult()
+
+
+func is_dark_context() -> bool:
+	# where the stage light is genuinely poor and a self-lit prop earns its keep. Blackout
+	# and Stage Fright can roll from The Street up, but both are SOFTENED (every prop keeps
+	# a lit trail, markers aside), so a torch-less player is never simply blind; the one
+	# place non-lit props go truly hard to read is the Midnight Show, which is post-win and
+	# late, by when torches are long affordable (Louis, 2026-07-26: the "only torches can
+	# be juggled" situation must never land before the player would obviously own them).
+	return encore_on("blackout") or encore_on("fright") or run_venue == MAX_VENUE
+
+
+func is_picky_crowd() -> bool:
+	# a hard-to-please room: The Critic scores only Perfects, The Hecklers lose patience
+	# fast. A dangerous prop (knives) is what wins a crowd like this over.
+	return encore_on("critic") or encore_on("hecklers")
+
+
+func prop_score_mult(kind: int = -1) -> float:
+	# the prop's own score multiplier (reward), read by object_mult on top of the ball-count
+	# term - plus its signature CONTEXT bonus: torches in the dark, knives before a picky
+	# crowd. Both only ever ADD, so choosing the right prop for the night pays and choosing
+	# the wrong one merely forgoes the bonus, never a penalty for it.
+	var k := prop_type if kind < 0 else kind
+	var m := float(PROPS[k]["smult"])
+	if k == PROP_TORCHES and is_dark_context():
+		m += DARK_PROP_BONUS
+	if k == PROP_KNIVES and is_picky_crowd():
+		m += PICKY_PROP_BONUS
+	return m
+
+
+func prop_thrill() -> float:
+	# extra crowd patience a heavy prop's Perfect catch buys: the danger of the thing thrills
+	# the room. Scales with weight, and doubles for knives before a picky crowd - exactly the
+	# fast-draining Hecklers set where keeping the room in their seats matters most.
+	var w := prop_weight() - 1
+	if w <= 0:
+		return 0.0
+	var t := THRILL_PERFECT * float(w)
+	if prop_type == PROP_KNIVES and is_picky_crowd():
+		t *= 2.0
+	return t
 
 
 func streak_cap() -> int:
@@ -5929,6 +6003,9 @@ func catch_chance(quality: int, height: float) -> float:
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
+	p += float(PROPS[prop_type]["fgive"])   # clubs are intrinsically forgiving: a better off-Perfect
+											# catch than their weight implies. A property of the prop
+											# itself (like its weight), so it stands even in a Purist run.
 	if not purist_run():
 		p += strength_catch_mod()  # raw muscle steadies a heavy prop in the hand (and only a
 								   # too-weak grip on a heavy prop makes the catch itself shaky)
@@ -6000,6 +6077,10 @@ func perfect_window() -> int:
 		w = mini(W_GOOD, W_PERFECT + bonus)
 	if encore_on("cold"):
 		w = maxi(2, w - 2)         # Cold Hands: the Perfect window is two ticks tighter
+	# heavier props ask for tighter timing (clubs stay forgiving for their weight, torches
+	# tightest) - the difficulty half of the per-prop character. Floored so the sum of a
+	# heavy prop AND Cold Hands is still humanly hittable.
+	w = maxi(PWIN_FLOOR, w + int(PROPS[prop_type]["pwin"]))
 	return w
 
 
@@ -7670,17 +7751,44 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0) -> void:
 #endregion
 
 #region HUD HELPERS & KEY-HINT LABELS
+func soft_card(r: Rect2, fill: Color, border: Color, border_w: float = 1.0, radius: float = 9.0, shadow: float = 12.0, top_sheen := 0.0) -> void:
+	# THE shared card look (2026-07-26 UI pass): a rounded, softly shadowed, anti-aliased
+	# panel drawn via StyleBoxFlat in one call. Rounded corners + a real drop shadow are
+	# what lift the whole UI off the flat-coloured-rectangle look that read as cheap.
+	# `top_sheen` overlays a faint lighter band across the top third for a subtle glassy
+	# gradient - StyleBoxFlat has no gradient fill, so this fakes one cheaply.
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.set_corner_radius_all(int(radius))
+	sb.border_color = border
+	sb.set_border_width_all(int(ceil(border_w)))
+	if shadow > 0.0:
+		sb.shadow_color = Color(0.0, 0.0, 0.0, 0.38)
+		sb.shadow_size = int(shadow)
+		sb.shadow_offset = Vector2(0.0, 3.0)
+	sb.anti_aliasing = true
+	draw_style_box(sb, r)
+	if top_sheen > 0.0:
+		var sheen := StyleBoxFlat.new()
+		sheen.bg_color = Color(1.0, 0.95, 0.85, top_sheen)
+		sheen.set_corner_radius_all(int(radius))
+		# only the top corners carry the sheen's rounding; the bottom is a soft straight cut
+		sheen.corner_radius_bottom_left = 0
+		sheen.corner_radius_bottom_right = 0
+		sheen.anti_aliasing = true
+		draw_style_box(sheen, Rect2(r.position.x, r.position.y, r.size.x, r.size.y * 0.42))
+
+
 func hud_panel(r: Rect2, glow: bool = false) -> void:
 	# a soft dark card with an ember hairline, so HUD numbers sit on something
 	# instead of floating loose over the stage. `glow` breathes the hairline -
 	# for a SELECTED menu row, so the cursor reads alive, not just lit; every
 	# other (static, always-on) card leaves it off and looks exactly as before.
-	draw_rect(r, Color(0.05, 0.03, 0.045, 0.55))
 	if glow:
 		var pulse := 0.5 + 0.5 * sin(float(cine_tick) * 0.08)
-		draw_rect(r, Color(0.95, 0.7, 0.4, lerpf(0.28, 0.55, pulse)), false, 1.6)
+		soft_card(r, Color(0.06, 0.035, 0.05, 0.62), Color(0.98, 0.74, 0.44, lerpf(0.34, 0.62, pulse)), 1.6, 9.0, 10.0, 0.05)
 	else:
-		draw_rect(r, Color(0.9, 0.6, 0.35, 0.22), false, 1.0)
+		soft_card(r, Color(0.05, 0.03, 0.045, 0.58), Color(0.9, 0.6, 0.35, 0.26), 1.0, 9.0, 9.0)
 
 
 func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
@@ -7688,18 +7796,40 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 	# readable over a busy stage, with a thin top accent line for a little Balatro-ish
 	# chunk. All live HUD lives in the LEFT and RIGHT rails now, never over the centre
 	# where the props fly.
-	draw_rect(r, Color(0.07, 0.04, 0.055, 0.84))
-	draw_rect(Rect2(r.position.x, r.position.y, r.size.x, 2.0), Color(accent.r, accent.g, accent.b, 0.5))
-	draw_rect(r, accent, false, 1.0)
+	soft_card(r, Color(0.075, 0.045, 0.06, 0.88), Color(accent.r, accent.g, accent.b, 0.5), 1.0, 9.0, 12.0, 0.05)
+	# a short accent bar just inside the top, kept clear of the rounded corners
+	draw_rect(Rect2(r.position.x + 10.0, r.position.y + 4.0, r.size.x - 20.0, 2.0), Color(accent.r, accent.g, accent.b, 0.65))
 
 
 func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color, label := "") -> void:
-	# a labelled progress bar used across the rails (target / crowd / stamina / xp)
-	draw_rect(Rect2(x - 1, y - 1, w + 2, h + 2), Color(0.03, 0.02, 0.03, 0.7))
-	draw_rect(Rect2(x, y, w, h), Color(0.18, 0.12, 0.10, 0.85))
-	draw_rect(Rect2(x, y, w * clampf(frac, 0.0, 1.0), h), fill)
+	# a labelled progress bar used across the rails (target / crowd / stamina / xp).
+	# Rounded track and fill with a soft top highlight on the fill, so it reads like a
+	# lit bar rather than a plain block.
+	var rad := minf(h * 0.5, 7.0)
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.16, 0.11, 0.09, 0.9)
+	track.set_corner_radius_all(int(rad))
+	track.border_color = Color(0.0, 0.0, 0.0, 0.55)
+	track.set_border_width_all(1)
+	track.anti_aliasing = true
+	draw_style_box(track, Rect2(x, y, w, h))
+	var fw := w * clampf(frac, 0.0, 1.0)
+	if fw > 2.0:
+		var bar := StyleBoxFlat.new()
+		bar.bg_color = fill
+		bar.set_corner_radius_all(int(rad))
+		bar.anti_aliasing = true
+		draw_style_box(bar, Rect2(x, y, fw, h))
+		# a faint lighter sheen across the top of the fill for a lit, rounded look
+		var sh := StyleBoxFlat.new()
+		sh.bg_color = Color(1.0, 1.0, 1.0, 0.16)
+		sh.set_corner_radius_all(int(rad))
+		sh.corner_radius_bottom_left = 0
+		sh.corner_radius_bottom_right = 0
+		sh.anti_aliasing = true
+		draw_style_box(sh, Rect2(x, y, fw, h * 0.5))
 	if label != "":
-		draw_string(game_font(), Vector2(x + 7, y + h - 4.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.08, 0.04, 0.03, 0.8))
+		draw_string(game_font(), Vector2(x + 8, y + h - 4.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.08, 0.04, 0.03, 0.85))
 
 
 func draw_drop_marks(x: float, y: float, lim: int, used: int) -> void:
@@ -8818,13 +8948,12 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# the SHOP, dealt as CARDS (Louis: Balatro look - big cards, clean zones, the buy
 	# key printed on every card). One zone of five prop cards, one zone of gear, the
 	# purse always big top-right.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.88))
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.9))
 	var pw := minf(1120.0, s.x - 60.0)
-	var ph := 648.0
+	var ph := minf(696.0, s.y - 24.0)
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.99), Color(0.9, 0.6, 0.35, 0.55), 2.0, 16.0, 22.0)
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
@@ -8854,16 +8983,18 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		if available(i):
 			draw_string(font, Vector2(cx0, y0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
 		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, y0 + 92.0), 2.6)
-		draw_string(font, Vector2(cx0, y0 + 158.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
+		draw_string(font, Vector2(cx0, y0 + 156.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
 		var req := int(PROPS[i]["req"])
-		draw_string(font, Vector2(cx0, y0 + 180.0), "weight %d" % int(PROPS[i]["weight"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 11, Color(0.75, 0.68, 0.6))
-		var reqline := "easy to throw" if req == 0 else "clean at Strength %d" % req
+		var reqline := "weight %d  ·  light throw" % int(PROPS[i]["weight"]) if req == 0 else "weight %d  ·  Str %d" % [int(PROPS[i]["weight"]), req]
 		if i == PROP_EGGS:
-			reqline = "breaks on a drop"
+			reqline = "weight 1  ·  fragile"
 		var reqcol := Color(0.75, 0.68, 0.6)
 		if req > strength:
 			reqcol = Color(0.95, 0.6, 0.45)   # under-strength: flag it before the buy
-		draw_string(font, Vector2(cx0, y0 + 196.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
+		draw_string(font, Vector2(cx0, y0 + 178.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
+		# the REWARD, quantified: this prop's own score multiplier, so the harder-pays-more
+		# trade is legible at the point of choice (context bonuses stack on top, in play)
+		draw_string(font, Vector2(cx0, y0 + 198.0), "pays  ×%.2f" % float(PROPS[i]["smult"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
 		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
 
 	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
@@ -8928,14 +9059,39 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			var gkey := str(7 + i) if i < 3 else "0"
 			draw_price_plate(font, Rect2(cx0 + 12.0, gy0 + gh - 46.0, gw - 24.0, 38.0), gkey, "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
-	# ---------------- footer: warnings, then the keys ----------------
-	if shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000:
-		draw_string(font, Vector2(px, py + ph - 58.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(1.0, 0.62, 0.45))
+	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
+	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
+	# uncluttered and the player still learns why they would pick one prop over another. A
+	# recent warning (can't afford, etc.) takes the strip over instead - it is more urgent
+	# and just as transient, so the two never fight for the same row.
+	var strip_y := py + ph - 92.0
+	var strip := Rect2(px + 30.0, strip_y, pw - 60.0, 40.0)
+	var warn := shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000
+	soft_card(strip, Color(0.10, 0.05, 0.05, 0.85) if warn else Color(0.08, 0.05, 0.06, 0.82),
+		Color(1.0, 0.5, 0.4, 0.5) if warn else Color(0.9, 0.6, 0.35, 0.3), 1.0, 9.0, 8.0)
+	if warn:
+		draw_string(font, Vector2(strip.position.x, strip_y + 25.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, strip.size.x, 13, Color(1.0, 0.66, 0.5))
+	else:
+		var detail := ""
+		var detail_head := ""
+		if shop_sel < PROPS.size():
+			detail_head = String(PROPS[shop_sel]["name"])
+			detail = String(PROPS[shop_sel]["trait"])
+		else:
+			var gi := shop_sel - 6
+			if gi >= 0 and gi < gear_names.size():
+				detail_head = gear_names[gi]
+				detail = gear_desc[gi]
+		if detail != "":
+			draw_string(font, Vector2(strip.position.x + 16.0, strip_y + 25.0), detail_head, HORIZONTAL_ALIGNMENT_LEFT, 156.0, 15, Color(1.0, 0.86, 0.55))
+			draw_string(font, Vector2(strip.position.x + 180.0, strip_y + 25.0), detail, HORIZONTAL_ALIGNMENT_LEFT, strip.size.x - 196.0, 13, Color(0.85, 0.8, 0.7))
+
+	# ---------------- footer: the keys ----------------
 	if pad_active():
-		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
+		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
 			[[["Stick"], "choose"], [k_finish(), "buy"], [k_sheet(), "leave"]])
 	else:
-		draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
+		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
 			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "0"], "quick buy"], [["Tab"], "leave"]])
 
 
