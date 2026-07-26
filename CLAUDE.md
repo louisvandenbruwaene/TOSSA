@@ -58,6 +58,24 @@ and deleted. History lives in git.
   player collapses on the same heavy props (torches x5 12k vs balls x5 239k), 3 balls stays
   locked out of venue 5, dark/picky A/B edges land on +17.6%/+19.3%. `--maxstats` (dev)
   models a fully invested master so a heavy-prop calib is fair (a bare-Strength one is not).
+- **NO TEXT EVER LEAVES ITS CONTAINER** (2026-07-27, Louis, a standing rule). Three
+  primitives, and the reason they exist: `draw_string`'s `width` argument does NOT
+  shorten text, it CLIPS it mid-glyph, which is how a hub card came to read "LEARN -
+  Overthrow (ne", and `draw_multiline_string`'s `max_lines` silently DROPS whatever did
+  not fit. So: `fit_text` / `draw_fit_string` shorten one line to a width and mark the
+  trim; `draw_wrap_fit` wraps into a BOX and stops at its height, marking the last line;
+  `fit_size` picks the largest font size that fits, for titles built by joining two
+  names ("TORCHES  REVERSE CASCADE") where an ellipsis would eat one of them. **Rule of
+  thumb: anything whose length is DATA (a venue, prop, trick, pattern, Encore or lesson
+  name, a commafied number, a description from a table) goes through one of these; fixed
+  strings the layout was built around do not need to.** Fixed that pass: the F9
+  descriptions, the results card's closing word, the sheet cards' blurbs, the Skills
+  detail box (its 2-line cap dropped a third line), the shop's gear text (it wrapped
+  down THROUGH its own price plate), the establish card's Encore text, the Records
+  screen (both cards were a fixed 300px and drew their last row through their own
+  bottom border - the venue board grew a seventh row and the career list a ninth), the
+  live goal-bar label (a goal notch drew a white line through the lettering; it is
+  `draw_text_shout` now, outlined), and the lesson/toast/slot/settings/records names.
 - **UI look (2026-07-26 polish pass):** the shared `soft_card` primitive (StyleBoxFlat:
   rounded corners, soft drop shadow, faint top sheen) is THE card now - `hud_card`,
   `hud_panel`, `draw_meter`, and every big screen container route through it, so depth is
@@ -209,6 +227,36 @@ and deleted. History lives in git.
   lines, so any three-line challenge had its last line drawn straight through the
   card's bottom border. `_wrap_lines` now does the wrapping without drawing, the card
   height comes from the line count, and `_wrap_text` draws from the same list.
+- **THE DAY HUB, in three drawers** (2026-07-27, verified on screen): ten flat text rows
+  was the crowding Louis flagged, so the actions live in `DAY_GROUPS` - TONIGHT (perform
+  / practice / daily), REST (meal / inn / pie / egg), PREPARE (shop / skills) - and the
+  top level shows one card each, at most four things including a pending LEARN. Actions
+  are CARDS now, the same language as the pause and settings screens: accent colour,
+  icon disc (`day_icon`), a chevron on a drawer. `day_group` is "" at the top level or
+  the open drawer's id; `day_actions()` is every action with its drawer, `day_rows()` is
+  what the cursor walks. Left/Right and Escape walk in and out like a folder tree
+  (Escape inside a drawer means "out of this drawer", not "leave the day"), backing out
+  lands the cursor ON the drawer just left, and arriving off a spent act opens REST with
+  the affordable recovery already selected. Every id `day_activate` matches is unchanged
+  - only which rows exist at a given moment is new. **The detached hover-explanation
+  block under the list is gone** (Louis: those "look wrong / bad" - a bare wrapped
+  paragraph on its own card, jammed against the bottom frame): each card carries its own
+  explanation and reveals it when SELECTED, growing to fit it exactly
+  (`day_card_height` measures what `day_draw_card` draws, so it cannot clip), with the
+  stage picker, the record to beat, the next-stage gate and the reason-it-is-blocked all
+  inside the PERFORM card. The ledger on the left is three cards with a real
+  `draw_meter`, not bare text over a flat rectangle. `--day <work|rest|prep>` opens a
+  named drawer for a screenshot.
+- **SHOP** (upgraded 2026-07-27): the selected card LIFTS off the row and lights its own
+  border instead of the old flashing rectangle drawn outside it, and every prop card
+  carries a SET meter - you need one prop per object you juggle, so what matters at the
+  counter is stock against YOUR count, not the raw number owned ("2 short of a set of
+  7"). **`B` (pad X) buys the whole shortfall in one press** (`try_top_up`), or a spare
+  set when the set is already fielded, stopping at what the purse can take rather than
+  half-failing with a warning - it used to be one Enter per object, up to fifteen of
+  them, and again after every broken egg. One confirmation for the whole basket. The
+  strip at the foot shows the receipt in green (`shop_msg_warn` false) rather than the
+  red it uses for problems.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
@@ -232,29 +280,47 @@ and deleted. History lives in git.
   hooked to the live `balls`/`pattern` state - safe to animate from any screen. Every
   ball position is hard-clamped inside the box as a guarantee, not just sized to fit.
   `--skills [N]` dev flag opens it for a screenshot, optionally selecting entry N.
-- **Arms mostly reach two points, `inner_pos` and `outer_pos`** - the same two
-  the 3-ball Cascade always used. Amended 2026-07-19 (same day, later): a
-  realistic-timing collision audit (`--latecatch`, see Verification workflow)
-  found a genuine PERFECT-catch-then-immediate-throw could overlap wherever
-  more than one ball shares a hand's own road at once - the even-count
-  Cascade same-hand pair, and (Half Shower/Shower/Tennis cross every throw
-  regardless of count, unlike Cascade) as early as four balls for those. Louis
-  authorized a THIRD kind of position for exactly this case: a straight
-  up-and-down `same_hand_lane_pool()` lane, toward centre from `inner_pos`,
-  for whichever ball isn't alone on its road (`road_lane`) - explicitly not
-  the rejected fix (the same-hand pair used to widen its landing 22px PAST
-  `outer_pos`; "outward, past the established reach" was the objection this
-  rule existed to stop). A crossing throw never gets a lane (pulling it
-  toward centre closes the gap with the opposite line it crosses, measured
-  worse not better) - that risk is carried by `prop_hit_scale` instead, whose
-  shrink now starts at 4 balls and reaches a much lower floor by 4-5 rather
-  than barely doing anything until 6+. Columns' lanes remain their own older,
-  separate thing. The goal throughout was a CONSISTENT margin comparable to
-  the Perfect catch window's own tolerance, not a hunt for exact zero on
-  every single count/pattern/prop/trick - some combinations (Half Shower/
-  Tennis around 5 balls, Cascade's highest odd counts at one specific catch
-  offset) still carry a small (a few px) residual, left as an accepted
-  tradeoff rather than chased with an ever-smaller hitbox.
+- **Arms reach exactly two points, `inner_pos` and `outer_pos`** - the same two the
+  3-ball Cascade always used, and now with NO exceptions at all (2026-07-27). Every
+  plain throw leaves inner and lands outer, INCLUDING the even-count Cascade's
+  same-hand face, because that is what a fountain looks like (Louis: "it should go to
+  the same hand yes, but not straight up, they should go from the inside throw to the
+  outside position"). The straight vertical columns-style lane that used to carry a
+  second ball on one hand's own road is DELETED, along with `road_lane`,
+  `same_hand_lane_pool`, `toward_center_x` and `Ball.road_lane_idx` - it read as a
+  Columns lane bolted onto a fountain, and it dragged the receiving hand toward centre
+  too, since `hand_target` follows the incoming ball's real `to_pos`. Columns' own
+  lanes (`lane_x`, `assign_lane`) are a separate, older thing and are untouched.
+  **Two measured facts worth not rediscovering.** (1) A taller ARC cannot separate two
+  balls sharing one road: one is ahead and one behind, so their height curves must
+  CROSS somewhere, and at that crossing their separation is exactly the x gap again
+  whatever their arcs. (2) Pulling the extra ball's landing INWARD makes it worse, not
+  better - 6 balls measured 17.9px before and 3.3px after - because two diverging roads
+  simply meet at some other phase. So the pure road is the best geometry available, and
+  the daylight it leaves is just `(outer - inner) / (count/2)`: ~27px at four objects,
+  ~19px at six, ~16px at eight, against a 22px drawn ball. Heavy props at high even
+  counts therefore DO brush through each other for a frame, which is the accepted cost
+  of the road Louis wants.
+- **`prop_hit_scale`: the hitbox is the difficulty knob** (reworked 2026-07-27 with
+  Louis's explicit authorization to use it, "not drawn size"). It used to collapse to
+  6% of drawn size the instant a fourth object appeared, so 4 through 15 objects were
+  all equally and completely collision-proof while 3 was not: a cliff, not a curve.
+  Three shrinks now, each with its own job. (1) A big prop sheds most of its EXTRA bulk
+  over a ball's by four objects (`HIT_EXCESS_KEEP`), so a club's hitbox walks toward a
+  ball's while the club still LOOKS like a club. (2) The whole set eases with the count
+  along the curve the pattern geometry itself follows, `HIT_ROOM/count - HIT_TRIM`
+  (~1/count, because that is how the road's own crowding falls), which keeps roughly
+  the same px of daylight at every count and makes each count read as a little harder
+  than the one below. (3) It scales by the room THIS pattern leaves, `PATTERNS`' new
+  `"room"` field, measured with `--collcheck --latecatch 4 --maxstats`: Columns leaves
+  ~40px where Tennis and Half Shower leave ~2px (both fly an over-the-top road straight
+  through the weave they cross), so no single count-only hitbox can be fair to all six.
+  Half Shower's and Tennis's 0.05 is the honest reading of a pattern whose roads
+  genuinely intersect under real timing - a long-standing residual the game must not
+  punish the player for. Measured after: every prop and every pattern clears at 4 and 6
+  objects under `--latecatch 4`, except Tennis at 5-6, which is that pre-existing
+  zero-room geometry. Three of anything still collides at exactly the size it is drawn:
+  at the beginner count, what you see is what hits.
 - **Patterns, current roster (2026-07-19, second pass):** Cascade, Columns, Half
   Shower, Shower, Reverse Cascade, Tennis - six now, down from eight at the start
   of the day. **Fountain was removed** (Louis: "fountain isn't a pattern, that's
@@ -333,7 +399,10 @@ and deleted. History lives in git.
   `sips --cropToHeightWidth 706 1232 <path>` for a distortion-free 2x Main
   Capsule, `sips -z 353 616 <path>` to the real 616x353; `--glow` owns the
   Glow-in-the-Dark Kit for the session (no save touched) - pair with
-  `--booking --encore blackout` to screenshot it. Windowed
+  `--booking --encore blackout` to screenshot it. `--day <work|rest|prep>` opens the
+  hub with that drawer already open, and `--f9` opens the EXPERIMENTS overlay (both
+  added 2026-07-27: the drawers and the F9 panel had no capture path at all otherwise,
+  since F9 is a real keypress). Windowed
   `--shot <path> --shotat <frame>` captures a frame. `--daily` (2026-07-24,
   unverified - see the Daily Challenge entry above) is used the same way as
   `--booking` but seeds today's venue/Encore instead of rolling; combine with
@@ -353,6 +422,11 @@ and deleted. History lives in git.
   skips the rest of that draw call rather than crashing, which can look like a
   rendering bug rather than the type error it actually is. Check the run's
   stderr for `SCRIPT ERROR`, not just the screenshot, after any risky edit.)
+  **And it is not even reliable for plain SYNTAX** (found 2026-07-27): an edit that
+  left `if x:` with no indented body printed NOTHING from `--check-only` and only
+  showed up as `SCRIPT ERROR: Parse Error` when the game was actually launched. Treat a
+  real run (`godot --path . -- --day --shot ...`, grepping for `SCRIPT ERROR|Parse`) as
+  the parse check that counts.
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
   ignore them all.
 - `--collcheck` (audits mid-air clearance) used to only ever exercise
