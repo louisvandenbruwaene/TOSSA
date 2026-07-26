@@ -737,7 +737,7 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
 # them the default"): the growth-column sheet, card settings, and icon pause are now the
 # shipped look; F9 (debug) toggles each OFF to compare against the classic version.
-var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true}
+var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true, "slot_cards": false}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
@@ -747,6 +747,8 @@ const EXPERIMENT_DEFS := [
 	 "desc": "Redraws Settings as Balatro-style cards, the same language the shop and sheet already use, instead of bare text rows. Same eight rows, same keys, same settings_input - purely how it's drawn."},
 	{"id": "pause_cards", "name": "Pause menu (cards)",
 	 "desc": "Redraws the pause menu's three options as colour-coded cards (calm to resume, warm to step out, red to quit) instead of plain centred text. Same pause_sel, same keys."},
+	{"id": "slot_cards", "name": "Save files (cards)",
+	 "desc": "Redraws the three save slots as tall portrait cards - a cascade motif, the level big, venue and gold below, a crown on a finished save - instead of wide text bars. Same slot_input, same keys."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -3704,10 +3706,12 @@ func credits_key() -> void:
 
 func slots_input(kc: int) -> void:
 	var n := NUM_SLOTS + 1   # the slots, then Back
+	# Left/Right navigate too, so the horizontal slot_cards experiment reads naturally
+	# (the classic bars are vertical); both drive the same menu_sel either way.
 	match kc:
-		KEY_UP, KEY_W:
+		KEY_UP, KEY_W, KEY_LEFT:
 			menu_sel = (menu_sel + n - 1) % n
-		KEY_DOWN, KEY_S:
+		KEY_DOWN, KEY_S, KEY_RIGHT:
 			menu_sel = (menu_sel + 1) % n
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			if menu_sel >= NUM_SLOTS:
@@ -6929,7 +6933,7 @@ func _draw_screen() -> void:
 			draw_menu(font, s)
 			return
 		ST_SLOTS:
-			draw_slots(font, s)
+			draw_slots_screen(font, s)
 			return
 		ST_SETTINGS:
 			draw_settings_screen(font, s)
@@ -9676,6 +9680,91 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 #endregion
 
 #region SLOTS / SETTINGS / GAME-OVER / MISC SCREENS
+func slot_info(i: int) -> Dictionary:
+	# structured per-slot summary for the card variant (draw_slots_cards), so it never has
+	# to parse slot_summary's sentence. Same source of truth (the slot cfg).
+	if not FileAccess.file_exists(slot_path(i)):
+		return {"exists": false}
+	var cf := ConfigFile.new()
+	if cf.load(slot_path(i)) != OK:
+		return {"exists": false}
+	var rep := int(cf.get_value("stats", "reputation", 0))
+	return {
+		"exists": true,
+		"level": int(cf.get_value("prog", "level", 1)),
+		"gold": int(cf.get_value("stats", "money", START_GOLD)),
+		"venue": String(venue_data(venue_index_of(rep))["name"]),
+		"won": bool(cf.get_value("prog", "won", false)),
+	}
+
+
+func draw_slots_screen(font: Font, s: Vector2) -> void:
+	# routes to the card variant or the classic bars - the slot_cards EXPERIMENT (F9).
+	# Both share menu_sel / slot_input untouched, exactly like draw_settings_screen.
+	if experiments.get("slot_cards", false):
+		draw_slots_cards(font, s)
+	else:
+		draw_slots(font, s)
+
+
+func draw_slots_cards(font: Font, s: Vector2) -> void:
+	# the save files as three tall portrait cards (EXPERIMENTS: slot_cards): a cascade
+	# motif up top, the level big, venue and gold below, a crown on a finished save.
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.66))
+	draw_string(title_font(), Vector2(0, s.y * 0.15), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
+	draw_ornament(s.x * 0.5, s.y * 0.15 + 40.0, 200.0, Color(0.82, 0.62, 0.34, 0.85))
+
+	var gap := 26.0
+	var cw := 262.0
+	var ch := 320.0
+	var total := cw * float(NUM_SLOTS) + gap * float(NUM_SLOTS - 1)
+	var sx := s.x * 0.5 - total * 0.5
+	var cy := s.y * 0.30
+	for i in NUM_SLOTS:
+		var sel := i == menu_sel
+		var info := slot_info(i)
+		var exists := bool(info.get("exists", false))
+		var crowned := exists and bool(info.get("won", false))
+		var cx := sx + float(i) * (cw + gap)
+		var accent := Color(1.0, 0.82, 0.42) if crowned else (Color(0.9, 0.62, 0.36) if exists else Color(0.55, 0.5, 0.48))
+		var fillc := Color(accent.r * 0.16, accent.g * 0.15, accent.b * 0.14, 0.95) if sel else Color(0.10, 0.07, 0.085, 0.9)
+		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(accent.r, accent.g, accent.b, 0.9 if sel else 0.32), 2.0 if sel else 1.0, 14.0, 16.0, 0.06 if sel else 0.0)
+		# a small three-ball cascade motif as the card's art (a crown for a finished save)
+		var mc := Vector2(cx + cw * 0.5, cy + 74.0)
+		if crowned:
+			var cwn := PackedVector2Array([mc + Vector2(-24, 10), mc + Vector2(-24, -10), mc + Vector2(-10, 2), mc + Vector2(0, -16), mc + Vector2(10, 2), mc + Vector2(24, -10), mc + Vector2(24, 10)])
+			draw_colored_polygon(cwn, Color(1.0, 0.84, 0.4))
+		else:
+			var arc_cols := [Color(0.95, 0.8, 0.4), Color(0.9, 0.45, 0.4), Color(0.5, 0.78, 0.95)]
+			for j in 3:
+				var t := float(j) / 2.0
+				var bp := mc + Vector2(lerpf(-30.0, 30.0, t), -18.0 * sin(t * PI))
+				draw_circle(bp, 9.0, Color(arc_cols[j].r, arc_cols[j].g, arc_cols[j].b, 0.95 if exists else 0.4))
+		var tcol := Color(1.0, 0.9, 0.6) if sel else (accent if exists else Color(0.7, 0.64, 0.58))
+		draw_string(title_font(), Vector2(cx, cy + 132.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, cw, 22, tcol)
+		if exists:
+			draw_string(title_font(), Vector2(cx, cy + 186.0), "Lv %d" % int(info["level"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 34, Color(1.0, 0.95, 0.82))
+			draw_string(font, Vector2(cx, cy + 214.0), String(info["venue"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(0.84, 0.78, 0.68))
+			draw_string(font, Vector2(cx, cy + 238.0), "%s gold" % commafy(int(info["gold"])), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(1.0, 0.86, 0.45))
+			if crowned:
+				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.4))
+			draw_string(font, Vector2(cx, cy + ch - 18.0), "[X] delete", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(0.88, 0.55, 0.5) if sel else Color(0.7, 0.5, 0.47, 0.7))
+		else:
+			draw_string(font, Vector2(cx, cy + 190.0), "empty", HORIZONTAL_ALIGNMENT_CENTER, cw, 18, Color(0.7, 0.64, 0.58))
+			draw_string(font, Vector2(cx, cy + 214.0), "start a new climb", HORIZONTAL_ALIGNMENT_CENTER, cw, 13, Color(0.6, 0.56, 0.5, 0.85))
+
+	var by := cy + ch + 30.0
+	var bsel := menu_sel == NUM_SLOTS
+	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	var sfoot := "Left / Right    A to play    X to delete    B to go back" if pad_active() else "Left / Right    Enter to play    X to delete    Esc to go back"
+	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
 func draw_slots(font: Font, s: Vector2) -> void:
 	view_venue = 2
 	draw_backdrop(s)
