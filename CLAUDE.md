@@ -74,11 +74,12 @@ and deleted. History lives in git.
   goals, score, best streak) is copied to the OS clipboard immediately and then shown
   as the day-hub's transient message on return from the results card. `--daily` (see
   Verification workflow) jumps a headless run straight into today's seeded act.
-  **This whole entry was written and coded by Claude in a session with no Godot binary
-  available to run the parse-check, `--daily --demo --booking`, or an actual playtest
-  - none of it has been verified. Run the standard workflow below (parse-check first,
-  then `--daily --demo --booking`, then a real hands-on pass over a couple of
-  calendar-seeded venues) before trusting any of this description or the code behind it.**
+  **PARTLY VERIFIED (2026-07-26):** parse-check passes, and `--daily --demo --booking`
+  resolves a whole seeded act end to end with no script error (prints a normal `ACT ...`
+  line - venue seeded off the date, goals/pay/rep/records all fire). The error-scan
+  across day/results/booking/daily also came up clean. What is still NOT done is a real
+  HANDS-ON human pass over a couple of calendar-seeded venues and a check that the shared
+  result line actually lands on the clipboard - do that before calling it shipping-ready.
 - **EXPERIMENTS panel** (2026-07-25, **UNVERIFIED**): F9, from anywhere, opens a small
   debug-only overlay (`debug_panel_open`, `draw_debug_panel`) listing named toggles
   (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an
@@ -106,11 +107,13 @@ and deleted. History lives in git.
   instead of just a bigger number. Endurance and Speed gate no skill directly, so
   their branches get three even milestones instead, purely to keep all four branches
   looking alike - the real value is still exactly what the classic sheet shows.
-  **Written and coded by Claude in a session with no Godot binary - the layout
-  numbers were sanity-checked by hand (an earlier trig-fan version was caught and
-  replaced with fixed lanes specifically because the math sent two branches off the
-  panel), but nothing has actually been drawn on screen. Toggle it on via F9 and look
-  at it before trusting the geometry.**
+  **VERIFIED ON SCREEN (2026-07-26)** and one real layout bug fixed: nodes were placed
+  purely proportionally (`value / cap`), so Columns (Accuracy 8) and Half Shower (12),
+  both a sliver of the 250 cap, landed ~12px apart and their ~120px labels overprinted
+  ("Columns" reading as "Columns:ower" over Half Shower's tail). Fixed with a minimum
+  centre-to-centre gap in `draw_talent_tree` (proportional look kept where there is room,
+  legibility forced where there is not, never pushed past the cap node). Re-screenshotted
+  clean. The lanes-not-trig geometry holds; still worth a hands-on point-spend pass.
 - **SETTINGS (cards) and PAUSE (cards)** (2026-07-26, **UNVERIFIED**, behind the
   `settings_cards` and `pause_cards` experiments, both off by default): two more
   EXPERIMENTS-panel alternates, same shape as the talent tree - `draw_settings_screen`
@@ -119,14 +122,35 @@ and deleted. History lives in git.
   game (bare `draw_string` rows, no card box at all, unlike the shop/sheet/slots screens
   that already use the Balatro-card look) - the alternate gives it the same `hud_card`/
   `draw_meter`/toggle-plate language those screens already established, one card per
-  row, same eight rows and the same `settings_input` untouched. Pause got the same
+  row, the same rows and the same `settings_input` untouched. Pause got the same
   treatment for its three options, colour-coded by what each one actually does (calm
   green to resume, warm amber to step out, warning red to quit) instead of plain
   centred text. Neither touches its screen's input handling at all - `settings_input`
-  (`menu_sel` 0..7, fixed row meanings) and `pause_activate` (`pause_sel` 0..2) are
-  exactly what they were; only the drawing differs. **Unverified, same caveat as the
-  talent tree: no Godot binary in this session, so nothing has actually been drawn on
-  screen. Toggle both on via F9 and look before trusting the geometry or the colours.**
+  and `pause_activate` (`pause_sel` 0..2) are exactly what they were; only the drawing
+  differs. **VERIFIED ON SCREEN (2026-07-26):** pause-cards screenshotted clean; the
+  settings row list was re-synced when the Reduce-motion row was added below - both
+  `draw_settings` AND `draw_settings_cards` now carry the SAME nine rows in the SAME
+  order `settings_input` drives (`menu_sel` 0..8), so a row added to one must be added
+  to the other or the cards view's selection silently desyncs from what it toggles.
+- **Professionalism pass (2026-07-26, all VERIFIED on screen):** five small
+  legibility/accessibility wins from a review, none touching the sim or balance.
+  (1) **Reduce Motion** setting (`reduce_motion`, persisted, a Settings row in both
+  the classic and cards views): suppresses screen shake, cuts every hit-stop `freeze`
+  to a single tick, and halves particle bursts at the `spawn_parts` choke point. It
+  deliberately does NOT touch slow-mo - that stretches the catch window, so it is a
+  gameplay aid, not a flourish. (2) **Skills gate badges name the real blocker:**
+  `skill_gate_badge` shows the FIRST unmet axis (e.g. "Acc 8" for Columns, "Str 10"
+  for Overthrow) instead of always the level - a level-9 player no longer sees "Lv 4+"
+  on a wall they cleared five levels ago. (3) **Venue-picker hint:** the day hub's
+  footer gains a "Left/Right (Dpad) stage" hint, but ONLY while PERFORM is the selected
+  row (the one row where those keys do anything) - the `< venue >` arrows were the only
+  cue before. (4) **Cash-in shows the gamble:** the goal bar reads "risking N" (score
+  above the last banked goal) so the push-your-luck choice is legible; the old "every
+  point is yours" was wrong, since a collapse strips back to the last goal even after
+  all three. (5) **Coaching line on a survived act** (`coach_text`): the same generosity
+  `fail_text` gives a lost night, extended to a won one - one honest line drawn from the
+  night's real numbers (drops resetting the streak, or the load being the next rung),
+  in the results card's closing-word slot.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
