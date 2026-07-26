@@ -781,8 +781,9 @@ var remap_col := 0        # 0 = keyboard column has focus, 1 = gamepad column (T
 var pad_remap_sel := 0    # cursor on the controls screen's gamepad column
 var _confirm_id := ""     # the purchase awaiting its second, confirming press
 var _confirm_ms := 0
-var shop_msg := ""        # transient warning line inside the shop panel
-var shop_msg_ms := 0
+var shop_msg := ""        # transient line inside the shop panel (a warning, or the
+var shop_msg_ms := 0      # receipt for a set bought in one press)
+var shop_msg_warn := true # false styles that line as news rather than a problem
 var shop_buy_ms := 0      # when gold last changed hands, so the purse can flash
 
 # --- day-loop state (persisted per slot) ---------------------------------------
@@ -1198,6 +1199,8 @@ func _ready() -> void:
 						encore = ek2
 		game_state = ST_ESTABLISH
 		cine_tick = 0
+	if ua.has("--f9"):                # dev: open the EXPERIMENTS overlay for a screenshot
+		debug_panel_open = true       # (it is normally F9-only, so it had no capture path)
 	if ua.has("--credits"):           # dev: jump straight to the credits roll for a screenshot
 		game_state = ST_CREDITS
 		cine_tick = 0
@@ -2548,6 +2551,15 @@ func shop_input(kc: int) -> void:
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
+		KEY_B, KEY_SPACE:
+			# BUY THE SET: enough of the lit prop to field your current count in one
+			# press (gear has no sets, so it just buys the one thing). KEY_SPACE is here
+			# for the pad: X routes to Space outside live play, and nothing else in the
+			# shop claims it - the same trick the save-slot screen uses for delete.
+			if shop_sel < PROPS.size():
+				try_top_up(shop_sel)
+			else:
+				shop_buy_sel()
 		KEY_1:
 			shop_sel = 0
 			try_buy(PROP_BALLS)
@@ -2798,6 +2810,7 @@ func confirm_spend(id: String, cost: int, in_shop: bool) -> bool:
 	if in_shop:
 		shop_msg = wtext
 		shop_msg_ms = now
+		shop_msg_warn = true
 	else:
 		set_day_msg(wtext)
 	play_sfx("late", -8.0)
@@ -2818,6 +2831,42 @@ func try_buy(kind: int) -> void:
 		play_sfx("money", -6.0)
 		if not was and available(kind):
 			offer_prop_tutorial(kind)   # first time you can juggle these: explain them
+
+
+func try_top_up(kind: int) -> void:
+	# BUY THE SET (2026-07-27). To juggle N of a prop you must own N of them, and eggs
+	# break for good, so the shop's real job is usually "get me back to a full set" -
+	# which used to be one Enter press per object, up to fifteen of them, and again
+	# after every egg. This buys the whole shortfall in one press, or a spare set on top
+	# when the set is already fielded, and it stops the moment the purse cannot take the
+	# next one rather than half-failing with a warning.
+	var cost := int(PROPS[kind]["cost"])
+	var want := maxi(num_balls - prop_count[kind], MIN_BALLS if prop_count[kind] == 0 else 0)
+	if want <= 0:
+		want = num_balls   # already fielded: top up a spare set for the drops to come
+	var can := clampi(int(floor(float(money) / float(maxi(cost, 1)))), 0, want)
+	if can <= 0:
+		shop_msg = "not enough gold for even one"
+		shop_msg_ms = int(Time.get_ticks_msec())
+		shop_msg_warn = true
+		play_sfx("whiff", -10.0)
+		return
+	# one confirmation for the whole basket, not one per item
+	if not confirm_spend("set%d" % kind, cost * can, true):
+		return
+	var was := available(kind)
+	money -= cost * can
+	prop_count[kind] += can
+	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -4.0)
+	shop_msg = "%d %s  -  %s gold" % [can, String(PROPS[kind]["name"]).to_lower(), commafy(cost * can)]
+	if can < want:
+		shop_msg += "  (all the purse would take)"
+	shop_msg_ms = int(Time.get_ticks_msec())
+	shop_msg_warn = false
+	if not was and available(kind):
+		offer_prop_tutorial(kind)
 
 
 func offer_prop_tutorial(kind: int) -> void:
@@ -3420,7 +3469,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(bx, by, bw, bh), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
 	var kind_col := Color(1.0, 0.72, 0.4) if tut_id.begins_with("trick_") else (Color(0.65, 0.85, 1.0) if tut_id.begins_with("pattern_") else Color(0.85, 0.75, 0.6))
 	draw_string(font, Vector2(bx, by + 18.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_CENTER, bw, 12, kind_col)
-	draw_string(font, Vector2(bx, by + 42.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw, 20, Color(1.0, 0.9, 0.6))
+	draw_fit_string(font, Vector2(bx, by + 42.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 24.0, 20, Color(1.0, 0.9, 0.6))
 	# the progress line flips to the GOOD JOB state once the goal is met: the step
 	# stays fully playable, and Enter is the player's own "I am done trying" (Louis).
 	# A guided step never says it - it is already flowing on by itself - and a read
@@ -3973,7 +4022,7 @@ func slot_summary(i: int) -> String:
 	var g := int(cf.get_value("stats", "money", START_GOLD))
 	var rep := int(cf.get_value("stats", "reputation", 0))
 	var vn := String(venue_data(venue_index_of(rep))["name"])
-	var line := "Level %d   -   %s   -   %d gold" % [lv, vn, g]
+	var line := "Level %d   -   %s   -   %s gold" % [lv, vn, commafy(g)]
 	if bool(cf.get_value("prog", "won", false)):
 		line += "  -  WORLD'S GREATEST JUGGLER"   # this save has conquered the top stage
 	return line
@@ -8140,11 +8189,41 @@ func fit_text(font: Font, text: String, w: float, size: int) -> String:
 	return "..."
 
 
+func fit_size(font: Font, text: String, w: float, want: int, low: int = 10) -> int:
+	# the largest size from `want` down to `low` at which text fits w. For the places
+	# where shrinking reads better than trimming: a title built by joining two names
+	# ("TORCHES  REVERSE CASCADE"), where an ellipsis would eat one of them.
+	var sz := want
+	while sz > low and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x > w:
+		sz -= 1
+	return sz
+
+
 func draw_fit_string(font: Font, pos: Vector2, text: String, align: int, w: float, size: int, col: Color) -> void:
 	# draw_string, but the text is shortened to fit `w` first instead of being clipped.
 	# Use this for anything whose length is DATA (a venue name, a trick name, a prop
 	# name, a save-slot title) rather than a fixed string the layout was built around.
 	draw_string(font, pos, fit_text(font, text, w, size), align, w, size, col)
+
+
+func draw_wrap_fit(font: Font, text: String, box: Rect2, size: int, col: Color, align := HORIZONTAL_ALIGNMENT_LEFT) -> float:
+	# THE block-text overflow guard, the paragraph half of what fit_text does for one
+	# line: wrap into a BOX and draw only the lines that fit its HEIGHT, marking the
+	# last one when there was more. Use it wherever a description sits above something
+	# else on a card - the shop's gear text used to run straight down through its own
+	# price plate as soon as it wrapped to a second line. Returns the height used.
+	var lines := _wrap_lines(font, text, box.size.x, size)
+	var lh := float(size) + 4.0
+	var room := maxi(1, int(floor((box.size.y + 3.0) / lh)))
+	var shown := mini(lines.size(), room)
+	var y := box.position.y + font.get_ascent(size)
+	for i in shown:
+		var ln := lines[i]
+		if i == room - 1 and lines.size() > room:
+			ln = fit_text(font, ln + " ...", box.size.x, size)
+		draw_string(font, Vector2(box.position.x, y), ln, align, box.size.x, size, col)
+		y += lh
+	return float(shown) * lh
 
 
 func _wrap_lines(font: Font, text: String, w: float, size: int) -> PackedStringArray:
@@ -8351,7 +8430,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if performing and not results_open:
 		# --- the act header: venue, THE ACT, and one dot per goal reached ---
 		hud_card(Rect2(LX, 16, LW, 52))
-		draw_string(font, Vector2(LX + 14, 40), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, gold)
+		draw_fit_string(font, Vector2(LX + 14, 40), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, LW - 80.0, 18, gold)
 		var setline := "THE ACT"
 		if purist:
 			setline += "   PURIST"
@@ -8399,7 +8478,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				bartxt = "all goals cleared  -  risking  %s" % commafy(at_risk)
 			else:
 				bartxt = "next goal  %s      risking  %s" % [commafy(target), commafy(at_risk)]
-		draw_string(font, Vector2(barx, tcard_y + 78), bartxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
+		# outlined, because this label sits ON the meter: a goal NOTCH lands in the middle
+		# of it at most scores and was drawing a white line straight through the lettering
+		# ("first goa|l"). The outline lifts the words off both the notch and the bar fill
+		# without moving them somewhere they read as less attached to the bar.
+		draw_text_shout(font, Vector2(barx, tcard_y + 78), bartxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
 		# the standing offer: from the first goal on, the cash-in is always open
 		if goals_hit >= 1:
 			var pl := 0.7 + 0.3 * sin(float(tick) * 0.14)
@@ -8426,7 +8509,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var edesc := String(ENCORES[encore]["desc"])
 			var elines := _wrap_lines(font, edesc, LW - 28, 11)
 			hud_card(Rect2(LX, 272, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
-			draw_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, ec)
+			draw_fit_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
 			_wrap_text(font, edesc, LX + 14, 312, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
@@ -8633,16 +8716,17 @@ func draw_results(font: Font, s: Vector2) -> void:
 	# by the venue name says WHAT happened, this says what to do about it. Last to
 	# arrive, so it reads as the card's closing word rather than competing with the
 	# count-up. A complete booking has no reason to give (nothing failed).
+	# the slot is the gap between the last row and the footer, and it is drawn as a BOX
+	# so a long line stops inside it instead of running down into the footer
+	var word_box := Rect2(px + 34.0, py + ph - 74.0, pw - 68.0, 36.0)
 	if not complete and String(ft[1]) != "" and age > 74:
-		draw_multiline_string(font, Vector2(px + 34.0, py + ph - 66.0), String(ft[1]),
-			HORIZONTAL_ALIGNMENT_CENTER, pw - 68.0, 12, 2, Color(0.86, 0.72, 0.64, 0.85))
+		draw_wrap_fit(font, String(ft[1]), word_box, 12, Color(0.86, 0.72, 0.64, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
 	elif not set_collapsed and age > 74:
 		# a survived act (all goals, or a chosen bow) gets a coaching line in the same
 		# closing-word slot - what to work on next, drawn from this night's real numbers
 		var coach := coach_text()
 		if coach != "":
-			draw_multiline_string(font, Vector2(px + 34.0, py + ph - 66.0), coach,
-				HORIZONTAL_ALIGNMENT_CENTER, pw - 68.0, 12, 2, Color(0.74, 0.86, 0.72, 0.85))
+			draw_wrap_fit(font, coach, word_box, 12, Color(0.74, 0.86, 0.72, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
 
 	# footer: how to continue, breathing gently once everything is revealed. every
 	# slot in this footer has a real pad button - the pad footer names only
@@ -8743,8 +8827,8 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 			"quit":
 				draw_line(ic + Vector2(-6, -6), ic + Vector2(6, 6), ac, 2.5)
 				draw_line(ic + Vector2(6, -6), ic + Vector2(-6, 6), ac, 2.5)
-		draw_string(font, Vector2(cx + 62.0, cy + 26.0), String(o["name"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 18, Color(1.0, 0.95, 0.85) if sel else Color(0.86, 0.81, 0.74))
-		draw_string(font, Vector2(cx + 62.0, cy + 44.0), String(o["note"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 11, Color(0.76, 0.71, 0.64, 0.85))
+		draw_fit_string(font, Vector2(cx + 62.0, cy + 26.0), String(o["name"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 18, Color(1.0, 0.95, 0.85) if sel else Color(0.86, 0.81, 0.74))
+		draw_fit_string(font, Vector2(cx + 62.0, cy + 44.0), String(o["note"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 11, Color(0.76, 0.71, 0.64, 0.85))
 	var pfoot2 := "up / down  -  A selects  -  B resumes" if pad_active() else "up / down  -  Enter  -  Esc resumes"
 	draw_string(font, Vector2(px, py + ph - 22.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
@@ -8758,7 +8842,8 @@ func draw_debug_panel() -> void:
 	var font := game_font()
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.55))
 	var pw := 560.0
-	var row_h := 68.0
+	var row_h := 80.0   # tall enough for a three-line description at 10pt: the two
+						# longest entries were being trimmed by draw_wrap_fit at 68
 	var ph := 100.0 + row_h * float(EXPERIMENT_DEFS.size())
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
@@ -8776,11 +8861,10 @@ func draw_debug_panel() -> void:
 			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, row_h - 8.0), Color(0.5, 0.8, 1.0, 0.10))
 			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, row_h - 8.0), Color(0.5, 0.8, 1.0, 0.5), false, 1.5)
 		var namecol := Color(1.0, 0.95, 0.8) if sel else Color(0.8, 0.78, 0.72)
-		draw_string(font, Vector2(px + 20.0, ry + 16.0), String(edef["name"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 140.0, 15, namecol)
+		draw_fit_string(font, Vector2(px + 20.0, ry + 16.0), String(edef["name"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 140.0, 15, namecol)
 		var statecol := Color(0.55, 0.95, 0.55) if on else Color(0.7, 0.6, 0.55)
 		draw_string(font, Vector2(px + pw - 100.0, ry + 16.0), "ON" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 15, statecol)
-		draw_multiline_string(font, Vector2(px + 20.0, ry + 34.0), String(edef["desc"]),
-			HORIZONTAL_ALIGNMENT_LEFT, pw - 40.0, 10, 3, Color(0.62, 0.6, 0.58))
+		draw_wrap_fit(font, String(edef["desc"]), Rect2(px + 20.0, ry + 26.0, pw - 40.0, row_h - 34.0), 10, Color(0.62, 0.6, 0.58))
 	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.6, 0.68, 0.72))
 
 
@@ -8803,7 +8887,7 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	var glow := 0.5 + 0.5 * sin(float(tick) * 0.11)
 	draw_rect(Rect2(bx, by, bw, 40.0), Color(0.10, 0.06, 0.08, 0.86 * a))
 	draw_rect(Rect2(bx, by, bw, 40.0), Color(1.0, 0.82, 0.45, (0.34 + 0.28 * glow) * a), false, 1.5)
-	draw_string(font, Vector2(bx, by + 18.0), "NEW SKILL   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw, 16, Color(1.0, 0.88, 0.52, a))
+	draw_fit_string(font, Vector2(bx, by + 18.0), "NEW SKILL   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw - 20.0, 16, Color(1.0, 0.88, 0.52, a))
 	draw_string(font, Vector2(bx, by + 33.0), "how to use it lives in  SKILLS", HORIZONTAL_ALIGNMENT_CENTER, bw, 11, Color(0.82, 0.76, 0.66, 0.85 * a))
 
 
@@ -8881,12 +8965,15 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	var pname := String(PATTERNS[pattern]["name"]).to_upper()
 	var ocol := ball_color(0) if prop_type == PROP_BALLS else prop_color(prop_type)
 	# object name in its own colour, pattern name warm, centred together as the title
+	# the two names are one centred title, so it SHRINKS to fit the card rather than
+	# running out past both edges on the longest pairing (TORCHES + REVERSE CASCADE)
+	var tsz := fit_size(font, oname + "    " + pname, pw - 24.0, 16, 11)
 	var otext := oname + "    "
-	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz).x
+	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz).x
 	var jx := cx - jw * 0.5
-	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, ocol)
-	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.86, 0.76, 0.62))
+	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz, ocol)
+	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz, Color(0.86, 0.76, 0.62))
 	var colw := pw / 3.0
 	var cy := s.y - 26.0
 	var hand_c := Color(0.92, 0.84, 0.7)
@@ -8978,10 +9065,11 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 			# the card's own colour.
 			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
 			draw_rect(Rect2(cx0 - 4.0, y0 - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.5)
-		draw_string(font, Vector2(cx0, y0 + 26.0), String(st[0]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(ac.r, ac.g, ac.b, 0.95))
+		draw_fit_string(font, Vector2(cx0, y0 + 26.0), String(st[0]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(ac.r, ac.g, ac.b, 0.95))
 		draw_string(font, Vector2(cx0, y0 + 78.0), str(int(st[1])), HORIZONTAL_ALIGNMENT_CENTER, cw, 44, Color(1.0, 0.94, 0.76))
-		draw_multiline_string(font, Vector2(cx0 + 12.0, y0 + 108.0), String(st[2]),
-			HORIZONTAL_ALIGNMENT_CENTER, cw - 24.0, 11, 5, Color(0.78, 0.72, 0.64))
+		# bounded by the gap down to the invest plate, so the blurb can never reach it
+		draw_wrap_fit(font, String(st[2]), Rect2(cx0 + 12.0, y0 + 98.0, cw - 24.0, ch - 158.0), 11,
+			Color(0.78, 0.72, 0.64), HORIZONTAL_ALIGNMENT_CENTER)
 		# the invest plate: bright and green when a point can land here, quiet otherwise
 		var can := points > 0
 		var plate := Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0)
@@ -9269,23 +9357,28 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var cw := (innerw - gap * 5.0) / 6.0
 	var ch := 272.0
 	var y0 := py + 110.0
-	var sel_a := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
 	for i in PROPS.size():   # balls included: every prop is bought stock now (Louis)
+		var sel := i == shop_sel
+		# the SELECTED card lifts off the row and lights its own border, instead of the
+		# old flashing rectangle drawn just outside it: a raised card is how every other
+		# card screen in the game shows the cursor now, and it never fights the artwork
 		var cx0 := tx + float(i) * (cw + gap)
+		var cy0 := y0 - (6.0 if sel else 0.0)
 		var pcol := prop_color(i)
 		var cost := int(PROPS[i]["cost"])
 		var afford := money >= cost
-		hud_card(Rect2(cx0, y0, cw, ch), Color(pcol.r, pcol.g, pcol.b, 0.45))
-		if i == shop_sel:
-			# the card cursor (see shop_input): Enter / pad A buys the lit card
-			draw_rect(Rect2(cx0 - 4.0, y0 - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
+		if sel:
+			soft_card(Rect2(cx0, cy0, cw, ch), Color(pcol.r * 0.17, pcol.g * 0.17, pcol.b * 0.17, 0.96),
+				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
+		else:
+			hud_card(Rect2(cx0, cy0, cw, ch), Color(pcol.r, pcol.g, pcol.b, 0.45))
 		var own := prop_count[i]
 		var oc := Color(0.75, 0.9, 0.72) if own > 0 else Color(0.6, 0.55, 0.5, 0.8)
-		draw_string(font, Vector2(cx0 + 12.0, y0 + 24.0), "own %d" % own, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, oc)
+		draw_string(font, Vector2(cx0 + 12.0, cy0 + 24.0), "own %d" % own, HORIZONTAL_ALIGNMENT_LEFT, cw - 70.0, 13, oc)
 		if available(i):
-			draw_string(font, Vector2(cx0, y0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
-		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, y0 + 92.0), 2.6)
-		draw_string(font, Vector2(cx0, y0 + 156.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
+			draw_string(font, Vector2(cx0, cy0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
+		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, cy0 + 88.0), 2.6)
+		draw_fit_string(font, Vector2(cx0, cy0 + 148.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
 		var req := int(PROPS[i]["req"])
 		var reqline := "weight %d  ·  light throw" % int(PROPS[i]["weight"]) if req == 0 else "weight %d  ·  Str %d" % [int(PROPS[i]["weight"]), req]
 		if i == PROP_EGGS:
@@ -9293,11 +9386,21 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		var reqcol := Color(0.75, 0.68, 0.6)
 		if req > strength:
 			reqcol = Color(0.95, 0.6, 0.45)   # under-strength: flag it before the buy
-		draw_string(font, Vector2(cx0, y0 + 178.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
+		draw_string(font, Vector2(cx0, cy0 + 168.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
 		# the REWARD, quantified: this prop's own score multiplier, so the harder-pays-more
 		# trade is legible at the point of choice (context bonuses stack on top, in play)
-		draw_string(font, Vector2(cx0, y0 + 198.0), "pays  ×%.2f" % float(PROPS[i]["smult"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
-		draw_price_plate(font, Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
+		draw_string(font, Vector2(cx0, cy0 + 186.0), "pays  ×%.2f" % float(PROPS[i]["smult"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
+		# THE SET: you need one prop per object you juggle, so what actually matters at
+		# the counter is stock against YOUR count - not the raw number owned. A short
+		# meter and one line say whether tonight's routine is fielded, and the top-up key
+		# below buys the whole shortfall in one press.
+		var need := num_balls
+		var setf := clampf(float(own) / float(maxi(need, 1)), 0.0, 1.0)
+		var setc := Color(0.55, 0.85, 0.55) if own >= need else Color(0.95, 0.68, 0.35)
+		draw_meter(cx0 + 14.0, cy0 + 194.0, cw - 28.0, 8.0, setf, setc)
+		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
+		draw_string(font, Vector2(cx0, cy0 + 216.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
+		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 46.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
 
 	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
 	# fourth for the Energy-Drink Helmet - same narrow vertical template the
@@ -9323,11 +9426,14 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var gear_cost := [GLASSES_COST, PIE_COST, GLOW_KIT_COST,
 		ENERGY_DRINK_BATCH_COST if has_helmet else ENERGY_HELMET_COST]
 	for i in 4:
+		var gsel := shop_sel == 6 + i
 		var cx0 := tx + float(i) * (gw + gap)
 		var cc: Color = gear_accent[i]
-		hud_card(Rect2(cx0, gy0, gw, gh), Color(cc.r, cc.g, cc.b, 0.4))
-		if shop_sel == 6 + i:
-			draw_rect(Rect2(cx0 - 4.0, gy0 - 4.0, gw + 8.0, gh + 8.0), Color(1.0, 0.86, 0.45, sel_a), false, 2.5)
+		if gsel:
+			soft_card(Rect2(cx0, gy0, gw, gh), Color(cc.r * 0.17, cc.g * 0.17, cc.b * 0.17, 0.96),
+				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
+		else:
+			hud_card(Rect2(cx0, gy0, gw, gh), Color(cc.r, cc.g, cc.b, 0.4))
 		var icx := cx0 + gw * 0.5
 		match i:
 			0:   # Glasses: two lens arcs and a bridge
@@ -9351,15 +9457,21 @@ func draw_shop(font: Font, s: Vector2) -> void:
 				if has_helmet:
 					draw_rect(Rect2(icx - 5.0, gy0 + 8.0, 10.0, 15.0), Color(0.95, 0.55, 0.25, 0.95))
 					draw_rect(Rect2(icx - 5.0, gy0 + 8.0, 10.0, 4.0), Color(0.85, 0.85, 0.85, 0.95))
-		draw_string(font, Vector2(cx0, gy0 + 74.0), gear_names[i], HORIZONTAL_ALIGNMENT_CENTER, gw, 17, Color(1.0, 0.88, 0.6))
-		_wrap_text(font, gear_desc[i], cx0 + 10.0, gy0 + 94.0, gw - 20.0, 11, Color(0.75, 0.68, 0.6))
-		if bool(gear_owned[i]):
-			draw_string(font, Vector2(cx0, gy0 + gh - 30.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, 16, Color(0.6, 0.9, 0.6))
+		draw_fit_string(font, Vector2(cx0, gy0 + 70.0), gear_names[i], HORIZONTAL_ALIGNMENT_CENTER, gw - 16.0, 17, Color(1.0, 0.88, 0.6))
+		# the description gets a BOX, not a start point: whatever it says, it now stops
+		# above the price plate instead of wrapping down through it (which is what the
+		# two-line Energy Drinks text did)
+		var owned := bool(gear_owned[i])
+		var plate_top := gy0 + gh - (36.0 if owned else 46.0)
+		draw_wrap_fit(font, gear_desc[i], Rect2(cx0 + 10.0, gy0 + 78.0, gw - 20.0, plate_top - gy0 - 82.0), 11,
+			Color(0.75, 0.68, 0.6), HORIZONTAL_ALIGNMENT_CENTER)
+		if owned:
+			draw_string(font, Vector2(cx0, gy0 + gh - 22.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, 16, Color(0.6, 0.9, 0.6))
 		else:
 			if int(gear_count[i]) > 0:
 				draw_string(font, Vector2(cx0, gy0 + 18.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
 			var gkey := str(7 + i) if i < 3 else "0"
-			draw_price_plate(font, Rect2(cx0 + 12.0, gy0 + gh - 46.0, gw - 24.0, 38.0), gkey, "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
+			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
 	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
@@ -9368,11 +9480,13 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# and just as transient, so the two never fight for the same row.
 	var strip_y := py + ph - 92.0
 	var strip := Rect2(px + 30.0, strip_y, pw - 60.0, 40.0)
-	var warn := shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000
+	var noted := shop_msg != "" and int(Time.get_ticks_msec()) - shop_msg_ms < 5000
+	var warn := noted and shop_msg_warn
 	soft_card(strip, Color(0.10, 0.05, 0.05, 0.85) if warn else Color(0.08, 0.05, 0.06, 0.82),
 		Color(1.0, 0.5, 0.4, 0.5) if warn else Color(0.9, 0.6, 0.35, 0.3), 1.0, 9.0, 8.0)
-	if warn:
-		draw_string(font, Vector2(strip.position.x, strip_y + 25.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, strip.size.x, 13, Color(1.0, 0.66, 0.5))
+	if noted:
+		draw_string(font, Vector2(strip.position.x, strip_y + 25.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, strip.size.x, 13,
+			Color(1.0, 0.66, 0.5) if warn else Color(0.72, 0.95, 0.68))
 	else:
 		var detail := ""
 		var detail_head := ""
@@ -9391,10 +9505,10 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# ---------------- footer: the keys ----------------
 	if pad_active():
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
-			[[["Stick"], "choose"], [k_finish(), "buy"], [k_sheet(), "leave"]])
+			[[["Stick"], "choose"], [k_finish(), "buy one"], [["X"], "buy the set"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
-			[[["Left", "Right"], "choose"], [["Enter"], "buy"], [["1", "0"], "quick buy"], [["Tab"], "leave"]])
+			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "buy the set"], [["1", "0"], "quick buy"], [["Tab"], "leave"]])
 
 
 #endregion
@@ -9409,7 +9523,7 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.10))
 		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.35), false, 1.0)
 	var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.86, 0.8, 0.68) if unlocked else Color(0.55, 0.5, 0.46))
-	draw_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, nc)
+	draw_fit_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, w - 100.0, 17, nc)
 	if unlocked:
 		draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
 	else:
@@ -9640,15 +9754,17 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# used to clip mid-word against a box sized for the shorter case. It is anchored
 	# to its BOTTOM (a fixed gap above the footer) and grows upward, so a taller box
 	# never encroaches on the footer no matter how much "how" needed to wrap.
-	var how_h := font.get_multiline_string_size(how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2).y
-	var desc_h := font.get_multiline_string_size(desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2).y
+	# measured with NO line cap (-1): a 2-line cap silently dropped a third line on the
+	# longest entries, which is the same clip the comment above says was fixed once
+	var how_h := font.get_multiline_string_size(how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1).y
+	var desc_h := font.get_multiline_string_size(desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1).y
 	var box_h := 30.0 + how_h + 8.0 + desc_h + 12.0
 	var box_bottom := py + ph - 44.0
 	var box_top := box_bottom - box_h
 	var dy := box_top + 6.0
 	draw_rect(Rect2(px + 30.0, box_top, pw - 60.0, box_h), Color(0.08, 0.05, 0.06, 0.7))
 	draw_rect(Rect2(px + 30.0, box_top, pw - 60.0, box_h), Color(0.9, 0.6, 0.35, 0.28), false, 1.0)
-	draw_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
+	draw_fit_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, pw - 560.0 if not is_unlocked else pw - 92.0, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
 	if not is_unlocked:
 		# the full requirement, right-aligned so a long ask (level + stat + stage)
 		# never collides with the name on the left
@@ -9656,8 +9772,8 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# "how" (a pattern's own version can run to two sentences) wraps instead of clipping mid-word,
 	# and "desc" is placed BELOW however tall "how" actually rendered, not at a fixed
 	# offset, so the two never overlap regardless of how much "how" needed to wrap
-	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2, Color(0.9, 0.82, 0.66))
-	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0 + how_h + 8.0), desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, 2, Color(0.78, 0.72, 0.64))
+	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1, Color(0.9, 0.82, 0.66))
+	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0 + how_h + 8.0), desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1, Color(0.78, 0.72, 0.64))
 
 	var foot := "arrows browse      Enter  practise this skill      Esc to leave"
 	if not is_unlocked:
@@ -10147,7 +10263,7 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 		draw_string(title_font(), Vector2(cx, cy + 132.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, cw, 22, tcol)
 		if exists:
 			draw_string(title_font(), Vector2(cx, cy + 186.0), "Lv %d" % int(info["level"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 34, Color(1.0, 0.95, 0.82))
-			draw_string(font, Vector2(cx, cy + 214.0), String(info["venue"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(0.84, 0.78, 0.68))
+			draw_fit_string(font, Vector2(cx, cy + 214.0), String(info["venue"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(0.84, 0.78, 0.68))
 			draw_string(font, Vector2(cx, cy + 238.0), "%s gold" % commafy(int(info["gold"])), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(1.0, 0.86, 0.45))
 			if crowned:
 				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.4))
@@ -10314,7 +10430,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 			var ny := y + (card_h * 0.5 - 4.0 if has_note else card_h * 0.5 + 6.0)
 			draw_string(font, Vector2(px + 24.0, ny), nm, HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 17, Color(1.0, 0.95, 0.82) if sel else Color(0.86, 0.81, 0.73))
 			if has_note:
-				draw_string(font, Vector2(px + 24.0, ny + 15.0), String(r["note"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 11, Color(0.72, 0.66, 0.6, 0.9))
+				draw_fit_string(font, Vector2(px + 24.0, ny + 15.0), String(r["note"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 11, Color(0.72, 0.66, 0.6, 0.9))
 			match String(r["kind"]):
 				"slider":
 					var vol: float = r["val"]
@@ -10425,7 +10541,7 @@ func draw_purist_legend(font: Font, s: Vector2) -> void:
 	for i in best_scores_purist.size():
 		var ry := s.y * 0.40 + float(i) * 30.0
 		var la := clampf(float(cine_tick - 60 - i * 12) / 30.0, 0.0, 1.0)
-		draw_string(font, Vector2(lx, ry), String(venue_data(i)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 240.0, 15, Color(0.85, 0.8, 0.9, la))
+		draw_fit_string(font, Vector2(lx, ry), String(venue_data(i)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 240.0, 15, Color(0.85, 0.8, 0.9, la))
 		draw_string(font, Vector2(lx + 240.0, ry), commafy(int(best_scores_purist[i])), HORIZONTAL_ALIGNMENT_RIGHT, 100.0, 15, Color(0.86, 0.78, 1.0, la))
 	if cine_tick > 90:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
@@ -10489,7 +10605,13 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	# left: the venue record boards, assisted and Purist
 	var lx := s.x * 0.5 - 470.0
 	var ly := s.y * 0.30
-	hud_panel(Rect2(lx - 20.0, ly - 34.0, 460.0, 300.0))
+	# BOTH panels are sized from their own row counts and then matched to the taller of
+	# the two, rather than a fixed 300px: the venue board grew a seventh row (The
+	# Midnight Show) and the career list grows a ninth once mastery starts paying, and
+	# each was drawing its last row straight through the bottom of its own card.
+	var career_rows := 9 if int(career.get("mastery", 0)) > 0 else 8
+	var panel_h := maxf(88.0 + 6.0 * 38.0, 88.0 + float(career_rows - 1) * 30.0)
+	hud_panel(Rect2(lx - 20.0, ly - 34.0, 460.0, panel_h))
 	draw_string(font, Vector2(lx, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
 	draw_string(font, Vector2(lx + 230.0, ly), "best", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.8, 0.74, 0.66))
 	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.82, 0.72, 0.85))
@@ -10503,25 +10625,25 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(lx, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66) if reached else Color(0.5, 0.46, 0.42))
 		var b := best_scores[i]
 		var p := best_scores_purist[i]
-		draw_string(font, Vector2(lx + 230.0, ry), str(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
-		draw_string(font, Vector2(lx + 330.0, ry), str(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 230.0, ry), commafy(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 330.0, ry), commafy(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
 
 	# right: the lifetime numbers
 	var rx := s.x * 0.5 + 30.0
-	hud_panel(Rect2(rx - 20.0, ly - 34.0, 460.0, 300.0))
+	hud_panel(Rect2(rx - 20.0, ly - 34.0, 460.0, panel_h))
 	draw_string(font, Vector2(rx, ly), "THE CAREER SO FAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
 	var lines := [
 		["days on the road", str(int(career["days"]))],
 		["performances", str(int(career["perfs"]))],
 		["practice sessions", str(int(career["practices"]))],
-		["catches  /  drops", "%d  /  %d" % [int(career["catches"]), int(career["drops"])]],
-		["longest streak ever", str(int(career["best_streak"]))],
-		["highest score anywhere", str(int(career["best_score"]))],
-		["tricks landed", str(int(career["tricks"]))],
-		["gold earned on stage", str(int(career["gold_earned"]))],
+		["catches  /  drops", "%s  /  %s" % [commafy(int(career["catches"])), commafy(int(career["drops"]))]],
+		["longest streak ever", commafy(int(career["best_streak"]))],
+		["highest score anywhere", commafy(int(career["best_score"]))],
+		["tricks landed", commafy(int(career["tricks"]))],
+		["gold earned on stage", commafy(int(career["gold_earned"]))],
 	]
 	if int(career.get("mastery", 0)) > 0:
-		lines.append(["mastery points turned to gold", str(int(career["mastery"]))])
+		lines.append(["mastery points turned to gold", commafy(int(career["mastery"]))])
 	for i in lines.size():
 		var ry := ly + 34.0 + float(i) * 30.0
 		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66))
@@ -11005,7 +11127,7 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	if booking_active:
 		var has_enc := encore >= 0 and encore < ENCORES.size()
 		var bw := 400.0
-		var bh := 130.0 if has_enc else 76.0
+		var bh := 146.0 if has_enc else 76.0
 		var bx := s.x - 18.0 - bw
 		var by2 := s.y - 88.0 - bh
 		hud_panel(Rect2(bx, by2, bw, bh))
@@ -11016,9 +11138,9 @@ func draw_establish(font: Font, s: Vector2) -> void:
 		if has_enc:
 			var enc: Dictionary = ENCORES[encore]
 			var ec := Color(1.0, 0.55, 0.4)
-			draw_string(font, Vector2(bx + 16.0, by2 + 82.0), "TONIGHT'S CHALLENGE:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
-			draw_multiline_string(font, Vector2(bx + 16.0, by2 + 102.0), String(enc["desc"]),
-				HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 11, 2, Color(0.9, 0.82, 0.72, 0.85 * tagA))
+			draw_fit_string(font, Vector2(bx + 16.0, by2 + 82.0), "TONIGHT'S CHALLENGE:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
+			draw_wrap_fit(font, String(enc["desc"]), Rect2(bx + 16.0, by2 + 92.0, bw - 32.0, bh - 100.0), 11,
+				Color(0.9, 0.82, 0.72, 0.85 * tagA))
 
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
 	draw_string(font, Vector2(0, s.y - 34.0), "press any key to begin", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
