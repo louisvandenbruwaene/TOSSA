@@ -133,13 +133,14 @@ and deleted. History lives in git.
   instead of just a bigger number. Endurance and Speed gate no skill directly, so
   their branches get three even milestones instead, purely to keep all four branches
   looking alike - the real value is still exactly what the classic sheet shows.
-  **VERIFIED ON SCREEN (2026-07-26)** and one real layout bug fixed: nodes were placed
-  purely proportionally (`value / cap`), so Columns (Accuracy 8) and Half Shower (12),
-  both a sliver of the 250 cap, landed ~12px apart and their ~120px labels overprinted
-  ("Columns" reading as "Columns:ower" over Half Shower's tail). Fixed with a minimum
-  centre-to-centre gap in `draw_talent_tree` (proportional look kept where there is room,
-  legibility forced where there is not, never pushed past the cap node). Re-screenshotted
-  clean. The lanes-not-trig geometry holds; still worth a hands-on point-spend pass.
+  **FULLY REDESIGNED 2026-07-26 (Louis: the old node-graph "looked horrible").** The
+  sparse horizontal wiring diagram is gone. `draw_talent_tree` is now four vertical
+  GROWTH COLUMNS: each stat is a tall rounded card whose track fills from the bottom up
+  to value/cap, milestone pips sit at the real thresholds (the next one pulsing), the
+  value is big, what the next point buys is spelled out (a real skill for acc/str, the
+  live effect for end/spd), and an invest plate sits at the foot. Active branch tinted +
+  brighter-bordered. Same sheet_sel/invest()/caps. Verified on screen. It now reads as a
+  genuine upgrade over the classic four-card sheet, not a downgrade.
 - **SETTINGS (cards) and PAUSE (cards)** (2026-07-26, **UNVERIFIED**, behind the
   `settings_cards` and `pause_cards` experiments, both off by default): two more
   EXPERIMENTS-panel alternates, same shape as the talent tree - `draw_settings_screen`
@@ -153,11 +154,14 @@ and deleted. History lives in git.
   green to resume, warm amber to step out, warning red to quit) instead of plain
   centred text. Neither touches its screen's input handling at all - `settings_input`
   and `pause_activate` (`pause_sel` 0..2) are exactly what they were; only the drawing
-  differs. **VERIFIED ON SCREEN (2026-07-26):** pause-cards screenshotted clean; the
-  settings row list was re-synced when the Reduce-motion row was added below - both
-  `draw_settings` AND `draw_settings_cards` now carry the SAME nine rows in the SAME
-  order `settings_input` drives (`menu_sel` 0..8), so a row added to one must be added
-  to the other or the cards view's selection silently desyncs from what it toggles.
+  differs. **FULLY REWORKED + VERIFIED 2026-07-26 (Louis: both "looked horrible").**
+  Settings cards are grouped into AUDIO / GAME FEEL / MORE sections with headers, a
+  coloured accent tab per row, title-over-subtitle spacing, and real sliding PILL toggles
+  (`draw_pill_toggle`) instead of ON/OFF plates. Pause cards get an icon disc per option
+  (play / back-arrow / X) and a soft-glow selected state. IMPORTANT invariant: both
+  `draw_settings` AND `draw_settings_cards` must carry the SAME nine rows in the SAME
+  order `settings_input` drives (`menu_sel` 0..8) - a row added to one must be added to
+  the other or the cards view's selection silently desyncs from what it toggles.
 - **Professionalism pass (2026-07-26, all VERIFIED on screen):** five small
   legibility/accessibility wins from a review, none touching the sim or balance.
   (1) **Reduce Motion** setting (`reduce_motion`, persisted, a Settings row in both
