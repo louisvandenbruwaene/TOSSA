@@ -886,6 +886,7 @@ var _duck := 0.0                    # transient music dip on a drop, decays
 # and humane with clear numerals. The single .ttf in fonts/ is the one deliberate
 # exception to the code-only art rule. Falls back to the engine font if missing.
 var ui_font: Font = null
+var title_font_v: Font = null   # a heavier cut of Nunito for headings (see setup_font)
 
 # previous-frame button states, for edge detection
 var _prev := {"lc": false, "lt": false, "rc": false, "rt": false, "trick": false}
@@ -957,10 +958,21 @@ func setup_font() -> void:
 		fv.base_font = base
 		fv.variation_opentype = {"wght": 600}
 		ui_font = fv
+		# a heavier cut of the SAME variable file for headings, so titles and big numbers
+		# carry real weight against the semibold body - typographic hierarchy for free,
+		# no second asset. Used via title_font() on screen titles and the biggest numerals.
+		var tv := FontVariation.new()
+		tv.base_font = base
+		tv.variation_opentype = {"wght": 800}
+		title_font_v = tv
 
 
 func game_font() -> Font:
 	return ui_font if ui_font != null else ThemeDB.fallback_font
+
+
+func title_font() -> Font:
+	return title_font_v if title_font_v != null else game_font()
 
 
 func _ready() -> void:
@@ -8062,7 +8074,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var tcard_y := 78.0
 		hud_card(Rect2(LX, tcard_y, LW, 108), Color(1.0, 0.82, 0.4, 0.4))
 		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(LX + 14, tcard_y + 52), commafy(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.94, 0.76))
+		draw_string(title_font(), Vector2(LX + 14, tcard_y + 52), commafy(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1.0, 0.94, 0.76))
 		# the record chase, top-right of the card
 		if run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
 			if record_broken:
@@ -8270,7 +8282,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var htag := "THE ACT  -  ALL THREE GOALS" if complete else ("THE ACT  -  %d of %d goals" % [goals_hit, NUM_GOALS])
 	var htc := Color(1.0, 0.86, 0.45) if complete else Color(0.9, 0.72, 0.55)
 	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, htc)
-	draw_string(font, Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
+	draw_string(title_font(), Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
 	# WHY the night ended, right under its name, whenever it did not end in a win: the
 	# card used to show only what was scored and left the player to guess the cause.
 	# The grade badge sits far right, so this line has the left of the card to itself.
@@ -8364,7 +8376,7 @@ func draw_pause(font: Font, s: Vector2) -> void:
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
-	draw_string(font, Vector2(px, py + 52.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 30, Color(1.0, 0.86, 0.5))
+	draw_string(title_font(), Vector2(px, py + 52.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 30, Color(1.0, 0.86, 0.5))
 	draw_ornament(px + pw * 0.5, py + 70.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
 	var opts: Array[String] = ["Resume", "End the session", "Quit Game"]
 	var oy := py + 116.0
@@ -8589,7 +8601,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
-	draw_string(font, Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
+	draw_string(title_font(), Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
 	if debug_mode:
 		draw_string(font, Vector2(tx + 168.0, py + 50.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.55, 0.9, 1.0))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
@@ -8760,7 +8772,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	var innerw := pw - 80.0
 
 	# ---------------- header: same content as draw_sheet's own ----------------
-	draw_string(font, Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
+	draw_string(title_font(), Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
 	draw_string(font, Vector2(tx + 168.0, py + 50.0), "TALENT TREE  -  EXPERIMENTAL (F9)", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.85, 1.0))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 	draw_string(font, Vector2(px, py + 74.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 13, Color(0.82, 0.72, 0.85))
@@ -8951,7 +8963,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
-	draw_string(font, Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
+	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
 	draw_string(font, Vector2(tx + 118.0, py + 50.0), "to juggle N of a prop, own N of them", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 
@@ -9255,7 +9267,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 
 	var kc_use := k_trick()[0]
 	var kc_sel := k_cycle()[0]
-	draw_string(font, Vector2(px + 40.0, py + 48.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(title_font(), Vector2(px + 40.0, py + 48.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
 	draw_string(font, Vector2(px + 40.0, py + 82.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
 	draw_string(font, Vector2(px + pw - 210.0, py + 48.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
 	# a plain hairline (the same quiet divider draw_results uses between its own
@@ -9651,7 +9663,7 @@ func draw_slots(font: Font, s: Vector2) -> void:
 	draw_backdrop(s)
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
-	draw_string(font, Vector2(0, s.y * 0.17), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
+	draw_string(title_font(), Vector2(0, s.y * 0.17), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
 	var pw := 660.0
 	var px := s.x * 0.5 - pw * 0.5
@@ -9685,7 +9697,7 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_backdrop(s)
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
-	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
+	draw_string(title_font(), Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
 	# Music / Sound are volume sliders (float 0..1); the rest stay plain on/off bools
 	var rows := [["Screen shake", set_shake], ["Reduce motion  (fewer jolts and bursts)", reduce_motion], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
