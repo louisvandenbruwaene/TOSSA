@@ -706,12 +706,16 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # same as set_shake/set_collide) so a chosen experiment survives a relaunch, but the
 # panel that can ever FLIP one is gated behind OS.is_debug_build() same as every
 # other dev surface - a release export always sees every experiment at its default.
-var experiments := {"talent_tree": false}
+var experiments := {"talent_tree": false, "settings_cards": false, "pause_cards": false}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
 	{"id": "talent_tree", "name": "Talent tree stat screen",
 	 "desc": "Replaces the four stat cards (Tab) with a node graph along four branches - same accuracy/strength/endurance/speed underneath, same points, same caps. Purely how it's drawn and navigated, nothing it does."},
+	{"id": "settings_cards", "name": "Settings screen (cards)",
+	 "desc": "Redraws Settings as Balatro-style cards, the same language the shop and sheet already use, instead of bare text rows. Same eight rows, same keys, same settings_input - purely how it's drawn."},
+	{"id": "pause_cards", "name": "Pause menu (cards)",
+	 "desc": "Redraws the pause menu's three options as colour-coded cards (calm to resume, warm to step out, red to quit) instead of plain centred text. Same pause_sel, same keys."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -6762,7 +6766,7 @@ func _draw_screen() -> void:
 			draw_slots(font, s)
 			return
 		ST_SETTINGS:
-			draw_settings(font, s)
+			draw_settings_screen(font, s)
 			return
 		ST_STATS:
 			draw_stats(font, s)
@@ -6827,7 +6831,7 @@ func _draw_screen() -> void:
 	if shop_open:
 		draw_shop(font, s)
 	if paused:
-		draw_pause(font, s)     # the pause menu sits over everything
+		draw_pause_screen(font, s)     # the pause menu sits over everything
 
 
 func draw_backdrop(s: Vector2) -> void:
@@ -8178,6 +8182,58 @@ func draw_pause(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px, py + ph - 20.0), pfoot, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
+func draw_pause_screen(font: Font, s: Vector2) -> void:
+	# the one call site every screen uses to open the pause menu - routes to
+	# whichever version the pause_cards EXPERIMENT currently points at, same shape
+	# as draw_sheet_screen/draw_settings_screen. draw_pause never changes;
+	# pause_input/pause_activate (pause_sel 0..2) are shared unmodified by both.
+	if experiments.get("pause_cards", false):
+		draw_pause_cards(font, s)
+	else:
+		draw_pause(font, s)
+
+
+func draw_pause_cards(font: Font, s: Vector2) -> void:
+	# a card-styled alternate to draw_pause (EXPERIMENTS: pause_cards). Same three
+	# options in the same pause_sel order pause_activate already drives - purely a
+	# different picture, colour-coded by what each option actually does (calm to
+	# resume, warm to step out, warning-red to quit), the same card language as the
+	# shop/sheet/settings-cards alternate.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.72))
+	var pw := 380.0
+	var ph := 320.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	draw_rect(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98))
+	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	draw_string(font, Vector2(px, py + 42.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 26, Color(1.0, 0.86, 0.5))
+	draw_ornament(px + pw * 0.5, py + 58.0, 110.0, Color(0.82, 0.62, 0.34, 0.7))
+
+	var opts := [
+		{"name": "Resume", "note": "right where it froze", "col": Color(0.55, 0.85, 0.5)},
+		{"name": "End the session", "note": "back to the day hub", "col": Color(0.95, 0.75, 0.4)},
+		{"name": "Quit Game", "note": "close IACTO", "col": Color(0.9, 0.4, 0.35)},
+	]
+	var cw := pw - 40.0
+	var cx := px + 20.0
+	var ch := 56.0
+	var gap := 12.0
+	var oy := py + 80.0
+	for i in opts.size():
+		var o: Dictionary = opts[i]
+		var sel := i == pause_sel
+		var cy := oy + float(i) * (ch + gap)
+		var ac: Color = o["col"]
+		hud_card(Rect2(cx, cy, cw, ch), Color(ac.r, ac.g, ac.b, 0.5))
+		if sel:
+			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
+			draw_rect(Rect2(cx - 4.0, cy - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.0)
+		draw_string(font, Vector2(cx + 16.0, cy + 24.0), String(o["name"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 32.0, 18, Color(1.0, 0.94, 0.85) if sel else Color(0.85, 0.8, 0.74))
+		draw_string(font, Vector2(cx + 16.0, cy + 42.0), String(o["note"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 32.0, 11, Color(0.75, 0.7, 0.64, 0.8))
+	var pfoot2 := "up / down  -  A selects  -  B resumes" if pad_active() else "up / down  -  Enter  -  Esc resumes"
+	draw_string(font, Vector2(px, py + ph - 20.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
+
+
 func draw_debug_panel() -> void:
 	# EXPERIMENTS (F9): a small, always-on-top list of alternate screens/behaviours
 	# that can be flipped on without ever touching the code - see debug_panel_input
@@ -9431,6 +9487,85 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px, rry), ("> " if rsel else "  ") + "Records and history", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if rsel else Color(0.8, 0.74, 0.66))
 	var bsel := menu_sel == rows_total + 2
 	draw_string(font, Vector2(0, rry + 48.0 + 28.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
+	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func draw_settings_screen(font: Font, s: Vector2) -> void:
+	# the one call site every screen uses to open Settings - routes to whichever
+	# version the settings_cards EXPERIMENT currently points at, same shape as
+	# draw_sheet_screen. draw_settings never changes; settings_input (menu_sel 0..7,
+	# fixed row meanings) is shared unmodified by both - only the drawing differs.
+	if experiments.get("settings_cards", false):
+		draw_settings_cards(font, s)
+	else:
+		draw_settings(font, s)
+
+
+func draw_settings_cards(font: Font, s: Vector2) -> void:
+	# a card-styled alternate to draw_settings (EXPERIMENTS: settings_cards). Same
+	# eight rows in the same menu_sel order settings_input already drives - this is
+	# purely a different PICTURE of the same settings, using the Balatro-card
+	# language the shop and sheet already use (hud_card/draw_meter/a toggle plate)
+	# that this screen alone never picked up: bare text rows, no card boxes at all.
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.72))
+	draw_title_glow(font, s.y * 0.10, "SETTINGS", 40, Color(1.0, 0.86, 0.5), s)
+	draw_ornament(s.x * 0.5, s.y * 0.10 + 56.0, 200.0, Color(0.82, 0.62, 0.34, 0.85))
+
+	var rows := [
+		{"kind": "slider", "name": "Music", "val": set_music, "note": "", "col": Color(0.95, 0.75, 0.4)},
+		{"kind": "slider", "name": "Sound effects", "val": set_sfx, "note": "", "col": Color(0.95, 0.6, 0.45)},
+		{"kind": "bool", "name": "Screen shake", "val": set_shake, "note": "", "col": Color(0.55, 0.85, 0.8)},
+		{"kind": "bool", "name": "Hard collisions", "val": set_collide, "note": "clacks ruin catches", "col": Color(0.9, 0.5, 0.45)},
+		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
+		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
+		{"kind": "nav", "name": "Records and history", "val": false, "note": "", "col": Color(0.95, 0.82, 0.5)},
+		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},
+	]
+	var pw := minf(680.0, s.x - 80.0)
+	var px := s.x * 0.5 - pw * 0.5
+	var top := s.y * 0.20
+	var bottom := s.y * 0.86
+	var row_adv := (bottom - top) / float(rows.size())
+	var card_h := row_adv * 0.8
+
+	for i in rows.size():
+		var r: Dictionary = rows[i]
+		var sel := i == menu_sel
+		var ry := top + float(i) * row_adv
+		var ac: Color = r["col"]
+		hud_card(Rect2(px, ry, pw, card_h), Color(ac.r, ac.g, ac.b, 0.45))
+		if sel:
+			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
+			draw_rect(Rect2(px - 4.0, ry - 4.0, pw + 8.0, card_h + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.0)
+		var nm := String(r["name"])
+		var ty := ry + card_h * 0.5 + 6.0
+		draw_string(font, Vector2(px + 20.0, ty), nm, HORIZONTAL_ALIGNMENT_LEFT, pw - 240.0, 18, Color(1.0, 0.94, 0.8) if sel else Color(0.85, 0.8, 0.72))
+		if String(r["note"]) != "":
+			draw_string(font, Vector2(px + 20.0, ty + 16.0), String(r["note"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 240.0, 11, Color(0.7, 0.64, 0.58, 0.85))
+		match String(r["kind"]):
+			"slider":
+				var vol: float = r["val"]
+				var mx := px + pw - 210.0
+				var my := ry + card_h * 0.5 - 8.0
+				draw_meter(mx, my, 150.0, 16.0, vol, Color(ac.r, ac.g, ac.b, 0.9) if vol > 0.0 else Color(0.5, 0.44, 0.4))
+				draw_string(font, Vector2(px + pw - 46.0, ty), "mute" if vol <= 0.0 else "%d%%" % int(round(vol * 100.0)),
+					HORIZONTAL_ALIGNMENT_RIGHT, 40.0, 15, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.85, 0.9, 0.82))
+			"bool":
+				var on := bool(r["val"])
+				var plate := Rect2(px + pw - 96.0, ry + card_h * 0.5 - 16.0, 76.0, 32.0)
+				draw_rect(plate, Color(0.16, 0.22, 0.13, 0.9) if on else Color(0.16, 0.09, 0.09, 0.85))
+				draw_rect(plate, Color(0.55, 0.85, 0.5, 0.55) if on else Color(0.7, 0.35, 0.3, 0.4), false, 1.0)
+				draw_string(font, plate.position + Vector2(0.0, 22.0), "ON" if on else "OFF",
+					HORIZONTAL_ALIGNMENT_CENTER, plate.size.x, 16, Color(0.78, 0.96, 0.72) if on else Color(0.9, 0.62, 0.58))
+			"nav":
+				draw_string(font, Vector2(px + pw - 40.0, ty), ">", HORIZONTAL_ALIGNMENT_RIGHT, 30.0, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
+
 	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)

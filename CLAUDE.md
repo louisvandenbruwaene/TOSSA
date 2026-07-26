@@ -111,6 +111,22 @@ and deleted. History lives in git.
   replaced with fixed lanes specifically because the math sent two branches off the
   panel), but nothing has actually been drawn on screen. Toggle it on via F9 and look
   at it before trusting the geometry.**
+- **SETTINGS (cards) and PAUSE (cards)** (2026-07-26, **UNVERIFIED**, behind the
+  `settings_cards` and `pause_cards` experiments, both off by default): two more
+  EXPERIMENTS-panel alternates, same shape as the talent tree - `draw_settings_screen`
+  and `draw_pause_screen` are now the one call site each of their screens uses, routing
+  to the card version or the untouched original. Settings was the plainest menu in the
+  game (bare `draw_string` rows, no card box at all, unlike the shop/sheet/slots screens
+  that already use the Balatro-card look) - the alternate gives it the same `hud_card`/
+  `draw_meter`/toggle-plate language those screens already established, one card per
+  row, same eight rows and the same `settings_input` untouched. Pause got the same
+  treatment for its three options, colour-coded by what each one actually does (calm
+  green to resume, warm amber to step out, warning red to quit) instead of plain
+  centred text. Neither touches its screen's input handling at all - `settings_input`
+  (`menu_sel` 0..7, fixed row meanings) and `pause_activate` (`pause_sel` 0..2) are
+  exactly what they were; only the drawing differs. **Unverified, same caveat as the
+  talent tree: no Godot binary in this session, so nothing has actually been drawn on
+  screen. Toggle both on via F9 and look before trusting the geometry or the colours.**
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
