@@ -817,6 +817,10 @@ var last_streak_tick := -999  # when the streak last grew, for the multiplier pu
 
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
+var reduce_motion := false  # accessibility: master "reduce motion" - suppresses screen
+						 # shake outright, cuts the hit-stop freezes to a single tick, and
+						 # thins particle bursts. Never touches slow-mo (that stretches the
+						 # catch window, so it is a gameplay benefit, not a visual flourish)
 var set_collide := false  # hard mode: props that clack mid-air become nearly
 						  # uncatchable (half the Perfect window, no chance roll).
 						  # A PERFECT pattern never collides, so this only ever
@@ -3657,7 +3661,7 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 8   # music, sound, shake, collisions, fullscreen, controls, records, Back
+	var n := 9   # music, sound, shake, reduce-motion, collisions, fullscreen, controls, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -3681,17 +3685,19 @@ func settings_input(kc: int) -> void:
 				2:
 					set_shake = not set_shake
 				3:
-					set_collide = not set_collide
+					reduce_motion = not reduce_motion
 				4:
+					set_collide = not set_collide
+				5:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
-				5:
+				6:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				6:
-					game_state = ST_STATS   # the career ledger, back with Esc
 				7:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				8:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -3804,6 +3810,7 @@ func load_settings() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
+		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
 		set_collide = bool(cf.get_value("opt", "collide", false))
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
@@ -3827,6 +3834,7 @@ func load_settings() -> void:
 func save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("opt", "shake", set_shake)
+	cf.set_value("opt", "reduce_motion", reduce_motion)
 	cf.set_value("opt", "collide", set_collide)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
@@ -4781,9 +4789,11 @@ func on_catch(h: int) -> void:
 			# reads as a bigger deal than streak 10, not the identical beat forever.
 			# Every 50 steps it up, every 100 is the biggest, adding a confetti burst
 			# via spawn_parts's existing "confetti" kind (already built for the
-			# results/unlock celebrations) rather than a new effect.
+			# results/unlock celebrations) rather than a new effect. Reduce Motion cuts
+			# the hit-stop to a single tick (the ring/confetti counts already thin inside
+			# spawn_parts), so the milestone still registers without the jolt.
 			var streak_tier := 2 if streak % 100 == 0 else (1 if streak % 50 == 0 else 0)
-			freeze = 4 + streak_tier * 2
+			freeze = 1 if reduce_motion else 4 + streak_tier * 2
 			spawn_parts(outer_pos(h), Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
 			var vs := get_viewport_rect().size
 			add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
@@ -5244,6 +5254,26 @@ func skill_req_text(d: Dictionary) -> String:
 	if parts.is_empty():
 		return "yours from the start"
 	return " + ".join(parts)
+
+
+func skill_gate_badge(d: Dictionary) -> String:
+	# the SHORT badge for a LOCKED skill on the Skills screen: name the FIRST axis the
+	# player has not met yet (level, then Strength, then Accuracy, then the stage's Rep),
+	# not always the level. A level-8 player eyeing Columns should see "Acc 8" - the wall
+	# they are actually against - not "Lv 4+", a bar they cleared four levels ago. A
+	# trailing "+" still says another axis is also unmet; the detail strip spells it all out.
+	var unmet: Array[String] = []
+	if level < int(d.get("lvl", 1)):
+		unmet.append("Lv %d" % int(d.get("lvl", 1)))
+	if strength < int(d.get("str", 0)):
+		unmet.append("Str %d" % int(d["str"]))
+	if accuracy < int(d.get("acc", 0)):
+		unmet.append("Acc %d" % int(d["acc"]))
+	if venue_index() < int(d.get("ven", 0)):
+		unmet.append("Rep %d" % VENUE_REP[int(d["ven"])])
+	if unmet.is_empty():
+		return "Lv %d" % int(d.get("lvl", 1))   # locked for another reason; show the level
+	return unmet[0] + ("+" if unmet.size() > 1 else "")
 
 
 func pattern_unlocked(i: int) -> bool:
@@ -6531,9 +6561,9 @@ func drop_ball(b: Ball, why: String) -> void:
 			tut_pace -= 1
 			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30),
 				"slower  -  find the rhythm again", Color(0.95, 0.78, 0.5))
-	if set_shake:
+	if set_shake and not reduce_motion:
 		shake = 5.0
-	freeze = 8   # a short hit-stop so the loss registers before play rolls on
+	freeze = 1 if reduce_motion else 8   # a short hit-stop so the loss registers before play rolls on
 	spawn_parts(flight_pos(b), Color(0.75, 0.5, 0.4), 10, 2.6, "spark")
 	spawn_falling(flight_pos(b), b.kind, b.color)
 	if b.kind == PROP_EGGS:
@@ -6609,6 +6639,29 @@ func fail_text() -> Array:
 			return ["YOU BOWED OUT UNDER THE TARGET",
 				"you chose the bow before the number fell, so the night ends here. The crowd went home happy."]
 	return ["", ""]
+
+
+func coach_text() -> String:
+	# one honest, specific line for a night that did NOT collapse - the same generosity
+	# fail_text gives a lost act, extended to a survived one. It names the single biggest
+	# lever the REAL numbers show, never a nag and never a generic "well done": drops
+	# reset the streak (and the streak is the score multiplier), so on a dropped night
+	# that is always the truest thing to say; on a spotless one, the load is the next
+	# rung. Silent on a collapse (fail_text already owns that) and during a lesson.
+	if set_collapsed or tut_active:
+		return ""
+	var rec := rec_table()[run_venue] if run_venue >= 0 and run_venue < rec_table().size() else 0
+	var ds := "" if dropped == 1 else "s"
+	if dropped > 0:
+		var gap := rec - score
+		if not results_record and gap > 0 and gap * 4 < score:
+			# genuinely close to the board - quantify exactly how close
+			return "%d drop%s reset your streak. Just %s more and the record here was yours." % [dropped, ds, commafy(gap)]
+		return "%d drop%s reset your streak, and the streak is your score multiplier - a tidy run pays far more than a bold one." % [dropped, ds]
+	# a spotless night: praise honestly, then point at the load, the real way up
+	if num_balls < 5 or prop_weight() <= 1:
+		return "Not one drop. Heavier props and higher counts pay more per catch - the record falls to a bigger load, not a safer one."
+	return "Not one drop at this load - masterful control. From here the record falls to a longer set, not a safer one."
 
 
 func update_sim() -> void:
@@ -7899,10 +7952,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var nx := barx + barw * float(goal_for(run_venue, gi)) / float(maxi(1, g_final))
 			draw_rect(Rect2(nx - 1.0, tcard_y + 61, 2.0, 24.0), Color(1.0, 0.95, 0.8, 0.75))
 		var bartxt := "first goal  %s" % commafy(target)
-		if goals_hit >= NUM_GOALS:
-			bartxt = "ALL THREE GOALS  -  every point is yours"
-		elif goals_hit > 0:
-			bartxt = "next goal  %s" % commafy(target)
+		if goals_hit > 0:
+			# from the first goal on, spell out the gamble: a collapse strips the score
+			# back to the last goal's value (goal_for(goals_hit-1)), so everything earned
+			# ABOVE that is what you are risking by pushing on - true even after all three
+			# goals, while you chase a record (the old "every point is yours" was wrong).
+			var banked := goal_for(run_venue, mini(goals_hit, NUM_GOALS) - 1)
+			var at_risk := maxi(0, score - banked)
+			if goals_hit >= NUM_GOALS:
+				bartxt = "all goals cleared  -  risking  %s" % commafy(at_risk)
+			else:
+				bartxt = "next goal  %s      risking  %s" % [commafy(target), commafy(at_risk)]
 		draw_string(font, Vector2(barx, tcard_y + 78), bartxt, HORIZONTAL_ALIGNMENT_CENTER, barw, 12, Color(1.0, 0.95, 0.82))
 		# the standing offer: from the first goal on, the cash-in is always open
 		if goals_hit >= 1:
@@ -8137,6 +8197,13 @@ func draw_results(font: Font, s: Vector2) -> void:
 	if not complete and String(ft[1]) != "" and age > 74:
 		draw_multiline_string(font, Vector2(px + 34.0, py + ph - 66.0), String(ft[1]),
 			HORIZONTAL_ALIGNMENT_CENTER, pw - 68.0, 12, 2, Color(0.86, 0.72, 0.64, 0.85))
+	elif not set_collapsed and age > 74:
+		# a survived act (all goals, or a chosen bow) gets a coaching line in the same
+		# closing-word slot - what to work on next, drawn from this night's real numbers
+		var coach := coach_text()
+		if coach != "":
+			draw_multiline_string(font, Vector2(px + 34.0, py + ph - 66.0), coach,
+				HORIZONTAL_ALIGNMENT_CENTER, pw - 68.0, 12, 2, Color(0.74, 0.86, 0.72, 0.85))
 
 	# footer: how to continue, breathing gently once everything is revealed. every
 	# slot in this footer has a real pad button - the pad footer names only
@@ -8634,11 +8701,20 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 
 		# node screen positions, spaced along the lane by how far into the cap
 		# each threshold actually sits - not evenly, so the graph shows WHERE the
-		# skills really cluster (early gates read close together, MAX sits far out)
+		# skills really cluster (early gates read close together, MAX sits far out).
+		# A minimum centre-to-centre gap is enforced so two thresholds that sit close
+		# RELATIVE TO THE CAP (Columns at Accuracy 8 and Half Shower at 12, both a
+		# sliver of the 250 cap) can never overprint their ~120px-wide labels - the
+		# proportional look is kept wherever there is room, legibility wins where there
+		# is not, and nothing is ever pushed past the cap node's far end.
+		var min_gap := 74.0
 		var pts: Array[Vector2] = [lane_start]
 		for node in nodes:
 			var t := clampf(float(node["val"]) / float(maxi(1, cap)), 0.0, 1.0)
-			pts.append(lane_start + Vector2(branch_len * t, 0.0))
+			var nx := lane_start.x + branch_len * t
+			nx = maxf(nx, pts[pts.size() - 1].x + min_gap)
+			nx = minf(nx, lane_start.x + branch_len)
+			pts.append(Vector2(nx, lane_y))
 
 		# the branch: one segment per node, solid once you've actually reached it,
 		# dim ahead of it - the fill visibly crawls outward as the stat climbs
@@ -8879,8 +8955,7 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 	if unlocked:
 		draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
 	else:
-		var more: bool = int(req.get("str", 0)) > 0 or int(req.get("acc", 0)) > 0 or int(req.get("ven", 0)) > 0
-		draw_string(font, Vector2(x + w - 76.0, y), "Lv %d%s" % [int(req["lvl"]), "+" if more else ""], HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
+		draw_string(font, Vector2(x + w - 76.0, y), skill_gate_badge(req), HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
 
 
 # --- pattern preview (Skills screen): a small self-looping schematic, not a real
@@ -9269,12 +9344,19 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var ma := clampf(1.0 - float(cine_tick - day_msg_tick - 220) / 80.0, 0.0, 1.0)
 		draw_string(font, Vector2(0, s.y - 92.0), day_msg, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.88, 0.55, ma))
 
+	# on the PERFORM row, Left/Right (or the dpad) picks the stage - without this hint
+	# a player could never learn the venue ladder was theirs to walk (the < > around the
+	# venue name was the only cue). Contextual: it shows only while PERFORM is selected.
 	if pad_active():
-		draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
-			[["Stick"], "choose"], [k_finish(), "do it"], [k_sheet(), "sheet"], [k_pause(), "menu"]])
+		var hints := [[["Stick"], "choose"], [k_finish(), "do it"], [k_sheet(), "sheet"], [k_pause(), "menu"]]
+		if is_perf:
+			hints.insert(1, [["Dpad"], "stage"])
+		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 	else:
-		draw_hints_row(font, s.x * 0.5, s.y - 52.0, [
-			[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]])
+		var hints := [[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]]
+		if is_perf:
+			hints.insert(1, [["Left", "Right"], "stage"])
+		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 
 	if day_anim != "":
 		draw_day_anim(font, s)
@@ -9457,7 +9539,7 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
 	# Music / Sound are volume sliders (float 0..1); the rest stay plain on/off bools
-	var rows := [["Screen shake", set_shake], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
+	var rows := [["Screen shake", set_shake], ["Reduce motion  (fewer jolts and bursts)", reduce_motion], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var oy := s.y * 0.28
@@ -9506,7 +9588,7 @@ func draw_settings_screen(font: Font, s: Vector2) -> void:
 
 func draw_settings_cards(font: Font, s: Vector2) -> void:
 	# a card-styled alternate to draw_settings (EXPERIMENTS: settings_cards). Same
-	# eight rows in the same menu_sel order settings_input already drives - this is
+	# nine rows in the same menu_sel order settings_input already drives - this is
 	# purely a different PICTURE of the same settings, using the Balatro-card
 	# language the shop and sheet already use (hud_card/draw_meter/a toggle plate)
 	# that this screen alone never picked up: bare text rows, no card boxes at all.
@@ -9521,6 +9603,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "slider", "name": "Music", "val": set_music, "note": "", "col": Color(0.95, 0.75, 0.4)},
 		{"kind": "slider", "name": "Sound effects", "val": set_sfx, "note": "", "col": Color(0.95, 0.6, 0.45)},
 		{"kind": "bool", "name": "Screen shake", "val": set_shake, "note": "", "col": Color(0.55, 0.85, 0.8)},
+		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
 		{"kind": "bool", "name": "Hard collisions", "val": set_collide, "note": "clacks ruin catches", "col": Color(0.9, 0.5, 0.45)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
@@ -10472,6 +10555,8 @@ func spawn_egg_break(at: Vector2) -> void:
 # randf (cosmetic RNG), so the deterministic sim rng is never consumed.
 
 func spawn_parts(at: Vector2, col: Color, n: int, spd: float, kind: String = "spark") -> void:
+	if reduce_motion:
+		n = maxi(1, n / 2)   # accessibility: thinner bursts, but a ring/marker still shows
 	for _i in n:
 		var ang := randf_range(-PI, PI) if kind != "confetti" else randf_range(-PI * 0.8, -PI * 0.2)
 		var v := Vector2(cos(ang), sin(ang)) * randf_range(spd * 0.4, spd)
