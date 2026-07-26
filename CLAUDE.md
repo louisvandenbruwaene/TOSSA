@@ -111,15 +111,36 @@ and deleted. History lives in git.
   (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an
   alternate version of a screen on or off live, no restart and no code edit - the
   point being to compare two real implementations side by side rather than guess from
-  a description. **2026-07-26: the reworked variants were all polished and three
-  (`talent_tree`, `settings_cards`, `pause_cards`) now DEFAULT ON - they are the shipped
-  look, F9 toggles each OFF to compare with the classic. `slot_cards` (Save files as
-  portrait cards) is a fourth, added the same day, default OFF for Louis to choose.** Persisted in the settings file so a choice survives a relaunch, but
-  the PANEL that can ever flip one is gated behind `OS.is_debug_build()` like every
-  other dev surface here, so a release export always runs every experiment at its
-  shipped default. Adding a second experiment later is one `EXPERIMENT_DEFS` entry
+  a description. **2026-07-26: the reworked variants were all polished and four
+  (`talent_tree`, `settings_cards`, `pause_cards`, `performer_polish`) now DEFAULT ON -
+  they are the shipped look, F9 toggles each OFF to compare with the classic.
+  `slot_cards` (Save files as portrait cards) is default OFF for Louis to choose.**
+  Debug choices persist
+  across debug relaunches, but load/save of experiment state is itself gated behind
+  `OS.is_debug_build()`, so a release export always uses its shipped defaults. Adding
+  another experiment later is one `EXPERIMENT_DEFS` entry
   plus whatever `if experiments.get("id", false):` branch it actually switches -
   `talent_tree` below is the template.
+- **PERFORMER WARDROBE** (2026-07-26, behind `performer_polish`, DEFAULT ON, verified
+  on screen at three venues plus a Spin): the juggler in evening dress -
+  `draw_performer_polish` (satin peak lapels, a filled shirt front, bow tie, breast
+  pocket + square, trouser stripes, and a centre seam/yoke on the back for the Spin's
+  reverse), `draw_face_polish` + `draw_brows` (a side-parted fringe and brows that
+  follow the same `face_mood()` the mouth already used), and a shirt cuff drawn INSIDE
+  `draw_arm`. The rules that made it work, after two passes Louis called awful:
+  (1) filled SHAPES, not thin decorative strokes - a stroked cream V over the jacket
+  reads as a necklace; (2) every mark either butts against something the base figure
+  already draws (the collar wedges, the shoulder seam, the trouser taper) or rides a
+  SOLVED joint - the old cuffs were placed body-relative and floated in mid-air nowhere
+  near the moving arms, which is why the cuff now lives in `draw_arm`, the only place
+  that knows where the wrist ended up; (3) every colour comes from the venue's own
+  palette (`collar` for shirt/cuffs, `suit_dk` for lapel silk, `suit` for the trouser
+  stripe) - `suit.lightened()` washes a crimson jacket out to pink, and a hard white
+  cuff would light the Midnight Show's deliberately-vanishing costume straight back up.
+  It is drawn above the jacket but BELOW the head and arms, so the arms still pass in
+  front of the coat and a held Columns middle ball (which rests at `stage_center`, over
+  the hip) is never painted over. Nothing in it touches the IK, hand targets, prop
+  layering, hitboxes or any sim value.
 - **TALENT TREE stat screen** (2026-07-25, **UNVERIFIED**, behind the `talent_tree`
   experiment, off by default): an alternate version of the character sheet (Tab) -
   the classic four-card version (`draw_sheet`) is untouched and stays the default.
@@ -183,7 +204,11 @@ and deleted. History lives in git.
   all three. (5) **Coaching line on a survived act** (`coach_text`): the same generosity
   `fail_text` gives a lost night, extended to a won one - one honest line drawn from the
   night's real numbers (drops resetting the streak, or the load being the next rung),
-  in the results card's closing-word slot.
+  in the results card's closing-word slot. (6) **The Encore card sizes itself to its
+  own description** (2026-07-26): it was a fixed 66px, which fits exactly two wrapped
+  lines, so any three-line challenge had its last line drawn straight through the
+  card's bottom border. `_wrap_lines` now does the wrapping without drawing, the card
+  height comes from the line count, and `_wrap_text` draws from the same list.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
@@ -370,15 +395,29 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   works) and heavier props now pay monotonically more for a player who can sustain them,
   while collapsing an uninvested one. Still worth a hands-on pass to confirm the FEEL, and
   the highest counts (8-15) were not swept - only 3/5/7.
-- **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST -
-  makes Blackout's dark stretch an almost-fully-visible colour halo, brightened
-  2026-07-19 off its original faint 0.09 alpha (too hard to actually see, not
-  the "mercy" it was meant to be), see `draw_glow_in_dark` / `has_glow_kit`;
-  Blackout itself was softened the same day - the SHAPE still goes past the
-  apex, but the comet trail stays lit for everyone, and a torch's own flame is
-  bright now too, not faint), and so is The Midnight Show, the
-  bonus post-game venue it's really for (see the Records/pay/rep bullet above);
-  player/prop skins beyond those two still open.
+- **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST) and
+  so is The Midnight Show, the bonus post-game venue it's really for (see the
+  Records/pay/rep bullet above); player/prop skins beyond those two still open.
+  **BLACKOUT rendering, rebuilt 2026-07-26 (verified on screen for torches, balls,
+  eggs and the Kit):** past `BLACKOUT_CUT` (0.68 of the flight, just past the apex)
+  the OBJECT is gone - no shape, no rim, no comet trail, no miniature stand-in.
+  What replaces it splits two ways, and that split IS the Encore:
+  - a **torch** keeps its flame and nothing else. `draw_torch_flame` was split out of
+    `draw_torch` so the dark stretch draws the very same flame the lit torch does -
+    same size (it used to be hand-written at roughly half scale and visibly shrank at
+    the cut), same tumble via the shared `prop_spin_angle`, same flicker - plus the
+    pool of light the fire throws, centred on the prop's true position so the catch
+    point stays legible while the flame itself rides out on the tumble. Only the
+    handle and the trail go dark. Bring torches to a Blackout night.
+  - **everything else** becomes a `draw_blackout_afterglow`: light with no object in
+    it. A smooth eight-shell radial bloom (a couple of low-alpha discs read as a dim
+    OBJECT - it is the falloff with no visible rim that reads as light), trailed by
+    the few positions it just came from, spreading and dimming down the fall but
+    never going out, because catching a genuinely invisible prop is a coin flip, not
+    a challenge. The **Kit** shows up inside that same visual language rather than as
+    a second halo over the top: it scales the fade down to ~a quarter, so the glow
+    barely decays across the fall, and `draw_glow_in_dark` adds a small bright centre
+    that says exactly WHERE - still never a shape or an outline.
 - **Settings depth:** Music/Sound are volume sliders now (not just on/off);
   difficulty presets alongside hard-mode collisions still open. **Per-channel sliders
   (catch/crowd/ambient), looked into 2026-07-25, PLANNED NOT BUILT:** the premise
