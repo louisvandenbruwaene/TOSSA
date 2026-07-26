@@ -101,6 +101,9 @@ const HOLD_GAIN := 1.9     # airtime ticks added per tick the THROW is held
 const ARC_PER_AIR := 2.15  # arc peak (px) per airtime tick; balls crest above the head
 const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_scale);
 							  # also the mid-air collision test's touching-circles radius
+const BLACKOUT_CUT := 0.68    # how far into a flight the Blackout Encore's lights die.
+							  # Just past the apex, so the throw and the top of the arc
+							  # are always seen and only the descent is dark.
 
 # how much height hurts a catch, and the under-Strength penalties (ideas.rtf rule)
 const HEIGHT_CATCH_PENALTY := 0.35  # subtracted from the off-Perfect chance at max height
@@ -534,7 +537,7 @@ const ENCORES := [
 	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
 	{"id": "gale",      "name": "The Gale",           "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut on the way down: past its apex a prop fades to a bare trail. Torches keep their flame, near enough to full sight."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut on the way down: past its apex a prop is a shapeless glow. A torch keeps its flame."},
 	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
 	{"id": "long",      "name": "The Long Set",       "desc": "The final goal is doubled, but the crowd is patient. An endurance test."},
 	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
@@ -737,18 +740,20 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
 # them the default"): the growth-column sheet, card settings, and icon pause are now the
 # shipped look; F9 (debug) toggles each OFF to compare against the classic version.
-var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true, "slot_cards": false}
+var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true, "slot_cards": false, "performer_polish": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
 	{"id": "talent_tree", "name": "Talent tree stat screen",
-	 "desc": "Replaces the four stat cards (Tab) with a node graph along four branches - same accuracy/strength/endurance/speed underneath, same points, same caps. Purely how it's drawn and navigated, nothing it does."},
+	 "desc": "Replaces the four stat cards (Tab) with four vertical growth columns, each filling to value/cap with milestone pips at the real thresholds - same accuracy/strength/endurance/speed underneath, same points, same caps. Purely how it's drawn and navigated, nothing it does."},
 	{"id": "settings_cards", "name": "Settings screen (cards)",
-	 "desc": "Redraws Settings as Balatro-style cards, the same language the shop and sheet already use, instead of bare text rows. Same eight rows, same keys, same settings_input - purely how it's drawn."},
+	 "desc": "Redraws Settings as Balatro-style cards grouped into Audio / Game feel / More, the same language the shop and sheet already use, instead of bare text rows. Same nine rows, same keys, same settings_input - purely how it's drawn."},
 	{"id": "pause_cards", "name": "Pause menu (cards)",
 	 "desc": "Redraws the pause menu's three options as colour-coded cards (calm to resume, warm to step out, red to quit) instead of plain centred text. Same pause_sel, same keys."},
 	{"id": "slot_cards", "name": "Save files (cards)",
 	 "desc": "Redraws the three save slots as tall portrait cards - a cascade motif, the level big, venue and gold below, a crown on a finished save - instead of wide text bars. Same slot_input, same keys."},
+	{"id": "performer_polish", "name": "Performer wardrobe (polished)",
+	 "desc": "Dresses the juggler in evening wear: satin peak lapels, a shirt front, bow tie, shirt cuffs on the solved wrists, pocket square, trouser stripes, a fringe and brows. Venue palette throughout. Visual only: same pose, hands, props and simulation."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -3890,12 +3895,15 @@ func load_settings() -> void:
 		K_CYCLE = int(cf.get_value("keys", "cycle", KEY_C))
 		PAD_TRICK = int(cf.get_value("keys", "pad_trick", JOY_BUTTON_X))
 		PAD_CYCLE = int(cf.get_value("keys", "pad_cycle", JOY_BUTTON_LEFT_STICK))
-		var loaded_exp = cf.get_value("opt", "experiments", experiments)
-		if loaded_exp is Dictionary:
-			for def in EXPERIMENT_DEFS:   # merge onto the defaults, so a NEW experiment
-				var eid := String(def["id"])   # added later always starts at its own
-				if loaded_exp.has(eid):        # default rather than a missing key
-					experiments[eid] = bool(loaded_exp[eid])
+		# F9 variants belong to debug work only. Do not let an old local debug choice
+		# alter the look of a release build that happens to share this user:// folder.
+		if OS.is_debug_build():
+			var loaded_exp = cf.get_value("opt", "experiments", experiments)
+			if loaded_exp is Dictionary:
+				for def in EXPERIMENT_DEFS:   # merge onto the defaults, so a NEW experiment
+					var eid := String(def["id"])   # added later always starts at its own
+					if loaded_exp.has(eid):        # default rather than a missing key
+						experiments[eid] = bool(loaded_exp[eid])
 
 
 func save_settings() -> void:
@@ -3914,7 +3922,8 @@ func save_settings() -> void:
 	cf.set_value("keys", "cycle", K_CYCLE)
 	cf.set_value("keys", "pad_trick", PAD_TRICK)
 	cf.set_value("keys", "pad_cycle", PAD_CYCLE)
-	cf.set_value("opt", "experiments", experiments)
+	if OS.is_debug_build():
+		cf.set_value("opt", "experiments", experiments)
 	cf.save(SETTINGS_PATH)
 
 
@@ -7315,6 +7324,17 @@ func draw_juggler(s: Vector2) -> void:
 			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H),
 			Vector2(cx + 0.24 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.24 * H, shoulder_y + 0.1 * H)]), collar)
 
+	# F9 experiment: the established juggler IS the base drawing. The wardrobe is a
+	# purely additive pass over the finished torso - it cannot touch the IK, the hand
+	# targets, prop layering or any sim value. It goes on HERE, above the jacket but
+	# BELOW the head and the arms, so the arms still pass in front of the coat and a
+	# held Columns middle ball (which rests at stage_center, i.e. over the hip) is
+	# never painted over.
+	var polished: bool = experiments.get("performer_polish", false)
+	if polished:
+		draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, floor_y,
+			suit, suit_dk, collar, Color(v["glow"]), facing_back)
+
 	# head: a full head of hair framing the crown and temples. Facing the crowd, the skin
 	# face sits over it; facing away mid-spin, the back of the head is all hair with a
 	# little skin at the nape, which is what sells the turn. The head keeps its full ROUND
@@ -7329,14 +7349,24 @@ func draw_juggler(s: Vector2) -> void:
 	else:
 		draw_circle(head, head_r, skin)                                   # face over the hair
 		draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
+		if polished:
+			draw_face_polish(head, head_r, hair)   # fringe UNDER the features, brows over
 		draw_face(head, head_r)
+		if polished:
+			draw_brows(head, head_r, hair)
 	if spin_on:                                                            # back to the body width-scale for the arms
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
-	# (their shoulder roots ride the same body dip as the trunk)
-	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit)
-	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit)
+	# (their shoulder roots ride the same body dip as the trunk). The wardrobe's cuff
+	# is drawn INSIDE draw_arm, on the solved wrist, so it can never float free of the
+	# arm the way a body-relative guess does.
+	# the cuff is the venue's OWN collar colour, never a fixed white: the Midnight
+	# Show's whole point is a costume that nearly vanishes, and a hard white cuff
+	# would light the performer straight back up
+	var cuff := collar if polished else Color(0, 0, 0, 0)
+	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit, cuff)
+	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit, cuff)
 
 	# hands (and any held balls) on top of the arms
 	draw_hand(LEFT)
@@ -7347,6 +7377,114 @@ func draw_juggler(s: Vector2) -> void:
 	if spin_on:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_spin_streaks(Vector2(cx, (shoulder_y + hip_y) * 0.5))
+
+
+func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: float,
+		waist_y: float, hip_y: float, floor_y: float,
+		suit: Color, suit_dk: Color, collar: Color, accent: Color, facing_back: bool) -> void:
+	# EXPERIMENTS / performer_polish: evening dress, drawn the way the rest of this
+	# figure is drawn - filled SHAPES pinned to the body's own landmarks, in the
+	# venue's own palette. The two earlier passes hung thin decorative STROKES over
+	# the jacket instead (a cream V that read as a necklace, two cuff dashes floating
+	# in mid-air nowhere near the moving arms), which is what "it just looks awful"
+	# was about. Rules that keep this good: every mark either butts against a shape
+	# the base figure already draws (the collar wedges, the shoulder seam, the trouser
+	# outline) or rides a solved joint; nothing is smaller than a couple of px at
+	# 720p; and the cuffs live in draw_arm, not here, because only draw_arm knows
+	# where the wrist actually ended up.
+	# lapel silk is the suit's OWN deep shade, barely lifted - not suit.lightened(),
+	# which washes a crimson jacket out to pink and reads as a shawl, not tailoring
+	var satin := suit_dk.lightened(0.08)
+	var seam := suit_dk.darkened(0.20)         # tailoring seams: the suit, in shadow
+	var linen := collar                        # shirt front/pocket square: the SAME cloth
+											   # the base figure's collar wedges use, so a
+											   # venue that dims its costume (the Midnight
+											   # Show) dims the wardrobe with it
+	var tie := Color(0.13, 0.09, 0.11)         # near-black, so it reads on any venue suit
+
+	# a satin stripe down the outside of each trouser leg, following the leg's own
+	# taper (hip 0.56h out, ankle 0.40h) so it sits ON the cloth at every point. It is
+	# the JACKET's shade on the trouser's darker one - the lapel silk has no contrast
+	# to give here, since the trousers are already cut from it.
+	var stripe := Color(suit.r, suit.g, suit.b, 0.65)
+	draw_line(Vector2(cx - 0.56 * h, hip_y + 0.06 * h), Vector2(cx - 0.40 * h, floor_y - 0.24 * h), stripe, 2.0)
+	draw_line(Vector2(cx + 0.56 * h, hip_y + 0.06 * h), Vector2(cx + 0.40 * h, floor_y - 0.24 * h), stripe, 2.0)
+
+	if facing_back:
+		# facing away mid-Spin: a centre seam and a shoulder yoke, so the back of the
+		# coat still reads as a tailored garment rather than a flat slab of colour
+		draw_line(Vector2(cx, shoulder_y + 0.34 * h), Vector2(cx, hip_y + 0.10 * h), Color(seam.r, seam.g, seam.b, 0.6), 1.8)
+		draw_line(Vector2(cx - 0.60 * h, shoulder_y + 0.30 * h), Vector2(cx + 0.60 * h, shoulder_y + 0.30 * h), Color(seam.r, seam.g, seam.b, 0.45), 1.5)
+		return
+
+	# SHIRT FRONT: the base figure draws its collar as two thin wedges with plain
+	# jacket showing BETWEEN them, which under a bow tie reads as a red necktie
+	# hanging out of the collar. Filling that gap turns the same two wedges into one
+	# proper dress shirt for the tie to sit on.
+	var apex := Vector2(cx, chest_y + 0.22 * h)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx - 0.062 * h, shoulder_y - 0.02 * h), Vector2(cx + 0.062 * h, shoulder_y - 0.02 * h), apex,
+	]), linen)
+
+	# PEAKED LAPELS. Their inner edge is exactly the outer edge of the collar wedges
+	# the base figure already draws (shoulder line -> the V's apex at chest+0.22h), so
+	# the satin FRAMES the shirt instead of crossing it. The peak sits at the chest,
+	# where a real lapel is widest.
+	for side in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx + side * 0.28 * h, shoulder_y - 0.02 * h),   # inner, on the collar
+			apex,                                                    # down the collar's edge
+			Vector2(cx + side * 0.08 * h, chest_y + 0.38 * h),       # the tip, just past the V
+			Vector2(cx + side * 0.54 * h, chest_y - 0.04 * h),       # the peak
+			Vector2(cx + side * 0.40 * h, shoulder_y - 0.01 * h),    # back up to the shoulder seam
+		]), satin)
+
+	# BOW TIE at the throat, where the neck column meets the jacket's neckline - not
+	# adrift on the chest. Two wings and a knot, ~19px wide at 720p.
+	for side in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx + side * 0.24 * h, shoulder_y - 0.07 * h),
+			Vector2(cx + side * 0.24 * h, shoulder_y + 0.13 * h),
+			Vector2(cx + side * 0.03 * h, shoulder_y + 0.03 * h),
+		]), tie)
+	draw_circle(Vector2(cx, shoulder_y + 0.03 * h), 0.055 * h, Color(accent.r, accent.g, accent.b, 0.9))
+
+	# BREAST POCKET + SQUARE on the wearer's left (the crowd's right), sitting BELOW
+	# the lapel's peak and inside the jacket's own edge, so neither the satin above it
+	# nor the coat's outline ever clips it
+	draw_line(Vector2(cx + 0.40 * h, chest_y + 0.34 * h), Vector2(cx + 0.68 * h, chest_y + 0.27 * h), Color(seam.r, seam.g, seam.b, 0.7), 2.0)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx + 0.44 * h, chest_y + 0.33 * h), Vector2(cx + 0.64 * h, chest_y + 0.28 * h),
+		Vector2(cx + 0.53 * h, chest_y + 0.13 * h),
+	]), linen)
+
+
+func draw_face_polish(head: Vector2, r: float, hair: Color) -> void:
+	# a side-parted fringe laid over the top of the face disc, so the head reads as
+	# hair-over-a-face instead of a bare oval with a hair halo behind it. Drawn as one
+	# filled crescent (outer edge = the face's own circle) rather than strands.
+	var pts := PackedVector2Array()
+	for i in 11:
+		var a := -PI + PI * float(i) / 10.0            # left -> over the crown -> right
+		pts.append(head + Vector2(cos(a), sin(a)) * r * 1.02)
+	pts.append(head + Vector2(r * 0.86, -r * 0.20))    # the hairline, sweeping back
+	pts.append(head + Vector2(r * 0.10, -r * 0.50))    # ...to the part
+	pts.append(head + Vector2(-r * 0.52, -r * 0.34))
+	pts.append(head + Vector2(-r * 0.98, -r * 0.02))
+	draw_colored_polygon(pts, hair)
+
+
+func draw_brows(head: Vector2, r: float, hair: Color) -> void:
+	# brows carry the same mood the mouth already does, which is most of what a face
+	# this small can express: lifted on a streak, pinched in after a drop
+	var mood := face_mood()
+	var bx := r * 0.34
+	var by := -r * 0.20                     # low enough to clear the fringe's hairline
+	var inner := by + (r * 0.08 if mood == -1 else (-r * 0.04 if mood == 1 else 0.0))
+	var outer := by + (-r * 0.04 if mood == -1 else (-r * 0.10 if mood == 1 else 0.0))
+	var col := hair.darkened(0.15)
+	draw_line(head + Vector2(-bx - r * 0.15, outer), head + Vector2(-bx + r * 0.15, inner), col, maxf(1.8, r * 0.11))
+	draw_line(head + Vector2(bx + r * 0.15, outer), head + Vector2(bx - r * 0.15, inner), col, maxf(1.8, r * 0.11))
 
 
 func draw_spin_streaks(center: Vector2) -> void:
@@ -7371,6 +7509,14 @@ func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
 	draw_colored_polygon(pts, col)
 
 
+func face_mood() -> int:
+	# -1 wince (just dropped), 0 calm, 1 pleased (on a streak). Shared by the mouth and
+	# the wardrobe pass's brows so the two can never disagree about the expression.
+	if tick - last_drop_tick < 45:
+		return -1
+	return 1 if streak >= 3 else 0
+
+
 func draw_face(head: Vector2, r: float = 21.0) -> void:
 	# features scale to the head radius r, so the face stays proportioned after the
 	# figure moved to the eight-head canon (a smaller head than the old drawing)
@@ -7382,11 +7528,7 @@ func draw_face(head: Vector2, r: float = 21.0) -> void:
 	draw_circle(head + Vector2(-ex + r * 0.05, ey - r * 0.05), r * 0.05, Color(1, 1, 1, 0.7))
 	draw_circle(head + Vector2(ex + r * 0.05, ey - r * 0.05), r * 0.05, Color(1, 1, 1, 0.7))
 	# expression: a smile on a streak, a wince just after a drop, else calm
-	var mood := 0
-	if tick - last_drop_tick < 45:
-		mood = -1
-	elif streak >= 3:
-		mood = 1
+	var mood := face_mood()
 	var my := head.y + r * 0.42
 	var mw := r * 0.3
 	var mouth := PackedVector2Array([Vector2(head.x - mw, my), Vector2(head.x + mw, my)])
@@ -7413,7 +7555,8 @@ func draw_capsule(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> v
 	draw_circle(b, rb, col)
 
 
-func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color) -> void:
+func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color,
+		cuff: Color = Color(0, 0, 0, 0)) -> void:
 	var bend := 1.0 if h == LEFT else -1.0            # elbows bow outward
 	# bones scale to the reach (a touch over half each), so the elbow keeps the SAME
 	# gentle bend whether the hand is out catching or tucked in holding a ball. Fixed
@@ -7425,6 +7568,15 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 	draw_capsule(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm (sleeved), tapering to the elbow
 	draw_capsule(elbow, wrist, 13.0, 10.0, skin)       # forearm (skin), tapering to the wrist
 	draw_circle(elbow, 7.0, sleeve)                    # elbow joint
+	if cuff.a > 0.0:
+		# WARDROBE pass only (performer_polish): the jacket sleeve runs on down the
+		# forearm and finishes in a shirt cuff, leaving bare wrist and hand for the
+		# catch to read against. Anchored to the SOLVED elbow/wrist, so it tracks the
+		# real arm at every frame instead of guessing a body-relative spot.
+		var cs := elbow.lerp(wrist, 0.58)
+		var ce := elbow.lerp(wrist, 0.76)
+		draw_capsule(elbow, cs, 13.5, 11.5, sleeve)
+		draw_capsule(cs, ce, 12.0, 11.5, cuff)
 
 
 # two-bone IK: places the elbow so it sits exactly l1 from shoulder a and l2 from
@@ -7543,27 +7695,24 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 			if _btb_behind(b) != behind:
 				continue
 			# BLACKOUT challenge: the throw and the apex stay VISIBLE - the lights only
-			# swallow the prop on its way down, so the challenge is catching from
+			# swallow the prop on its way down, so the challenge is catching from the
 			# memory of the arc, not juggling blind (fully invisible flight was way too
-			# difficult - Louis). The cut is a hard one just past the apex: the SHAPE
-			# goes, but the comet trail stays lit (2026-07-19, reverted back to this:
-			# hiding the trail too was too hard for early game - the fading trail alone
-			# is exactly enough to guess where a prop still is, without seeing it
-			# outright). A TORCH is the exception: no blackout argues with fire, so its
-			# flame burns through the dark stretch nearly as visible as ever - that is
-			# the game knowledge: bring torches to a Blackout night.
+			# difficult - Louis). Past BLACKOUT_CUT the OBJECT is gone for everything:
+			# no shape, no rim, no comet trail, no miniature stand-in. What is left is
+			# a shapeless afterglow, dimming as it falls but never out. A TORCH is the
+			# exception the whole Encore is built around: its handle goes, its flame
+			# does not.
 			if encore_on("blackout"):
 				var bspan := maxi(1, b.land_tick - b.launch_tick)
 				var bp := clampf(float(tick - b.launch_tick) / float(bspan), 0.0, 1.0)
-				if bp > 0.68:
-					draw_trail(b)
+				if bp > BLACKOUT_CUT:
+					var dark_pos := flight_pos(b)
 					if b.kind == PROP_TORCHES:
-						draw_flame_in_dark(flight_pos(b))
-					elif has_glow_kit:
-						# the Glow-in-the-Dark Kit's mercy: a faint colour-matched halo on
-						# top of the trail - still meaningfully harder than normal play,
-						# just never fully gone
-						draw_glow_in_dark(flight_pos(b), b.color)
+						draw_flame_in_dark(b, dark_pos)
+					else:
+						draw_blackout_afterglow(b, dark_pos, bp)
+						if has_glow_kit:
+							draw_glow_in_dark(dark_pos, b.color)
 					continue
 			draw_trail(b)
 			var pos := flight_pos(b)
@@ -7620,33 +7769,64 @@ func draw_charge_gauges() -> void:
 		draw_rect(Rect2(gx - 1.0, gy - gh * 0.78, 8.0, 1.5), Color(1.0, 0.9, 0.7, 0.7))
 
 
-func draw_flame_in_dark(pos: Vector2) -> void:
-	# the Blackout's one concession: a torch's flame burns through nearly as bright
-	# as it would in plain sight (2026-07-19: "faint and flickering" was not the
-	# concession it was meant to be - a torch juggler should be able to bring fire
-	# to a Blackout night and actually see it), no handle and no trail, just a
-	# real fire moving through the dark.
-	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)
-	draw_circle(pos + Vector2(0, -10), 16.0, Color(1.0, 0.55, 0.2, 0.20))
-	draw_colored_polygon(PackedVector2Array([
-		pos + Vector2(-5, -4), pos + Vector2(5, -4), pos + Vector2(0, -16.0 * fl),
-	]), Color(1.0, 0.5, 0.15, 0.88))
-	draw_colored_polygon(PackedVector2Array([
-		pos + Vector2(-2.5, -5), pos + Vector2(2.5, -5), pos + Vector2(0, -12.0 * fl),
-	]), Color(1.0, 0.85, 0.4, 0.92))
+func draw_flame_in_dark(b: Ball, pos: Vector2) -> void:
+	# Blackout's one concession: no blackout argues with fire. What goes dark on a
+	# torch is the WOOD - the handle and the comet trail - and what is left is the
+	# exact flame draw_torch renders in the light, at the torch's own scale and still
+	# tumbling at its own rate, so the cut reads as the handle being swallowed rather
+	# than the prop swapping to a different, smaller sprite. Bringing torches to a
+	# Blackout night is the game knowledge this is here to reward.
+	var sc := prop_scale(b.kind)
+	# the pool of light the fire throws. It is centred on the prop's TRUE position
+	# (the flame itself rides out on the tumble), so the catch point stays legible.
+	draw_circle(pos, 30.0 * sc, Color(1.0, 0.52, 0.18, 0.07))
+	draw_circle(pos, 16.0 * sc, Color(1.0, 0.60, 0.24, 0.10))
+	draw_torch_flame(pos, prop_spin_angle(b), sc)
+
+
+func draw_blackout_afterglow(b: Ball, pos: Vector2, flight_progress: float) -> void:
+	# every prop that is not a torch, past the apex: NOT a dimmed prop, NOT a small
+	# stand-in shape, and not the ordinary comet trail either. What is left is light
+	# with no object in it - a soft radial bloom with no edge anywhere, trailed by the
+	# few positions it just came from, so the eye reads a moving glow it can still
+	# track but no longer a thing it can see. It spreads and dims on the way down;
+	# it never goes out, because catching a genuinely invisible prop is not a
+	# challenge, it is a coin flip (Louis).
+	var sc := prop_scale(b.kind)
+	var r0 := BALL_RADIUS_PX * sc                                  # the prop's own size
+	var down := clampf((flight_progress - BLACKOUT_CUT) / (1.0 - BLACKOUT_CUT), 0.0, 1.0)
+	if has_glow_kit:
+		# the Kit's mercy, in the SAME visual language rather than a second halo laid
+		# over the top: 60,000g buys a glow that barely decays at all across the fall
+		down *= 0.22
+	var core := lerpf(0.85, 0.38, down)      # peak brightness at the centre
+	var spread := lerpf(1.7, 2.6, down)      # outer reach, in prop radii
+	var g := b.color.lightened(0.18)
+	# where it has just been, dimmest first: this lag is what makes it read as an
+	# AFTERglow instead of a dim prop
+	var n := b.trail.size()
+	if n >= 2:
+		var keep := mini(n, 6)
+		for i in range(n - keep, n):
+			var f := float(i - n + keep + 1) / float(keep)   # 0 oldest .. 1 newest
+			draw_circle(b.trail[i], r0 * (0.35 + 0.85 * f), Color(g.r, g.g, g.b, core * 0.13 * f * f))
+	# the bloom itself: concentric shells, widest first. Eight of them rather than a
+	# couple of discs, because a hard-edged circle at low alpha reads as a dim OBJECT -
+	# it is the smooth falloff that makes this light instead of a thing.
+	for i in 8:
+		var f := 1.0 - float(i) / 7.0                        # 1 outermost .. 0 core
+		draw_circle(pos, r0 * lerpf(0.45, spread, f), Color(g.r, g.g, g.b, core * lerpf(0.22, 0.03, f)))
 
 
 func draw_glow_in_dark(pos: Vector2, col: Color) -> void:
-	# the Glow-in-the-Dark Kit's mercy: a colour-matched halo tracking the prop
-	# through Blackout's dark stretch, bright enough to read as ALMOST fully
-	# visible (2026-07-19: a faint 0.09-alpha smear undersold what a Kit that
-	# costs 60,000g should buy you) - no shape, no trail, but plainly there. The
-	# pulse rate is offset by x so a whole load of glowing props doesn't flicker
-	# in lockstep.
+	# the Glow-in-the-Dark Kit's own mark, ON TOP of the (now barely-fading) afterglow
+	# it already bought: a small bright centre that says exactly where the prop is.
+	# Still no shape and no outline - Blackout stays its own challenge, the Kit just
+	# takes the guesswork out of WHERE. The pulse is offset by x so a whole load of
+	# glowing props never flickers in lockstep.
 	var fl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
-	draw_circle(pos, 15.0, Color(col.r, col.g, col.b, 0.55 * fl))
-	draw_circle(pos, 5.5, Color(col.r, col.g, col.b, 0.32 * fl))
-	draw_circle(pos, 1.8, Color(1.0, 1.0, 1.0, 0.35 * fl))
+	draw_circle(pos, 6.0, Color(col.r, col.g, col.b, 0.40 * fl))
+	draw_circle(pos, 2.2, Color(1.0, 1.0, 1.0, 0.42 * fl))
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
@@ -7666,11 +7846,7 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
 		draw_arc(pos, (23.0 + 3.0 * pulse) * sc, 0.0, TAU, 26, Color(1.0, 0.86, 0.5, 0.5), 2.5, true)
 		draw_circle(pos, 15.0 * sc, Color(1.0, 0.85, 0.5, 0.14))
-	var ang := 0.0
-	if bool(PROPS[b.kind]["spins"]) and b.state == STATE_FLIGHT:
-		var span := maxi(1, b.land_tick - b.launch_tick)
-		var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
-		ang = b.spin_dir * p * TAU * 2.0   # two tumbles across the flight
+	var ang := prop_spin_angle(b)
 	match b.kind:
 		PROP_EGGS, PROP_BALLS:
 			# squash and stretch: a fast ball elongates slightly along its motion,
@@ -7754,7 +7930,17 @@ func draw_torch(pos: Vector2, ang: float, sc: float) -> void:
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var handle := Color(0.24, 0.16, 0.12)
 	draw_line(Vector2(0, 14), Vector2(0, -2), handle, 4.0)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_torch_flame(pos, ang, sc)
+
+
+func draw_torch_flame(pos: Vector2, ang: float, sc: float) -> void:
+	# the FIRE only, no handle. Split out so Blackout's dark stretch can draw the very
+	# same flame the lit torch draws (same size, same tumble, same flicker) instead of
+	# a second, smaller hand-written one - the two used to disagree, and a torch
+	# visibly shrank to about half size the instant the lights went.
 	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)           # flicker
+	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	draw_colored_polygon(PackedVector2Array([              # outer flame
 		Vector2(-6, -4), Vector2(6, -4), Vector2(0, -18.0 * fl),
 	]), Color(1.0, 0.5, 0.15, 0.95))
@@ -7762,6 +7948,17 @@ func draw_torch(pos: Vector2, ang: float, sc: float) -> void:
 		Vector2(-3, -5), Vector2(3, -5), Vector2(0, -13.0 * fl),
 	]), Color(1.0, 0.85, 0.4, 0.95))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func prop_spin_angle(b: Ball) -> float:
+	# how far a tumbling prop has turned through its flight - two tumbles, launch to
+	# catch. Shared by the lit prop and Blackout's bare flame, so a torch's fire keeps
+	# turning at exactly the rate it was turning at before the handle went dark.
+	if not bool(PROPS[b.kind]["spins"]) or b.state != STATE_FLIGHT:
+		return 0.0
+	var span := maxi(1, b.land_tick - b.launch_tick)
+	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
+	return b.spin_dir * p * TAU * 2.0
 
 
 func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0) -> void:
@@ -7886,21 +8083,30 @@ func draw_drop_marks(x: float, y: float, lim: int, used: int) -> void:
 			draw_colored_polygon(pts, c)
 
 
-func _wrap_text(font: Font, text: String, x: float, y: float, w: float, size: int, col: Color) -> void:
-	# word-wrap a line to a width, for the Encore description in its rail card
-	var words := text.split(" ")
+func _wrap_lines(font: Font, text: String, w: float, size: int) -> PackedStringArray:
+	# word-wrap a line to a width, WITHOUT drawing it. Split out so the Encore card can
+	# size itself to its own description before drawing it: the card used to be a fixed
+	# 66px, which fits two lines, and any three-line challenge (Blackout's, for one) had
+	# its last line drawn straight through the card's bottom edge.
+	var out := PackedStringArray()
 	var line := ""
-	var ly := y
-	for word in words:
+	for word in text.split(" "):
 		var test := word if line == "" else line + " " + word
 		if line != "" and font.get_string_size(test, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > w:
-			draw_string(font, Vector2(x, ly), line, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+			out.append(line)
 			line = word
-			ly += float(size) + 4.0
 		else:
 			line = test
 	if line != "":
+		out.append(line)
+	return out
+
+
+func _wrap_text(font: Font, text: String, x: float, y: float, w: float, size: int, col: Color) -> void:
+	var ly := y
+	for line in _wrap_lines(font, text, w, size):
 		draw_string(font, Vector2(x, ly), line, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+		ly += float(size) + 4.0
 
 
 func pad_active() -> bool:
@@ -8151,9 +8357,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
 		if encore >= 0 and encore < ENCORES.size():
 			var ec := Color(1.0, 0.55, 0.42)
-			hud_card(Rect2(LX, 272, LW, 66), Color(ec.r, ec.g, ec.b, 0.5))
+			# the card grows to whatever its description wraps to (36 of chrome plus a
+			# 15px line each), so a longer challenge is never clipped by its own border
+			var edesc := String(ENCORES[encore]["desc"])
+			var elines := _wrap_lines(font, edesc, LW - 28, 11)
+			hud_card(Rect2(LX, 272, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
 			draw_string(font, Vector2(LX + 14, 294), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, ec)
-			_wrap_text(font, String(ENCORES[encore]["desc"]), LX + 14, 312, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+			_wrap_text(font, edesc, LX + 14, 312, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
 		# here (Louis: no redundancy) - the routine card at the foot of the stage
