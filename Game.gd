@@ -99,6 +99,11 @@ const BASE_AIR := 84       # airtime (ticks) for an instant tap-throw (snappy)
 const HOLD_MAX := 44       # holding THROW past this adds no more height
 const HOLD_GAIN := 1.9     # airtime ticks added per tick the THROW is held
 const ARC_PER_AIR := 2.15  # arc peak (px) per airtime tick; balls crest above the head
+const HIT_ROOM := 4.2      # prop_hit_scale's count curve: the hitbox tracks the room the
+const HIT_TRIM := 0.23     # PATTERN actually leaves, which is ~(HIT_ROOM/count - HIT_TRIM)
+const HIT_FLOOR := 0.06    # of drawn size, floored here so 12-15 objects still have one.
+const HIT_EXCESS_KEEP := 0.15 # how much of a big prop's EXTRA bulk over a ball's its hitbox
+							# keeps once a load needs the room (by 4 objects).
 const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_scale);
 							  # also the mid-air collision test's touching-circles radius
 const BLACKOUT_CUT := 0.68    # how far into a flight the Blackout Encore's lights die.
@@ -232,18 +237,30 @@ const TENNIS := 5
 # at an even one (do_throw's `cross`), with one shared mult, no separate entry.
 # Indices are NOT frozen any more (both removals needed real migration) - see
 # load_progress's versioned pattern_sel migration for the full history.
+# "room" is how much DAYLIGHT the pattern's own roads leave between props, 1.0 being a
+# Cascade's, and it only ever scales the HITBOX (never a drawn size, never the score).
+# Measured, not guessed: `--collcheck --latecatch 4 --maxstats` at 4/5/6 objects reports
+# how close the ideal pattern actually brings two props, and these are those numbers.
+# The spread is enormous - Columns leaves ~40px, Tennis and Half Shower leave ~2px,
+# because both fly an over-the-top road straight through the weave they cross - so one
+# count-only hitbox cannot be fair to all six: sized for Columns it would clack every
+# clean Tennis, and sized for Tennis it forgives everything. Hence: forgiveness follows
+# the room the pattern leaves. Half Shower's and Tennis's ~0.05 is the honest reading of
+# a pattern whose roads genuinely intersect under real (not frame-perfect) timing - a
+# long-standing residual, documented under the arms rule in CLAUDE.md, that the game
+# must not punish the player for.
 const PATTERNS := [
-	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0,
+	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0, "room": 0.65,
 	 "desc": "The weave. Odd counts cross to the other hand; even counts keep each hand's own circle."},
-	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 8, "mult": 1.15,
+	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 8, "mult": 1.15, "room": 1.0,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
-	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25,
+	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25, "room": 0.05,
 	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
-	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4,
+	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4, "room": 0.7,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
-	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.45,
+	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.45, "room": 1.0,
 	 "desc": "BOTH hands throw over the top, the weave runs backward."},
-	{"id": "tennis",     "name": "Tennis",      "lvl": 1, "ven": 5, "mult": 1.5,
+	{"id": "tennis",     "name": "Tennis",      "lvl": 1, "ven": 5, "mult": 1.5, "room": 0.05,
 	 "desc": "One marked ball sails over the top, back and forth across the weave."},
 ]
 # UNLOCK DESIGN (Louis): every skill sits behind a wall of difficulty, hard work or
@@ -564,19 +581,7 @@ class Ball:
 	var over_top := false     # an over-the-top lob: scooped from INNER, lofted wide to OUTER
 	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
 							  # balls in one hand never stack on the same line (-1 = unset)
-	var thrown_from := -1     # which hand actually released this (LEFT/RIGHT) - only used
-							  # to group balls sharing one straight-line road (see
-							  # road_lane in do_throw), not read anywhere gameplay cares
-	var road_lane_idx := -1   # which of ROAD_LANE_INSET's slots THIS flight is using on
-							  # its road, held for its whole flight - road_lane() must
-							  # pick whichever slot ISN'T already taken by another ball
-							  # still flying the same road, not just count them: two
-							  # balls that strictly alternate flying/held (the common
-							  # case) would otherwise both keep counting "1 other
-							  # already up" forever and land on the SAME slot every
-							  # time, shifting the whole road sideways with no actual
-							  # separation ever won back (caught this via --latecatch
-							  # showing zero improvement, only a shifted collision).
+	var thrown_from := -1     # which hand actually released this (LEFT/RIGHT); informational
 	var bumped := false       # hard mode: this ball clacked another mid-air; only a
 							  # half-Perfect-window catch can still save it
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
@@ -786,6 +791,18 @@ var seg_used := 0         # action segments spent today (0..SEG_PER_DAY)
 var venue_pick := 0       # which unlocked venue you have chosen to play
 var meals := 0            # meals eaten toward the next point of Strength
 var day_sel := 0          # cursor in the day hub
+var day_group := ""       # which day-hub DRAWER is open ("" = the top level). Session
+						  # state only, never saved: a new day always opens at the top.
+# the hub's three drawers, in the order a day is actually spent: earn, recover, then
+# spend. Ten flat rows was the crowding Louis flagged; this is at most four cards.
+const DAY_GROUPS := [
+	{"id": "work", "name": "TONIGHT", "icon": "star", "col": Color(0.98, 0.74, 0.40),
+	 "sub": "take the stage, or work the pattern in private"},
+	{"id": "rest", "name": "REST", "icon": "moon", "col": Color(0.62, 0.80, 0.95),
+	 "sub": "eat, or end the day and wake rested"},
+	{"id": "prep", "name": "PREPARE", "icon": "bag", "col": Color(0.84, 0.68, 0.96),
+	 "sub": "spend what you earned, and read up on what you know"},
+]
 var day_msg := ""         # transient hub feedback ("the day is spent, sleep")
 var day_msg_tick := -999  # cine_tick the message appeared
 var day_anim := ""        # a short hub vignette playing: "eat", "inn" or "shop"
@@ -1193,8 +1210,12 @@ func _ready() -> void:
 	if ua.has("--tutdone"):           # dev: the basics-lesson congrats card, for a screenshot
 		game_state = ST_TUTDONE
 		cine_tick = 0
-	if ua.has("--day"):               # dev: jump straight to the day hub for a screenshot
+	var dyi := ua.find("--day")       # dev: jump straight to the day hub for a screenshot,
+	if dyi != -1:                     # optionally --day <work|rest|prep> with that drawer open
 		enter_day()
+		if dyi + 1 < ua.size() and not ua[dyi + 1].begins_with("--"):
+			day_group = ua[dyi + 1]
+			day_sel = 0
 	var ssi := ua.find("--skills")    # dev: open the Skills reference for a screenshot,
 	if ssi != -1:                     # optionally --skills <N> to select entry N directly
 		level = maxi(level, 7)        # enough unlocked that both ready and locked show
@@ -2028,14 +2049,17 @@ func next_venue_rep() -> int:
 func enter_day() -> void:
 	game_state = ST_DAY
 	day_sel = 0
+	day_group = ""    # a new day always opens at the top level, never mid-drawer
 	day_msg = ""
 	view_venue = -1
 	cine_tick = 0
 	pattern_once = -1   # a Skills-practice pattern was for that session only
-	# came off the stage SPENT: land the cursor on the first recovery you can afford
-	# (a meal, else the inn) and say so, so the player is steered to it, not left guessing
+	# came off the stage SPENT: open the REST drawer and land the cursor on the first
+	# recovery you can afford (a meal, else the inn), so the player is steered straight
+	# at it instead of left guessing - the drawer is opened FOR them here
 	if exhausted:
 		exhausted = false
+		day_group = "rest"
 		var rows := day_rows()
 		var want := "eat" if money >= EAT_COST and stamina < stamina_max - 1.0 else "inn"
 		for i in rows.size():
@@ -2111,61 +2135,114 @@ func set_day_msg(m: String) -> void:
 	day_msg_tick = cine_tick
 
 
-func day_rows() -> Array[Dictionary]:
-	# the hub's actions with their live enabled state and the reason when not.
-	# built fresh every frame and every keypress so drawing and input always agree.
-	var vname := String(venue_data(play_venue())["name"])
+func day_actions() -> Array[Dictionary]:
+	# every hub action with its live enabled state, the reason when not, the drawer it
+	# belongs in, and an icon/accent for its card. Built fresh every frame and every
+	# keypress so drawing and input can never disagree about what is on screen.
 	var out: Array[Dictionary] = []
-	# a queued lesson sits at the TOP of the hub, so a new unlock is the first thing you
-	# see and can choose to learn - it never yanks you out of a set, and costs no day time
-	if not pending_tuts.is_empty():
-		out.append({"id": "learn", "name": "LEARN  -  %s" % lesson_title(pending_tuts[0]),
-			"cost": "", "ok": true, "why": "",
-			"sub": "something new. Taught slow, one step at a time. Costs no time."})
 	var tired := too_tired()
 	var tired_why := "too tired to work (stamina under %d)  -  sleep first" % int(TIRED_FLOOR)
-	out.append({"id": "perform", "name": "PERFORM  at  %s" % vname,
-		"cost": "", "ok": not tired,
-		"why": tired_why if tired else "",
+	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
+		"cost": "", "ok": not tired, "why": tired_why if tired else "",
 		"sub": "gold and reputation, while stamina lasts. P books it PURIST."})
-	out.append({"id": "practice", "name": "PRACTICE",
-		"cost": "", "ok": not tired,
-		"why": tired_why if tired else "",
+	out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
+		"cost": "", "ok": not tired, "why": tired_why if tired else "",
 		"sub": "no crowd, no pay. Work as long as you can stand."})
-	out.append({"id": "daily", "name": "DAILY CHALLENGE  -  %s" % String(venue_data(daily_venue())["name"]),
-		"cost": "", "ok": not tired,
-		"why": tired_why if tired else "",
-		"sub": "today's stage and Encore, same for every juggler playing today. Costs a segment, same as PERFORM."})
+	out.append({"id": "daily", "grp": "work", "icon": "cal", "name": "DAILY CHALLENGE",
+		"cost": String(venue_data(daily_venue())["name"]), "ok": not tired, "why": tired_why if tired else "",
+		"sub": "today's stage and Encore, the same for every juggler playing today. Costs a segment, same as PERFORM."})
 	var full := stamina >= stamina_max - 1.0
-	var can_eat := money >= EAT_COST and not full
 	var eat_why := ""
 	if money < EAT_COST:
 		eat_why = "not enough gold"
 	elif full:
 		eat_why = "not hungry yet"
-	out.append({"id": "eat", "name": "EAT",
-		"cost": "%d gold" % EAT_COST, "ok": can_eat, "why": eat_why,
-		"sub": "stamina back. Every third meal adds Strength."})
-	out.append({"id": "inn", "name": "SLEEP  at the inn",
+	out.append({"id": "eat", "grp": "rest", "icon": "plate", "name": "EAT a hot meal",
+		"cost": "%d gold" % EAT_COST, "ok": money >= EAT_COST and not full, "why": eat_why,
+		"sub": "stamina back. Every third meal adds a point of Strength."})
+	out.append({"id": "inn", "grp": "rest", "icon": "bed", "name": "SLEEP at the inn",
 		"cost": "%d gold" % INN_COST, "ok": money >= INN_COST,
 		"why": "not enough gold  -  the innkeeper does not haggle" if money < INN_COST else "",
 		"sub": "ends the day, wake fully rested. Keep %d gold aside or the road ends." % INN_COST})
 	if pie_count > 0:
-		out.append({"id": "pie", "name": "EAT  Uncle Dan's Pie",
+		out.append({"id": "pie", "grp": "rest", "icon": "pie", "name": "EAT Uncle Dan's Pie",
 			"cost": "own %d" % pie_count, "ok": not pie_active, "why": "one is already working" if pie_active else "",
 			"sub": "a stimulant slice: the whole day runs a quarter slower, until you sleep."})
 	if have(PROP_EGGS) > 0:
-		var egg_full := stamina >= stamina_max - 1.0
-		out.append({"id": "egg", "name": "EAT  a raw egg",
-			"cost": "own %d" % have(PROP_EGGS), "ok": not egg_full, "why": "not hungry yet" if egg_full else "",
-			"sub": "no gold, no Strength tick - just +%d stamina and one fewer egg to juggle." % int(EGG_EAT_STAM)})
-	out.append({"id": "shop", "name": "SHOP",
+		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
+			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
+			"sub": "no gold and no Strength tick: just +%d stamina, and one fewer egg to juggle." % int(EGG_EAT_STAM)})
+	out.append({"id": "shop", "grp": "prep", "icon": "coin", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
-		"sub": "props and gear. New props teach themselves."})
-	out.append({"id": "skills", "name": "SKILLS",
+		"sub": "props and gear. A new prop teaches itself when you buy it."})
+	out.append({"id": "skills", "grp": "prep", "icon": "book", "name": "SKILLS",
 		"cost": "", "ok": true, "why": "",
-		"sub": "every trick and pattern you know, and how to pull it off."})
+		"sub": "every trick and pattern you know, and the keys that pull it off."})
 	return out
+
+
+func day_rows() -> Array[Dictionary]:
+	# WHAT THE CURSOR WALKS. The hub used to lay all ten actions out at once, which
+	# Louis called crowded, so they live in three DRAWERS now (see DAY_GROUPS) and the
+	# top level shows one card each: at most four things on screen instead of ten.
+	# `day_group` is "" at the top level, else the open drawer's id. Everything else
+	# (day_activate, the venue picker, the vignettes) keys off row ids exactly as
+	# before - only which rows exist at a given moment changed.
+	var out: Array[Dictionary] = []
+	if day_group == "":
+		# a queued lesson always sits at the very top of the hub, never inside a
+		# drawer: a new unlock should be the first thing seen, and it costs no time
+		if not pending_tuts.is_empty():
+			# the lesson's NAME goes in the explanation, not the title: a trick name is
+			# data and can be any length, and the title strip is narrow
+			out.append({"id": "learn", "icon": "spark", "name": "LEARN something new",
+				"cost": "free", "ok": true, "why": "", "col": Color(0.55, 0.88, 0.52),
+				"sub": "%s, taught slow, one step at a time. Costs no time at all." % lesson_title(pending_tuts[0])})
+		var acts := day_actions()
+		for g in DAY_GROUPS:
+			var gid := String(g["id"])
+			var open_n := 0
+			var total := 0
+			var blocked := ""
+			for a in acts:
+				if String(a["grp"]) != gid:
+					continue
+				total += 1
+				if bool(a["ok"]):
+					open_n += 1
+				elif blocked == "":
+					blocked = String(a["why"])
+			# the drawer says what it holds and, when nothing in it can be done, why
+			var note := String(g["sub"])
+			if open_n == 0 and blocked != "":
+				note = blocked
+			out.append({"id": "grp:" + gid, "icon": String(g["icon"]), "name": String(g["name"]),
+				"cost": "%d of %d" % [open_n, total] if open_n < total else "%d" % total,
+				"ok": open_n > 0, "why": blocked, "col": Color(g["col"]), "sub": note,
+				"drawer": true})
+		return out
+	for a in day_actions():
+		if String(a["grp"]) == day_group:
+			var r := a.duplicate()
+			r["col"] = day_group_col(day_group)
+			out.append(r)
+	out.append({"id": "back", "icon": "back", "name": "BACK", "cost": "", "ok": true, "why": "",
+		"col": Color(0.78, 0.72, 0.66), "sub": "out to the day's other choices."})
+	return out
+
+
+func day_group_col(gid: String) -> Color:
+	for g in DAY_GROUPS:
+		if String(g["id"]) == gid:
+			return Color(g["col"])
+	return Color(0.95, 0.7, 0.4)
+
+
+func day_group_name(gid: String) -> String:
+	for g in DAY_GROUPS:
+		if String(g["id"]) == gid:
+			return String(g["name"])
+	return ""
 
 
 func day_input(kc: int) -> void:
@@ -2186,6 +2263,7 @@ func day_input(kc: int) -> void:
 		return
 	var rows := day_rows()
 	var n := rows.size()
+	day_sel = clampi(day_sel, 0, n - 1)
 	match kc:
 		KEY_UP, KEY_W:
 			day_sel = (day_sel + n - 1) % n
@@ -2202,6 +2280,10 @@ func day_input(kc: int) -> void:
 				if np != play_venue():
 					venue_pick = np
 					play_sfx("ui2", -14.0)
+			elif kc == KEY_LEFT and day_group != "":
+				day_close_drawer()   # left is also "out of this drawer", like a file tree
+			elif kc == KEY_RIGHT and String(rows[day_sel]["id"]).begins_with("grp:"):
+				day_activate(String(rows[day_sel]["id"]), true, "")   # right opens one
 		KEY_P:
 			# book tonight PURIST: the pure-skill ladder with its own records
 			purist = not purist
@@ -2214,13 +2296,42 @@ func day_input(kc: int) -> void:
 			sheet_open = true
 			play_sfx("ui2", -13.0)
 		KEY_ESCAPE:
+			# inside a drawer, Escape backs out of it rather than leaving the day
+			# entirely - the same thing Back does, and what a folder view should do
+			if day_group != "":
+				day_close_drawer()
+				return
 			save_progress()
 			game_state = ST_MENU
 			menu_sel = 0
 			play_sfx("ui", -12.0)
 
 
+func day_close_drawer() -> void:
+	# back out to the top level, landing the cursor ON the drawer just left, so the
+	# way back in is exactly where the eye already is
+	var was := day_group
+	day_group = ""
+	day_sel = 0
+	var rows := day_rows()
+	for i in rows.size():
+		if String(rows[i]["id"]) == "grp:" + was:
+			day_sel = i
+			break
+	play_sfx("ui", -13.0)
+
+
 func day_activate(id: String, ok: bool, why: String) -> void:
+	# a DRAWER always opens, even when nothing inside it can be done right now: the
+	# player is allowed to look, and the row inside says why it is closed
+	if id.begins_with("grp:"):
+		day_group = id.substr(4)
+		day_sel = 0
+		play_sfx("ui2", -13.0)
+		return
+	if id == "back":
+		day_close_drawer()
+		return
 	if not ok:
 		set_day_msg(why)
 		play_sfx("whiff", -10.0)
@@ -4330,73 +4441,6 @@ func shoulder_pos(h: int) -> Vector2:
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
-func same_hand_lane_pool() -> Array[float]:
-	# px pulled toward stage centre from inner_pos, for an EXTRA same-hand ball
-	# sharing an already-busy road (index 0 unused - lane 0 keeps the normal
-	# diagonal). Each non-zero entry is a straight VERTICAL line, not a shifted
-	# diagonal: a diagonal shift does NOT guarantee separation (the two lines'
-	# x-RANGES still overlap unless shifted the full line length, ~46px, found
-	# the hard way via --latecatch showing it could make things WORSE). Two
-	# DISTINCT verticals stay a CONSTANT x apart regardless of relative timing,
-	# unlike two diagonals - but a ball clamped onto an ALREADY-occupied
-	# vertical is worse than the original problem, not better: two balls
-	# sharing one vertical land at the exact same point whenever their flight
-	# fractions are p and 1-p (same height by the parabola's own symmetry,
-	# same x since neither moves sideways) - also found the hard way.
-	#
-	# The pool itself depends on num_balls: three-or-more balls sharing one
-	# hand's own road needs three-or-more DISTINCT lanes, but the 0-54px
-	# budget (inner_pos's own reach - past it starts overlapping the diagonal;
-	# past 0 starts entering the other hand's half) can only fit two lanes at
-	# a real ~28px hitbox-clearing gap for a base ball. Six balls (three per
-	# hand) is exactly the count where a third lane would first be needed AT
-	# that full, unshrunk hitbox size, so it gets the wide two-lane pool.
-	# Eight and up already carries prop_hit_scale's count>=6 shrink, so a
-	# tighter three-lane pool can afford to fit there instead - the smaller
-	# hitbox is what makes the closer packing safe, not a separate excuse.
-	if num_balls <= 7:
-		return [0.0, 40.0, 12.0]
-	return [0.0, 46.0, 30.0, 14.0, 4.0]
-
-
-func toward_center_x(x: float, inset: float) -> float:
-	var c := stage_center().x
-	return x + inset if x < c else x - inset
-
-
-func road_lane(from_h: int, to_h: int, ot: bool, exclude: Ball, pool_size: int) -> int:
-	# the SMALLEST slot index, WITHIN a pool of pool_size PHYSICAL lanes, not
-	# already held by another ball still in flight along this exact straight
-	# road (same origin hand, same destination hand, same over-the-top-ness).
-	# Bounded by pool_size (not an ever-growing raw count) because the mapping
-	# from index to an actual x position is itself bounded (SAME_HAND_LANE_X
-	# has only so many physically-separated verticals) - an unbounded index
-	# that later gets folded back onto a small physical pool would silently
-	# reuse a slot ANOTHER ball still thinks is its own, recreating the exact
-	# bug this function exists to avoid (see below). If every physical lane is
-	# genuinely occupied, this falls back to slot 0 rather than growing forever
-	# - accepted residual risk for the rare case that needs it, same spirit as
-	# prop_hit_scale accepting less margin for a harder load.
-	# Also: two balls that strictly alternate flying/held (the ordinary case,
-	# one road ball per hand's own same-hand rotation) would both count "1
-	# other already up" forever and land on the SAME slot every single time if
-	# this returned a raw count instead of an actually-free index - shifting
-	# the whole road sideways with the two balls exactly as close together as
-	# before (a real bug caught by --latecatch showing zero improvement). A
-	# Columns lane ball (lane_x >= 0) or the middle ball never shares a road,
-	# so they never call this. 0 (unmoved) for the common case: nothing else
-	# on this road yet.
-	var taken := {}
-	for o in balls:
-		if o != exclude and o.state == STATE_FLIGHT and o.thrown_from == from_h \
-				and o.to_hand == to_h and o.over_top == ot and o.lane_x < 0.0:
-			taken[o.road_lane_idx] = true
-	for slot in range(pool_size):
-		if not taken.has(slot):
-			return slot
-	return 0
-
-
 func columns_x(slot: int) -> float:
 	# the x of vertical column `slot` (0..num_balls-1) in a Columns pattern, spread
 	# symmetric about centre so every ball owns its own line and no two share air
@@ -5216,37 +5260,22 @@ func do_throw(h: int, hold: int) -> void:
 		b.from_pos = outer_pos(h)
 		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
 	else:
-		# a plain cascade throw: inner launch, outer catch - always these same two
-		# points, whichever hand it lands in. UNLESS it is a SAME-HAND throw
-		# (b.to_hand == h - the even-count Cascade face) and another ball already
-		# rides that exact road: then it rides a straight VERTICAL columns-style
-		# lane instead, pulled toward centre from inner_pos (Louis, 2026-07-19: an
-		# arm only ever reaches inner or outer was the rule when a same-hand pair
-		# widened its landing 22px PAST outer_pos to buy clearance - "outward,
-		# past the established reach" was the objection. A lane pulled TOWARD
-		# centre, never past outer_pos, is the one Louis authorized in its place
-		# once a realistic-timing audit - not just the frame-perfect one that
-		# measured this "tight but real" - found an actual overlap here). A
-		# CROSSING throw never gets a lane at all: its road already runs through
-		# the centre by design, so pulling it inward only closes the gap with the
-		# opposite-direction road it crosses - confirmed measurably worse, not
-		# better, by the same audit; a crossing road's own concurrency (5+ balls
-		# sharing one direction) needs a hitbox-scale fix instead (prop_hit_scale).
-		var lane_pool := same_hand_lane_pool()
-		if b.to_hand == h:
-			b.road_lane_idx = road_lane(h, b.to_hand, false, b, lane_pool.size())
-		if b.road_lane_idx <= 0:
-			b.from_pos = inner_pos(h)
-			b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
-		else:
-			# a straight up-and-down road, like Columns' own lanes: its x never
-			# enters the diagonal's [inner_pos,outer_pos] range, so the two can
-			# never coincide no matter how their timing lines up - a DIAGONAL
-			# shift of the same size does not guarantee that (the two lines'
-			# ranges still overlap unless shifted the full ~46px line length).
-			var lx := toward_center_x(inner_pos(h).x, lane_pool[b.road_lane_idx])
-			b.from_pos = Vector2(lx, inner_pos(h).y)
-			b.to_pos = Vector2(lx + drift, inner_pos(h).y)
+		# a plain cascade throw: inner launch, outer catch - ALWAYS these same two
+		# points, whichever hand it lands in, and now including the even-count
+		# Cascade's same-hand face (Louis, 2026-07-26). An extra ball sharing one
+		# hand's own road no longer gets moved sideways onto a vertical lane; it gets
+		# a TALLER ARC instead, so the road a player sees is the same fountain road
+		# for every ball on it and only the height differs. See same_hand_arc_lift for
+		# the geometry, and prop_hit_scale for the other half Louis authorized: the
+		# hitbox, never the drawn size, absorbs what the lift cannot.
+		#
+		# A CROSSING throw is not part of this and never was: its road already runs
+		# through the centre by design, so nothing about it can be nudged inward
+		# without closing the gap with the opposite-direction road it crosses
+		# (measurably worse, per the --latecatch audit). A crossing road's own
+		# concurrency is carried entirely by prop_hit_scale.
+		b.from_pos = inner_pos(h)
+		b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
 	if this_trick == TR_BTB:
 		# BEHIND THE BACK actually goes behind now (Louis: it never read as
 		# behind): the arm wraps and the ball RELEASES from behind the opposite
@@ -6364,21 +6393,32 @@ func prop_hit_scale(kind: int) -> float:
 	# little further toward eleven. Every DRAWING reads prop_scale, the true size, so a
 	# six-club load looks exactly like a five-club load - it just forgives near misses.
 	var sc := prop_scale(kind)
-	var hit := sc
-	if num_balls >= 4:
-		# big props flatten toward ball size fast, and the whole set then eases
-		# smaller toward fourteen objects. Starts at FOUR now, not six
-		# (2026-07-19): a realistic-timing audit (--latecatch - a genuine
-		# Perfect catch anywhere in its real window, not just a frame-perfect
-		# one) found Half Shower, Shower and Tennis crossing every throw
-		# regardless of count (unlike Cascade, which only crosses at odd
-		# counts), so their own crossing-road concurrency shows up as early as
-		# four balls - long before the old six-ball trigger, tuned only
-		# against the frame-perfect bot, ever gave it anything to work with.
-		var flatten := clampf(float(num_balls - 3) / 2.0, 0.0, 1.0)      # full by 5
-		var excess := (sc - 1.0) * lerpf(0.55, 0.10, flatten)
-		var whole := lerpf(1.0, 0.06, clampf(float(num_balls - 3) / 1.0, 0.0, 1.0))   # floor by 4
-		hit = (1.0 + excess) * whole
+	# TWO separate shrinks, and they do different jobs.
+	#
+	# (1) A big prop sheds most of its EXTRA bulk over a ball's as soon as a load needs
+	# the room, so a club's hitbox walks toward a ball's while the club still LOOKS like
+	# a club. Full bulk at three objects, HIT_EXCESS_KEEP of it from four up.
+	#
+	# (2) The whole set then eases in with the count, and it eases along the curve the
+	# PATTERN's own geometry follows: a hand's road is (outer - inner) px wide and the
+	# count/2 balls sharing it pass ~2*(outer - inner)/count apart, so the room a
+	# pattern leaves falls like 1/count and the hitbox is set to fall with it
+	# (HIT_ROOM/count - HIT_TRIM). That keeps roughly the SAME px of daylight between
+	# hitboxes at every count, which is what makes each count read as a little harder
+	# than the one below rather than a cliff: this used to drop to 6% of drawn size the
+	# instant a fourth object appeared, so 4 through 15 objects were all equally and
+	# completely collision-proof while 3 was not (Louis, 2026-07-26: the difficulty
+	# should interpolate against the odd count either side of it).
+	#
+	# (3) ...and then by the room THIS pattern leaves (PATTERNS' "room"), because that
+	# varies far more than the count does: Columns leaves ~40px of daylight where Tennis
+	# leaves ~2px. Blended in from four objects up, so three of anything still collides
+	# at exactly the size it is drawn - at the beginner count, what you see is what hits.
+	var excess := (sc - 1.0) * lerpf(1.0, HIT_EXCESS_KEEP, clampf(float(num_balls - 3), 0.0, 1.0))
+	var whole := clampf(HIT_ROOM / float(maxi(num_balls, 1)) - HIT_TRIM, HIT_FLOOR, 1.0)
+	var room := float(PATTERNS[pattern].get("room", 1.0))
+	whole *= lerpf(1.0, room, clampf(float(num_balls - 3), 0.0, 1.0))
+	var hit := (1.0 + excess) * whole
 	if kind == PROP_RINGS:
 		hit *= RING_HIT_FACTOR
 	return hit
@@ -8083,6 +8123,30 @@ func draw_drop_marks(x: float, y: float, lim: int, used: int) -> void:
 			draw_colored_polygon(pts, c)
 
 
+func fit_text(font: Font, text: String, w: float, size: int) -> String:
+	# THE one-line overflow guard. draw_string's `width` argument does not shorten text,
+	# it CLIPS it mid-glyph, which is how a hub card ended up reading "LEARN - Overthrow
+	# (ne". This trims to the width and marks the trim, so a long name degrades into
+	# something readable instead of something broken (Louis, 2026-07-26: no text should
+	# ever leave its container). Returns the text untouched when it already fits, which
+	# is the normal case, so this costs nothing on the vast majority of draws.
+	if w <= 0.0 or font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= w:
+		return text
+	var cut := text
+	while cut.length() > 1:
+		cut = cut.substr(0, cut.length() - 1)
+		if font.get_string_size(cut + "...", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= w:
+			return cut.strip_edges() + "..."
+	return "..."
+
+
+func draw_fit_string(font: Font, pos: Vector2, text: String, align: int, w: float, size: int, col: Color) -> void:
+	# draw_string, but the text is shortened to fit `w` first instead of being clipped.
+	# Use this for anything whose length is DATA (a venue name, a trick name, a prop
+	# name, a save-slot title) rather than a fixed string the layout was built around.
+	draw_string(font, pos, fit_text(font, text, w, size), align, w, size, col)
+
+
 func _wrap_lines(font: Font, text: String, w: float, size: int) -> PackedStringArray:
 	# word-wrap a line to a width, WITHOUT drawing it. Split out so the Encore card can
 	# size itself to its own description before drawing it: the card used to be a fixed
@@ -9643,116 +9707,242 @@ func draw_day(font: Font, s: Vector2) -> void:
 
 	# the ledger card: purse, reputation, stamina, and the road to the next meal
 	# bonus. It sits high on the left so the stage picture keeps the middle.
+	# three stacked cards in the same language as the action column on the right, each
+	# with its own accent tab and icon disc: the ledger used to be bare text on one
+	# panel with a flat rectangle for a stamina bar, which read as the oldest thing on
+	# the screen next to the card menus everywhere else.
 	var lw := 300.0
 	var lx := 40.0
 	var ly := s.y * 0.175
-	hud_panel(Rect2(lx, ly, lw, 168.0))
-	draw_circle(Vector2(lx + 26.0, ly + 30.0), 7.0, Color(1.0, 0.84, 0.4))
-	draw_circle(Vector2(lx + 23.0, ly + 27.0), 2.4, Color(1.0, 0.95, 0.7))
-	draw_string(font, Vector2(lx + 42.0, ly + 37.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.86, 0.45))
-	draw_string(font, Vector2(lx + 20.0, ly + 64.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.82, 0.72, 0.85))
 	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-	draw_string(font, Vector2(lx + 20.0, ly + 92.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.9, 0.85, 0.85))
-	draw_string(font, Vector2(lx + lw - 90.0, ly + 92.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 70.0, 12, Color(0.85, 0.9, 0.85, 0.85))
-	draw_rect(Rect2(lx + 20.0, ly + 100.0, lw - 40.0, 12.0), Color(0.2, 0.14, 0.11, 0.7))
 	var scol := Color(0.55, 0.80, 0.6)
 	if sfrac < STAM_LOW:
 		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
-	draw_rect(Rect2(lx + 20.0, ly + 100.0, (lw - 40.0) * sfrac, 12.0), scol)
-	if sfrac < STAM_LOW:
-		draw_string(font, Vector2(lx + 20.0, ly + 130.0), "worn out  -  throws are getting wild", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.6, 0.45))
-	else:
-		draw_string(font, Vector2(lx + 20.0, ly + 130.0), "rested enough to work", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.68, 0.6))
 	var to_str := MEALS_PER_STR - (meals % MEALS_PER_STR)
-	draw_string(font, Vector2(lx + 20.0, ly + 152.0), "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.68, 0.6))
+	var ledger := [
+		{"icon": "coin", "col": Color(1.0, 0.84, 0.42), "label": "PURSE",
+		 "big": "%s gold" % commafy(money), "note": "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"]},
+		{"icon": "star", "col": Color(0.84, 0.72, 0.92), "label": "REPUTATION",
+		 "big": commafy(reputation), "note": rep_tier()},
+	]
+	for i in ledger.size():
+		var e: Dictionary = ledger[i]
+		var r := Rect2(lx, ly + float(i) * 80.0, lw, 72.0)
+		var ec: Color = e["col"]
+		soft_card(r, Color(0.07, 0.045, 0.06, 0.86), Color(ec.r, ec.g, ec.b, 0.30), 1.0, 11.0, 12.0, 0.04)
+		draw_rect(Rect2(r.position.x + 1.0, r.position.y + 12.0, 3.0, r.size.y - 24.0), Color(ec.r, ec.g, ec.b, 0.8))
+		var eic := Vector2(r.position.x + 30.0, r.position.y + 34.0)
+		draw_circle(eic, 14.0, Color(ec.r, ec.g, ec.b, 0.18))
+		day_icon(String(e["icon"]), eic, ec)
+		draw_string(font, Vector2(r.position.x + 54.0, r.position.y + 23.0), String(e["label"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 11, Color(0.74, 0.70, 0.64, 0.9))
+		draw_fit_string(font, Vector2(r.position.x + 54.0, r.position.y + 45.0), String(e["big"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 130.0, 18, ec)
+		draw_fit_string(font, Vector2(r.position.x + 54.0, r.position.y + 62.0), String(e["note"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 11, Color(0.74, 0.70, 0.64, 0.9))
+	var sr := Rect2(lx, ly + 160.0, lw, 72.0)
+	soft_card(sr, Color(0.07, 0.045, 0.06, 0.86), Color(scol.r, scol.g, scol.b, 0.30), 1.0, 11.0, 12.0, 0.04)
+	draw_rect(Rect2(sr.position.x + 1.0, sr.position.y + 12.0, 3.0, sr.size.y - 24.0), Color(scol.r, scol.g, scol.b, 0.8))
+	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 24.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, 120.0, 11, Color(0.80, 0.84, 0.80, 0.9))
+	draw_string(font, Vector2(sr.position.x + lw - 108.0, sr.position.y + 24.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 11, Color(0.80, 0.84, 0.80, 0.9))
+	draw_meter(sr.position.x + 18.0, sr.position.y + 32.0, lw - 36.0, 12.0, sfrac, scol)
+	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 62.0),
+		"worn out  -  throws are getting wild" if sfrac < STAM_LOW else "rested enough to work",
+		HORIZONTAL_ALIGNMENT_LEFT, lw - 36.0, 11, Color(1.0, 0.6, 0.45) if sfrac < STAM_LOW else Color(0.74, 0.70, 0.64, 0.9))
 
-	# the actions: a compact column on the RIGHT edge, off the stage picture
-	# (they used to sprawl across the middle and covered the venue's marquee)
+	# THE ACTIONS: a column of cards on the RIGHT edge, off the stage picture. Each card
+	# carries its own explanation, so there is no detached tooltip block under the list
+	# any more (Louis: those hover texts "look wrong / bad" - they were a bare wrapped
+	# paragraph on a card of their own, jammed against the bottom frame). The SELECTED
+	# card is the only one that grows: it brightens, shows its explanation, and on
+	# PERFORM adds the live chase and the next-stage gate. Everything else stays a
+	# one-line title, which is what keeps ten actions' worth of hub readable.
 	var rows := day_rows()
-	var aw := 348.0
-	var ax := s.x - aw - 44.0
-	var ay := s.y * 0.285
+	var aw := 360.0
+	var ax := s.x - aw - 40.0
+	var sub_w := aw - 74.0
+	# measure first, lay out second: the column is centred on the actions area, so a
+	# two-card drawer does not sit stranded at the top of a ten-card space
+	var heights := PackedFloat32Array()
+	var total_h := 0.0
 	for i in rows.size():
-		var r: Dictionary = rows[i]
-		var sel := i == day_sel
-		var ok := bool(r["ok"])
-		var ry := ay + float(i) * 44.0
-		if sel:
-			hud_panel(Rect2(ax - 14.0, ry - 21.0, aw, 40.0), true)
-		var name_c := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
-		if not ok:
-			name_c = Color(0.55, 0.5, 0.46)
-		var label := String(r["name"])
-		if String(r["id"]) == "perform":
-			# the stage picker lives ON this row: arrows show which way it can
-			# still move (left to right along the ladder, never wrapping). The
-			# PURIST mark sits under the cost, never inside the name (it used to
-			# run into the "1 segment" text on long venue names).
-			# arrows wrap the venue NAME, so PERFORM always starts flush with the
-			# other rows (a leading arrow pad used to indent the whole row)
-			var pv := play_venue()
-			var lar := "<  " if pv > 0 else ""
-			var rar := "  >" if pv < venue_index() else ""
-			label = "PERFORM  at  %s%s%s" % [lar, String(venue_data(pv)["name"]), rar]
-			if purist:
-				draw_string(font, Vector2(ax + aw - 118.0, ry + 15.0), "PURIST", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 11, Color(0.82, 0.72, 0.85))
-		draw_string(font, Vector2(ax, ry), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, name_c)
-		var cost := String(r["cost"])
-		if cost != "":
-			var cc := Color(0.85, 0.75, 0.58, 0.9) if ok else Color(0.55, 0.5, 0.46)
-			draw_string(font, Vector2(ax + aw - 118.0, ry), cost, HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, cc)
-
-	# under the list: the selected action explains itself, and the perform row
-	# adds its live chase and how the NEXT stage opens. The block sits on its own
-	# card (same footprint as the row highlight): drawn bare it fought the fence
-	# pickets and the sun glow of the exterior behind it. Long subs (the inn's,
-	# the pie's) wrap inside the card instead of clipping at its edge. hud_card,
-	# not hud_panel: this card sits over the brightest part of the exterior art
-	# (the sun glow), and hud_panel's 55%-opaque fill still washed out there.
-	var selr: Dictionary = rows[day_sel]
-	var suby := ay + float(rows.size()) * 44.0 + 2.0
-	var sub_text := String(selr["sub"])
-	var sub_w := aw - 28.0
-	var sub_h := font.get_multiline_string_size(sub_text, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, 2).y
-	var is_perf := String(selr["id"]) == "perform"
-	var nxt := next_venue_rep()
-	var block_h := 8.0 + sub_h + 10.0
-	if is_perf:
-		block_h += 26.0 + (20.0 if nxt > 0 else 0.0)
-	hud_card(Rect2(ax - 14.0, suby, aw, block_h))
-	draw_multiline_string(font, Vector2(ax, suby + 8.0 + font.get_ascent(13)), sub_text,
-		HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, 2, Color(0.85, 0.78, 0.66))
-	if is_perf:
-		var vi := play_venue()
-		var chase := "no record here yet  -  set one"
-		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
-			chase = "record to beat   %d" % rec_table()[vi]
-		var cy := suby + 8.0 + sub_h + 24.0
-		draw_string(font, Vector2(ax, cy), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, Color(0.96, 0.83, 0.52, 0.9))
-		if nxt > 0:
-			draw_string(font, Vector2(ax, cy + 20.0), "the next stage opens at Rep %d  (you have %d)" % [nxt, reputation], HORIZONTAL_ALIGNMENT_LEFT, sub_w, 13, Color(0.82, 0.72, 0.85, 0.9))
+		var h := day_card_height(font, rows[i], i == day_sel, sub_w)
+		heights.append(h)
+		total_h += h + 8.0
+	# centre the column in the space between the header and the footer hints, so a
+	# two-card drawer is not left stranded at the top of a ten-card-tall gap
+	var band_top := s.y * 0.21
+	var band_bot := s.y - 96.0
+	var ay := maxf(band_top, band_top + ((band_bot - band_top) - total_h) * 0.5)
+	if day_group != "":
+		# a breadcrumb, so an open drawer never leaves the player wondering where they are
+		var gc := day_group_col(day_group)
+		draw_string(font, Vector2(ax + 4.0, ay - 13.0), day_group_name(day_group),
+			HORIZONTAL_ALIGNMENT_LEFT, aw * 0.6, 13, Color(gc.r, gc.g, gc.b, 0.95))
+		draw_string(font, Vector2(ax, ay - 13.0), "Esc  back", HORIZONTAL_ALIGNMENT_RIGHT, aw - 4.0, 12, Color(0.72, 0.66, 0.6, 0.8))
+	var cy := ay
+	for i in rows.size():
+		day_draw_card(font, rows[i], Rect2(ax, cy, aw, heights[i]), i == day_sel, sub_w)
+		cy += heights[i] + 8.0
 
 	# transient feedback (a meal eaten, a spent day) fades after a few seconds
 	if day_msg != "" and cine_tick - day_msg_tick < 300:
 		var ma := clampf(1.0 - float(cine_tick - day_msg_tick - 220) / 80.0, 0.0, 1.0)
 		draw_string(font, Vector2(0, s.y - 92.0), day_msg, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.88, 0.55, ma))
 
-	# on the PERFORM row, Left/Right (or the dpad) picks the stage - without this hint
-	# a player could never learn the venue ladder was theirs to walk (the < > around the
-	# venue name was the only cue). Contextual: it shows only while PERFORM is selected.
+	# the footer follows what the cursor is actually on: Left/Right picks the stage on
+	# PERFORM (without this hint the < > around the venue name was the only cue a whole
+	# venue ladder was there to walk), opens a drawer on a drawer card, and Escape means
+	# "out of this drawer" rather than "leave the day" whenever one is open.
+	var selid := String(rows[day_sel]["id"])
+	var esc_note := "back" if day_group != "" else "menu"
 	if pad_active():
-		var hints := [[["Stick"], "choose"], [k_finish(), "do it"], [k_sheet(), "sheet"], [k_pause(), "menu"]]
-		if is_perf:
+		var hints := [[["Stick"], "choose"], [k_finish(), "open" if selid.begins_with("grp:") else "do it"], [k_sheet(), "sheet"], [k_pause(), esc_note]]
+		if selid == "perform":
 			hints.insert(1, [["Dpad"], "stage"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 	else:
-		var hints := [[["Up", "Down"], "choose"], [["Enter"], "do it"], [["Tab"], "sheet"], [["Esc"], "menu"]]
-		if is_perf:
+		var hints := [[["Up", "Down"], "choose"], [["Enter"], "open" if selid.begins_with("grp:") else "do it"], [["Tab"], "sheet"], [["Esc"], esc_note]]
+		if selid == "perform":
 			hints.insert(1, [["Left", "Right"], "stage"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 
 	if day_anim != "":
 		draw_day_anim(font, s)
+
+
+func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> float:
+	# a card is one title line until it is SELECTED, then it grows to fit exactly what
+	# it has to say. Measured with max_lines -1, the same as day_draw_card draws it, so
+	# a long explanation can never run past the bottom of its own card.
+	if not sel:
+		return 46.0
+	var h := 42.0
+	var perf := String(r["id"]) == "perform"
+	if perf:
+		h += 28.0                                   # the stage picker line
+	h += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 10.0
+	if not bool(r["ok"]) and String(r["why"]) != "":
+		h += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 4.0
+	if perf:
+		h += 20.0                                   # the record to chase
+		if next_venue_rep() > 0:
+			h += 18.0                               # ...and how the next stage opens
+	return h
+
+
+func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: float) -> void:
+	var ok := bool(r["ok"])
+	var ac: Color = r.get("col", Color(0.95, 0.7, 0.4))
+	if not ok:
+		ac = ac.lerp(Color(0.45, 0.42, 0.40), 0.65)
+	var fill := Color(ac.r * 0.16, ac.g * 0.16, ac.b * 0.16, 0.94) if sel else Color(0.07, 0.045, 0.06, 0.82)
+	soft_card(box, fill, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.26), 2.0 if sel else 1.0, 11.0, 12.0, 0.06 if sel else 0.0)
+	var ic := Vector2(box.position.x + 32.0, box.position.y + 23.0)
+	draw_circle(ic, 15.0, Color(ac.r, ac.g, ac.b, 0.20))
+	draw_arc(ic, 15.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.45), 1.5, true)
+	day_icon(String(r.get("icon", "")), ic, ac)
+	var tx := box.position.x + 58.0
+	var title_c := Color(1.0, 0.95, 0.86) if sel else Color(0.84, 0.79, 0.72)
+	if not ok:
+		title_c = Color(0.60, 0.56, 0.52)
+	# a DRAWER card gets a chevron, so it reads as "opens into more". It claims its own
+	# strip of the right edge, and the cost text stops short of it.
+	var right := box.position.x + box.size.x - 14.0
+	if bool(r.get("drawer", false)):
+		var chx := right - 4.0
+		var chy := box.position.y + 23.0
+		draw_polyline(PackedVector2Array([Vector2(chx - 5.0, chy - 6.0), Vector2(chx + 1.0, chy), Vector2(chx - 5.0, chy + 6.0)]),
+			Color(ac.r, ac.g, ac.b, 0.85 if sel else 0.4), 2.0)
+		right -= 18.0
+	var cost := String(r["cost"])
+	var cost_w := 0.0
+	if cost != "":
+		cost_w = minf(120.0, font.get_string_size(cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 8.0)
+		draw_string(font, Vector2(right - cost_w, box.position.y + 28.0), cost,
+			HORIZONTAL_ALIGNMENT_RIGHT, cost_w, 12, Color(0.88, 0.80, 0.64, 0.9) if ok else Color(0.58, 0.54, 0.5))
+	draw_fit_string(font, Vector2(tx, box.position.y + 29.0), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT,
+		right - cost_w - tx - 8.0, 17, title_c)
+	if not sel:
+		return
+	var y := box.position.y + 42.0
+	if String(r["id"]) == "perform":
+		# the stage picker lives on the card, arrows showing which way the ladder can
+		# still move (left to right, never wrapping), with the PURIST mark beside it
+		var pv := play_venue()
+		var pick := "%s%s%s" % ["<   " if pv > 0 else "", String(venue_data(pv)["name"]), "   >" if pv < venue_index() else ""]
+		draw_string(font, Vector2(tx, y + 16.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 18, Color(1.0, 0.88, 0.52))
+		if purist:
+			draw_string(font, Vector2(box.position.x + box.size.x - 110.0, y + 16.0), "PURIST",
+				HORIZONTAL_ALIGNMENT_RIGHT, 96.0, 11, Color(0.84, 0.72, 0.90))
+		y += 28.0
+	draw_multiline_string(font, Vector2(tx, y + font.get_ascent(12)), String(r["sub"]),
+		HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1, Color(0.86, 0.80, 0.70))
+	y += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 10.0
+	if not ok and String(r["why"]) != "":
+		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(12)), String(r["why"]),
+			HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1, Color(1.0, 0.66, 0.48))
+		y += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 4.0
+	if String(r["id"]) == "perform":
+		var vi := play_venue()
+		var chase := "no record here yet  -  set one"
+		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
+			chase = "record to beat   %s" % commafy(rec_table()[vi])
+		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, Color(0.96, 0.83, 0.52, 0.92))
+		var nxt := next_venue_rep()
+		if nxt > 0:
+			draw_string(font, Vector2(tx, y + 32.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
+				HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, Color(0.84, 0.74, 0.90, 0.92))
+
+
+func day_icon(kind: String, c: Vector2, col: Color) -> void:
+	# small vector marks for the hub's cards, drawn from primitives like the rest of
+	# the art. Each one says what its row DOES at a glance, which is what lets the
+	# collapsed cards get away with a title and nothing else.
+	match kind:
+		"star":
+			var pts := PackedVector2Array()
+			for i in 10:
+				var a := -PI * 0.5 + TAU * float(i) / 10.0
+				var rr := 8.0 if i % 2 == 0 else 3.6
+				pts.append(c + Vector2(cos(a), sin(a)) * rr)
+			draw_colored_polygon(pts, col)
+		"loop":
+			draw_arc(c, 6.5, -2.2, 2.5, 18, col, 2.0, true)
+			draw_colored_polygon(PackedVector2Array([c + Vector2(2.0, -8.5), c + Vector2(8.0, -6.0), c + Vector2(2.5, -2.5)]), col)
+		"cal":
+			draw_rect(Rect2(c.x - 7.0, c.y - 6.0, 14.0, 13.0), Color(col.r, col.g, col.b, 0.55))
+			draw_rect(Rect2(c.x - 7.0, c.y - 6.0, 14.0, 4.0), col)
+			draw_rect(Rect2(c.x - 3.5, c.y + 0.5, 3.0, 3.0), col)
+		"plate":
+			draw_arc(c, 8.0, 0.0, TAU, 20, col, 1.6, true)
+			draw_arc(c, 4.0, 0.0, TAU, 14, Color(col.r, col.g, col.b, 0.7), 1.4, true)
+		"bed":
+			draw_rect(Rect2(c.x - 8.0, c.y, 16.0, 5.0), col)
+			draw_rect(Rect2(c.x - 8.0, c.y - 5.0, 6.0, 5.0), Color(col.r, col.g, col.b, 0.7))
+			draw_line(Vector2(c.x - 8.0, c.y + 5.0), Vector2(c.x - 8.0, c.y + 8.0), col, 1.6)
+			draw_line(Vector2(c.x + 8.0, c.y + 5.0), Vector2(c.x + 8.0, c.y + 8.0), col, 1.6)
+		"pie":
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-7.0, 5.0), c + Vector2(7.0, 5.0), c + Vector2(0.0, -7.0)]), col)
+			draw_line(c + Vector2(-7.0, 5.0), c + Vector2(7.0, 5.0), Color(1, 1, 1, 0.35), 1.6)
+		"egg":
+			fill_ellipse(c, 5.5, 7.5, col)
+		"coin":
+			draw_circle(c, 7.5, col)
+			draw_circle(c + Vector2(-2.0, -2.0), 2.2, Color(1.0, 1.0, 1.0, 0.45))
+		"book":
+			draw_rect(Rect2(c.x - 8.0, c.y - 7.0, 7.0, 14.0), col)
+			draw_rect(Rect2(c.x + 1.0, c.y - 7.0, 7.0, 14.0), Color(col.r, col.g, col.b, 0.65))
+		"moon":
+			draw_arc(c + Vector2(2.0, 0.0), 7.5, 0.6, TAU - 0.6, 20, col, 3.2, true)
+		"bag":
+			draw_rect(Rect2(c.x - 7.5, c.y - 3.0, 15.0, 10.0), col)
+			draw_arc(c + Vector2(0.0, -3.0), 4.5, PI, TAU, 12, col, 1.8, true)
+		"spark":
+			draw_line(c + Vector2(0, -8), c + Vector2(0, 8), col, 2.0)
+			draw_line(c + Vector2(-8, 0), c + Vector2(8, 0), col, 2.0)
+			draw_line(c + Vector2(-5, -5), c + Vector2(5, 5), Color(col.r, col.g, col.b, 0.6), 1.4)
+			draw_line(c + Vector2(5, -5), c + Vector2(-5, 5), Color(col.r, col.g, col.b, 0.6), 1.4)
+		"back":
+			draw_line(c + Vector2(7, 0), c + Vector2(-6, 0), col, 2.2)
+			draw_polyline(PackedVector2Array([c + Vector2(-1, -6), c + Vector2(-7, 0), c + Vector2(-1, 6)]), col, 2.2)
 
 
 func draw_day_anim(font: Font, s: Vector2) -> void:
