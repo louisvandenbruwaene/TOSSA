@@ -74,7 +74,11 @@ const MISS_GRACE := 20    # an uncaught ball drops this many ticks past arrival
 # Late timing band secures with a probability that rises with Accuracy and falls
 # with throw height; Perfect timing always secures. So low Accuracy still lands
 # plenty of catches, just less reliably, and Accuracy buys reliability.
-const ACC_FULL := 55.0            # Accuracy at which off-Perfect catches are reliable
+const ACC_FULL := 100.0           # Accuracy at which off-Perfect catches are reliable. Raised
+								   # from 55 (2026-07-26, Louis): eff_accuracy caps at 100, so at
+								   # 55 the catch benefit SATURATED at accuracy 55 and points 55-100
+								   # did nothing for catching (a dead band before Focus at 100). At
+								   # 100 the whole 0-100 range pays out, spreading the benefit evenly
 const GOOD_BASE := 0.50           # base chance to secure a Good-timed catch
 const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
 const ACC_CATCH_BONUS := 0.30     # added to the chance at full Accuracy. Capped so a
@@ -495,6 +499,8 @@ const NUM_GOALS := 3
 # post-game content with no strong-player data behind it yet.
 const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000, 200000]
 const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
+const GOAL_BAR_GAMMA := 0.62          # goal-meter fill exponent (<1 = concave): spreads a
+									   # streak-accelerated score evenly along the bar. See goal_bar_pos
 const ANTE_STEP := 0.15               # each complete act at a venue raises its bar 15%
 # the crowd's patience bleeds this much per tick, per venue (120 ticks a second),
 # draining from the 0.7 an act starts at. At the Backyard a still juggler (no
@@ -728,7 +734,10 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # same as set_shake/set_collide) so a chosen experiment survives a relaunch, but the
 # panel that can ever FLIP one is gated behind OS.is_debug_build() same as every
 # other dev surface - a release export always sees every experiment at its default.
-var experiments := {"talent_tree": false, "settings_cards": false, "pause_cards": false}
+# DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
+# them the default"): the growth-column sheet, card settings, and icon pause are now the
+# shipped look; F9 (debug) toggles each OFF to compare against the classic version.
+var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
@@ -1870,6 +1879,17 @@ func next_goal() -> int:
 	# the first goal the act has NOT yet reached, or the final goal once all have
 	# fallen (the meter then shows a full bar, not a moving one)
 	return goal_for(run_venue, clampi(goals_hit, 0, NUM_GOALS - 1))
+
+
+func goal_bar_pos(v: float, final: float) -> float:
+	# where a score value sits on the goal METER, 0..1. NOT linear in score: the streak
+	# multiplier makes score accelerate (slow while the streak builds, fast once it is up),
+	# so a linear fill crawls early then rockets late. A concave (log-like) mapping,
+	# GOAL_BAR_GAMMA < 1, amplifies the low end so the bar advances more evenly over TIME
+	# (Louis, 2026-07-26). Fill AND the goal notches share it, so a notch still marks its
+	# real score - only the spacing is remapped.
+	var x := clampf(v / maxf(1.0, final), 0.0, 1.0)
+	return pow(x, GOAL_BAR_GAMMA)
 
 
 func encore_pool(venue: int) -> Array[int]:
@@ -8085,13 +8105,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# the meter runs the WHOLE act - zero to the final goal - with a notch at each
 		# goal line, so where you are and what is left both read at a glance
 		var g_final := goal_for(run_venue, NUM_GOALS - 1)
-		var tfrac := clampf(float(score) / float(maxi(1, g_final)), 0.0, 1.0)
+		var tfrac := goal_bar_pos(float(score), float(g_final))   # concave: even over time
 		var barx := LX + 14
 		var barw := LW - 28
 		var fcol := Color(0.82, 0.5, 0.28).lerp(Color(1.0, 0.86, 0.42), tfrac)
 		draw_meter(barx, tcard_y + 63, barw, 20.0, tfrac, fcol)
 		for gi in NUM_GOALS - 1:
-			var nx := barx + barw * float(goal_for(run_venue, gi)) / float(maxi(1, g_final))
+			var nx := barx + barw * goal_bar_pos(float(goal_for(run_venue, gi)), float(g_final))
 			draw_rect(Rect2(nx - 1.0, tcard_y + 61, 2.0, 24.0), Color(1.0, 0.95, 0.8, 0.75))
 		var bartxt := "first goal  %s" % commafy(target)
 		if goals_hit > 0:
@@ -8756,10 +8776,19 @@ func talent_nodes(which: String) -> Array[Dictionary]:
 	vals.sort()
 	for v in vals:
 		out.append({"val": int(v), "label": String(by_val[v])})
-	if which == "end" or which == "spd":
-		for frac in [0.25, 0.5, 0.75]:
-			out.append({"val": int(round(float(cap) * frac)), "label": ""})
-	out.append({"val": cap, "label": "MAX"})
+	# Endurance and Speed gate no named skill, so their milestones are labelled with the
+	# EFFECT they reach (Louis, 2026-07-26: "i don't know what they mean") - the stamina
+	# pool at that Endurance, the slow-motion % at that Speed - not a bare unlabelled dot.
+	if which == "end":
+		for frac in [0.25, 0.5, 0.75, 1.0]:
+			var ev := int(round(float(cap) * frac))
+			out.append({"val": ev, "label": "%d stam" % int(round(100.0 + 9.0 * float(ev)))})
+	elif which == "spd":
+		for frac in [0.25, 0.5, 0.75, 1.0]:
+			var sv := int(round(float(cap) * frac))
+			out.append({"val": sv, "label": "%d%% slow" % int(sv / 8)})
+	else:
+		out.append({"val": cap, "label": "MAX"})
 	return out
 
 
@@ -8866,17 +8895,19 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 				if isnext and active and points > 0:
 					var pp := 0.5 + 0.5 * sin(float(tick) * 0.15)
 					draw_arc(ppos, 7.0 + 3.0 * pp, 0.0, TAU, 18, Color(bcol.r, bcol.g, bcol.b, 0.55 * (1.0 - pp)), 2.0, true)
-		# what the NEXT point in this column works toward - a real skill for acc/str, the
-		# live effect for end/spd (which gate no named skill)
+			# Endurance/Speed pips carry a short EFFECT label beside them (stamina, slow %),
+			# since they gate no named skill - the fix for "i don't know what they mean".
+			# acc/str pips stay bare (their next-line names the skill; low thresholds would
+			# overprint here anyway), so this is end/spd only.
+			var pl_id := String(b["id"])
+			if (pl_id == "end" or pl_id == "spd") and String(nd["label"]) != "":
+				var plc := Color(0.9, 0.87, 0.78) if reached else (Color(bcol.r, bcol.g, bcol.b, 0.95) if isnext else Color(0.64, 0.61, 0.56, 0.85))
+				draw_string(font, Vector2(trk_x + trk_w + 7.0, ppos.y + 4.0), String(nd["label"]), HORIZONTAL_ALIGNMENT_LEFT, colw * 0.5 - 6.0, 10, plc)
+		# what the NEXT point in this column works toward - a named skill for acc/str, the
+		# effect it reaches for end/spd (their pips are effect-labelled above). Uniform now.
 		var nl1 := ""
 		var nl2 := ""
-		if String(b["id"]) == "end":
-			nl1 = "max stamina"
-			nl2 = "%d" % int(round(100.0 + 9.0 * float(endurance)))
-		elif String(b["id"]) == "spd":
-			nl1 = "slow motion"
-			nl2 = "%d%%" % int(mini(speed, SPEED_CAP) / 8)
-		elif next_i >= 0:
+		if next_i >= 0:
 			nl1 = "next: %s" % (String(nodes[next_i]["label"]) if String(nodes[next_i]["label"]) != "" else "the cap")
 			nl2 = "at %d  (+%d)" % [int(nodes[next_i]["val"]), int(nodes[next_i]["val"]) - val]
 		else:
