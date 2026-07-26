@@ -39,6 +39,32 @@ and deleted. History lives in git.
 - **Catch model:** Perfect always secures; Good/Late are a chance that rises with
   Accuracy and falls with throw height. Focus (Accuracy past 100) first cuts stamina
   costs, then widens the Perfect window (to 250).
+- **PROP IDENTITY (2026-07-26, VERIFIED with --maxstats calib):** every prop class is a
+  real CHOICE, not just a heavier ball, across four levers held in `PROPS` + code, so a
+  matched choice is rewarded and a mismatched one punished (the balance goal). Perfect
+  window (`pwin`, difficulty): balls/eggs/rings 7, clubs 6 (forgiving for its weight),
+  knives 5, torches 4, floored at `PWIN_FLOOR` 3 so heavy+Cold Hands stays hittable.
+  Score multiplier (`smult`, reward, read by `prop_score_mult` -> `object_mult`): balls
+  1.00 up to torches 1.70, replacing the old flat per-weight-step bonus - climbing weight
+  AND count compounds. Throw stamina (`stam`, the early limiter): rings cut to 2 as their
+  low-stamina signature (the endurance prop). Catch forgiveness (`fgive`): clubs +0.12 on
+  off-Perfect, even in Purist. CONTEXT edges live in code, never flat fields, and only ever
+  ADD: torches +`DARK_PROP_BONUS` (0.30) where the stage is dark (`is_dark_context`:
+  Blackout, Stage Fright, the Midnight Show - all softened or late, so "only torches are
+  juggleable" never lands before the player would own them), knives +`PICKY_PROP_BONUS`
+  (0.30) before a hard-to-please crowd (`is_picky_crowd`: The Critic, The Hecklers) plus a
+  weight-scaled `prop_thrill` patience feed on Perfect catches. Calib proof: a master earns
+  monotonically more per weight step (torches x7 678k vs balls x7 399k), an uninvested
+  player collapses on the same heavy props (torches x5 12k vs balls x5 239k), 3 balls stays
+  locked out of venue 5, dark/picky A/B edges land on +17.6%/+19.3%. `--maxstats` (dev)
+  models a fully invested master so a heavy-prop calib is fair (a bare-Strength one is not).
+- **UI look (2026-07-26 polish pass):** the shared `soft_card` primitive (StyleBoxFlat:
+  rounded corners, soft drop shadow, faint top sheen) is THE card now - `hud_card`,
+  `hud_panel`, `draw_meter`, and every big screen container route through it, so depth is
+  consistent and the old flat-rectangle "cheap" look is gone. When adding a panel, use
+  `soft_card`, not a bare `draw_rect`. The shop gained a detail strip that names the
+  selected prop's signature edge and a "pays xN.NN" line per card (the reward, legible at
+  the point of choice).
 - **THE ACT (performances):** one continuous act at the chosen venue, three GOALS
   (first/second/final = VENUE_BASE x GOAL_STEP [1.0, 1.9, 3.2] x ante). From the
   first goal on you may CASH IN at any time: press Enter, or catch every ball and
@@ -332,9 +358,11 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   the other half, a day-hub row that spends one OWNED egg for a flat `EGG_EAT_STAM`
   (10) stamina, no gold, no Strength tick. Not yet confirmed the flat number actually
   feels worthwhile early and irrelevant late the way it was intended to.
-- **Rep pressure by difficulty:** make high venues effectively demand heavy props /
-  high counts (Louis: "near impossible to unlock high venues with only 3 balls") -
-  the goal numbers enforce some of this; validate with --calib per prop/count.
+- ~~Rep pressure by difficulty~~ - **largely addressed 2026-07-26** (see PROP IDENTITY
+  above): --maxstats calib confirms 3 balls is locked out of venue 5 (count pressure
+  works) and heavier props now pay monotonically more for a player who can sustain them,
+  while collapsing an uninvested one. Still worth a hands-on pass to confirm the FEEL, and
+  the highest counts (8-15) were not swept - only 3/5/7.
 - **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST -
   makes Blackout's dark stretch an almost-fully-visible colour halo, brightened
   2026-07-19 off its original faint 0.09 alpha (too hard to actually see, not

@@ -8259,8 +8259,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var ph := 500.0   # tall enough that the footer hints breathe below the XP row
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5 + (1.0 - card_a) * 24.0
-	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98 * card_a))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5 * card_a), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98 * card_a), Color(0.9, 0.6, 0.35, 0.5 * card_a), 2.0, 16.0, 22.0 * card_a)
 	if card_a < 1.0:
 		return
 	var lx := px + 34.0
@@ -8364,8 +8363,7 @@ func draw_pause(font: Font, s: Vector2) -> void:
 	var ph := 268.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
 	draw_string(font, Vector2(px, py + 52.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 30, Color(1.0, 0.86, 0.5))
 	draw_ornament(px + pw * 0.5, py + 70.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
 	var opts: Array[String] = ["Resume", "End the session", "Quit Game"]
@@ -8401,8 +8399,7 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 	var ph := 320.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
 	draw_string(font, Vector2(px, py + 42.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 26, Color(1.0, 0.86, 0.5))
 	draw_ornament(px + pw * 0.5, py + 58.0, 110.0, Color(0.82, 0.62, 0.34, 0.7))
 
@@ -8444,8 +8441,7 @@ func draw_debug_panel() -> void:
 	var ph := 100.0 + row_h * float(EXPERIMENT_DEFS.size())
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.07, 0.09, 0.13, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.5, 0.8, 1.0, 0.6), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.07, 0.09, 0.13, 0.98), Color(0.5, 0.8, 1.0, 0.6), 2.0, 16.0, 22.0)
 	draw_string(font, Vector2(px, py + 34.0), "EXPERIMENTS", HORIZONTAL_ALIGNMENT_CENTER, pw, 22, Color(0.7, 0.9, 1.0))
 	draw_string(font, Vector2(px, py + 54.0), "debug build only  -  never reaches a release export", HORIZONTAL_ALIGNMENT_CENTER, pw, 11, Color(0.55, 0.65, 0.7))
 	var oy := py + 76.0
@@ -8589,8 +8585,7 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	var ph := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
@@ -8759,8 +8754,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	var ph := minf(600.0, s.y - 60.0)
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.08, 0.06, 0.10, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.55, 0.75, 0.95, 0.5), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.08, 0.06, 0.10, 0.98), Color(0.55, 0.75, 0.95, 0.5), 2.0, 16.0, 22.0)
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
@@ -9257,8 +9251,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 					  # more stacked header line than Shop, so it earns a bit more)
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	draw_rect(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98))
-	draw_rect(Rect2(px, py, pw, ph), Color(0.9, 0.6, 0.35, 0.5), false, 2.0)
+	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
 
 	var kc_use := k_trick()[0]
 	var kc_sel := k_cycle()[0]
