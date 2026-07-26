@@ -8406,38 +8406,49 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 	# different picture, colour-coded by what each option actually does (calm to
 	# resume, warm to step out, warning-red to quit), the same card language as the
 	# shop/sheet/settings-cards alternate.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.72))
-	var pw := 380.0
-	var ph := 320.0
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.74))
+	var pw := 400.0
+	var ph := 336.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
-	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
-	draw_string(font, Vector2(px, py + 42.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 26, Color(1.0, 0.86, 0.5))
-	draw_ornament(px + pw * 0.5, py + 58.0, 110.0, Color(0.82, 0.62, 0.34, 0.7))
+	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.99), Color(0.9, 0.6, 0.35, 0.5), 2.0, 18.0, 26.0)
+	draw_string(title_font(), Vector2(px, py + 46.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 28, Color(1.0, 0.86, 0.5))
+	draw_ornament(px + pw * 0.5, py + 62.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
 
 	var opts := [
-		{"name": "Resume", "note": "right where it froze", "col": Color(0.55, 0.85, 0.5)},
-		{"name": "End the session", "note": "back to the day hub", "col": Color(0.95, 0.75, 0.4)},
-		{"name": "Quit Game", "note": "close IACTO", "col": Color(0.9, 0.4, 0.35)},
+		{"name": "Resume", "note": "right where it froze", "col": Color(0.55, 0.88, 0.52), "icon": "play"},
+		{"name": "End the session", "note": "back to the day hub", "col": Color(0.96, 0.76, 0.4), "icon": "back"},
+		{"name": "Quit Game", "note": "close IACTO", "col": Color(0.92, 0.42, 0.36), "icon": "quit"},
 	]
-	var cw := pw - 40.0
-	var cx := px + 20.0
-	var ch := 56.0
+	var cw := pw - 44.0
+	var cx := px + 22.0
+	var ch := 58.0
 	var gap := 12.0
-	var oy := py + 80.0
+	var oy := py + 92.0
 	for i in opts.size():
 		var o: Dictionary = opts[i]
-		var sel := i == pause_sel
+		var sel: bool = i == pause_sel
 		var cy := oy + float(i) * (ch + gap)
 		var ac: Color = o["col"]
-		hud_card(Rect2(cx, cy, cw, ch), Color(ac.r, ac.g, ac.b, 0.5))
-		if sel:
-			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
-			draw_rect(Rect2(cx - 4.0, cy - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.0)
-		draw_string(font, Vector2(cx + 16.0, cy + 24.0), String(o["name"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 32.0, 18, Color(1.0, 0.94, 0.85) if sel else Color(0.85, 0.8, 0.74))
-		draw_string(font, Vector2(cx + 16.0, cy + 42.0), String(o["note"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 32.0, 11, Color(0.75, 0.7, 0.64, 0.8))
+		var fillc := Color(ac.r * 0.18, ac.g * 0.18, ac.b * 0.18, 0.95) if sel else Color(0.11, 0.08, 0.09, 0.85)
+		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.3), 2.0 if sel else 1.0, 11.0, 10.0, 0.06 if sel else 0.0)
+		# an icon disc on the left says what the option DOES at a glance
+		var ic := Vector2(cx + 34.0, cy + ch * 0.5)
+		draw_circle(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22))
+		draw_arc(ic, 16.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.55), 1.5, true)
+		match String(o["icon"]):
+			"play":
+				draw_colored_polygon(PackedVector2Array([ic + Vector2(-5, -7), ic + Vector2(-5, 7), ic + Vector2(8, 0)]), ac)
+			"back":
+				draw_line(ic + Vector2(7, 0), ic + Vector2(-6, 0), ac, 2.5)
+				draw_polyline(PackedVector2Array([ic + Vector2(-1, -6), ic + Vector2(-7, 0), ic + Vector2(-1, 6)]), ac, 2.5)
+			"quit":
+				draw_line(ic + Vector2(-6, -6), ic + Vector2(6, 6), ac, 2.5)
+				draw_line(ic + Vector2(6, -6), ic + Vector2(-6, 6), ac, 2.5)
+		draw_string(font, Vector2(cx + 62.0, cy + 26.0), String(o["name"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 18, Color(1.0, 0.95, 0.85) if sel else Color(0.86, 0.81, 0.74))
+		draw_string(font, Vector2(cx + 62.0, cy + 44.0), String(o["note"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 11, Color(0.76, 0.71, 0.64, 0.85))
 	var pfoot2 := "up / down  -  A selects  -  B resumes" if pad_active() else "up / down  -  Enter  -  Esc resumes"
-	draw_string(font, Vector2(px, py + ph - 20.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(px, py + ph - 22.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
 func draw_debug_panel() -> void:
@@ -9739,57 +9750,83 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 	var rows := [
 		{"kind": "slider", "name": "Music", "val": set_music, "note": "", "col": Color(0.95, 0.75, 0.4)},
 		{"kind": "slider", "name": "Sound effects", "val": set_sfx, "note": "", "col": Color(0.95, 0.6, 0.45)},
-		{"kind": "bool", "name": "Screen shake", "val": set_shake, "note": "", "col": Color(0.55, 0.85, 0.8)},
+		{"kind": "bool", "name": "Screen shake", "val": set_shake, "note": "a jolt on every drop", "col": Color(0.55, 0.85, 0.8)},
 		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
 		{"kind": "bool", "name": "Hard collisions", "val": set_collide, "note": "clacks ruin catches", "col": Color(0.9, 0.5, 0.45)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
-		{"kind": "nav", "name": "Records and history", "val": false, "note": "", "col": Color(0.95, 0.82, 0.5)},
+		{"kind": "nav", "name": "Records and history", "val": false, "note": "your career ledger", "col": Color(0.95, 0.82, 0.5)},
 		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},
 	]
-	var pw := minf(680.0, s.x - 80.0)
+	# grouped into sections so it reads as a designed panel, not a wall of identical
+	# bars. The row INDEX still matches settings_input 0..8 exactly - only the y of each
+	# card shifts to leave room for the section headers between groups.
+	var sections := [
+		{"head": "AUDIO", "rows": [0, 1]},
+		{"head": "GAME FEEL", "rows": [2, 3, 4, 5]},
+		{"head": "MORE", "rows": [6, 7, 8]},
+	]
+	var pw := minf(620.0, s.x - 90.0)
 	var px := s.x * 0.5 - pw * 0.5
-	var top := s.y * 0.20
-	var bottom := s.y * 0.86
-	var row_adv := (bottom - top) / float(rows.size())
-	var card_h := row_adv * 0.8
-
-	for i in rows.size():
-		var r: Dictionary = rows[i]
-		var sel := i == menu_sel
-		var ry := top + float(i) * row_adv
-		var ac: Color = r["col"]
-		hud_card(Rect2(px, ry, pw, card_h), Color(ac.r, ac.g, ac.b, 0.45))
-		if sel:
-			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
-			draw_rect(Rect2(px - 4.0, ry - 4.0, pw + 8.0, card_h + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.0)
-		var nm := String(r["name"])
-		var ty := ry + card_h * 0.5 + 6.0
-		draw_string(font, Vector2(px + 20.0, ty), nm, HORIZONTAL_ALIGNMENT_LEFT, pw - 240.0, 18, Color(1.0, 0.94, 0.8) if sel else Color(0.85, 0.8, 0.72))
-		if String(r["note"]) != "":
-			draw_string(font, Vector2(px + 20.0, ty + 16.0), String(r["note"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 240.0, 11, Color(0.7, 0.64, 0.58, 0.85))
-		match String(r["kind"]):
-			"slider":
-				var vol: float = r["val"]
-				var mx := px + pw - 210.0
-				var my := ry + card_h * 0.5 - 8.0
-				draw_meter(mx, my, 150.0, 16.0, vol, Color(ac.r, ac.g, ac.b, 0.9) if vol > 0.0 else Color(0.5, 0.44, 0.4))
-				draw_string(font, Vector2(px + pw - 46.0, ty), "mute" if vol <= 0.0 else "%d%%" % int(round(vol * 100.0)),
-					HORIZONTAL_ALIGNMENT_RIGHT, 40.0, 15, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.85, 0.9, 0.82))
-			"bool":
-				var on := bool(r["val"])
-				var plate := Rect2(px + pw - 96.0, ry + card_h * 0.5 - 16.0, 76.0, 32.0)
-				draw_rect(plate, Color(0.16, 0.22, 0.13, 0.9) if on else Color(0.16, 0.09, 0.09, 0.85))
-				draw_rect(plate, Color(0.55, 0.85, 0.5, 0.55) if on else Color(0.7, 0.35, 0.3, 0.4), false, 1.0)
-				draw_string(font, plate.position + Vector2(0.0, 22.0), "ON" if on else "OFF",
-					HORIZONTAL_ALIGNMENT_CENTER, plate.size.x, 16, Color(0.78, 0.96, 0.72) if on else Color(0.9, 0.62, 0.58))
-			"nav":
-				draw_string(font, Vector2(px + pw - 40.0, ty), ">", HORIZONTAL_ALIGNMENT_RIGHT, 30.0, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
+	var card_h := 42.0
+	var gap := 7.0
+	var sec_gap := 16.0
+	var head_h := 20.0
+	var y := s.y * 0.185
+	for sec in sections:
+		draw_string(font, Vector2(px + 4.0, y + 13.0), String(sec["head"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.95, 0.8, 0.55, 0.85))
+		y += head_h
+		for i in sec["rows"]:
+			var r: Dictionary = rows[i]
+			var sel: bool = i == menu_sel
+			var ac: Color = r["col"]
+			var card := Rect2(px, y, pw, card_h)
+			var fillc := Color(ac.r * 0.16, ac.g * 0.16, ac.b * 0.17, 0.92) if sel else Color(0.10, 0.08, 0.10, 0.82)
+			soft_card(card, fillc, Color(ac.r, ac.g, ac.b, 0.85 if sel else 0.28), 1.5 if sel else 1.0, 9.0, 9.0, 0.05 if sel else 0.0)
+			# a rounded accent tab on the left edge marks the row's colour without tinting all of it
+			var tab := StyleBoxFlat.new()
+			tab.bg_color = ac if sel else Color(ac.r, ac.g, ac.b, 0.55)
+			tab.set_corner_radius_all(2)
+			tab.anti_aliasing = true
+			draw_style_box(tab, Rect2(px + 8.0, y + 9.0, 4.0, card_h - 18.0))
+			var nm := String(r["name"])
+			var has_note := String(r["note"]) != ""
+			var ny := y + (card_h * 0.5 - 4.0 if has_note else card_h * 0.5 + 6.0)
+			draw_string(font, Vector2(px + 24.0, ny), nm, HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 17, Color(1.0, 0.95, 0.82) if sel else Color(0.86, 0.81, 0.73))
+			if has_note:
+				draw_string(font, Vector2(px + 24.0, ny + 15.0), String(r["note"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 11, Color(0.72, 0.66, 0.6, 0.9))
+			match String(r["kind"]):
+				"slider":
+					var vol: float = r["val"]
+					draw_meter(px + pw - 178.0, y + card_h * 0.5 - 7.0, 128.0, 14.0, vol, Color(ac.r, ac.g, ac.b, 0.95) if vol > 0.0 else Color(0.5, 0.44, 0.4))
+					draw_string(font, Vector2(px + pw - 44.0, y + card_h * 0.5 + 5.0), "mute" if vol <= 0.0 else "%d%%" % int(round(vol * 100.0)),
+						HORIZONTAL_ALIGNMENT_RIGHT, 34.0, 14, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.86, 0.92, 0.84))
+				"bool":
+					draw_pill_toggle(px + pw - 74.0, y + card_h * 0.5 - 13.0, 54.0, 26.0, bool(r["val"]))
+				"nav":
+					draw_string(font, Vector2(px + pw - 42.0, y + card_h * 0.5 + 7.0), ">", HORIZONTAL_ALIGNMENT_RIGHT, 28.0, 20, Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
+			y += card_h + gap
+		y += sec_gap
 
 	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
-	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 40.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func draw_pill_toggle(x: float, y: float, w: float, h: float, on: bool) -> void:
+	# a sliding pill switch (green + knob-right when on, muted + knob-left when off) - the
+	# premium version of a bare ON/OFF plate, shared by the settings-cards experiment.
+	var pill := StyleBoxFlat.new()
+	pill.bg_color = Color(0.22, 0.42, 0.20, 0.95) if on else Color(0.20, 0.13, 0.13, 0.9)
+	pill.set_corner_radius_all(int(h * 0.5))
+	pill.border_color = Color(0.55, 0.9, 0.5, 0.7) if on else Color(0.6, 0.4, 0.38, 0.5)
+	pill.set_border_width_all(1)
+	pill.anti_aliasing = true
+	draw_style_box(pill, Rect2(x, y, w, h))
+	var kr := h * 0.5 - 3.0
+	var kx := x + w - kr - 4.0 if on else x + kr + 4.0
+	draw_circle(Vector2(kx, y + h * 0.5), kr, Color(0.85, 0.98, 0.82) if on else Color(0.8, 0.74, 0.7))
 
 
 func draw_gameover(font: Font, s: Vector2) -> void:
