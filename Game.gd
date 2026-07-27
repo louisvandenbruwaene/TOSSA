@@ -5404,7 +5404,11 @@ func skill_req_text(d: Dictionary) -> String:
 	if int(d.get("acc", 0)) > 0:
 		parts.append("Accuracy %d" % int(d["acc"]))
 	if int(d.get("ven", 0)) > 0:
-		parts.append("reach the %s" % String(venue_data(int(d["ven"]))["name"]))
+		# some venues carry their own article ("The Circus", "The Midnight Show"), so
+		# the sentence supplies one only when the name does not - it read "reach the
+		# The Circus" on the Skills screen and in every lock message
+		var vn := String(venue_data(int(d["ven"]))["name"])
+		parts.append("reach %s" % vn if vn.begins_with("The ") else ("reach the %s" % vn))
 	if parts.is_empty():
 		return "yours from the start"
 	return " + ".join(parts)
@@ -9692,8 +9696,10 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 	# stays short (the level, plus a + when stats or a stage are also asked);
 	# the detail strip below spells the full requirement out.
 	if sel:
-		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.10))
-		draw_rect(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.35), false, 1.0)
+		# the same raised, rounded card the shop and the day hub use for a cursor -
+		# a flat outlined rectangle was the last bare draw_rect on this screen
+		soft_card(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.09),
+			Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
 	var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.86, 0.8, 0.68) if unlocked else Color(0.55, 0.5, 0.46))
 	draw_fit_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, w - 100.0, 17, nc)
 	if unlocked:
@@ -9702,136 +9708,442 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 		draw_string(font, Vector2(x + w - 76.0, y), skill_gate_badge(req), HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
 
 
-# --- pattern preview (Skills screen): a small self-looping schematic, not a real
-# sim. Each dot follows the pattern's ACTUAL inner/outer hand geometry (see
-# inner_pos/outer_pos) and the same relative height ordering do_throw uses (a
-# low/fast feed < a plain weave < an over-the-top launch), just scaled to fit a
-# small box and driven by atick() instead of player input - so it reads as
-# THIS pattern, not a generic bouncing-ball loop. It does not touch the real
-# `balls` / `pattern` state, so it is safe to animate from any screen.
-const PREV_OUTER_DX := 38.0   # local-space stand-in for outer_pos's 100px reach
-const PREV_INNER_DX := 20.0   # keeps outer_pos:inner_pos's ~100:54 ratio, scaled down
-const PREV_ARC_SCALE := 42.0  # px of peak arc height per 1.0 of a leg's "height" units -
-							  # sized so even the tallest leg (1.7) stays inside the box,
-							  # see draw_pattern_preview's origin placement
-const PREV_ORIGIN_Y := 100.0  # baseline's distance down from the box's own top edge
+# --- SKILL PREVIEWS (Skills screen) -------------------------------------------
+# Every skill - trick OR pattern - gets the same picture now: a miniature stage with
+# the juggler standing on it, the flight ROADS drawn as ghost arcs behind him, and
+# props running that skill's real choreography on a loop. It is not the sim (it never
+# reads or writes `balls`, `pattern` or `tick`, so it is safe to animate from any
+# screen), but its geometry is DERIVED from the sim's, which is what makes it read as
+# THIS skill instead of a generic bouncing loop:
+#   * PV_OUTER / PV_INNER are outer_pos / inner_pos at PV_K scale,
+#   * PV_ARC is one tap throw's true peak (BASE_AIR * ARC_PER_AIR) at that scale, and
+#     a leg's DURATION rides its height exactly as airtime does in flight_pos,
+#   * the figure is draw_juggler's own eight-head canon, same head unit, same stance,
+#   * every leg is read off do_throw's actual rules: a plain throw leaves INNER and
+#     lands OUTER, an over-the-top lob leaves OUTER and lands on over_top_land_slot,
+#     the Shower's feed hand snaps SHOWER_FEED-flat, Columns rides columns_x lanes,
+#     and Behind the Back releases from behind the FAR hip (drawn behind the body,
+#     the same _btb_behind cut the real one uses).
+# What was here before was two dots bouncing in a 176x130 box - no figure, no roads,
+# no hands, and nothing at all for the four TRICKS (Louis: "awful / wrong or not even
+# there"). Everything a preview draws is bounded by construction (see draw_skill_
+# preview's `inner` rect): a prop that would leave the frame is not clipped mid-shape,
+# it fades and hands over to a top-edge marker, which is what the real High Toss does.
+const PV_K := 0.55            # preview px per stage px (PV_OUTER / outer_pos's own 100)
+const PV_OUTER := 55.0        # the catch point (outer_pos, 100px out) at preview scale
+const PV_INNER := 29.7        # the throw point (inner_pos, 54px out) at preview scale
+const PV_HEAD := 22.2         # draw_juggler's head unit H at preview scale
+const PV_FLOOR := 91.0        # the floor line, below the hand line (4.11 head units)
+const PV_ARC := 99.3          # peak px of a height-1.0 throw: BASE_AIR * ARC_PER_AIR, scaled
+const PV_TIME := 1.15         # seconds a height-1.0 throw hangs. Real time is 0.7s; the
+                              # preview runs ~1.6x slow so the shape is readable (Louis)
+const PV_CARRY := 0.30        # seconds a hand carries a caught prop to its launch point
+const PV_LANE := 24.2         # Columns' lane spacing (columns_x's 44px) at preview scale
+const PV_HIGH := 1.5          # an over-the-top lob (OVER_TOP_MIN) as a multiple of a tap
+const PV_SHOWER_HIGH := 1.6   # SHOWER_MIN's taller high road
+const PV_FEED := 0.34         # the Shower's flat, fast feed pass (SHOWER_FEED)
+const PV_BTB_DROP := 14.3     # how far below the hand line a Behind-the-Back throw
+                              # releases (do_throw's +26px), at preview scale
 
-func preview_hand_point(is_outer: bool, hand: int) -> Vector2:
-	if hand < 0:
-		return Vector2.ZERO   # Columns' middle lane (odd counts): stage-centre, no side
-	var dx := PREV_OUTER_DX if is_outer else PREV_INNER_DX
-	return Vector2(-dx if hand == LEFT else dx, 0.0)
+
+func pv_o(hand: int) -> Vector2:
+	return Vector2(-PV_OUTER if hand == LEFT else PV_OUTER, 0.0)
 
 
-# one pattern's choreography as a list of [legs, ball_count] tracks. Every ball on a
-# track runs the SAME repeating leg cycle, spread evenly across its total duration -
-# the trick that turns one throw-catch cycle into a continuous multi-ball loop (a real
-# 3-ball cascade is one L->R/R->L cycle with 3 balls a third of a cycle apart). A leg is
-# [from_outer, from_hand, to_outer, to_hand, height, duration]; height/duration are
-# preview-only units, but their ORDER mirrors the real constants: SHOWER_FEED-style
-# low feeds are short and near-flat, a plain weave is the baseline, and an over-the-top
-# leg (OVER_TOP_MIN / SHOWER_MIN / HALFSHOWER_MIN territory) is the tallest and
-# longest-hanging. Durations are deliberately slow (2026-07-19, Louis: too fast to
-# read) - not a literal airtime match to any one throw height, just kept in the same
-# relative order the real do_throw rules use.
-func pattern_preview_tracks(p: int) -> Array:
-	var d_plain := 1.2   # a plain weave leg
-	var d_low := 0.75    # a fast, low feed (shortest hang)
-	var d_high := 1.7    # an over-the-top launch (longest hang)
-	var plain_weave := [[false, LEFT, true, RIGHT, 1.0, d_plain], [false, RIGHT, true, LEFT, 1.0, d_plain]]
-	match p:
-		CASCADE:
-			# shown at 4 balls (Louis, 2026-07-19): Cascade's OTHER face at an even
-			# count - each hand keeps its own ball in a self-contained loop instead of
-			# crossing, out-and-back, no crossing - the role Fountain used to play as
-			# its own pattern, before it was folded into Cascade ("that's just cascade
-			# for 4 balls"). The odd/crossing face is already obvious from the weave
-			# shape at every other count, so it doesn't need its own preview too.
-			return [[[[false, LEFT, true, LEFT, 0.9, d_plain], [true, LEFT, false, LEFT, 0.9, d_plain]], 2],
-					[[[false, RIGHT, true, RIGHT, 0.9, d_plain], [true, RIGHT, false, RIGHT, 0.9, d_plain]], 2]]
+func pv_i(hand: int) -> Vector2:
+	return Vector2(-PV_INNER if hand == LEFT else PV_INNER, 0.0)
+
+
+func pv_btb(hand: int) -> Vector2:
+	# Behind the Back's release point: behind the FAR hip, a touch below the hand
+	# line - do_throw's own lerp(centre, inner_pos(other), 0.75) at preview scale
+	return Vector2((-PV_INNER if hand == LEFT else PV_INNER) * 0.75, PV_BTB_DROP)
+
+
+func pv_throw(a: Vector2, b: Vector2, hgt: float, bhd := 0.0) -> Dictionary:
+	# one leg of FLIGHT: the parabola flight_pos draws, hanging in proportion to its
+	# height exactly as real airtime does. `bhd` is how far into the leg the prop is
+	# still hidden behind the figure (_btb_behind's own 0.35 for a behind-the-back throw).
+	return {"a": a, "b": b, "h": hgt, "d": PV_TIME * maxf(hgt, 0.25), "carry": false, "bhd": bhd}
+
+
+func pv_carry(a: Vector2, b: Vector2, bhd := 0.0) -> Dictionary:
+	# the hand's own carry, from where it caught the prop to where its next throw
+	# leaves from: a short scoop along the hand line, not a flight
+	return {"a": a, "b": b, "h": 0.0, "d": PV_CARRY, "carry": true, "bhd": bhd}
+
+
+func pv_cascade_legs(hgt := 1.0, bhd := 0.0) -> Array:
+	# THE weave, straight off do_throw: a plain throw leaves INNER, lands OUTER, and
+	# the catching hand carries it back in before its own throw
+	if bhd > 0.0:
+		# ...and Behind the Back replaces both the carry and the launch: the hand
+		# takes the prop round the back and releases it behind the opposite hip
+		return [pv_throw(pv_btb(RIGHT), pv_o(RIGHT), hgt, bhd), pv_carry(pv_o(RIGHT), pv_btb(LEFT), 1.0),
+				pv_throw(pv_btb(LEFT), pv_o(LEFT), hgt, bhd), pv_carry(pv_o(LEFT), pv_btb(RIGHT), 1.0)]
+	return [pv_throw(pv_i(LEFT), pv_o(RIGHT), hgt), pv_carry(pv_o(RIGHT), pv_i(RIGHT)),
+			pv_throw(pv_i(RIGHT), pv_o(LEFT), hgt), pv_carry(pv_o(LEFT), pv_i(LEFT))]
+
+
+# one skill's whole choreography: a list of TRACKS, each a repeating leg cycle with N
+# props spread evenly around it (the trick that turns one throw-catch cycle into a
+# continuous multi-prop loop - a real 3-ball cascade is one L->R/R->L cycle with three
+# balls a third of a cycle apart), plus the one line of text the box captions itself with.
+func skill_preview(is_trick: bool, idx: int) -> Dictionary:
+	if is_trick:
+		match idx:
+			TR_HIGH:
+				# every throw sky high - it genuinely leaves the frame, and a top-edge
+				# marker tracks it while it is gone, exactly as draw_balls_in_flight does
+				return {"tracks": [{"legs": pv_cascade_legs(2.7), "n": 3, "mark": true}],
+						"note": "every throw leaves the frame"}
+			TR_BTB:
+				return {"tracks": [{"legs": pv_cascade_legs(1.12, 0.35), "n": 3, "mark": true}],
+						"note": "round the back, out past the far hip"}
+			TR_SPIN:
+				return {"tracks": [{"legs": pv_cascade_legs(1.6), "n": 3}],
+						"note": "one full turn, caught blind", "spin": true}
+			_:
+				# Overthrow: ONE marked prop launched up and over the pattern (an
+				# over-the-top road: out of the OUTER corner, down onto the inner slot),
+				# while the other two keep the weave underneath it
+				return {"tracks": [{"legs": pv_cascade_legs(), "n": 2},
+						{"legs": [pv_throw(pv_o(LEFT), pv_i(RIGHT), 1.95), pv_carry(pv_i(RIGHT), pv_i(RIGHT)),
+								  pv_throw(pv_i(RIGHT), pv_o(LEFT), 1.0), pv_carry(pv_o(LEFT), pv_o(LEFT))],
+						 "n": 1, "mark": true}],
+						"note": "one throw over the top of the rest"}
+	match idx:
 		COLUMNS:
-			# 3 balls: two side lanes (a degenerate from==to leg - flight_pos's own
-			# parabola alone already draws a straight vertical bounce when the
-			# endpoints match) plus the odd-count middle lane, hand -1 (stage-centre,
-			# no side - Columns is the one pattern exempt from the inner/outer-only
-			# rule below, per Louis, since its lanes are their own thing entirely)
-			return [[[[false, LEFT, false, LEFT, 1.1, d_plain]], 1],
-					[[[false, RIGHT, false, RIGHT, 1.1, d_plain]], 1],
-					[[[false, -1, false, -1, 1.1, d_plain]], 1]]
+			# three lanes on columns_x's own spacing: each prop rides straight up and
+			# down its own line (a from == to leg - the parabola alone draws the bounce),
+			# and the middle lane runs half a cycle out of phase with the outer two,
+			# which is what makes the pattern read as columns and not as three balls
+			var lanes: Array = []
+			for k in 3:
+				var lx := Vector2(float(k - 1) * PV_LANE, 0.0)
+				lanes.append({"legs": [pv_throw(lx, lx, 1.15), pv_carry(lx, lx)], "n": 1,
+							  "phase": 0.5 if k == 1 else 0.0})
+			return {"tracks": lanes, "note": "3 objects - one lane each"}
 		HALFSHOWER:
-			# left is capped LOW (HALFSHOWER_LOW, 2026-07-19: it crossed the high road
-			# too often before this cap existed), right is fixed on the over-the-top road
-			return [[[[false, LEFT, true, RIGHT, 0.5, d_plain], [true, RIGHT, true, LEFT, 1.6, d_high]], 3]]
+			return {"tracks": [{"legs": [pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_HIGH),
+									pv_carry(pv_o(LEFT), pv_i(LEFT)),
+									pv_throw(pv_i(LEFT), pv_o(RIGHT), 0.95)], "n": 3}],
+					"note": "right over the top, left low"}
 		SHOWER:
-			# left is a fast, near-horizontal feed (SHOWER_FEED); right rides the full
-			# high circle - the two hands' roles never swap, unlike Half Shower's weave
-			return [[[[false, LEFT, true, RIGHT, 0.08, d_low], [true, RIGHT, true, LEFT, 1.7, d_high]], 3]]
+			return {"tracks": [{"legs": [pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_SHOWER_HIGH),
+									pv_carry(pv_o(LEFT), pv_i(LEFT)),
+									pv_throw(pv_i(LEFT), pv_o(RIGHT), PV_FEED)], "n": 3}],
+					"note": "one circle, one direction"}
 		RCASC:
-			# both hands fixed over-the-top: the weave runs backward, outer to outer
-			return [[[[true, LEFT, true, RIGHT, 1.6, d_high], [true, RIGHT, true, LEFT, 1.6, d_high]], 3]]
+			# both hands over the top, so both launch from OUTER and both land INNER
+			# (over_top_land_slot's complement rule) - the weave runs backward
+			return {"tracks": [{"legs": [pv_throw(pv_o(LEFT), pv_i(RIGHT), PV_HIGH),
+									pv_carry(pv_i(RIGHT), pv_o(RIGHT)),
+									pv_throw(pv_o(RIGHT), pv_i(LEFT), PV_HIGH),
+									pv_carry(pv_i(LEFT), pv_o(LEFT))], "n": 3}],
+					"note": "both hands over the top"}
 		TENNIS:
-			# two balls run the plain weave; the third (its own track) is the one marked
-			# ball - SAME duration as the plain weave (Louis: uniform spread, like a real
-			# cascade), only its height differs, so it reads as "the same rhythm, just higher"
-			return [[plain_weave, 2], [[[true, LEFT, true, RIGHT, 1.6, d_plain], [true, RIGHT, true, LEFT, 1.6, d_plain]], 1]]
+			return {"tracks": [{"legs": pv_cascade_legs(), "n": 2},
+					{"legs": [pv_throw(pv_o(LEFT), pv_o(RIGHT), PV_HIGH),
+							  pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_HIGH)], "n": 1, "mark": true}],
+					"note": "one marked prop over the weave"}
 		_:
-			return [[plain_weave, 3]]   # a safe fallback for anything unrecognised
+			# Cascade, shown at 3: the crossing weave the pattern is named for. Its
+			# even-count face (each hand keeping its own circle) is the same two roads
+			# without the crossing, and the detail strip below says so in words.
+			return {"tracks": [{"legs": pv_cascade_legs(), "n": 3}], "note": "3 objects - the crossing weave"}
 
 
-func pattern_preview_ball_pos(legs: Array, tsec: float) -> Vector2:
+func pv_total(legs: Array) -> float:
 	var total := 0.0
 	for leg in legs:
-		total += float(leg[5])
-	if total <= 0.0:
-		return Vector2.ZERO
-	var tloop := fmod(tsec, total)
+		total += float(leg["d"])
+	return maxf(total, 0.001)
+
+
+func pv_leg_pos(leg: Dictionary, p: float) -> Vector2:
+	var pos: Vector2 = Vector2(leg["a"]).lerp(Vector2(leg["b"]), p)
+	if bool(leg["carry"]):
+		pos.y += 7.0 * sin(p * PI)   # the hand scoops as it carries
+	else:
+		pos.y -= 4.0 * float(leg["h"]) * PV_ARC * p * (1.0 - p)   # flight_pos's own parabola
+	return pos
+
+
+func pv_state(legs: Array, tsec: float) -> Dictionary:
+	# where one prop is, and whether it is currently hidden behind the figure
+	var total := pv_total(legs)
+	var tloop := fposmod(tsec, total)
 	var acc := 0.0
-	for idx in legs.size():
-		var leg: Array = legs[idx]
-		var dur: float = leg[5]
-		if idx == legs.size() - 1 or tloop < acc + dur:
+	for i in legs.size():
+		var leg: Dictionary = legs[i]
+		var dur := float(leg["d"])
+		if i == legs.size() - 1 or tloop < acc + dur:
 			var p := clampf((tloop - acc) / dur, 0.0, 1.0)
-			var from_pt := preview_hand_point(bool(leg[0]), int(leg[1]))
-			var to_pt := preview_hand_point(bool(leg[2]), int(leg[3]))
-			var pos := from_pt.lerp(to_pt, p)
-			pos.y -= 4.0 * float(leg[4]) * PREV_ARC_SCALE * p * (1.0 - p)   # flight_pos's own parabola, rescaled
-			return pos
+			return {"pos": pv_leg_pos(leg, p), "behind": p < float(leg["bhd"])}
 		acc += dur
-	return Vector2.ZERO
+	return {"pos": Vector2.ZERO, "behind": false}
 
 
-func draw_pattern_preview(font: Font, box: Rect2, p: int) -> void:
-	draw_rect(box, Color(0.08, 0.05, 0.06, 0.75))
-	draw_rect(box, Color(0.9, 0.6, 0.35, 0.3), false, 1.0)
-	draw_string(font, box.position + Vector2(10.0, 16.0), "PREVIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.75, 0.68, 0.58, 0.8))
-	var origin := box.position + Vector2(box.size.x * 0.5, PREV_ORIGIN_Y)
+func draw_mini_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color) -> void:
+	# draw_arm at preview scale: same two-bone solve, same outward elbow bow, widths
+	# scaled by PV_K so the little figure keeps the real one's proportions
+	var bend := 1.0 if h == LEFT else -1.0
+	var reach := (hand - shoulder).length()
+	var bone := maxf(46.0 * PV_K, reach * 0.56)
+	var elbow := solve_elbow(shoulder, hand, bone, bone, bend)
+	var wrist := hand + (elbow - hand).normalized() * 3.2
+	draw_capsule(shoulder, elbow, 19.0 * PV_K, 14.0 * PV_K, sleeve)
+	draw_capsule(elbow, wrist, 13.0 * PV_K, 10.0 * PV_K, skin)
+	draw_circle(elbow, 7.0 * PV_K, sleeve)
+
+
+func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> void:
+	# the same performer, small: draw_juggler's eight-head canon at PV_HEAD, in the
+	# CURRENT venue's costume colours, and turning through a Spin the same way the real
+	# figure does (body width scaled by cos, the head kept round outside that scale).
+	var v := venue_data(cur_venue())
+	var suit: Color = v["suit"]
+	var suit_dk: Color = v["suit_dk"]
+	var vest: Color = v["vest"]
+	var collar: Color = v["collar"]
+	var skin := Color(0.87, 0.64, 0.45)
+	var hair := Color(0.28, 0.16, 0.11)
+	var H := PV_HEAD
+	var floor_y := o.y + PV_FLOOR
+	var hip_y := floor_y - 4.0 * H
+	var knee_y := floor_y - 2.0 * H
+	var waist_y := floor_y - 5.0 * H
+	var chest_y := floor_y - 6.0 * H
+	var sh_y := floor_y - 6.72 * H
+	var head := Vector2(o.x, floor_y - 7.5 * H)
+	var head_r := 0.52 * H
+	fill_ellipse(Vector2(o.x, floor_y + 1.0), 30.0, 5.0, Color(0, 0, 0, 0.28))   # ground shadow
+
+	var sx := 1.0
+	var facing_back := false
+	if turn > 0.0:
+		sx = cos(turn * TAU)
+		facing_back = sx < 0.0
+		if absf(sx) < 0.16:
+			sx = 0.16 if sx >= 0.0 else -0.16
+		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
+
+	var shoe := Color(0.20, 0.12, 0.09)
+	draw_capsule(Vector2(o.x - 0.4 * H, hip_y), Vector2(o.x - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
+	draw_capsule(Vector2(o.x - 0.34 * H, knee_y), Vector2(o.x - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
+	draw_capsule(Vector2(o.x + 0.4 * H, hip_y), Vector2(o.x + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
+	draw_capsule(Vector2(o.x + 0.34 * H, knee_y), Vector2(o.x + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
+	fill_ellipse(Vector2(o.x - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+	fill_ellipse(Vector2(o.x + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+	draw_colored_polygon(PackedVector2Array([   # neck
+		Vector2(o.x - 0.18 * H, head.y + head_r - 0.05 * H), Vector2(o.x + 0.18 * H, head.y + head_r - 0.05 * H),
+		Vector2(o.x + 0.23 * H, sh_y + 0.14 * H), Vector2(o.x - 0.23 * H, sh_y + 0.14 * H)]), skin)
+	draw_colored_polygon(PackedVector2Array([   # jacket
+		Vector2(o.x - 0.92 * H, sh_y + 0.1 * H), Vector2(o.x - 0.30 * H, sh_y - 0.04 * H),
+		Vector2(o.x + 0.30 * H, sh_y - 0.04 * H), Vector2(o.x + 0.92 * H, sh_y + 0.1 * H),
+		Vector2(o.x + 0.8 * H, chest_y), Vector2(o.x + 0.5 * H, waist_y), Vector2(o.x + 0.66 * H, hip_y + 0.15 * H),
+		Vector2(o.x - 0.66 * H, hip_y + 0.15 * H), Vector2(o.x - 0.5 * H, waist_y), Vector2(o.x - 0.8 * H, chest_y)]), suit)
+	if facing_back:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(o.x - 0.28 * H, sh_y - 0.02 * H), Vector2(o.x + 0.28 * H, sh_y - 0.02 * H),
+			Vector2(o.x + 0.24 * H, sh_y + 0.1 * H), Vector2(o.x - 0.24 * H, sh_y + 0.1 * H)]), collar)
+	else:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(o.x - 0.28 * H, sh_y - 0.02 * H), Vector2(o.x, chest_y + 0.22 * H), Vector2(o.x - 0.05 * H, sh_y - 0.02 * H)]), collar)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(o.x + 0.28 * H, sh_y - 0.02 * H), Vector2(o.x, chest_y + 0.22 * H), Vector2(o.x + 0.05 * H, sh_y - 0.02 * H)]), collar)
+		var vest_top := sh_y + 0.52 * H
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(o.x - 0.3 * H, vest_top), Vector2(o.x + 0.3 * H, vest_top),
+			Vector2(o.x + 0.28 * H, waist_y), Vector2(o.x + 0.36 * H, hip_y - 0.1 * H),
+			Vector2(o.x - 0.36 * H, hip_y - 0.1 * H), Vector2(o.x - 0.28 * H, waist_y)]), vest)
+	if turn > 0.0:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # the head keeps its round size through a turn
+	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)
+	if facing_back:
+		draw_circle(head, head_r, hair)
+		draw_circle(head + Vector2(0, head_r * 0.62), head_r * 0.42, skin)
+	else:
+		draw_circle(head, head_r, skin)
+		draw_circle(head + Vector2(-head_r * 0.34, -head_r * 0.06), head_r * 0.17, Color(0.16, 0.10, 0.08))
+		draw_circle(head + Vector2(head_r * 0.34, -head_r * 0.06), head_r * 0.17, Color(0.16, 0.10, 0.08))
+		draw_arc(head + Vector2(0.0, head_r * 0.06), head_r * 0.44, 0.7, PI - 0.7, 8, Color(0.42, 0.20, 0.16), 1.5, true)
+	if turn > 0.0:
+		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
+	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit)
+	draw_mini_arm(Vector2(o.x + 0.9 * H, sh_y + 0.14 * H), hr, RIGHT, skin, suit)
+	draw_circle(hl, 5.4, skin)
+	draw_circle(hr, 5.4, skin)
+	if turn > 0.0:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# the same sweeping streaks the real Spin lays over the turn, so the little
+		# figure reads as MOVING rather than as a squashed one
+		var mid := Vector2(o.x, (sh_y + hip_y) * 0.5)
+		for k in 3:
+			var rr := 16.0 + float(k) * 7.0
+			var a0 := turn * TAU + float(k) * 0.6
+			draw_arc(mid, rr, a0, a0 + 1.5, 10, Color(1.0, 0.9, 0.65, 0.16), 1.6, true)
+
+
+func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename: String) -> void:
+	# the preview box: a little stage, the roads, the figure, the props. Everything is
+	# bounded to `inner` by construction - the standing no-overflow rule applies to
+	# drawings, not only to text.
+	var data := skill_preview(is_trick, idx)
+	var tracks: Array = data["tracks"]
+	var v := venue_data(cur_venue())
+	var glow: Color = v["glow"]
+	# no top sheen on this one: soft_card's sheen ends in a straight horizontal cut
+	# across the top 42%, which reads as a seam in the sky rather than as gloss
+	soft_card(box, Color(0.075, 0.05, 0.055, 0.97), Color(0.9, 0.6, 0.35, 0.34), 1.0, 12.0, 14.0)
+	var inner := Rect2(box.position + Vector2(9.0, 9.0), box.size - Vector2(18.0, 18.0))
+	# THE HAND LINE, placed per skill rather than at a fixed height: a Cascade's arcs
+	# crest just above the head and a Reverse Cascade's twice that, so one fixed baseline
+	# either strands a low pattern in the bottom third of the box or pushes a high one
+	# through the ceiling. The scene is measured (tallest arc + the figure below the
+	# hands) and centred in whatever room is left, then clamped so the feet always stand
+	# on the floor - a throw too tall to fit (a High Toss) is then EXACTLY the one that
+	# leaves the frame, which is what that trick does anyway.
+	var ceil_y := inner.position.y + 30.0
+	var peak := 0.0
+	for tr0 in tracks:
+		for leg0 in tracks_legs(tr0):
+			peak = maxf(peak, float(leg0["h"]) * PV_ARC)
+	var room := inner.position.y + inner.size.y - ceil_y
+	var slack := maxf(room - (peak + 7.0 + PV_FLOOR), 0.0)
+	var o := Vector2(box.position.x + box.size.x * 0.5,
+		clampf(ceil_y + peak + 7.0 + slack * 0.62, ceil_y, inner.position.y + inner.size.y - PV_FLOOR - 6.0))
+	var fy := o.y + PV_FLOOR
+
+	# the stage itself: a spotlight cone from the top of the box, a warm pool on the
+	# floor, and a lit floor lip - the same three moves draw_backdrop makes, in miniature
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(o.x, inner.position.y + 4.0),
+		Vector2(o.x - box.size.x * 0.30, fy), Vector2(o.x + box.size.x * 0.30, fy)]),
+		Color(glow.r, glow.g, glow.b, 0.05))
+	for i in 9:
+		var f := float(i) / 8.0
+		fill_ellipse(Vector2(o.x, fy), lerpf(box.size.x * 0.36, 22.0, f), lerpf(18.0, 4.0, f),
+			Color(glow.r, glow.g, glow.b, 0.03))
+	draw_rect(Rect2(inner.position.x, fy, inner.size.x, inner.position.y + inner.size.y - fy),
+		Color(0.09, 0.06, 0.07, 0.92))
+	draw_line(Vector2(inner.position.x, fy), Vector2(inner.position.x + inner.size.x, fy),
+		Color(glow.r, glow.g, glow.b, 0.45), 1.5)
+
+	# THE ROADS: every leg's own parabola, drawn faint and behind everything, so the
+	# pattern's SHAPE is legible in a still frame and not only in motion
+	# ...inside the same ceiling the props respect, so no road ever runs through the
+	# box's own caption line
+	var road_box := Rect2(inner.position + Vector2(0.0, 30.0), inner.size - Vector2(0.0, 30.0))
+	for tr in tracks:
+		var road_c := Color(1.0, 0.86, 0.5, 0.30) if bool(tr.get("mark", false)) else Color(1.0, 0.82, 0.6, 0.16)
+		for leg in tracks_legs(tr):
+			if bool(leg["carry"]):
+				continue
+			var prev := Vector2.ZERO
+			var prev_ok := false
+			for k in 19:
+				var p := o + pv_leg_pos(leg, float(k) / 18.0)
+				var ok := road_box.has_point(p)
+				if ok and prev_ok:
+					# a road climbing out of the box FADES rather than stopping dead at
+					# the ceiling: four hard-cut tall arcs (a High Toss) read as strings
+					var a := clampf((minf(p.y, prev.y) - ceil_y) / 46.0, 0.0, 1.0)
+					if a > 0.02:
+						draw_line(prev, p, Color(road_c.r, road_c.g, road_c.b, road_c.a * a), 1.8, true)
+				prev = p
+				prev_ok = ok
+
+	# where every prop is this instant
 	var t := atick() / 120.0
-	var ball_i := 0
-	var tracks := pattern_preview_tracks(p)
-	# PREV_ARC_SCALE/PREV_ORIGIN_Y are sized so nothing should ever reach the edge,
-	# but every ball's FINAL position is also hard-clamped inside the box (minus its
-	# own radius) as a guarantee, not just an assumption - a preview that ever drew
-	# outside its own frame would be worse than no preview at all
-	var lo := box.position + Vector2(6.0, 6.0)
-	var hi := box.position + box.size - Vector2(6.0, 6.0)
-	for ti in tracks.size():
-		var legs: Array = tracks[ti][0]
-		var n: int = tracks[ti][1]
-		var total := 0.0
-		for leg in legs:
-			total += float(leg[5])
-		# Tennis's second track is the one MARKED ball - it gets its own colour
-		# (gold) rather than the shared rotation, same as the real marked ball
-		var marked := p == TENNIS and ti == 1
+	var props: Array = []
+	var ci := 0
+	for tr in tracks:
+		var legs: Array = tracks_legs(tr)
+		var n := int(tr["n"])
+		var total := pv_total(legs)
+		var marked := bool(tr.get("mark", false))
+		var ph := float(tr.get("phase", 0.0))
 		for i in n:
-			var phase := t + total * float(i) / float(n)
-			var pos := origin + pattern_preview_ball_pos(legs, phase)
-			pos.x = clampf(pos.x, lo.x, hi.x)
-			pos.y = clampf(pos.y, lo.y, hi.y)
-			draw_circle(pos, 6.0, Color(1.0, 0.85, 0.3) if marked else ball_color(ball_i))
-			ball_i += 1
-	draw_string(font, origin + Vector2(-PREV_OUTER_DX - 10.0, 26.0), "L", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
-	draw_string(font, origin + Vector2(PREV_OUTER_DX - 10.0, 26.0), "R", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 11, Color(0.6, 0.55, 0.5))
+			var st := pv_state(legs, t + total * (ph + float(i) / float(n)))
+			props.append({"pos": o + Vector2(st["pos"]), "col": ball_color(ci),
+						  "behind": bool(st["behind"]), "mark": marked})
+			ci += 1
+
+	# the hands go where the props are: each hand takes the nearest prop crossing its
+	# own side of the hand line, so the figure visibly scoops and throws. A prop hidden
+	# BEHIND the body is skipped - the arm has no business chasing it round the back.
+	var hp := [o + Vector2(-PV_OUTER, 0.0), o + Vector2(PV_OUTER, 0.0)]
+	var hbest := [999.0, 999.0]
+	for pr in props:
+		if bool(pr["behind"]):
+			continue
+		var p: Vector2 = pr["pos"]
+		var dy := absf(p.y - o.y)
+		if dy > 34.0 or absf(p.x - o.x) < 9.0:
+			continue   # ...and never Columns' MIDDLE lane: that prop rests at stage
+					   # centre, over the hip, and belongs to neither hand's reach
+		var h := LEFT if p.x < o.x else RIGHT
+		if dy < float(hbest[h]):
+			hbest[h] = dy
+			hp[h] = Vector2(p.x, o.y + clampf(p.y - o.y, -12.0, 9.0))
+
+	var spin := bool(data.get("spin", false))
+	var turn := 0.0
+	if spin:
+		# one full turn per loop, held facing front either side of it, so the preview
+		# reads as "a turn happens here" rather than as a body that never stops spinning
+		var cyc := fposmod(t * 0.34, 1.0)
+		turn = clampf((cyc - 0.2) / 0.45, 0.0, 1.0)
+	for pr in props:
+		if bool(pr["behind"]):
+			pv_draw_prop(pr, inner)
+	draw_mini_juggler(o, hp[LEFT], hp[RIGHT], turn)
+	for pr in props:
+		if not bool(pr["behind"]):
+			pv_draw_prop(pr, inner)
+
+	# the caption: what this picture IS. Both halves go through draw_fit_string, since
+	# both are DATA (a skill name, a per-skill note) - see the no-overflow rule.
+	var head_w := inner.size.x - 24.0
+	draw_fit_string(font, inner.position + Vector2(6.0, 16.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT,
+		head_w * 0.5, 14, Color(1.0, 0.88, 0.58))
+	draw_fit_string(font, inner.position + Vector2(inner.size.x - 6.0 - head_w * 0.5, 16.0), String(data["note"]),
+		HORIZONTAL_ALIGNMENT_RIGHT, head_w * 0.5, 12, Color(0.78, 0.72, 0.62))
+
+
+func tracks_legs(tr: Dictionary) -> Array:
+	return tr["legs"]
+
+
+func pv_draw_prop(pr: Dictionary, inner: Rect2) -> void:
+	# one prop, and the guarantee that it never draws outside its own box: a prop on
+	# its way out of the frame FADES over the last stretch and hands over to a marker
+	# on the top edge (what draw_balls_in_flight does for a real High Toss), rather
+	# than being clipped mid-shape or clamped into a pile against the border.
+	var p: Vector2 = pr["pos"]
+	var col: Color = pr["col"]
+	var r := 6.5
+	# the ceiling sits BELOW the caption line, so a prop on its way out never collides
+	# with the box's own lettering on the way
+	var ceil_y := inner.position.y + 30.0
+	if p.y < ceil_y:
+		var mx := clampf(p.x, inner.position.x + 10.0, inner.position.x + inner.size.x - 10.0)
+		var my := ceil_y - 6.0
+		draw_colored_polygon(PackedVector2Array([Vector2(mx, my - 5.0), Vector2(mx + 5.0, my + 3.0),
+			Vector2(mx - 5.0, my + 3.0)]), Color(col.r, col.g, col.b, 0.75))
+		return
+	if p.x < inner.position.x + r or p.x > inner.position.x + inner.size.x - r:
+		return
+	var fade := clampf((p.y - ceil_y) / 26.0, 0.0, 1.0)
+	if bool(pr["mark"]):
+		# the same warm ring the sim puts on a trick throw
+		draw_arc(p, r + 3.5, 0.0, TAU, 20, Color(1.0, 0.86, 0.5, 0.45 * fade), 1.6, true)
+	draw_circle(p, r + 5.0, Color(col.r, col.g, col.b, 0.15 * fade))
+	draw_circle(p, r, Color(col.r, col.g, col.b, fade))
+	var hi := col.lightened(0.4)
+	draw_circle(p + Vector2(-2.0, -2.0), 2.2, Color(hi.r, hi.g, hi.b, 0.9 * fade))
 
 
 func draw_skills(font: Font, s: Vector2) -> void:
@@ -9839,30 +10151,33 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# the exact keys that pull it off. This is where the trimmed unlock toast now
 	# sends the player to learn the how, so a live run is never buried in text.
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
-	var pw := 904.0
-	var ph := 672.0   # was 626: the taller card is what buys the extra breathing
-					  # room below, on top of Shop's own 648 (this screen has one
-					  # more stacked header line than Shop, so it earns a bit more)
+	# three zones now (2026-07-27): TRICKS, PATTERNS, and a PREVIEW that is always
+	# showing - the old layout had two half-width lists and tucked a small preview box
+	# into the leftover space under the shorter one, which meant a TRICK had no preview
+	# at all and a pattern's was 176x130. The panel widened to the shop's own 1120 to
+	# pay for it, so no list lost a pixel.
+	var pw := minf(1120.0, s.x - 60.0)
+	var ph := minf(684.0, s.y - 24.0)
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
 
 	var kc_use := k_trick()[0]
 	var kc_sel := k_cycle()[0]
-	draw_string(title_font(), Vector2(px + 40.0, py + 48.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(px + 40.0, py + 82.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
-	draw_string(font, Vector2(px + pw - 210.0, py + 48.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
+	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(px + 40.0, py + 84.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
+	draw_string(font, Vector2(px + pw - 210.0, py + 50.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
 	# a plain hairline (the same quiet divider draw_results uses between its own
 	# sections) so TRICKS / PATTERNS reads as a new section, not a third line of
 	# the same paragraph the title started
-	draw_line(Vector2(px + 40.0, py + 98.0), Vector2(px + pw - 40.0, py + 98.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
+	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
 	var nt := TRICKS.size()
 	var col_l := px + 40.0
-	var col_r := px + pw * 0.52
-	var colw := pw * 0.44
+	var col_r := px + 330.0
+	var colw := 268.0
 	var row_h := 46.0
-	var header_y := py + 134.0
+	var header_y := py + 136.0
 	var y0 := header_y + 42.0
 	# the headers sit well ABOVE the first row so the selection highlight (which
 	# reaches ~23px above a row's baseline) never touches the TRICKS / PATTERNS label
@@ -9877,17 +10192,6 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	for j in pord.size():
 		var pd: Dictionary = PATTERNS[pord[j]]
 		_skills_row(font, col_r, y0 + float(j) * row_h, colw, String(pd["name"]), pd, pattern_unlocked(pord[j]), (nt + j) == skills_sel)
-
-	# a pattern's preview lives under the (always shorter) TRICKS list, in the
-	# left column's own empty space - it never has to fight the PATTERNS list
-	# (which is the taller of the two) for room, and the offset is derived from
-	# nt/row_h rather than hardcoded, so it stays clear if TRICKS ever grows
-	if skills_sel >= nt:
-		var pbox_w := 176.0
-		var pbox_h := 130.0
-		var pbox_x := col_l + (colw - pbox_w) * 0.5
-		var pbox_y := y0 + float(nt) * row_h + 8.0
-		draw_pattern_preview(font, Rect2(pbox_x, pbox_y, pbox_w, pbox_h), pattern_order()[skills_sel - nt])
 
 	# the detail strip: the selected entry explained, with its exact controls
 	var ename := ""
@@ -9920,6 +10224,14 @@ func draw_skills(font: Font, s: Vector2) -> void:
 			# true only of Cascade itself - this used to print unconditionally on
 			# every pattern's card, so Columns/Tennis/etc. all falsely claimed it too
 			how += " Cascade also changes shape with the ball count: crossing odd, same-hand even."
+
+	# THE PREVIEW, third zone: whatever is selected, trick or pattern, running its own
+	# choreography on a little stage of its own (see draw_skill_preview). Never empty.
+	var prev_x := px + 644.0
+	draw_string(font, Vector2(prev_x, header_y), "PREVIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_skill_preview(font, Rect2(prev_x, py + 152.0, px + pw - 40.0 - prev_x, 356.0),
+		skills_sel < nt, skills_sel if skills_sel < nt else int(pattern_order()[skills_sel - nt]), ename)
+
 	var how_w := pw - 92.0
 	# the card is sized to what "how" and "desc" actually need (up to 2 lines each),
 	# not a fixed guess - a pattern's "how" is one sentence longer than a trick's and

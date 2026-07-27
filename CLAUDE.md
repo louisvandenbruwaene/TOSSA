@@ -296,14 +296,28 @@ and deleted. History lives in git.
   no gold, no Strength tick, and the egg is gone either way (it already broke for
   good on a drop; now it can also just be eaten) - the real tradeoff is the egg you
   no longer have in hand to juggle for score.
-- **Skills screen:** every trick and pattern, whether it's yours yet, and the exact
-  keys that pull it off. A selected PATTERN (2026-07-18, slowed/tightened/rebuilt
-  2026-07-19 x2) also gets a live PREVIEW box (`draw_pattern_preview`): a small self-
-  looping schematic built from the pattern's real inner/outer hand points and
-  relative throw-height rules (see `pattern_preview_tracks`), not a real sim and not
-  hooked to the live `balls`/`pattern` state - safe to animate from any screen. Every
-  ball position is hard-clamped inside the box as a guarantee, not just sized to fit.
-  `--skills [N]` dev flag opens it for a screenshot, optionally selecting entry N.
+- **Skills screen, and THE PREVIEWS** (rebuilt 2026-07-27, verified on screen for all
+  ten entries): three zones now - TRICKS, PATTERNS, and a PREVIEW that is always
+  showing, on a panel widened to the shop's own 1120. Before this, a trick had NO
+  preview at all and a pattern's was two dots bouncing in a 176x130 box (Louis:
+  "awful / wrong or not even there"). `draw_skill_preview` is one picture for both
+  kinds: a miniature STAGE (spotlight cone, lit floor, the venue's own palette), the
+  juggler on it at `PV_K` scale (draw_juggler's eight-head canon, and he really turns
+  through the Spin preview), the flight ROADS drawn as ghost arcs so the shape reads
+  in a still frame, and props running the skill's own choreography. It never touches
+  `balls` / `pattern` / `tick`, so it is safe to animate from any screen, but every
+  number in it is DERIVED from the sim: `PV_OUTER`/`PV_INNER` are outer_pos/inner_pos
+  scaled, `PV_ARC` is one tap's true peak (BASE_AIR x ARC_PER_AIR), a leg's duration
+  rides its height the way airtime does, and each pattern's legs are read off
+  do_throw's real rules (plain = inner to outer, over-the-top = outer to
+  `over_top_land_slot`, Shower's feed is SHOWER_FEED-flat, Columns rides `columns_x`
+  lanes, Behind the Back releases from behind the FAR hip and is drawn behind the
+  body for `_btb_behind`'s own 0.35). Two rules make it fit any box: the hand line is
+  placed per skill from the tallest arc in it (so a low pattern is not stranded in the
+  bottom third and a high one is not pushed through the ceiling), and anything that
+  still would not fit FADES and hands over to a top-edge marker - which is exactly
+  what a High Toss does anyway. `--skills [N]` opens it for a screenshot, optionally
+  selecting entry N (0-3 tricks, 4-9 patterns in unlock order).
 - **Arms reach exactly two points, `inner_pos` and `outer_pos`** - the same two the
   3-ball Cascade always used, and now with NO exceptions at all (2026-07-27). Every
   plain throw leaves inner and lands outer, INCLUDING the even-count Cascade's
