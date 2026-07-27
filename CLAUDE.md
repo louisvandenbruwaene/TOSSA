@@ -280,7 +280,24 @@ and deleted. History lives in git.
   half-failing with a warning - it used to be one Enter per object, up to fifteen of
   them, and again after every broken egg. One confirmation for the whole basket. The
   strip at the foot shows the receipt in green (`shop_msg_warn` false) rather than the
-  red it uses for problems.
+  red it uses for problems. **Icons and layout, 2026-07-27** (Louis: "the icons of the
+  objects and the layout mostly" were subpar - the selection and border designs he
+  liked are untouched): a prop icon used to be the raw stage shape blown up 2.6x about
+  the origin the SIM uses, which is a hand position and not the middle of the object,
+  so a club floated high in its card, a torch sat low, and all six came out the same
+  nominal size. `draw_prop_icon` now hangs each on its own centre (`PROP_ICON_OFF`) at
+  its own weight (`PROP_ICON_MAG`, a shared optical size with a mild heavier-is-bigger
+  hierarchy), tilts the spinning props the way they read in the air, lights a niche
+  behind them and drops a contact shadow under, and BREATHES on the selected card. The
+  club shape itself was fixed while there: at 7 units of head against 14 of body it was
+  as wide as it was long above the grip and read as a LOLLIPOP, so the body runs longer
+  and the head narrower (about 3:1 now, like a real club) - this shows on stage too and
+  is the intended fix, no sim value touched. Gear got real objects instead of glyphs
+  (`draw_gear_icon`): a pie slice with crust and steam where a bare triangle used to
+  read as the torch card's flame, glazed lenses in a frame, the Kit's own halo on a
+  prop, and the Helmet as the cap-with-two-cans-and-straws it actually is. The gear
+  CARD is laid out across now (object left, words right, price along the foot) instead
+  of borrowing the tall prop template and leaving a third of itself empty.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
   Stamina persists; sleep/meals restore it. Practice grants XP (per catch and a
   completion bonus banked even when leaving via Enter). The Energy-Drink Helmet
