@@ -591,7 +591,13 @@ const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092, 0.001
 # number - only how it is earned, drawn and named. The whole thing sits behind an F9
 # experiment so it can be compared against the gold economy live.
 # =============================================================================
-const FLOWER_GREEN := 0.50        # applause below this and nobody throws anything
+const FLOWER_GREEN := 0.78        # THE GREEN BAND: exactly where GAUGE_ZONES turns green,
+								  # so "the crowd meter is green" and "the room is throwing"
+								  # are the same fact and the player learns it in one act
+const FLOWER_FLOOR := 0.34        # ...and below this nobody throws at all (mid-orange)
+const FLOWER_P := 0.30            # the per-thrower chance at a full green house, before fame
+const FLOWER_FAME_DIV := 2200.0   # Reputation's share of the rate: a name people have heard
+const FLOWER_FAME_CAP := 2.0      # of gets showered, an unknown gets a few stems
 const FLOWER_BEAT := 26           # ticks between the room's chances to throw
 const TOMATO_RED := 0.22          # ...and below THIS the room throws tomatoes instead
 const FLOWER_TIERS := [
@@ -823,20 +829,12 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
 # them the default"): the growth-column sheet, card settings, and icon pause are now the
 # shipped look; F9 (debug) toggles each OFF to compare against the classic version.
-var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true, "slot_cards": false, "performer_polish": true, "flowers": true}
+var experiments := {"prop_art": true, "flowers": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
-	{"id": "talent_tree", "name": "Talent tree stat screen",
-	 "desc": "Replaces the four stat cards (Tab) with four vertical growth columns, each filling to value/cap with milestone pips at the real thresholds - same accuracy/strength/endurance/speed underneath, same points, same caps. Purely how it's drawn and navigated, nothing it does."},
-	{"id": "settings_cards", "name": "Settings screen (cards)",
-	 "desc": "Redraws Settings as Balatro-style cards grouped into Audio / Game feel / More, the same language the shop and sheet already use, instead of bare text rows. Same nine rows, same keys, same settings_input - purely how it's drawn."},
-	{"id": "pause_cards", "name": "Pause menu (cards)",
-	 "desc": "Redraws the pause menu's three options as colour-coded cards (calm to resume, warm to step out, red to quit) instead of plain centred text. Same pause_sel, same keys."},
-	{"id": "slot_cards", "name": "Save files (cards)",
-	 "desc": "Redraws the three save slots as tall portrait cards - a cascade motif, the level big, venue and gold below, a crown on a finished save - instead of wide text bars. Same slot_input, same keys."},
-	{"id": "performer_polish", "name": "Performer wardrobe (polished)",
-	 "desc": "Dresses the juggler in evening wear: satin peak lapels, a shirt front, bow tie, shirt cuffs on the solved wrists, pocket square, trouser stripes, a fringe and brows. Venue palette throughout. Visual only: same pose, hands, props and simulation."},
+	{"id": "prop_art", "name": "Balls, eggs and rings (relit)",
+	 "desc": "The three round props shaded rather than flat: a shadow crescent left between two smooth outlines, a panel seam on the balls, a true ovoid for the eggs, and a concentric dark-body-bright cross-section on the rings. OFF restores the old flat fill with one paler blob on it. Visual only - same sizes, same hitboxes, same physics."},
 	{"id": "flowers", "name": "FLOWERS instead of gold",
 	 "desc": "The crowd pays you in front of you. Play deep in the green and the room throws flowers at your feet - a plain one worth 1, a posy 5, a gold rose 25, and the rare tiers only come when the room is won over with nothing dropped. Lose the room and they throw tomatoes, worth nothing at the counter but eatable later, so a disastrous night still leaves you something. The pile on the boards replaces the score hat as the read on how the night is going, and everything reduces to the basic flower for spending. OFF restores gold and the hat."},
 ]
@@ -5368,11 +5366,20 @@ func hand_target(h: int) -> Vector2:
 		if b.state == STATE_FLIGHT and b.to_hand == h:
 			if inc == null or b.land_tick < inc.land_tick:
 				inc = b
+	# HOLDING MEANS INWARD, EMPTY MEANS OUTWARD, and nothing else gets a say (2026-07-27,
+	# Louis: "the hand is already gone to catch, but hasn't thrown yet, making the throw
+	# look weird"). A holding hand used to reach for an incoming prop's landing point as
+	# soon as it was within 36 ticks - so in a throw-then-catch exchange, which is the
+	# beat the whole beginner cascade is made of, the hand had already travelled out to
+	# the catch slot while it was still holding the prop it had not thrown yet. The throw
+	# then departed from a hand that was visibly in the wrong place.
+	#
+	# The rule is also what the lesson prompts have always said out loud - a hand with a
+	# prop in it is asked to THROW, never to catch - so the picture and the instruction
+	# finally agree. A hand can still catch into a held stack (that rescue is unchanged):
+	# catching is decided by timing, never by where the hand is drawn.
 	if not stack(h).is_empty():
-		# holding, but a hand may catch INTO a held stack now (Louis), so when a
-		# ball is about to land its way it still reaches for the landing point;
-		# otherwise it rests where its own next throw departs from
-		p = inc.to_pos if inc != null and inc.land_tick - tick < 36 else slot_pos(h, throw_slot(h))
+		p = slot_pos(h, throw_slot(h))
 	else:
 		p = inc.to_pos if inc != null else slot_pos(h, hand_catch_rest[h])
 	# a brief upward kick right after a throw sells the release
@@ -8649,7 +8656,7 @@ func draw_juggler(s: Vector2) -> void:
 	# BELOW the head and the arms, so the arms still pass in front of the coat and a
 	# held Columns middle ball (which rests at stage_center, i.e. over the hip) is
 	# never painted over.
-	var polished: bool = experiments.get("performer_polish", false)
+	var polished := true   # the wardrobe pass is the costume now, not a variant
 	if polished:
 		draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, floor_y,
 			suit, suit_dk, collar, Color(v["glow"]), facing_back)
@@ -9376,65 +9383,93 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 			draw_ball_shape(pos, b.color, sc)
 
 
-# THE LIT PROPS (2026-07-27, Louis: the torches and knives "stand out... because
-# everything else is just less taken care of"). Balls, eggs and rings were each a flat
-# shape with one paler blob stuck on it - the sticker look the coin was just rescued
-# from. They are lit properly now, on one consistent rule that costs almost nothing:
+# THE LIT PROPS, second attempt (2026-07-27, Louis: the first one "looks horrible").
 #
-#   the key light is UP AND LEFT (where the stage's spot is), so every prop carries a
-#   broad soft highlight on that shoulder, a tight specular inside it, a shaded
-#   crescent on the opposite side, and a thin BOUNCE along its lower-left edge from
-#   the lit boards. Four marks and a silhouette is all a round thing needs to stop
-#   reading as a disc.
+# WHAT WENT WRONG, because it is the whole lesson: shading was drawn with draw_arc at a
+# large width. A thick arc is an annulus SEGMENT with square ends, so instead of light
+# falling off it produced a hard-edged grey wedge stuck to the ball - a pac-man bite -
+# and on the ring a row of segments that read as a loading spinner. Godot has no round
+# line caps, so a partial thick arc can never be soft, at any colour or alpha.
 #
-# Everything scales off sc, so the same call serves an 11px flying ball and a blown-up
-# shop card, and no draw count changed enough to matter (measured: the props were never
-# the expensive half of the frame - the trails were, and those are one call each now).
+# THE RULE NOW: shade only with shapes that HAVE NO ENDS.
+#   - a round prop is the SHADED tone at full size, with the LIT tone overdrawn as a
+#     slightly smaller shape nudged toward the light. The crescent left behind is the
+#     shadow, and being the gap between two smooth outlines it cannot look blunt.
+#   - a ring is CONCENTRIC only - dark outer tube, body, bright inner edge - because a
+#     full circle has no ends either. No fake directional light on it at all.
+#   - the specular is a small filled shape, never a stroke.
+# This is also the language the clubs and knives already speak (crisp filled regions,
+# not gradients), which is why they read and these did not.
+#
+# The whole thing sits behind the F9 `prop_art` switch so it can be held against the
+# old flat look live.
+func prop_art_new() -> bool:
+	return bool(experiments.get("prop_art", true))
+
+
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
 	var r := BALL_RADIUS_PX * sc
-	draw_circle(pos, r, col)
-	# the shaded side, an arc hugging the lower-right edge rather than a second disc
-	draw_arc(pos, r * 0.74, -PI * 0.30, PI * 0.72, 16, Color(col.r * 0.62, col.g * 0.60, col.b * 0.62, 0.75), r * 0.5, true)
-	# the panel seam every juggling ball has, which is what says "ball" and not "sphere"
-	draw_arc(pos, r * 0.66, PI * 0.62, PI * 1.34, 12, Color(col.r * 0.72, col.g * 0.70, col.b * 0.72, 0.55), maxf(1.0, r * 0.11), true)
-	# key light: a broad soft shoulder, then a tight specular inside it
-	var hi := col.lightened(0.42)
-	draw_circle(pos + Vector2(-0.34, -0.36) * r, r * 0.40, Color(hi.r, hi.g, hi.b, 0.55))
-	draw_circle(pos + Vector2(-0.38, -0.42) * r, r * 0.19, Color(1.0, 1.0, 0.97, 0.85))
-	# and the bounce off the boards, along the lower-left rim
-	draw_arc(pos, r * 0.90, PI * 0.58, PI * 0.96, 10, Color(1.0, 0.92, 0.80, 0.28), maxf(1.0, r * 0.14), true)
+	if not prop_art_new():
+		draw_circle(pos, r, col)
+		var oh := col.lightened(0.4)
+		oh.a = 0.9
+		draw_circle(pos + Vector2(-3, -3) * sc, 3.5 * sc, oh)
+		return
+	# the shaded body, then the lit face over it, offset toward the light. The offset
+	# and the lit radius are chosen so the lit circle can never poke out past the
+	# silhouette (0.84 + |(-0.10, -0.11)| = 0.98 of the radius).
+	draw_circle(pos, r, Color(col.r * 0.60, col.g * 0.58, col.b * 0.62))
+	draw_circle(pos + Vector2(-0.10, -0.11) * r, r * 0.84, col)
+	# the panel seam: a flat ellipse, which is a great circle seen almost edge-on, so it
+	# has to run the FULL width of the ball. Inset it and it stops being a seam and
+	# becomes a floating oval - it read as a smile.
+	ellipse_outline(pos, r * 0.97, r * 0.34, Color(col.r * 0.72, col.g * 0.70, col.b * 0.74, 0.5), maxf(1.0, r * 0.08))
+	# the specular: a soft cap with a hot point inside it
+	draw_circle(pos + Vector2(-0.34, -0.38) * r, r * 0.24, col.lightened(0.5))
+	draw_circle(pos + Vector2(-0.38, -0.42) * r, maxf(1.0, r * 0.11), Color(1.0, 1.0, 0.98, 0.9))
+
+
+func ovoid(c: Vector2, w: float, h: float, col: Color) -> void:
+	# an EGG outline: pinched toward the top, full toward the bottom. A symmetric
+	# ellipse is a pill; this asymmetry is the entire character of the shape.
+	var pts := PackedVector2Array()
+	for i in 29:
+		var a := TAU * float(i) / 28.0
+		var taper := 1.0 - 0.20 * clampf(-sin(a), 0.0, 1.0)
+		pts.append(c + Vector2(cos(a) * w * taper, sin(a) * h))
+	draw_colored_polygon(pts, col)
 
 
 func draw_egg(pos: Vector2, col: Color, sc: float) -> void:
-	# a real ovoid: narrower at the top than the bottom. A symmetric ellipse is a
-	# pill, and the whole character of an egg is in that asymmetry.
 	var w := 9.0 * sc
 	var h := 12.0 * sc
-	var pts := PackedVector2Array()
-	for i in 25:
-		var a := TAU * float(i) / 24.0
-		var taper := 1.0 - 0.24 * clampf(-sin(a), 0.0, 1.0)   # pinch the top only
-		pts.append(pos + Vector2(cos(a) * w * taper, sin(a) * h))
-	draw_colored_polygon(pts, col)
-	draw_arc(pos + Vector2(0.0, h * 0.10), w * 0.72, -PI * 0.28, PI * 0.70, 16,
-		Color(col.r * 0.66, col.g * 0.62, col.b * 0.58, 0.65), w * 0.52, true)
-	var hi := col.lightened(0.30)
-	fill_ellipse(pos + Vector2(-w * 0.30, -h * 0.34), w * 0.34, h * 0.26, Color(hi.r, hi.g, hi.b, 0.6))
-	draw_circle(pos + Vector2(-w * 0.34, -h * 0.40), w * 0.16, Color(1.0, 1.0, 0.96, 0.8))
+	if not prop_art_new():
+		fill_ellipse(pos, w, h, col)
+		var oh := col.lightened(0.25)
+		oh.a = 0.9
+		draw_circle(pos + Vector2(-3, -4) * sc, 2.6 * sc, oh)
+		return
+	ovoid(pos, w, h, Color(col.r * 0.64, col.g * 0.61, col.b * 0.60))
+	ovoid(pos + Vector2(-0.10 * w, -0.10 * h), w * 0.84, h * 0.84, col)
+	draw_circle(pos + Vector2(-0.30 * w, -0.36 * h), w * 0.20, col.lightened(0.42))
+	draw_circle(pos + Vector2(-0.34 * w, -0.40 * h), maxf(1.0, w * 0.10), Color(1.0, 1.0, 0.97, 0.9))
 
 
 func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
-	# a ring has THICKNESS, and drawing it as one stroked circle threw that away. Three
-	# concentric arcs give it a rounded cross-section - dark edges, a lit body - and the
-	# hole gets its own inner rim, which is what stops it reading as a painted O.
 	var r := 12.0 * sc
 	var w := 5.0 * sc
-	draw_arc(pos, r, 0.0, TAU, 30, Color(col.r * 0.52, col.g * 0.50, col.b * 0.52), w, true)          # the dark edges
-	draw_arc(pos, r, 0.0, TAU, 30, col, w * 0.62, true)                                               # the body between them
-	draw_arc(pos, r, PI * 1.05, PI * 1.85, 14, Color(col.r, col.g, col.b, 1.0).lightened(0.45), w * 0.42, true)   # key light, upper left
-	draw_arc(pos, r, PI * 0.10, PI * 0.62, 12, Color(0.0, 0.0, 0.0, 0.28), w * 0.42, true)            # ...and the far side falling away
-	draw_arc(pos, r, PI * 0.62, PI * 0.98, 10, Color(1.0, 0.92, 0.80, 0.22), w * 0.30, true)          # bounce off the boards
-	draw_arc(pos, r - w * 0.5, 0.0, TAU, 24, Color(0.0, 0.0, 0.0, 0.30), maxf(1.0, sc), true)         # the hole's own rim
+	if not prop_art_new():
+		draw_arc(pos, r, 0.0, TAU, 28, col, w, true)
+		var oh := col.lightened(0.3)
+		oh.a = 0.7
+		draw_arc(pos, r, -2.4, -1.0, 8, oh, 3.0 * sc, true)
+		return
+	# CONCENTRIC ONLY. A ring is the one prop that must stay an annulus (the hole has to
+	# stay transparent), so every band here is a FULL circle - dark tube, body, bright
+	# inner edge - and none of them has an end that could read as a cut.
+	draw_arc(pos, r, 0.0, TAU, 32, Color(col.r * 0.46, col.g * 0.45, col.b * 0.50), w, true)
+	draw_arc(pos, r - w * 0.14, 0.0, TAU, 32, col, w * 0.60, true)
+	draw_arc(pos, r - w * 0.30, 0.0, TAU, 32, col.lightened(0.38), w * 0.22, true)
 
 
 func draw_club(pos: Vector2, ang: float, sc: float) -> void:
@@ -9719,16 +9754,28 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		var passed := frac >= m
 		draw_line(Vector2(x - 10.0, my), Vector2(x + 10.0, my),
 			Color(1.0, 0.90, 0.55, 0.95) if passed else Color(0.62, 0.56, 0.50, 0.7), 2.2)
-	# the bud opens as the final goal comes in, and blooms outright past it
+	# THE BUD OPENS as the goal comes in, and the bloom is deliberately much BIGGER than
+	# the bud was (2026-07-27, Louis: "a bigger flower when done, making it more clear
+	# that you have reached the desired score"). A bud at 7px quietly becoming a flower
+	# at 8px is not an event; tripling it, lighting it, and putting a ring of petals out
+	# past the stem's own width is. Past the FINAL goal it opens again, gold, and keeps
+	# growing with the overflow - so the rail says "cleared" and then "still climbing".
 	var bud := Vector2(x, base - maxf(h, 4.0))
 	if over > 0.0:
-		draw_glow(bud, 26.0 + 12.0 * over, Color(accent.r, accent.g, accent.b, 0.22 + 0.2 * over))
-		draw_flower(bud, 2, 1.6 + 0.5 * over, atick() * 0.01, 1.0)
+		draw_glow(bud, 40.0 + 22.0 * over, Color(accent.r, accent.g, accent.b, 0.28 + 0.24 * over))
+		for i in 6:                                    # petals shed round a finished act
+			var sa := atick() * 0.02 + TAU * float(i) / 6.0
+			draw_flower(bud + Vector2(cos(sa), sin(sa)) * (26.0 + 8.0 * over), 0, 0.7, sa, 0.5)
+		draw_flower(bud, 2, 3.2 + 1.2 * over, atick() * 0.01, 1.0)
 	elif frac >= 0.999:
-		draw_flower(bud, 1, 1.5, atick() * 0.008, 1.0)
+		draw_glow(bud, 32.0, Color(1.0, 0.86, 0.45, 0.26))
+		draw_flower(bud, 1, 2.8, atick() * 0.008, 1.0)
 	else:
-		fill_ellipse(bud, 5.0, 7.5, Color(0.55, 0.72, 0.45))
-		fill_ellipse(bud + Vector2(-1.4, -1.6), 2.0, 3.0, Color(0.72, 0.86, 0.58, 0.8))
+		# still a bud - and it swells as the goal nears, so the change is a growth and
+		# not a swap
+		var swell := 1.0 + 0.45 * clampf(frac, 0.0, 1.0)
+		fill_ellipse(bud, 5.0 * swell, 7.5 * swell, Color(0.55, 0.72, 0.45))
+		fill_ellipse(bud + Vector2(-1.4, -1.6) * swell, 2.0 * swell, 3.0 * swell, Color(0.72, 0.86, 0.58, 0.8))
 
 
 func draw_money_hat(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
@@ -10378,17 +10425,25 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_fit_string(title_font(), Vector2(LX + 219.0, tcard_y + 66.0), commafy(run_flowers),
 				HORIZONTAL_ALIGNMENT_LEFT, 74.0, 24, fc)
 			# and how the room is FEELING, in the one word the pile is saying
-			var mood := "quiet"
+			# ...in the SAME bands the crowd dial is coloured in, so the word and the
+			# needle can never disagree about whether flowers are coming
+			var mood := "waiting"
 			var mc := Color(0.70, 0.66, 0.62)
 			if applause <= TOMATO_RED:
-				mood = "turning"
+				mood = "turning on you"
 				mc = Color(1.0, 0.45, 0.38)
-			elif applause >= 0.85:
+			elif applause >= 0.92:
 				mood = "on their feet"
 				mc = Color(0.75, 0.95, 0.72)
 			elif applause >= FLOWER_GREEN:
-				mood = "warming"
-				mc = Color(0.95, 0.85, 0.55)
+				mood = "throwing flowers"
+				mc = Color(0.65, 0.92, 0.62)
+			elif applause >= 0.50:
+				mood = "with you"
+				mc = Color(0.96, 0.86, 0.42)
+			elif applause >= FLOWER_FLOOR:
+				mood = "restless"
+				mc = Color(0.96, 0.62, 0.30)
 			draw_fit_string(font, Vector2(LX + 196.0, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, 96.0, 12, mc)
 		else:
 			draw_money_hat(Rect2(LX + 148.0, tcard_y + 8.0, 138.0, 162.0), tfrac, over, marks,
@@ -10686,24 +10741,6 @@ func draw_results(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
 
 
-func draw_pause(font: Font, s: Vector2) -> void:
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.72))
-	var pw := 360.0
-	var ph := 268.0
-	var px := s.x * 0.5 - pw * 0.5
-	var py := s.y * 0.5 - ph * 0.5
-	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
-	draw_string(title_font(), Vector2(px, py + 52.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 30, Color(1.0, 0.86, 0.5))
-	draw_ornament(px + pw * 0.5, py + 70.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
-	var opts: Array[String] = ["Resume", "End the session", "Quit Game"]
-	var oy := py + 116.0
-	for i in opts.size():
-		var sel := i == pause_sel
-		var col := Color(1.0, 0.9, 0.6) if sel else Color(0.74, 0.68, 0.62)
-		var label := ("> %s <" % opts[i]) if sel else opts[i]
-		draw_string(font, Vector2(px, oy + float(i) * 40.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw, 22, col)
-	var pfoot := "up / down  -  A selects  -  B resumes" if pad_active() else "up / down  -  Enter  -  Esc resumes"
-	draw_string(font, Vector2(px, py + ph - 20.0), pfoot, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
 func draw_pause_screen(font: Font, s: Vector2) -> void:
@@ -10711,15 +10748,12 @@ func draw_pause_screen(font: Font, s: Vector2) -> void:
 	# whichever version the pause_cards EXPERIMENT currently points at, same shape
 	# as draw_sheet_screen/draw_settings_screen. draw_pause never changes;
 	# pause_input/pause_activate (pause_sel 0..2) are shared unmodified by both.
-	if experiments.get("pause_cards", false):
-		draw_pause_cards(font, s)
-	else:
-		draw_pause(font, s)
+	draw_pause_cards(font, s)
 
 
 func draw_pause_cards(font: Font, s: Vector2) -> void:
-	# a card-styled alternate to draw_pause (EXPERIMENTS: pause_cards). Same three
-	# options in the same pause_sel order pause_activate already drives - purely a
+	# THE PAUSE MENU as three colour-coded cards, in the same pause_sel order
+	# pause_activate already drives (shipped 2026-07-27, no longer a variant) - purely a
 	# different picture, colour-coded by what each option actually does (calm to
 	# resume, warm to step out, warning-red to quit), the same card language as the
 	# shop/sheet/settings-cards alternate.
@@ -10920,127 +10954,6 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 #endregion
 
 #region CHARACTER SHEET SCREEN
-func draw_sheet(font: Font, s: Vector2) -> void:
-	# the character sheet, dealt as CARDS like the shop (Louis: Balatro look - one big
-	# card per stat, its key printed on the card, a loud banner when points wait)
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.86))
-	var pw := minf(1040.0, s.x - 60.0)
-	var ph := 560.0
-	var px := s.x * 0.5 - pw * 0.5
-	var py := s.y * 0.5 - ph * 0.5
-	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
-
-	var tx := px + 40.0
-	var innerw := pw - 80.0
-	draw_string(title_font(), Vector2(tx, py + 52.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 32, Color(1.0, 0.86, 0.55))
-	if debug_mode:
-		draw_string(font, Vector2(tx + 168.0, py + 50.0), "DEBUG BUILD", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.55, 0.9, 1.0))
-	draw_purse(font, px + pw - 40.0, py + 52.0)
-	draw_string(font, Vector2(px, py + 74.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 13, Color(0.82, 0.72, 0.85))
-
-	# the level and its road: one full-width bar, the number on it
-	var need := xp_to_next(level)
-	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_string(font, Vector2(tx, py + 96.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1.0, 0.9, 0.6))
-	var xbx := tx + 130.0
-	var xbw := innerw - 130.0
-	draw_rect(Rect2(xbx, py + 82.0, xbw, 16.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(xbx, py + 82.0, xbw * xf, 16.0), Color(0.9, 0.7, 0.35))
-	# outlined: this label sits ON the xp meter, so a single flat colour was always
-	# unreadable over half of it (dark text vanishes on the dark track, light text on
-	# the lit fill) - and the bar's fill moves as you level, so neither half is safe
-	draw_text_shout(font, Vector2(xbx, py + 95.0), "%s / %s xp" % [commafy(xp), commafy(need)], HORIZONTAL_ALIGNMENT_CENTER, xbw, 12, Color(1.0, 0.96, 0.85))
-
-	# the SPEND banner: impossible to miss when points are waiting, quiet otherwise
-	var by0 := py + 116.0
-	if points > 0:
-		var pa := 0.75 + 0.25 * sin(float(Time.get_ticks_msec()) * 0.006)
-		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.84, 0.4, 0.16 + 0.10 * pa))
-		draw_rect(Rect2(tx, by0, innerw, 34.0), Color(1.0, 0.86, 0.45, 0.7), false, 1.5)
-		draw_string(font, Vector2(tx, by0 + 23.0), "%d POINT%s TO SPEND  -  press the key on a card" % [points, "" if points == 1 else "S"],
-			HORIZONTAL_ALIGNMENT_CENTER, innerw, 16, Color(1.0, 0.92, 0.7))
-	elif all_stats_capped():
-		var mtext := "MASTERY - every stat is at its ceiling. Each new level now pays %d gold per point" % MASTERY_GOLD
-		if int(career.get("mastery", 0)) > 0:
-			mtext += "  (%d earned so far)" % int(career.get("mastery", 0))
-		draw_string(font, Vector2(tx, by0 + 23.0), mtext, HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
-	else:
-		draw_string(font, Vector2(tx, by0 + 23.0), "Skill sets your score. Stats only ease the climb - the next point comes with the next level.",
-			HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
-
-	# ---------------- four stat cards ----------------
-	var str_note := "heavy props fly higher and catch easier - %d balls now" % max_balls()
-	if next_ball_strength() > 0:
-		str_note = "heavy props steadier and easier to catch. The %d-ball unlock waits at Str %d" % [max_balls() + 1, next_ball_strength()]
-	var acc_note := "a better chance to hold off-Perfect catches, and throws land closer to the hand"
-	if accuracy > 100:
-		if focus() <= 100.0:
-			acc_note = "Focus %d - every action costs less stamina" % int(focus())
-		else:
-			acc_note = "Focus %d - minimum stamina cost, +%d ticks on the Perfect window" % [int(focus()), perfect_window() - W_PERFECT]
-	var spd_pct := speed / 8
-	var spd_note := "the world runs %d%% slower for you - 8 points per percent, capped at %d%%" % [spd_pct, SPEED_CAP / 8]
-	if speed >= SPEED_CAP:
-		spd_note = "the world runs %d%% slower for you - at the cap" % spd_pct
-	var stats: Array = [
-		["ACCURACY", accuracy, acc_note, "1", Color(0.6, 0.8, 1.0), "acc"],
-		["STRENGTH", strength, str_note, "2", Color(0.95, 0.55, 0.4), "str"],
-		["ENDURANCE", endurance, "raises your maximum stamina, the fuel every throw and catch burns", "3", Color(0.55, 0.8, 0.6), "end"],
-		["SPEED", speed, spd_note, "4", Color(0.8, 0.7, 0.95), "spd"],
-	]
-	var gap := 16.0
-	var cw := (innerw - gap * 3.0) / 4.0
-	var ch := 240.0
-	var y0 := py + 168.0
-	for i in stats.size():
-		var st: Array = stats[i]
-		var cx0 := tx + float(i) * (cw + gap)
-		var ac: Color = st[4]
-		hud_card(Rect2(cx0, y0, cw, ch), Color(ac.r, ac.g, ac.b, 0.45))
-		if i == sheet_sel:
-			# the card cursor: arrows / dpad / stick moved it here, Enter (pad A)
-			# invests here. A breathing gold frame, so it reads without stealing
-			# the card's own colour.
-			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
-			draw_rect(Rect2(cx0 - 4.0, y0 - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.5)
-		draw_fit_string(font, Vector2(cx0, y0 + 26.0), String(st[0]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(ac.r, ac.g, ac.b, 0.95))
-		draw_string(font, Vector2(cx0, y0 + 74.0), str(int(st[1])), HORIZONTAL_ALIGNMENT_CENTER, cw, 44, Color(1.0, 0.94, 0.76))
-		# the climb: how far along the whole stat this is, every real threshold pipped,
-		# and the next one NAMED - so a point is never spent blind (Louis)
-		draw_stat_track(font, Rect2(cx0 + 14.0, y0 + 88.0, cw - 28.0, 7.0), String(st[5]), int(st[1]), ac)
-		# bounded by the gap down to the invest plate, so the blurb can never reach it
-		draw_wrap_fit(font, String(st[2]), Rect2(cx0 + 12.0, y0 + 124.0, cw - 24.0, ch - 184.0), 11,
-			Color(0.78, 0.72, 0.64), HORIZONTAL_ALIGNMENT_CENTER)
-		# the invest plate: bright and green when a point can land here, quiet otherwise
-		var can := points > 0
-		var plate := Rect2(cx0 + 10.0, y0 + ch - 50.0, cw - 20.0, 40.0)
-		var bg := Color(0.16, 0.22, 0.13, 0.9) if can else Color(0.10, 0.07, 0.08, 0.7)
-		var line := Color(0.55, 0.85, 0.5, 0.55) if can else Color(0.6, 0.5, 0.45, 0.3)
-		draw_rect(plate, bg)
-		draw_rect(plate, line, false, 1.0)
-		draw_keycap(font, plate.position.x + 8.0, plate.position.y + 10.5, String(st[3]))
-		draw_string(font, Vector2(plate.position.x, plate.position.y + 26.0), "+1" if can else "invest",
-			HORIZONTAL_ALIGNMENT_RIGHT, plate.size.x - 12.0, 15, Color(0.78, 0.96, 0.72) if can else Color(0.6, 0.55, 0.5, 0.8))
-
-	# ---------------- stamina: a resource, not a stat ----------------
-	var sy := y0 + ch + 34.0
-	draw_string(font, Vector2(tx, sy), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.8, 0.9, 0.85))
-	var sbx := tx + 130.0
-	var sbw := innerw - 260.0
-	var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-	draw_rect(Rect2(sbx, sy - 12.0, sbw, 14.0), Color(0.2, 0.14, 0.11, 0.8))
-	draw_rect(Rect2(sbx, sy - 12.0, sbw * sfrac, 14.0), Color(0.55, 0.80, 0.6))
-	draw_string(font, Vector2(sbx + sbw + 14.0, sy), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.9, 0.85))
-	draw_string(font, Vector2(tx, sy + 20.0), "drains as you play; meals and sleep bring it back. Empty hands catch nothing.", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.75, 0.68, 0.6))
-
-	var by := py + ph - 32.0
-	if debug_mode:
-		draw_string(font, Vector2(tx, by), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.9, 1.0))
-	var sh_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "choose"]]
-	if points > 0:
-		sh_items.append([k_finish(), "invest"])
-	sh_items.append([k_sheet(), "resume"])
-	draw_hints_row(font, px + pw * 0.5, by - 14.0, sh_items)
 
 
 func draw_sheet_screen(font: Font, s: Vector2) -> void:
@@ -11048,10 +10961,7 @@ func draw_sheet_screen(font: Font, s: Vector2) -> void:
 	# whichever version the talent_tree EXPERIMENT currently points at. Both
 	# versions share sheet_sel/sheet_input/invest()/_adjust() untouched, so this
 	# function is the entire difference between them: draw_sheet never changes.
-	if experiments.get("talent_tree", false):
-		draw_talent_tree(font, s)
-	else:
-		draw_sheet(font, s)
+	draw_talent_tree(font, s)
 
 
 func stat_cap(which: String) -> int:
@@ -11156,7 +11066,7 @@ func draw_stat_track(font: Font, r: Rect2, which: String, val: int, col: Color) 
 
 
 func draw_talent_tree(font: Font, s: Vector2) -> void:
-	# the TALENT TREE (experimental, F9): the same four stats as draw_sheet, drawn as four
+	# THE STAT SCREEN (shipped 2026-07-27; it replaced a set of four flat cards): four
 	# GROWTH COLUMNS that fill upward as you invest, each milestone pip a REAL PATTERNS/
 	# TRICKS threshold. Same sheet_sel / invest() / caps as the classic sheet - only the
 	# picture differs, so the two can never disagree on what a point is worth.
@@ -12453,15 +12363,28 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 				Vector2(nx - 1.8, c.y + 1.0), Vector2(nx + 1.8, c.y - 0.5),
 				Vector2(nx + 1.2, c.y - 8.5), Vector2(nx - 1.8, c.y - 7.5)]), col)
 		"bed":
-			# REST: a bed with a pillow, a turned-down cover and legs, seen from the side.
-			# The old one was three bare rectangles that read as a filing tray.
-			draw_line(Vector2(c.x - 9.0, c.y - 7.0), Vector2(c.x - 9.0, c.y + 3.0), col, 1.8)  # headboard
-			draw_rect(Rect2(c.x - 9.0, c.y + 1.0, 18.0, 4.0), col)                              # mattress
-			draw_rect(Rect2(c.x - 9.0, c.y + 5.0, 18.0, 2.0), Color(col.r, col.g, col.b, 0.55)) # base
-			fill_ellipse(Vector2(c.x - 5.0, c.y - 1.0), 4.0, 2.4, Color(col.r, col.g, col.b, 0.9))  # pillow
-			draw_line(Vector2(c.x - 1.0, c.y + 0.6), Vector2(c.x + 9.0, c.y + 0.6), Color(col.r, col.g, col.b, 0.7), 1.6)
-			draw_line(Vector2(c.x - 8.0, c.y + 7.0), Vector2(c.x - 8.0, c.y + 9.5), col, 1.6)
-			draw_line(Vector2(c.x + 8.0, c.y + 7.0), Vector2(c.x + 8.0, c.y + 9.5), col, 1.6)
+			# REST, third attempt (2026-07-27, Louis: "the rest icon still looks weird").
+			# A side-on bed at 18px is a pile of thin strokes that reads as a filing
+			# tray however it is arranged - too many parts, none of them legible.
+			#
+			# So it is not a bed any more. It is a MOON with three z's, which is the
+			# universal mark for sleep, survives being 16px wide, and needs exactly two
+			# recognisable shapes. (The hub's REST DRAWER already uses a plain moon;
+			# this is the same idea with the z's that say "sleep" rather than "night".)
+			# the crescent is a THICK ARC, not a circle with a bite cut out of it: cutting
+			# the bite means overdrawing in the background colour, and the hub's cards do
+			# not all share one. An arc keeps the hole honestly transparent, and its two
+			# blunt ends land exactly where a crescent moon has its horns anyway - the
+			# one place in this whole art pass where a square cap is the right answer.
+			var mc := c + Vector2(-2.5, 1.0)
+			draw_arc(mc, 7.0, 0.62, TAU - 0.62, 22, col, 4.6, true)
+			for zi in 3:
+				var zs := 5.0 - float(zi) * 1.4
+				var zp := c + Vector2(4.5 + float(zi) * 3.4, -3.0 - float(zi) * 3.6)
+				var zc := Color(col.r, col.g, col.b, 0.95 - 0.22 * float(zi))
+				draw_line(zp + Vector2(-zs * 0.5, -zs * 0.5), zp + Vector2(zs * 0.5, -zs * 0.5), zc, 1.4)
+				draw_line(zp + Vector2(zs * 0.5, -zs * 0.5), zp + Vector2(-zs * 0.5, zs * 0.5), zc, 1.4)
+				draw_line(zp + Vector2(-zs * 0.5, zs * 0.5), zp + Vector2(zs * 0.5, zs * 0.5), zc, 1.4)
 		"pie":
 			# UNCLE DAN'S PIE: a real slice - a crimped crust along the back, a filled
 			# wedge, and a lattice over it. A bare triangle read as a torch flame next to
@@ -12733,17 +12656,16 @@ func slot_info(i: int) -> Dictionary:
 
 
 func draw_slots_screen(font: Font, s: Vector2) -> void:
-	# routes to the card variant or the classic bars - the slot_cards EXPERIMENT (F9).
-	# Both share menu_sel / slot_input untouched, exactly like draw_settings_screen.
-	if experiments.get("slot_cards", false):
-		draw_slots_cards(font, s)
-	else:
-		draw_slots(font, s)
+	draw_slots_cards(font, s)
+
+
 
 
 func draw_slots_cards(font: Font, s: Vector2) -> void:
-	# the save files as three tall portrait cards (EXPERIMENTS: slot_cards): a cascade
-	# motif up top, the level big, venue and gold below, a crown on a finished save.
+	# the save files as three tall portrait cards: a cascade motif up top, the level
+	# big, venue and purse below, a crown on a finished save. (Shipped 2026-07-27 - it
+	# was an F9 variant that defaulted OFF, which is the only reason the classic bars
+	# were still the ones on screen; Louis wanted the new picture everywhere.)
 	view_venue = 2
 	draw_backdrop(s)
 	view_venue = -1
@@ -12799,87 +12721,6 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
-func draw_slots(font: Font, s: Vector2) -> void:
-	view_venue = 2
-	draw_backdrop(s)
-	view_venue = -1
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
-	draw_string(title_font(), Vector2(0, s.y * 0.17), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
-
-	var pw := 660.0
-	var px := s.x * 0.5 - pw * 0.5
-	var oy := s.y * 0.30
-	for i in NUM_SLOTS:
-		var sel := i == menu_sel
-		var ry := oy + float(i) * 74.0
-		var sum := slot_summary(i)
-		draw_rect(Rect2(px, ry, pw, 60.0), Color(0.12, 0.07, 0.08, 0.92))
-		draw_rect(Rect2(px, ry, pw, 60.0), Color(0.9, 0.6, 0.35, 0.55) if sel else Color(0.4, 0.32, 0.26, 0.5), false, 2.0)
-		var crowned := sum.find("WORLD'S GREATEST") != -1   # a finished save wears a warmer gold
-		var tcol := Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66)
-		if crowned:
-			tcol = Color(1.0, 0.82, 0.4) if sel else Color(0.98, 0.76, 0.36)
-		draw_string(font, Vector2(px + 24.0, ry + 27.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, tcol)
-		draw_string(font, Vector2(px + 24.0, ry + 49.0), sum, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.78, 0.72, 0.62))
-		if sum != "empty":
-			draw_string(font, Vector2(px + pw - 110.0, ry + 37.0), "[X] delete", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.88, 0.55, 0.5))
-
-	var by := oy + float(NUM_SLOTS) * 74.0 + 16.0
-	var bsel := menu_sel == NUM_SLOTS
-	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
-	var sfoot := "Up / Down    A to play    X to delete    B to go back" if pad_active() else "Up / Down    Enter to play    X to delete    Esc to go back"
-	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
-	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
-
-
-func draw_settings(font: Font, s: Vector2) -> void:
-	view_venue = 2
-	draw_backdrop(s)
-	view_venue = -1
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.62))
-	draw_string(title_font(), Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
-
-	# Music / Sound are volume sliders (float 0..1); the rest stay plain on/off bools
-	# NOTE (standing invariant): draw_settings, draw_settings_cards and settings_input
-	# must carry the SAME rows in the SAME order - menu_sel is a bare index into all three.
-	var rows := [["Screen shake", set_shake], ["Reduce motion  (fewer jolts and bursts)", reduce_motion], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen], ["Dominant hand  (holds the odd prop)", dominant_hand == RIGHT]]
-	var pw := 560.0
-	var px := s.x * 0.5 - pw * 0.5
-	var oy := s.y * 0.28
-	var sliders := [["Music", set_music], ["Sound effects", set_sfx]]
-	for i in sliders.size():
-		var sel := i == menu_sel
-		var ry := oy + float(i) * 48.0
-		var nm := String(sliders[i][0])
-		var vol: float = sliders[i][1]
-		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
-		draw_meter(px + pw - 190.0, ry - 14.0, 130.0, 16.0, vol, Color(0.55, 0.80, 0.6) if vol > 0.0 else Color(0.5, 0.44, 0.4))
-		draw_string(font, Vector2(px + pw - 50.0, ry), "mute" if vol <= 0.0 else "%d%%" % int(round(vol * 100.0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.8, 0.9, 0.8))
-	for i in rows.size():
-		var sel := (i + sliders.size()) == menu_sel
-		var ry := oy + float(i + sliders.size()) * 48.0
-		var nm := String(rows[i][0])
-		var on := bool(rows[i][1])
-		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
-		# the dominant hand is the one row whose value is not a yes/no
-		var vtext := ("RIGHT" if on else "LEFT") if i == rows.size() - 1 else ("ON" if on else "OFF")
-		var vcol := Color(1.0, 0.86, 0.5) if i == rows.size() - 1 else (Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
-		draw_string(font, Vector2(px + pw - 70.0, ry), vtext, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, vcol)
-	var rows_total := rows.size() + sliders.size()
-
-	var csel := menu_sel == rows_total
-	var cry := oy + float(rows_total) * 48.0
-	draw_string(font, Vector2(px, cry), ("> " if csel else "  ") + "Controls  (rebind the keys)", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if csel else Color(0.8, 0.74, 0.66))
-	var rsel := menu_sel == rows_total + 1
-	var rry := cry + 48.0
-	draw_string(font, Vector2(px, rry), ("> " if rsel else "  ") + "Records and history", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if rsel else Color(0.8, 0.74, 0.66))
-	var bsel := menu_sel == rows_total + 2
-	draw_string(font, Vector2(0, rry + 48.0 + 28.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
-	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
-	draw_string(font, Vector2(0, s.y - 42.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
-	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_settings_screen(font: Font, s: Vector2) -> void:
@@ -12887,18 +12728,14 @@ func draw_settings_screen(font: Font, s: Vector2) -> void:
 	# version the settings_cards EXPERIMENT currently points at, same shape as
 	# draw_sheet_screen. draw_settings never changes; settings_input (menu_sel 0..7,
 	# fixed row meanings) is shared unmodified by both - only the drawing differs.
-	if experiments.get("settings_cards", false):
-		draw_settings_cards(font, s)
-	else:
-		draw_settings(font, s)
+	draw_settings_cards(font, s)
 
 
 func draw_settings_cards(font: Font, s: Vector2) -> void:
-	# a card-styled alternate to draw_settings (EXPERIMENTS: settings_cards). Same
-	# nine rows in the same menu_sel order settings_input already drives - this is
-	# purely a different PICTURE of the same settings, using the Balatro-card
-	# language the shop and sheet already use (hud_card/draw_meter/a toggle plate)
-	# that this screen alone never picked up: bare text rows, no card boxes at all.
+	# SETTINGS as cards - the same nine rows in the same menu_sel order settings_input
+	# already drives, in the Balatro-card language the shop and sheet use
+	# (hud_card/draw_meter/a toggle plate). This screen alone never picked it up and was
+	# bare text rows. (Shipped 2026-07-27, no longer a variant.)
 	view_venue = 2
 	draw_backdrop(s)
 	view_venue = -1
@@ -14072,6 +13909,29 @@ func stage_floor_y() -> float:
 	return get_viewport_rect().size.y * 0.80   # the boards, where thrown things land
 
 
+func flower_pressure() -> float:
+	# HOW HARD THE ROOM IS THROWING, 0 upward, off the crowd meter alone (2026-07-27,
+	# Louis: "only throws flowers consistently when you are in the green. In the orange
+	# you shouldn't get much"). The curve below the green line is SQUARED, not
+	# proportional: a room that is merely not-leaving does not throw flowers, it waits
+	# to see whether you are any good. In the orange that works out to a stem or two a
+	# minute; in the green it is a steady shower, and a full house is better still.
+	if applause < FLOWER_FLOOR:
+		return 0.0
+	if applause >= FLOWER_GREEN:
+		return 1.0 + 0.6 * clampf((applause - FLOWER_GREEN) / (1.0 - FLOWER_GREEN), 0.0, 1.0)
+	var f := (applause - FLOWER_FLOOR) / (FLOWER_GREEN - FLOWER_FLOOR)
+	return f * f * 0.5
+
+
+func flower_fame() -> float:
+	# ...and WHO IS THROWING IT. A performer people have heard of gets showered; an
+	# unknown one gets polite applause and a few stems, however well the night goes.
+	# Capped like every other Reputation effect, so a long career cannot turn the stage
+	# into a florist's - the crowd meter has to stay the thing that matters most.
+	return clampf(0.45 + float(reputation) / FLOWER_FAME_DIV, 0.45, FLOWER_FAME_CAP)
+
+
 func flower_tier_roll() -> int:
 	# WHICH flower, and the answer is almost always the plain one. A posy needs a room
 	# already won over; a gold rose needs one won over with NOTHING dropped all night
@@ -14109,12 +13969,10 @@ func throw_step() -> void:
 		return
 	var vi := clampi(run_venue, 0, FLOWER_THROWERS.size() - 1)
 	var rolls := int(FLOWER_THROWERS[vi])
-	if applause >= FLOWER_GREEN:
-		# how far into the green, 0..1 - a room that is merely pleased throws the odd
-		# one, a room on its feet throws steadily
-		var green := clampf((applause - FLOWER_GREEN) / (1.0 - FLOWER_GREEN), 0.0, 1.0)
+	var p := clampf(FLOWER_P * flower_pressure() * flower_fame(), 0.0, 0.85)
+	if p > 0.0:
 		for _i in rolls:
-			if randf() < 0.25 + 0.50 * green:
+			if randf() < p:
 				var t := flower_tier_roll()
 				throw_from_crowd("flower", t)
 				run_flowers += int(FLOWER_TIERS[t]["val"])
@@ -14129,10 +13987,24 @@ func throw_step() -> void:
 		thrown.remove_at(0)
 
 
-func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float) -> void:
+func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: float = 0.0) -> void:
 	# a flower drawn as a flower: petals round a lit centre, on the same "draw the
 	# object" rule the money hat and the coin follow. The petal COUNT and colour carry
 	# the tier, so a pile can be read at a glance without a single number on screen.
+	# `stem` (2026-07-27, Louis) hangs a green stem and a leaf off it, in the direction
+	# the flower is lying - a cut flower without one reads as a badge, and a pile of
+	# badges does not read as a bouquet on the boards.
+	if stem > 0.0:
+		var dir := Vector2(cos(rot + PI * 0.5), sin(rot + PI * 0.5))
+		var tip := p + dir * stem * sc
+		draw_line(p, tip, Color(0.30, 0.56, 0.28, a), maxf(1.0, 1.6 * sc))
+		var mid := p.lerp(tip, 0.55)
+		var side := Vector2(-dir.y, dir.x)
+		var lv := PackedVector2Array()
+		for k in 9:
+			var t := TAU * float(k) / 8.0
+			lv.append(mid + side * 3.4 * sc + Vector2(cos(t) * 3.6 * sc, sin(t) * 1.6 * sc).rotated(dir.angle()))
+		draw_colored_polygon(lv, Color(0.34, 0.60, 0.30, a))
 	var td: Dictionary = FLOWER_TIERS[clampi(tier, 0, FLOWER_TIERS.size() - 1)]
 	var col: Color = td["col"]
 	var mid: Color = td["mid"]
@@ -14186,7 +14058,7 @@ func draw_thrown() -> void:
 		if String(d["kind"]) == "tomato":
 			draw_tomato(p, sc, rot, a)
 		else:
-			draw_flower(p, int(d["tier"]), sc, rot, a)
+			draw_flower(p, int(d["tier"]), sc, rot, a, 13.0)   # thrown flowers keep their stems
 #endregion
 
 
