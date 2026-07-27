@@ -904,26 +904,41 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 - **Cosmetics:** the Glow-in-the-Dark Kit is built (60,000g gear, GLOW_KIT_COST) and
   so is The Midnight Show, the bonus post-game venue it's really for (see the
   Records/pay/rep bullet above); player/prop skins beyond those two still open.
-  **BLACKOUT rendering, rebuilt 2026-07-26 (verified on screen for torches, balls,
-  eggs and the Kit):** past `BLACKOUT_CUT` (0.68 of the flight, just past the apex)
-  the OBJECT is gone - no shape, no rim, no comet trail, no miniature stand-in.
-  What replaces it splits two ways, and that split IS the Encore:
-  - a **torch** keeps its flame and nothing else. `draw_torch_flame` was split out of
-    `draw_torch` so the dark stretch draws the very same flame the lit torch does -
-    same size (it used to be hand-written at roughly half scale and visibly shrank at
-    the cut), same tumble via the shared `prop_spin_angle`, same flicker - plus the
-    pool of light the fire throws, centred on the prop's true position so the catch
-    point stays legible while the flame itself rides out on the tumble. Only the
-    handle and the trail go dark. Bring torches to a Blackout night.
-  - **everything else** becomes a `draw_blackout_afterglow`: light with no object in
-    it. A smooth eight-shell radial bloom (a couple of low-alpha discs read as a dim
-    OBJECT - it is the falloff with no visible rim that reads as light), trailed by
-    the few positions it just came from, spreading and dimming down the fall but
-    never going out, because catching a genuinely invisible prop is a coin flip, not
-    a challenge. The **Kit** shows up inside that same visual language rather than as
-    a second halo over the top: it scales the fade down to ~a quarter, so the glow
-    barely decays across the fall, and `draw_glow_in_dark` adds a small bright centre
-    that says exactly WHERE - still never a shape or an outline.
+  **BLACKOUT rendering, rebuilt AGAIN 2026-07-27 - the cut is GONE (Louis's own call,
+  chosen over a cross-fade and over a dimming glow).** The rule now is one sentence:
+  **the house lights are out, so in the air a prop is only the glow it carries, from
+  throw to catch.** No threshold, no cross-fade, nothing to tune. What this replaced:
+  the lights were cut at `BLACKOUT_CUT` (0.68 of the flight) and a full-colour prop
+  became a shapeless afterglow in a single frame. Louis: the object "changes color into
+  glow in the dark ... i want the glow in the dark to fade in and out, not that sudden.
+  Perhaps you should even just make the challenge entirely: the objects are hard to see,
+  because it is dark." He picked exactly that. **The lesson worth keeping: any threshold
+  mid-flight is a cliff, and there is no good place to put one - the fix was to delete
+  the state change, not to smooth it.**
+  - **The clubs used to stop turning, and it was a one-argument bug.**
+    `draw_glow_in_dark` called `glow_silhouette(pos, kind, sc, 0.0, ...)` - a hard-coded
+    angle - while that function has always taken one and used it for the three spinning
+    props. So the instant the lights took a club it snapped upright and froze for the
+    rest of the fall. It takes `prop_spin_angle(b)` now. Check this whenever a second
+    renderer is added for an existing prop: the silhouette path is easy to write without
+    ever asking what the prop is doing.
+  - **The SHAPE is kept for everyone, deliberately.** Handing a non-Kit player a
+    shapeless glow for a WHOLE flight would be juggling blind, which was tried and
+    rejected once already as "way too difficult" - and was only survivable before
+    because the rise stayed fully lit. `draw_blackout_afterglow` is deleted.
+  - **The Glow Kit is now brightness, not mercy** (`BLACKOUT_UNLIT` 0.55 against 1.0):
+    the difference between a prop you can READ and one you can only find. That is a
+    better thing to sell than a special case on one Encore.
+  - a **torch** is still the exception the Encore is built around: it keeps its flame.
+    `draw_torch_flame` was split out of `draw_torch` so the dark draws the very same
+    flame the lit torch does - same size (it used to be hand-written at roughly half
+    scale and visibly shrank at the cut), same tumble via the shared `prop_spin_angle`,
+    same flicker - plus the pool of light the fire throws, centred on the prop's true
+    position so the catch point stays legible while the flame rides out on the tumble.
+  - **Still true, and a known inconsistency:** a HELD prop is drawn by the hand code, not
+    by `draw_balls_in_flight`, so it keeps its normal colours through a Blackout. The
+    Encore text says "in the air" for exactly that reason. Worth revisiting if it ever
+    reads wrong.
 - **Settings depth:** Music/Sound are volume sliders now (not just on/off);
   difficulty presets alongside hard-mode collisions still open. **Per-channel sliders
   (catch/crowd/ambient), looked into 2026-07-25, PLANNED NOT BUILT:** the premise
