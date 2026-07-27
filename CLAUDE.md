@@ -335,6 +335,28 @@ and deleted. History lives in git.
   still would not fit FADES and hands over to a top-edge marker - which is exactly
   what a High Toss does anyway. `--skills [N]` opens it for a screenshot, optionally
   selecting entry N (0-3 tricks, 4-9 patterns in unlock order).
+- **THE STAGES, dressed (2026-07-27, verified on screen at all seven):** the Circus was
+  the only venue with a real set - the other six were a tinted void with a spotlight
+  cone and a crowd (Louis: "all the stages except circus could use some attention").
+  Two rules kept it safe: everything new is edge-weighted and out of the juggling
+  window, and there are now TWO passes, because the old one-pass dressing sat behind
+  draw_backdrop's 0.42 veil and anything near the act came out muddy. `draw_venue_
+  dressing` is still the far field (behind the veil); `draw_venue_foreground` is the
+  NEAR field, drawn after the veil and the stage floor, for the handful of things the
+  act stands among. What each venue got: **Backyard** a dusk horizon glow (the one move
+  that turned a dark field into evening), a hedge, the washing still out on a line
+  strung tree-to-post (both ends TIED to something - a rope beginning in mid-air read
+  as two grey boxes), a porch light on the house, grass and fireflies. **Street Corner**
+  a shuttered shopfront under a striped awning, the busker's crates, a lamp post moved
+  clear of the HUD rail and given a colour that silhouettes against the night, a kerb,
+  and the busker's own hat with coins in it on the pavement. **Small Theatre** a hung
+  velvet back wall with folds (its middle was a flat void) and a gilded proscenium arch
+  with studded piers. **Championship** raked stands, a lighting truss, and the score
+  board hung off that truss on two visible hangers. **World Arena** deeper stands, a
+  truss, and two big screens flanking the top centre at x 0.31/0.69 - the only band
+  wide enough to clear both HUD rails and the props. **The Midnight Show** stays
+  deliberately dark (the Glow Kit must keep its job): only the house clock, reading
+  midnight, and the two candles the room is lit by.
 - **Arms reach exactly two points, `inner_pos` and `outer_pos`** - the same two the
   3-ball Cascade always used, and now with NO exceptions at all (2026-07-27). Every
   plain throw leaves inner and lands outer, INCLUDING the even-count Cascade's

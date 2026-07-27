@@ -7160,6 +7160,10 @@ func draw_backdrop(s: Vector2) -> void:
 	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
 	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(glow.r, glow.g, glow.b, 0.55), 3.0)
 
+	# the near field: the handful of things the act is standing AMONG, drawn past the
+	# veil so they read, unlike the set dressing behind it (see draw_venue_foreground)
+	draw_venue_foreground(s, vi, fy, glow)
+
 	# footlights along the stage lip once the career reaches ticketed rooms
 	if vi >= 2:
 		for i in 12:
@@ -7218,30 +7222,55 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 	# what the stage LOOKS OUT ON, per rung of the ladder. Dim, at the edges, and
 	# behind a veil, so the centre stays clear for juggling.
 	match vi:
-		0:   # backyard: dusk stars, the old tree, a fence, the house with a lit window
+		0:   # backyard: dusk stars, the old tree, a fence, the house with a lit window,
+			# and (2026-07-27) the rest of a garden at dusk - a hedge along the back, the
+			# washing still out on the line, fireflies over the grass
+			# the last of the light along the horizon: this one move is what makes the
+			# garden read as DUSK instead of as a dark field with things in it
+			draw_gradient_v(Rect2(0.0, fy - 250.0, s.x, 250.0), Color(0.10, 0.09, 0.20, 0.0),
+				Color(0.44, 0.25, 0.18, 0.55), 16)
 			draw_stars(s, 20, 0.42)
+			draw_hedge(s, fy - 2.0, s.x * 0.16, s.x * 0.60, 26.0)
 			draw_tree(Vector2(s.x * 0.09, fy + 2.0), 1.0)
 			draw_fence(s, fy - 2.0, s.x * 0.60, s.x * 0.97)
 			draw_house(Vector2(s.x * 0.88, fy + 2.0), 132.0, 108.0)
+			draw_washing_line(Vector2(s.x * 0.085, fy - 128.0), Vector2(s.x * 0.34, fy - 112.0), fy)
 		1:   # street corner: the cold city behind one warm lamp. The skyline gets its
 			# own heavy night veil: lit windows read as distant, never as clutter or a
-			# fight with the text that floats over them (Louis).
+			# fight with the text that floats over them (Louis). The STREET itself is
+			# drawn after that veil (2026-07-27), so the corner the act is actually
+			# standing on reads at full strength: a shuttered shopfront under its awning,
+			# the lamp, and the busker's own kit stacked beside it.
 			draw_moon(Vector2(s.x * 0.87, s.y * 0.13), 20.0)
 			draw_stars(s, 26, 0.38)
 			draw_city_row(s, fy)
 			draw_rect(Rect2(0, 0, s.x, fy), Color(0.03, 0.04, 0.09, 0.85))
-			draw_streetlamp(Vector2(s.x * 0.07, fy), fy)
-		2:   # small theatre: velvet wings and a valance frame the stage
+			draw_shopfront(Vector2(s.x * 0.86, fy), 250.0, 132.0)
+			draw_streetlamp(Vector2(s.x * 0.26, fy), fy)
+			draw_crate(Vector2(s.x * 0.16, fy), 34.0, 26.0)
+			draw_crate(Vector2(s.x * 0.20, fy), 26.0, 18.0)
+		2:   # small theatre: velvet wings and a valance frame the stage, a hung velvet
+			# back wall behind it (2026-07-27 - the middle of the room was a flat void),
+			# and a gilded proscenium arch over the whole picture
+			draw_curtain_wall(s, fy, s.y * 0.06, Color(0.21, 0.045, 0.065), 26)
 			draw_theatre_wings(s, fy)
+			draw_proscenium(s, fy)
 		3:   # circus: the big-top canopy overhead and a string of lanterns
 			draw_circus_canopy(s)
 			draw_lantern_string(Vector2(-10.0, s.y * 0.20), Vector2(s.x + 10.0, s.y * 0.24))
-		4:   # championship: cool banners, a scoreboard glow high in the dark
+		4:   # championship: a competition hall - raked stands along the back, a lighting
+			# truss overhead, the board keeping score high in the dark, and the banners
+			# (2026-07-27: it was four banners, a flat 8px rectangle and a few stars)
+			draw_tiers(s, fy - 4.0, 3, Color(0.30, 0.42, 0.66), 0.9)
+			draw_truss(s, s.y * 0.085, Color(0.62, 0.78, 1.0))
+			draw_scoreboard(Vector2(s.x * 0.5, s.y * 0.19), 250.0, 74.0, Color(0.55, 0.78, 1.0), s.y * 0.085 + 18.0)
 			for bx in [s.x * 0.06, s.x * 0.16, s.x * 0.84, s.x * 0.94]:
-				draw_banner(Vector2(bx, s.y * 0.06), Color(0.3, 0.5, 0.9))
-			draw_rect(Rect2(s.x * 0.36, s.y * 0.04, s.x * 0.28, 8.0), Color(0.6, 0.8, 1.0, 0.10))
-			draw_stars(s, 14, 0.3)
+				draw_banner(Vector2(bx, s.y * 0.10), Color(0.3, 0.5, 0.9))
 		5:   # world arena: a vast bowl of warm crowd-lights and roaming beams
+			draw_tiers(s, fy - 4.0, 4, Color(0.44, 0.32, 0.56), 1.0)
+			draw_truss(s, s.y * 0.06, Color(1.0, 0.84, 0.6))
+			draw_jumbotron(Vector2(s.x * 0.31, s.y * 0.155), 140.0, 82.0, glow)
+			draw_jumbotron(Vector2(s.x * 0.69, s.y * 0.155), 140.0, 82.0, glow)
 			for i in 110:
 				var seed := float(i) * 17.7
 				var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x
@@ -7273,6 +7302,250 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 					continue   # keep the juggling window clear
 				var a := 0.10 + 0.16 * sin(atick() * 0.05 + seed)
 				draw_circle(Vector2(x, y), 1.4, Color(1.0, 0.82, 0.52, clampf(a, 0.02, 0.24)))
+			# ...and the two things that say WHICH dark room this is (2026-07-27), both
+			# kept faint enough that the Glow-in-the-Dark Kit still has a job: the house
+			# clock, at midnight, and the candles the room is lit by
+			draw_wall_clock(Vector2(s.x * 0.5, s.y * 0.13), 30.0, Color(0.55, 0.95, 0.68))
+
+
+func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
+	# the NEAR field, drawn after the veil and after the stage floor (2026-07-27), so
+	# the few things the act is standing among read at full strength while everything
+	# in draw_venue_dressing stays pushed back into the depth. Edge-weighted, and
+	# never inside the juggling window.
+	match vi:
+		0:   # the lawn it is all happening on, and the fireflies over it
+			draw_grass(s, fy - 4.0)
+			for i in 9:
+				var seed := float(i) * 31.7
+				var fx := fposmod(sin(seed) * 411.0, 1.0) * s.x
+				if absf(fx - s.x * 0.5) < 210.0:
+					continue
+				var fyy := fy - 30.0 - fposmod(cos(seed) * 271.0, 1.0) * 150.0
+				var drift := Vector2(sin(atick() * 0.008 + seed) * 16.0, cos(atick() * 0.011 + seed) * 11.0)
+				var pulse := clampf(0.35 + 0.65 * sin(atick() * 0.03 + seed * 2.0), 0.0, 1.0)
+				draw_circle(Vector2(fx, fyy) + drift, 10.0, Color(0.9, 1.0, 0.5, 0.09 * pulse))
+				draw_circle(Vector2(fx, fyy) + drift, 2.4, Color(0.95, 1.0, 0.6, 0.95 * pulse))
+		1:   # the kerb, and the busker's own hat out on the pavement for coins
+			draw_line(Vector2(0.0, fy + 16.0), Vector2(s.x, fy + 16.0), Color(0.25, 0.24, 0.26, 0.5), 2.0)
+			draw_hat_prop(Vector2(s.x * 0.5 - 196.0, fy - 2.0))
+		6:   # the candles this room is actually lit by
+			draw_candle(Vector2(s.x * 0.13, fy - 2.0), 30.0)
+			draw_candle(Vector2(s.x * 0.87, fy - 2.0), 30.0)
+
+
+func draw_hedge(s: Vector2, y: float, x0: float, x1: float, h: float) -> void:
+	# a garden hedge: overlapping dark discs along a run, so the backyard has a back
+	var c := Color(0.08, 0.13, 0.08)
+	var x := x0
+	while x <= x1:
+		var bump := h * (0.75 + 0.25 * sin(x * 0.06))
+		draw_circle(Vector2(x, y - bump * 0.35), bump * 0.7, c)
+		x += h * 0.42
+
+
+func draw_washing_line(a: Vector2, b: Vector2, post_y: float) -> void:
+	# the washing still out at dusk: a sagging line with two sheets stirring on it.
+	# The sheets go down FIRST and the line over them, with a peg at each corner, so
+	# the cloth hangs FROM the rope instead of floating near it. Both ends are TIED to
+	# something (the tree at one end, this post at the other) - a rope beginning and
+	# ending in mid-air was the whole reason the first version read as two grey boxes.
+	draw_rect(Rect2(b.x - 2.5, b.y, 5.0, post_y - b.y), Color(0.15, 0.12, 0.10))
+	draw_rect(Rect2(b.x - 9.0, b.y - 3.0, 18.0, 4.0), Color(0.15, 0.12, 0.10))
+	for k in 2:
+		var t := 0.30 + 0.34 * float(k)
+		var top := a.lerp(b, t)
+		top.y += sin(t * PI) * 12.0
+		var sway := sin(atick() * 0.012 + float(k) * 2.0) * 5.0
+		var col := Color(0.80, 0.76, 0.66, 0.72) if k == 0 else Color(0.72, 0.68, 0.66, 0.66)
+		draw_colored_polygon(PackedVector2Array([
+			top + Vector2(-13.0, 0.0), top + Vector2(13.0, 0.0),
+			top + Vector2(15.0 + sway, 44.0), top + Vector2(-11.0 + sway, 44.0)]), col)
+		draw_circle(top + Vector2(-11.0, 0.0), 2.2, Color(0.55, 0.42, 0.28))
+		draw_circle(top + Vector2(11.0, 0.0), 2.2, Color(0.55, 0.42, 0.28))
+	var n := 10
+	for i in n:
+		var t0 := float(i) / float(n)
+		var t1 := float(i + 1) / float(n)
+		var p0 := a.lerp(b, t0)
+		var p1 := a.lerp(b, t1)
+		p0.y += sin(t0 * PI) * 12.0
+		p1.y += sin(t1 * PI) * 12.0
+		draw_line(p0, p1, Color(0.42, 0.36, 0.30), 1.4)
+
+
+func draw_shopfront(base: Vector2, w: float, h: float) -> void:
+	# the shuttered shop the busker set up outside: a dark front, a striped awning, and
+	# one warm window still lit inside it
+	draw_rect(Rect2(base.x - w * 0.5, base.y - h, w, h), Color(0.09, 0.08, 0.10))
+	var wy := base.y - h * 0.62
+	draw_rect(Rect2(base.x - w * 0.32, wy, w * 0.40, h * 0.30), Color(1.0, 0.72, 0.34, 0.20))
+	draw_rect(Rect2(base.x - w * 0.32, wy, w * 0.40, h * 0.30), Color(0.35, 0.24, 0.14), false, 2.0)
+	var ay := base.y - h * 0.80
+	var n := 7
+	for i in n:
+		var x0 := base.x - w * 0.5 + w * float(i) / float(n)
+		var x1 := base.x - w * 0.5 + w * float(i + 1) / float(n)
+		var col := Color(0.42, 0.13, 0.14) if i % 2 == 0 else Color(0.60, 0.56, 0.50)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x0, ay), Vector2(x1, ay), Vector2(x1 + 6.0, ay + 26.0), Vector2(x0 + 6.0, ay + 26.0)]), col)
+	draw_line(Vector2(base.x - w * 0.5 + 6.0, ay + 26.0), Vector2(base.x + w * 0.5 + 6.0, ay + 26.0),
+		Color(0.20, 0.10, 0.09), 2.0)
+
+
+func draw_crate(base: Vector2, w: float, h: float) -> void:
+	# a wooden crate: the busker's own kit, stacked where the pitch is
+	var body := Color(0.24, 0.17, 0.11)
+	draw_rect(Rect2(base.x - w * 0.5, base.y - h, w, h), body)
+	draw_rect(Rect2(base.x - w * 0.5, base.y - h, w, h), Color(0.34, 0.25, 0.16), false, 1.5)
+	draw_line(Vector2(base.x - w * 0.5, base.y - h), Vector2(base.x + w * 0.5, base.y),
+		Color(0.34, 0.25, 0.16), 1.2)
+
+
+func draw_curtain_wall(s: Vector2, fy: float, top: float, base: Color, n: int) -> void:
+	# a hung velvet back wall: alternating folds, kept very low in contrast so the
+	# middle of the room has TEXTURE without ever competing with a prop crossing it
+	var w := s.x / float(n)
+	for i in n:
+		var k := 0.5 + 0.5 * sin(float(i) * 1.9)
+		var m := 0.62 + 0.52 * k
+		draw_rect(Rect2(float(i) * w, top, w + 1.0, fy - top), Color(base.r * m, base.g * m, base.b * m))
+	# the hem, where the cloth meets the boards
+	draw_rect(Rect2(0.0, fy - 7.0, s.x, 7.0), Color(base.r * 0.45, base.g * 0.45, base.b * 0.45))
+
+
+func draw_proscenium(s: Vector2, fy: float) -> void:
+	# the gilded arch the whole picture hangs in: two piers and a shallow crown, with
+	# a warm inner edge, drawn over the wings so it frames them too
+	var gold := Color(0.72, 0.54, 0.26)
+	var gold_hi := Color(0.94, 0.76, 0.42)
+	var pw := s.x * 0.028
+	var top := s.y * 0.11
+	for side in 2:
+		var x := 0.0 if side == 0 else s.x - pw
+		draw_rect(Rect2(x, top, pw, fy - top), gold.darkened(0.45))
+		draw_rect(Rect2(x + (pw - 4.0 if side == 0 else 0.0), top, 4.0, fy - top), gold)
+		for k in 6:
+			var yy := lerpf(top + 20.0, fy - 20.0, float(k) / 5.0)
+			draw_circle(Vector2(x + pw * 0.5, yy), 3.4, gold_hi)
+	draw_rect(Rect2(0.0, top - 12.0, s.x, 14.0), gold.darkened(0.45))
+	draw_rect(Rect2(0.0, top, s.x, 4.0), gold)
+	for k in 13:
+		var cx2 := s.x * (float(k) + 0.5) / 13.0
+		draw_circle(Vector2(cx2, top - 5.0), 3.4, gold_hi)
+
+
+func draw_tiers(s: Vector2, fy: float, rows: int, col: Color, lit: float) -> void:
+	# raked stands behind the stage: banked rows of seats climbing away, each row a
+	# little darker and a little further back. Read as a full house from the front.
+	for r in range(rows, 0, -1):
+		var t := float(r) / float(rows)
+		var y := fy - 14.0 - t * s.y * 0.20
+		var hgt := s.y * 0.20 * t / float(rows) + 10.0
+		var shade := 0.30 + 0.22 * (1.0 - t)
+		draw_rect(Rect2(0.0, y, s.x, hgt), Color(col.r * shade, col.g * shade, col.b * shade))
+		draw_line(Vector2(0.0, y), Vector2(s.x, y), Color(col.r, col.g, col.b, 0.22 * lit), 1.0)
+		# heads along the front of the tier
+		var n := 26 - r * 2
+		for i in n:
+			var hx := s.x * (float(i) + 0.5) / float(n) + float(r) * 9.0
+			var a := 0.20 * lit * (1.0 - 0.15 * t)
+			draw_circle(Vector2(fposmod(hx, s.x), y + 3.0), 4.0 - t * 1.2, Color(col.r + 0.3, col.g + 0.3, col.b + 0.3, a))
+
+
+func draw_truss(s: Vector2, y: float, col: Color) -> void:
+	# a lighting truss across the top of the room: two chords, a zigzag web between
+	# them, and the lamps hanging off it (the source the spotlight cone comes from)
+	var dark := Color(col.r * 0.22, col.g * 0.22, col.b * 0.24)
+	draw_rect(Rect2(0.0, y, s.x, 3.0), dark)
+	draw_rect(Rect2(0.0, y + 15.0, s.x, 3.0), dark)
+	var step := 34.0
+	var x := 0.0
+	var up := true
+	while x < s.x:
+		draw_line(Vector2(x, y + (2.0 if up else 16.0)), Vector2(x + step, y + (16.0 if up else 2.0)), dark, 2.0)
+		up = not up
+		x += step
+	for i in 7:
+		var lx := s.x * (float(i) + 0.5) / 7.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(lx - 7.0, y + 18.0), Vector2(lx + 7.0, y + 18.0),
+			Vector2(lx + 5.0, y + 30.0), Vector2(lx - 5.0, y + 30.0)]), dark)
+		var fl := 0.6 + 0.4 * sin(atick() * 0.04 + float(i) * 1.3)
+		draw_circle(Vector2(lx, y + 31.0), 4.0, Color(col.r, col.g, col.b, 0.55 * fl))
+		draw_circle(Vector2(lx, y + 31.0), 13.0, Color(col.r, col.g, col.b, 0.07 * fl))
+
+
+func draw_scoreboard(c: Vector2, w: float, h: float, col: Color, hang_y: float) -> void:
+	# the board keeping score, high in the dark: a housing, a dot-matrix face, and a
+	# slow shimmer travelling across it. Abstract on purpose - a real number up there
+	# would be a second HUD competing with the rail that already carries the score.
+	draw_rect(Rect2(c.x - w * 0.5 - 6.0, c.y - h * 0.5 - 6.0, w + 12.0, h + 12.0), Color(0.07, 0.08, 0.11))
+	draw_rect(Rect2(c.x - w * 0.5 - 6.0, c.y - h * 0.5 - 6.0, w + 12.0, h + 12.0), Color(col.r, col.g, col.b, 0.22), false, 2.0)
+	draw_rect(Rect2(c.x - w * 0.5, c.y - h * 0.5, w, h), Color(0.03, 0.04, 0.07))
+	var cols := 22
+	var rows := 6
+	for i in cols:
+		for j in rows:
+			var px := c.x - w * 0.5 + w * (float(i) + 0.5) / float(cols)
+			var py := c.y - h * 0.5 + h * (float(j) + 0.5) / float(rows)
+			var wave := sin(float(i) * 0.5 - atick() * 0.03) * 0.5 + 0.5
+			var on := fposmod(sin(float(i) * 12.9 + float(j) * 78.2) * 43758.5, 1.0) > 0.55
+			var a := (0.30 + 0.45 * wave) if on else 0.05
+			draw_circle(Vector2(px, py), 2.2, Color(col.r, col.g, col.b, a))
+	# hung off the truss above it: two visible hangers, so the board reads as rigged
+	# into the room rather than as a panel floating in the middle of the frame
+	for sgn in [-1.0, 1.0]:
+		var hx: float = c.x + sgn * w * 0.32
+		draw_line(Vector2(hx, hang_y), Vector2(hx, c.y - h * 0.5 - 6.0), Color(0.10, 0.11, 0.14), 3.0)
+
+
+func draw_jumbotron(c: Vector2, w: float, h: float, col: Color) -> void:
+	# a big screen either side of the arena, showing the act back to the back rows:
+	# a bright frame, a soft picture, and the light it throws into the room
+	draw_circle(c, w * 0.8, Color(col.r, col.g, col.b, 0.03))
+	draw_rect(Rect2(c.x - w * 0.5 - 5.0, c.y - h * 0.5 - 5.0, w + 10.0, h + 10.0), Color(0.06, 0.05, 0.08))
+	draw_rect(Rect2(c.x - w * 0.5, c.y - h * 0.5, w, h), Color(col.r * 0.18, col.g * 0.16, col.b * 0.20))
+	# a suggestion of the performer on the screen, plus scanline shimmer
+	draw_circle(Vector2(c.x, c.y - h * 0.12), h * 0.13, Color(col.r, col.g, col.b, 0.30))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(c.x - h * 0.22, c.y + h * 0.42), Vector2(c.x - h * 0.13, c.y + h * 0.02),
+		Vector2(c.x + h * 0.13, c.y + h * 0.02), Vector2(c.x + h * 0.22, c.y + h * 0.42)]),
+		Color(col.r, col.g, col.b, 0.22))
+	for j in 9:
+		var ly := c.y - h * 0.5 + h * (float(j) + 0.5) / 9.0
+		draw_line(Vector2(c.x - w * 0.5, ly), Vector2(c.x + w * 0.5, ly), Color(0.0, 0.0, 0.0, 0.10), 1.0)
+	var sh := fposmod(atick() * 0.004, 1.0)
+	draw_rect(Rect2(c.x - w * 0.5, c.y - h * 0.5 + h * sh, w, 6.0), Color(1.0, 1.0, 1.0, 0.04))
+	draw_rect(Rect2(c.x - w * 0.5 - 5.0, c.y - h * 0.5 - 5.0, w + 10.0, h + 10.0), Color(col.r, col.g, col.b, 0.28), false, 2.0)
+
+
+func draw_wall_clock(c: Vector2, r: float, col: Color) -> void:
+	# the house clock at The Midnight Show, reading exactly midnight. Dim by design:
+	# this is the venue built to make the Glow-in-the-Dark Kit matter.
+	draw_circle(c, r * 1.5, Color(col.r, col.g, col.b, 0.025))
+	draw_circle(c, r, Color(0.05, 0.07, 0.06, 0.9))
+	draw_arc(c, r, 0.0, TAU, 30, Color(col.r, col.g, col.b, 0.30), 2.0, true)
+	for i in 12:
+		var a := TAU * float(i) / 12.0
+		var d := Vector2(sin(a), -cos(a))
+		draw_line(c + d * (r * 0.82), c + d * (r * 0.94), Color(col.r, col.g, col.b, 0.22), 1.4)
+	draw_line(c, c + Vector2(0.0, -r * 0.62), Color(col.r, col.g, col.b, 0.42), 2.0)   # both hands
+	draw_line(c, c + Vector2(0.0, -r * 0.86), Color(col.r, col.g, col.b, 0.42), 1.6)   # ...at twelve
+	draw_circle(c, 2.2, Color(col.r, col.g, col.b, 0.45))
+
+
+func draw_candle(base: Vector2, h: float) -> void:
+	# a candle on a stand at the edge of the stage: the only warm light in the room
+	var wax := Color(0.86, 0.82, 0.70, 0.55)
+	draw_rect(Rect2(base.x - 3.0, base.y - h, 6.0, h), wax)
+	fill_ellipse(Vector2(base.x, base.y), 9.0, 3.0, Color(0.30, 0.26, 0.20, 0.6))
+	var fl := 1.0 + 0.25 * sin(atick() * 0.09 + base.x)
+	var tip := Vector2(base.x, base.y - h - 9.0 * fl)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(base.x - 3.0, base.y - h), Vector2(base.x + 3.0, base.y - h), tip]),
+		Color(1.0, 0.72, 0.32, 0.85))
+	draw_circle(Vector2(base.x, base.y - h - 3.0), 16.0 * fl, Color(1.0, 0.7, 0.3, 0.05))
 
 
 func draw_theatre_wings(s: Vector2, fy: float) -> void:
@@ -12332,6 +12605,16 @@ func draw_house(base: Vector2, w: float, h: float) -> void:
 	draw_rect(Rect2(wx, wy, ww, wh), Color(0.2, 0.12, 0.06), false, 2.0)
 	draw_line(Vector2(wx + ww * 0.5, wy), Vector2(wx + ww * 0.5, wy + wh), Color(0.2, 0.12, 0.06), 2.0)
 	draw_line(Vector2(wx, wy + wh * 0.5), Vector2(wx + ww, wy + wh * 0.5), Color(0.2, 0.12, 0.06), 2.0)
+	# a porch light by the back door, and the pool it throws down the wall: the second
+	# warm point the garden needed to read as somebody's home rather than a silhouette
+	var px := base.x + w * 0.28
+	var py := base.y - h * 0.50
+	draw_circle(Vector2(px, py), 26.0, Color(1.0, 0.72, 0.34, 0.07))
+	draw_circle(Vector2(px, py), 11.0, Color(1.0, 0.75, 0.38, 0.16))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(px - 5.0, py - 5.0), Vector2(px + 5.0, py - 5.0),
+		Vector2(px + 3.5, py + 5.0), Vector2(px - 3.5, py + 5.0)]), Color(1.0, 0.84, 0.5, 0.9))
+	draw_rect(Rect2(px - 6.0, py - 8.0, 12.0, 3.0), Color(0.14, 0.10, 0.08))
 
 
 func draw_tree(base: Vector2, sc: float) -> void:
@@ -12382,8 +12665,11 @@ func draw_streetlamp(base: Vector2, gy: float) -> void:
 	for k in range(6, 0, -1):
 		draw_circle(Vector2(base.x, gy + 6.0), 20.0 + float(k) * 22.0, Color(1.0, 0.72, 0.36, 0.05 * (1.0 - float(k) / 7.0)))
 	fill_ellipse(Vector2(base.x, gy + 4.0), 92.0, 20.0, Color(1.0, 0.7, 0.35, 0.12))
-	draw_rect(Rect2(base.x - 3.0, base.y - 152.0, 6.0, 152.0), Color(0.06, 0.06, 0.08))
-	draw_rect(Rect2(base.x - 3.0, base.y - 152.0, 30.0, 5.0), Color(0.06, 0.06, 0.08))
+	# the post reads as a SILHOUETTE against the night, not as black on black: at
+	# 0.06 it simply vanished and left the lamp head glowing in mid-air
+	draw_rect(Rect2(base.x - 3.0, base.y - 152.0, 6.0, 152.0), Color(0.17, 0.17, 0.20))
+	draw_rect(Rect2(base.x - 3.0, base.y - 152.0, 30.0, 5.0), Color(0.17, 0.17, 0.20))
+	fill_ellipse(Vector2(base.x, base.y), 11.0, 4.0, Color(0.13, 0.13, 0.16))   # the base plate
 	var head := Vector2(base.x + 26.0, base.y - 150.0)
 	draw_circle(head, 30.0, Color(1.0, 0.75, 0.4, 0.20))
 	draw_colored_polygon(PackedVector2Array([
@@ -12395,6 +12681,13 @@ func draw_hat_prop(pos: Vector2) -> void:
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(pos.x - 14.0, pos.y), Vector2(pos.x + 14.0, pos.y), Vector2(pos.x + 10.0, pos.y - 18.0), Vector2(pos.x - 10.0, pos.y - 18.0)]), Color(0.13, 0.10, 0.11))
 	draw_rect(Rect2(pos.x - 10.0, pos.y - 6.0, 20.0, 4.0), Color(0.7, 0.5, 0.3))
+	# a few coins already in the brim, and the glint off them: on the street this is
+	# the busker's hat lying on the pavement, and it has to read as one from ten feet
+	for i in 3:
+		var cx := pos.x - 9.0 + float(i) * 9.0
+		draw_circle(Vector2(cx, pos.y + 1.0), 3.2, Color(1.0, 0.82, 0.38, 0.9))
+		draw_circle(Vector2(cx - 1.0, pos.y), 1.2, Color(1.0, 0.96, 0.76, 0.9))
+	draw_circle(pos, 22.0, Color(1.0, 0.8, 0.4, 0.05))
 
 
 func draw_marquee(center: Vector2, w: float) -> void:
