@@ -842,6 +842,19 @@ var trick_msg := ""       # brief on-stage feedback ("High Toss armed", "SPIN")
 var trick_msg_tick := -999
 var trick_unlock := -1    # a newly unlocked trick to announce with a banner, or -1
 var trick_unlock_tick := -999
+# THE UNLOCK CARD (2026-07-27, Louis: "i'd like you to design cards, like in balatro that
+# pop up when unlocking a trick or pattern, on it the name and a cool design that is
+# recognisable as the trick or pattern"). One card serves both tables - patterns had no
+# announcement of their own at all before this, only a line of text.
+# Timed on atick(), NOT tick: an unlock is usually granted the moment an act resolves or
+# a stat is spent, and `tick` does not advance on those screens, so a card keyed to it
+# would have hung on screen forever in the day hub.
+var ucard_kind := -1      # -1 none, 0 a trick, 1 a pattern
+var ucard_idx := 0
+var ucard_tick := -99999.0
+const UCARD_IN := 26.0     # ticks to pop in
+const UCARD_HOLD := 300.0  # ...to sit there
+const UCARD_OUT := 46.0    # ...and to fade away
 var sheet_open := false
 var shop_open := false
 # the card CURSOR on the sheet and the shop (Louis: select with arrows / sticks / dpad,
@@ -1334,6 +1347,21 @@ func _ready() -> void:
 			if ua.has("--unlock"):   # dev: also show the new-trick banner
 				trick_unlock = TR_SPIN
 				trick_unlock_tick = 0
+		# dev: deal the UNLOCK CARD for any skill, on any screen - `--ucard trick:spin`
+		# or `--ucard pattern:shower`. The card is normally only reachable by actually
+		# crossing a wall, which is a whole career away for the later ones, so without
+		# this most of them could never be looked at.
+		var uci := ua.find("--ucard")
+		if uci != -1 and uci + 1 < ua.size():
+			var spec: PackedStringArray = ua[uci + 1].split(":")
+			var want := String(spec[1]) if spec.size() > 1 else ""
+			ucard_kind = 1 if spec.size() > 0 and String(spec[0]) == "pattern" else 0
+			var tab: Array = PATTERNS if ucard_kind == 1 else TRICKS
+			ucard_idx = 0
+			for k in tab.size():
+				if String((tab[k] as Dictionary)["id"]) == want:
+					ucard_idx = k
+			ucard_tick = 0.0
 		var hoi := ua.find("--hold")    # dev: the auto-player's hold per throw (0..44),
 		if hoi != -1 and hoi + 1 < ua.size():   # to verify held heights on screenshots
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
@@ -6872,6 +6900,9 @@ func announce_unlocks() -> void:
 			trick_sel = i
 			trick_primed = false
 			perfs_since_unlock = 0   # the reward drought counter re-arms on any unlock
+			ucard_kind = 0
+			ucard_idx = i
+			ucard_tick = atick()
 			play_sfx("streak", -5.0)
 	for i in PATTERNS.size():
 		if not pattern_unlocked(i) or skill_req_text(PATTERNS[i]) == "yours from the start":
@@ -6879,6 +6910,9 @@ func announce_unlocks() -> void:
 		if queue_lesson("pattern_%s" % String(PATTERNS[i]["id"])):
 			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
 			perfs_since_unlock = 0
+			ucard_kind = 1
+			ucard_idx = i
+			ucard_tick = atick()
 			play_sfx("streak", -6.0)
 
 
@@ -8111,6 +8145,10 @@ func _draw() -> void:
 	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
 	_draw_state_fade()
+	# the unlock card rides on top of WHATEVER screen just drew, the same trick the state
+	# fade and the debug panel use - an unlock can land on the results card, in the day
+	# hub or mid-act, and none of those should have to know about it
+	draw_unlock_card(game_font(), get_viewport_rect().size)
 	if debug_panel_open:
 		draw_debug_panel()   # same trick as _draw_state_fade: drawn on top of WHATEVER
 							  # screen just drew, so no screen needs to know about it
@@ -10960,7 +10998,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
-	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360:
+	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
+	# is announced once by the card and then quietly reinforced where the hands are
+	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360 \
+			and atick() - ucard_tick > UCARD_IN + UCARD_HOLD + UCARD_OUT:
 		draw_trick_unlock_banner(font, s)
 	# trick feedback line, tucked LOW under the performer so it never sits in the arcs
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
@@ -11236,6 +11277,88 @@ func draw_debug_panel() -> void:
 		draw_string(font, Vector2(px + pw - 100.0, ry + 16.0), "ON" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 15, statecol)
 		draw_wrap_fit(font, String(edef["desc"]), Rect2(px + 20.0, ry + 26.0, pw - 40.0, row_h - 34.0), 10, Color(0.62, 0.6, 0.58))
 	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.6, 0.68, 0.72))
+
+
+func draw_unlock_card(font: Font, s: Vector2) -> void:
+	# THE UNLOCK CARD. A dealt card: it snaps in past its final size, settles, holds, and
+	# goes. The art is `draw_skill_preview`, the same little staged illustration the
+	# Skills screen uses - which is the honest answer to "recognisable as the trick or
+	# pattern", because it IS the trick, drawn from the same road data the sim throws.
+	# Nothing here is a second description of a skill that could drift from the first.
+	#
+	# Animated by RECT SIZE rather than by draw_set_transform: the preview draws a figure
+	# that sets its own transform for the spin, and an outer one would be clobbered
+	# mid-card. Growing the box does the same job and the art re-lays out to fit for free.
+	if ucard_kind < 0:
+		return
+	var age := atick() - ucard_tick
+	if age < 0.0 or age > UCARD_IN + UCARD_HOLD + UCARD_OUT:
+		return
+	var d: Dictionary = TRICKS[ucard_idx] if ucard_kind == 0 else PATTERNS[ucard_idx]
+	# pop: overshoot to 1.06 then settle. `a` fades the whole thing at both ends.
+	var grow := 1.0
+	var a := 1.0
+	if age < UCARD_IN:
+		var t := age / UCARD_IN
+		var e := 1.0 - pow(1.0 - t, 3.0)          # ease-out cubic
+		grow = 0.74 + 0.32 * e - 0.06 * sin(PI * e)
+		a = clampf(t * 1.8, 0.0, 1.0)
+	elif age > UCARD_IN + UCARD_HOLD:
+		a = clampf(1.0 - (age - UCARD_IN - UCARD_HOLD) / UCARD_OUT, 0.0, 1.0)
+		grow = 1.0 + 0.05 * (1.0 - a)
+	var kindcol := Color(1.0, 0.84, 0.42) if ucard_kind == 0 else Color(0.82, 0.70, 0.98)
+	# SIZED AROUND THE ART, not guessed. The preview figure is a fixed pixel height (its
+	# floor, arc and body constants are absolute), so a box that is too short does not
+	# scale it down - it lets the head out through the top. The Skills screen gives the
+	# same drawing 356px; at the 176 this card first tried, the juggler stood straight
+	# through the lid and across the title pill. The card is built outward from a box
+	# that actually holds him.
+	var cw := 344.0 * grow
+	var ch := 520.0 * grow
+	var cx := s.x * 0.5
+	var cy := s.y * 0.46
+	var r := Rect2(cx - cw * 0.5, cy - ch * 0.5, cw, ch)
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.015, 0.03, 0.62 * a))
+	# the burst behind it: three soft pools that breathe, so the card sits in light
+	var br := 0.5 + 0.5 * sin(atick() * 0.05)
+	draw_glow(Vector2(cx, cy), cw * 1.25, Color(kindcol.r, kindcol.g, kindcol.b, 0.20 * a))
+	draw_glow(Vector2(cx, cy), cw * (0.85 + 0.06 * br), Color(kindcol.r, kindcol.g, kindcol.b, 0.16 * a))
+	# rays, because a dealt card in a game like this arrives lit from behind
+	for i in 12:
+		var ang := atick() * 0.004 + TAU * float(i) / 12.0
+		var dir := Vector2(cos(ang), sin(ang))
+		var p0 := Vector2(cx, cy) + dir * cw * 0.42
+		var p1 := Vector2(cx, cy) + dir * cw * (0.92 + 0.10 * sin(atick() * 0.03 + float(i)))
+		draw_line(p0, p1, Color(kindcol.r, kindcol.g, kindcol.b, 0.10 * a), 6.0 * grow)
+	soft_card(r, Color(0.10, 0.07, 0.09, 0.99 * a), Color(kindcol.r, kindcol.g, kindcol.b, 0.85 * a),
+		2.5 * grow, 16.0 * grow, 26.0)
+	# the kind pill, top centre
+	var pillw := 128.0 * grow
+	var pill := Rect2(cx - pillw * 0.5, r.position.y + 13.0 * grow, pillw, 22.0 * grow)
+	draw_rect(pill, Color(kindcol.r, kindcol.g, kindcol.b, 0.20 * a))
+	draw_rect(pill, Color(kindcol.r, kindcol.g, kindcol.b, 0.75 * a), false, 1.0)
+	draw_string(font, Vector2(pill.position.x, pill.position.y + 16.0 * grow),
+		"NEW TRICK" if ucard_kind == 0 else "NEW PATTERN", HORIZONTAL_ALIGNMENT_CENTER, pillw,
+		int(maxf(8.0, 12.0 * grow)), Color(kindcol.r, kindcol.g, kindcol.b, a))
+	# THE ART
+	var art := Rect2(r.position.x + 14.0 * grow, r.position.y + 44.0 * grow,
+		cw - 28.0 * grow, 260.0 * grow)
+	draw_skill_preview(font, art, ucard_kind == 0, ucard_idx, "", false)
+	# the name, sized to fit whatever it is called
+	var namew := cw - 30.0 * grow
+	var nm := String(d["name"]).to_upper()
+	var nsz := fit_size(title_font(), nm, namew, int(maxf(10.0, 27.0 * grow)), 11)
+	draw_string(title_font(), Vector2(r.position.x + 15.0 * grow, art.position.y + art.size.y + 34.0 * grow),
+		nm, HORIZONTAL_ALIGNMENT_CENTER, namew, nsz, Color(1.0, 0.96, 0.86, a))
+	draw_ornament(cx, art.position.y + art.size.y + 46.0 * grow, cw * 0.52,
+		Color(kindcol.r, kindcol.g, kindcol.b, 0.7 * a))
+	# what it actually does, wrapped into the room that is left above the footer
+	var dbox := Rect2(r.position.x + 18.0 * grow, art.position.y + art.size.y + 58.0 * grow,
+		cw - 36.0 * grow, r.position.y + ch - 34.0 * grow - (art.position.y + art.size.y + 58.0 * grow))
+	draw_wrap_fit(font, String(d["desc"]), dbox, int(maxf(8.0, 12.0 * grow)), Color(0.88, 0.83, 0.75, 0.95 * a))
+	draw_string(font, Vector2(r.position.x, r.position.y + ch - 14.0 * grow),
+		"SKILLS shows you how" if ucard_kind == 0 else "P switches patterns in training",
+		HORIZONTAL_ALIGNMENT_CENTER, cw, int(maxf(8.0, 11.0 * grow)), Color(0.72, 0.68, 0.62, 0.9 * a))
 
 
 func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
@@ -12244,7 +12367,8 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 			draw_arc(mid, rr, a0, a0 + 1.5, 10, Color(1.0, 0.9, 0.65, 0.16), 1.6, true)
 
 
-func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename: String) -> void:
+func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename: String,
+		caption: bool = true) -> void:
 	# the preview box: a little stage, the roads, the figure, the props. Everything is
 	# bounded to `inner` by construction - the standing no-overflow rule applies to
 	# drawings, not only to text.
@@ -12361,6 +12485,13 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 
 	# the caption: what this picture IS. Both halves go through draw_fit_string, since
 	# both are DATA (a skill name, a per-skill note) - see the no-overflow rule.
+	# SUPPRESSED on a short box (the unlock card): the caption sits at a fixed 16px from
+	# the top, which on the Skills screen is clear sky above the figure but on the card's
+	# shorter art ran straight across his head - the words fit their width perfectly and
+	# were still unreadable, because overflow is not the only way text can collide. The
+	# card names the skill underneath in 27pt anyway, so this would only repeat it.
+	if not caption:
+		return
 	var head_w := inner.size.x - 24.0
 	draw_fit_string(font, inner.position + Vector2(6.0, 16.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT,
 		head_w * 0.5, 14, Color(1.0, 0.88, 0.58))
