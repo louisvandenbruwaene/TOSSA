@@ -829,12 +829,14 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
 # them the default"): the growth-column sheet, card settings, and icon pause are now the
 # shipped look; F9 (debug) toggles each OFF to compare against the classic version.
-var experiments := {"prop_art": true, "flowers": true}
+var experiments := {"prop_art": true, "flowers": true, "round_v3": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
 	{"id": "prop_art", "name": "Balls, eggs and rings (relit)",
 	 "desc": "The three round props shaded rather than flat: a shadow crescent left between two smooth outlines, a panel seam on the balls, a true ovoid for the eggs, and a concentric dark-body-bright cross-section on the rings. OFF restores the old flat fill with one paler blob on it. Visual only - same sizes, same hitboxes, same physics."},
+	{"id": "round_v3", "name": "Balls and eggs: flat, and steady in the air",
+	 "desc": "No fake light on the round props: one flat disc of the prop's own colour inside a darker rim that runs the whole way round, so the shape is stated without a light direction. Also fixes the real cause of the jitter - the squash/stretch read its velocity off the SPACED comet trail, which sawtoothed and spun the prop. It is analytic now. OFF restores the previous relit balls and eggs (and prop_art below still picks relit-vs-flat there)."},
 	{"id": "flowers", "name": "FLOWERS instead of gold",
 	 "desc": "The crowd pays you in front of you. Play deep in the green and the room throws flowers at your feet - a plain one worth 1, a posy 5, a gold rose 25, and the rare tiers only come when the room is won over with nothing dropped. Lose the room and they throw tomatoes, worth nothing at the counter but eatable later, so a disastrous night still leaves you something. The pile on the boards replaces the score hat as the read on how the night is going, and everything reduces to the basic flower for spending. OFF restores gold and the hat."},
 ]
@@ -7887,6 +7889,28 @@ func flight_pos(b: Ball) -> Vector2:
 	return pos
 
 
+func flight_vel(b: Ball) -> Vector2:
+	# THE EXACT DERIVATIVE of flight_pos, in pixels per tick.
+	#
+	# This exists because of a real bug (2026-07-27, Louis: the round props look
+	# "jittery" in the air). The squash/stretch in draw_prop used to measure velocity as
+	# `pos - b.trail[last]` - but comet-trail samples are deliberately SPACED, never
+	# per-frame (TRAIL_STEP_SQ, 6px apart), so that difference GREW from ~0 to 6+px and
+	# SNAPPED BACK every time a new sample landed. Two artifacts fell out of it: the
+	# stretch amount sawtoothed at the sampling rate, and - worse - right after each snap
+	# the angle of a near-zero vector is numerical noise, so `vel.angle()` spun the prop
+	# through arbitrary angles. On a circle that was invisible until the relit art put a
+	# seam and a specular on it; on an egg it was always a visible whip.
+	#
+	# flight_pos is a closed-form parabola, so none of that guesswork is needed. With
+	#   pos = from + (to - from) * p,  pos.y -= 4 * arc * p * (1 - p),  p = (tick - t0)/span
+	# the derivative is (to - from) - (0, 4 * arc * (1 - 2p)), all over span. Smooth
+	# everywhere, exactly zero vertical speed at the apex, and no sampling artifact.
+	var span := maxi(1, b.land_tick - b.launch_tick)
+	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
+	return (b.to_pos - b.from_pos - Vector2(0.0, 4.0 * b.arc * (1.0 - 2.0 * p))) / float(span)
+
+
 # -----------------------------------------------------------------------------
 # Rendering: warm-theatrical, code-only. A stylized performer with procedurally
 # posed arms and open/closing hands, so the no-crossing choreography is visible.
@@ -9340,7 +9364,11 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 		PROP_RINGS:
 			draw_ring_prop(pos, col, sc)
 		PROP_EGGS:
-			draw_egg(pos, col, sc)
+			# FLAT, deliberately: this function's whole contract is the prop's shape in
+			# one phosphor tone. Routing it through draw_egg painted the art pass's rim
+			# (and, before that, its highlights) into the glow, and a dark edge on a
+			# charged prop reads as a hole punched in the bloom rather than as an object.
+			ovoid(pos, 9.0 * sc, 12.0 * sc, col)
 		PROP_CLUBS:
 			draw_set_transform(pos, ang, Vector2.ONE * sc)
 			draw_line(Vector2(0, 14), Vector2(0, -4), col, 3.6)
@@ -9355,7 +9383,7 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 			draw_line(Vector2(0, 4.0), Vector2(0, 12.5), col, 5.0)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		_:
-			draw_ball_shape(pos, col, sc)
+			draw_circle(pos, BALL_RADIUS_PX * sc, col)   # flat, same reason as the egg
 
 
 func draw_glow_strips(pts: Array, w: float, a: float) -> void:
@@ -9412,9 +9440,11 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 			# which makes the arc feel alive at zero cost to readability
 			var k := 0.0
 			var vang := 0.0
-			if b.state == STATE_FLIGHT and b.trail.size() > 0:
-				var vel := pos - b.trail[b.trail.size() - 1]
-				k = clampf(vel.length() * 0.025, 0.0, 0.22)
+			if b.state == STATE_FLIGHT:
+				# analytic, never differenced off the SPACED comet trail - see flight_vel
+				# for what that sampling did to this (it is the whole jitter bug)
+				var vel := flight_vel(b)
+				k = clampf(vel.length() * 0.055, 0.0, 0.22)
 				vang = vel.angle()
 			draw_set_transform(pos, vang, Vector2(1.0 + k, 1.0 - k))
 			if b.kind == PROP_EGGS:
@@ -9458,8 +9488,47 @@ func prop_art_new() -> bool:
 	return bool(experiments.get("prop_art", true))
 
 
+# THE ROUND PROPS, third attempt (2026-07-27, Louis: the relit balls and eggs are not
+# wanted - "get rid of the 'light' and 'shadows' of both").
+#
+# WHAT THIS VERSION REFUSES TO DO, and why it is the right call rather than a retreat:
+# a painted highlight and a shadow crescent are a claim about where the light is. On a
+# stage whose lighting actually CHANGES (venue palettes, Blackout, the Glow Kit, the
+# spotlight pool) that claim is wrong most of the time, and a wrong specular is exactly
+# what makes flat art look cheap. Worse, both were built out of 1-2px features - a
+# crescent that is the GAP between two near-equal circles, a 1px seam, a 1.3px hot
+# point - and a sub-pixel feature on a moving object shimmers frame to frame however
+# well it is drawn.
+#
+# SO: state the shape, not the lighting. One flat disc of the prop's own colour, inside
+# a rim that is darker THE WHOLE WAY ROUND. A concentric rim has no direction, so it
+# says "this is a solid round object with an edge" without ever claiming a light source,
+# it survives any stage palette, and being a full ring it has no ends to read as a cut
+# (the same rule the ring prop already follows). It is floored at ~1.6px so it never
+# falls into the shimmering sub-pixel band at small scales.
+#
+# The other half of "looks good in the air" was never an art problem at all - see
+# flight_vel for the trail-sampling bug that was actually causing the jitter.
+func round_props_v3() -> bool:
+	return bool(experiments.get("round_v3", true))
+
+
+func ball_rim(r: float) -> float:
+	# the rim's thickness: proportional, but never thin enough to shimmer. Below about
+	# 1.6px an antialiased ring crawls as the object moves sub-pixel, which is the very
+	# artifact this art pass exists to remove.
+	return maxf(1.6, r * 0.13)
+
+
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
 	var r := BALL_RADIUS_PX * sc
+	if round_props_v3():
+		# darker disc first, body inset over it: the rim is what is left showing. Drawn
+		# as two filled circles rather than a stroked outline because a filled shape has
+		# no line-join or cap behaviour to go wrong at any radius.
+		draw_circle(pos, r, Color(col.r * 0.62, col.g * 0.60, col.b * 0.64))
+		draw_circle(pos, r - ball_rim(r), col)
+		return
 	if not prop_art_new():
 		draw_circle(pos, r, col)
 		var oh := col.lightened(0.4)
@@ -9494,6 +9563,13 @@ func ovoid(c: Vector2, w: float, h: float, col: Color) -> void:
 func draw_egg(pos: Vector2, col: Color, sc: float) -> void:
 	var w := 9.0 * sc
 	var h := 12.0 * sc
+	if round_props_v3():
+		# same rule as the ball, on the ovoid: the egg's whole character is its
+		# asymmetric silhouette, so the rim traces that and nothing is painted inside it.
+		var rim := ball_rim(w)
+		ovoid(pos, w, h, Color(col.r * 0.62, col.g * 0.60, col.b * 0.64))
+		ovoid(pos, w - rim, h - rim, col)
+		return
 	if not prop_art_new():
 		fill_ellipse(pos, w, h, col)
 		var oh := col.lightened(0.25)
@@ -11283,11 +11359,16 @@ func draw_purse(font: Font, right_x: float, y: float) -> void:
 	var fl := clampf(1.0 - float(int(Time.get_ticks_msec()) - shop_buy_ms) / 450.0, 0.0, 1.0)
 	var fs := 24 + int(round(6.0 * fl))
 	var gc := Color(1.0, 0.86, 0.45).lerp(Color(1.0, 0.98, 0.85), fl)
-	var txt := "%s %s" % [commafy(money), coin_short()]
+	# THE MARK IS THE UNIT (2026-07-27, Louis: "the currency in shop should not be f but
+	# the flower icon"). The drawn coin/flower already sits beside this number, so the
+	# trailing letter was naming the currency a second time - "50,582 f" next to a
+	# flower. The icon says it better than an abbreviation can, and it stays correct
+	# when the economy switches.
+	var txt := commafy(money)
 	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	# the coin grows a touch with the flash too, so gold changing hands is felt on the
 	# object and not only on the number beside it
-	draw_coin_mark(Vector2(right_x - tw - 24.0, y - 8.0), 10.0 + 1.5 * fl, Color(1.0, 0.84, 0.4))
+	draw_coin_mark(Vector2(right_x - tw - 24.0, y - 8.0), 10.0 + 1.5 * fl, Color(1.0, 0.84, 0.4), true)
 	draw_string(font, Vector2(right_x - tw, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
 
 
@@ -11300,8 +11381,16 @@ func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, aff
 	draw_rect(r, bg)
 	draw_rect(r, line, false, 1.0)
 	draw_keycap(font, r.position.x + 8.0, r.position.y + r.size.y * 0.5 - 9.5, keylabel)
-	draw_string(font, Vector2(r.position.x, r.position.y + r.size.y * 0.5 + 6.0), price,
-		HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 12.0, 16, cc)
+	# the price is a NUMBER plus the currency's own MARK, never a letter - the same mark
+	# the purse above it draws, so what is being asked for and what is being held look
+	# like the same thing. Right-aligned as a unit: measure the digits, put the mark in
+	# front of them. `price` is data (it can run to "60,000"), so the mark is placed off
+	# the measured width rather than a guessed offset.
+	var baseline := r.position.y + r.size.y * 0.5 + 6.0
+	var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+	var px := r.position.x + r.size.x - 12.0 - pw
+	draw_string(font, Vector2(px, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+	draw_coin_mark(Vector2(px - 12.0, baseline - 5.5), 7.0, cc, true)
 
 
 func draw_gear_icon(i: int, c: Vector2, cc: Color) -> void:
@@ -11469,7 +11558,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_meter(cx0 + 14.0, cy0 + 208.0, cw - 28.0, 7.0, setf, setc)
 		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
 		draw_fit_string(font, Vector2(cx0, cy0 + 232.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
-		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0), str(i + 1), "%s %s" % [commafy(cost), coin_short()], afford)
+		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0), str(i + 1), commafy(cost), afford)
 
 	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
 	# fourth for the Energy-Drink Helmet - same narrow vertical template the
@@ -11530,7 +11619,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			if int(gear_count[i]) > 0:
 				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
 			var gkey := str(7 + i) if i < 3 else "0"
-			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, "%s %s" % [commafy(int(gear_cost[i])), coin_short()], money >= int(gear_cost[i]))
+			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
 	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
@@ -13947,18 +14036,23 @@ func coin_word_one() -> String:
 	return "flower" if flowers_on() else "gold"
 
 
-func coin_short() -> String:
-	return "f" if flowers_on() else "g"   # the shop's compact readout
-
-
-func draw_coin_mark(c: Vector2, r: float, col: Color) -> void:
+func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> void:
 	# the currency's own MARK, used by the purse readouts and the hub's ledger card:
 	# a coin in the gold economy, a flower in the flower one, so the two never disagree
 	# about what the number in front of them means
 	if flowers_on():
-		draw_flower(c, 0, r / 5.0, -PI * 0.5, col.a)
+		# `turning` is opt-in, and deliberately so (2026-07-27, Louis: "the flowers
+		# shouldn't turn when on stage, perhaps the icon could tho: in the store").
+		# A flower lying on the boards is an OBJECT at rest and must be still; the same
+		# mark used as a UI icon is a symbol, and a slow drift there just keeps the
+		# screen alive. Phased off its own x so a shelf of price plates drifts
+		# organically instead of turning in lockstep like a row of gears.
+		var rot := -PI * 0.5
+		if turning:
+			rot += atick() * 0.006 + c.x * 0.02
+		draw_flower(c, 0, r / 5.0, rot, col.a)
 	else:
-		draw_coin(c, r, col)
+		draw_coin(c, r, col)   # a struck coin has a fixed strike: turning it reads as a wobble
 
 
 func stage_floor_y() -> float:
@@ -14011,7 +14105,7 @@ func throw_from_crowd(kind: String, tier: int) -> void:
 	thrown.append({"kind": kind, "tier": tier, "from": from, "to": to,
 		"born": tick, "land": tick + FLOWER_FLIGHT + randi_range(-6, 6),
 		"arc": randf_range(90.0, 190.0), "rot": randf_range(0.0, TAU),
-		"spin": randf_range(-0.09, 0.09), "landed": false})
+		"spin": randf_range(-0.09, 0.09)})   # tumble in the air only; draw_thrown freezes it on landing
 
 
 func throw_step() -> void:
@@ -14110,7 +14204,14 @@ func draw_thrown() -> void:
 			# older entries sit lower in the array; fade the oldest third of the pile so
 			# it settles into the boards instead of stacking forever
 			a = clampf(0.35 + 0.65 * float(i) / float(maxi(1, thrown.size() - 1)), 0.35, 1.0)
-		var rot := float(d["rot"]) + float(d["spin"]) * float(tick - int(d["born"]))
+		# A FLOWER ON THE BOARDS DOES NOT TURN (2026-07-27, Louis). The tumble was
+		# accumulated off `tick - born`, which never stops growing - so a flower kept
+		# spinning where it lay, for the whole rest of the act, and a settled pile was a
+		# field of pinwheels. Clamping the accumulator at the landing tick freezes each
+		# one at the angle it came to rest at: still a loose scatter (every flower has
+		# its own `rot` and its own tumble), but a STILL one.
+		var spun := float(mini(tick, lt) - int(d["born"]))
+		var rot := float(d["rot"]) + float(d["spin"]) * spun
 		if String(d["kind"]) == "tomato":
 			draw_tomato(p, sc, rot, a)
 		else:
