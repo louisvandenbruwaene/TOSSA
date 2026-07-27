@@ -160,6 +160,10 @@ const EAT_COST := 10       # a hot meal: gold out, stamina back, strength slowly
 const EAT_STAM := 0.35     # a meal restores this FRACTION of max Stamina (scales with
 						   # Endurance, so it stays a meaningful top-up at 100 or at 1000)
 const MEALS_PER_STR := 3   # every third meal feeds +1 Strength (GDD: eating fuels it)
+const TOMATO_MAX_KEPT := 10   # tomatoes a single failed act can send you home with
+const TOMATO_EAT_STAM := 14.0 # a tomato the crowd threw at you, eaten later: free stamina
+							  # with a bruise on it. Worth a touch more than a raw egg
+							  # because it costs no prop, and nothing like a hot meal
 const EGG_EAT_STAM := 10.0 # eating an OWNED egg (Still open: "eating eggs"): a flat, not
 							# scaled, stamina top-up - no gold, no Strength tick (it is a raw
 							# snack, not a hot meal), and it costs the egg itself: one fewer
@@ -193,7 +197,14 @@ const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
 
 # --- reputation: the career-climb currency (GDD 4.4). Scales PAY, never score
 # or catching, so it stays on the comfort axis and never touches the skill floor.
-const REP_PAY_DIV := 400.0    # pay multiplier = 1 + reputation / REP_PAY_DIV
+const REP_PAY_DIV := 1400.0   # pay multiplier = 1 + reputation / REP_PAY_DIV, capped at
+const REP_PAY_CAP := 3.5      # REP_PAY_CAP (2026-07-27, Louis: "20000 gold is just
+							  # insane for the theater"). It was an UNBOUNDED 1 + rep/400,
+							  # which at a mid-career Reputation of 5,900 was already a
+							  # fifteenfold multiplier sitting on top of a score that
+							  # scales with the venue, the prop, the count AND the streak.
+							  # Four compounding curves is three too many: Reputation now
+							  # tops out as a modest premium and the score carries the pay.
 const REP_SWING := 60         # reputation gained by a great set, lost by a poor one
 const PURIST_BONUS := 1.4     # Purist pay and reputation both get this multiplier: a
 							   # Purist set is objectively harder to run clean (catch
@@ -560,6 +571,41 @@ const ANTE_STEP := 0.15               # each complete act at a venue raises its 
 # Perfect catch pays ~0.014 back, so keeping the crowd is a matter of keeping juggling.
 # The 7th entry continues the established +0.00012-per-venue step exactly.
 const APPL_DECAY := [0.00034, 0.00044, 0.00056, 0.00068, 0.00080, 0.00092, 0.00104]
+
+# =============================================================================
+# FLOWERS AND TOMATOES - what the room throws (2026-07-27, Louis; F9 "flowers")
+#
+# THE IDEA: the crowd pays you, in front of you, while you work. Play deep in the
+# GREEN and the room starts throwing flowers at your feet - one chance per person who
+# can reach the stage, so a grander venue is a heavier shower - and the pile that
+# grows there IS the read on how the night is going. No meter, no percentage: a look
+# down tells you. Lose the room instead and they throw TOMATOES, which are worth
+# nothing at the counter but can be eaten later, so a disastrous night still leaves
+# you something to live on.
+#
+# Flowers come in tiers, and the rare ones are RARE ON PURPOSE: a posy needs a room
+# already won over, a gold rose needs one won over with nothing dropped all night.
+# That makes the pile's COLOUR meaningful too, not just its size.
+#
+# Everything reduces to the basic flower for spending, so `money` is unchanged as a
+# number - only how it is earned, drawn and named. The whole thing sits behind an F9
+# experiment so it can be compared against the gold economy live.
+# =============================================================================
+const FLOWER_GREEN := 0.50        # applause below this and nobody throws anything
+const FLOWER_BEAT := 26           # ticks between the room's chances to throw
+const TOMATO_RED := 0.22          # ...and below THIS the room throws tomatoes instead
+const FLOWER_TIERS := [
+	{"name": "flower",    "val": 1,  "col": Color(0.98, 0.55, 0.68), "mid": Color(1.0, 0.88, 0.45), "petals": 5, "r": 5.0},
+	{"name": "posy",      "val": 5,  "col": Color(0.74, 0.58, 0.98), "mid": Color(1.0, 0.94, 0.72), "petals": 6, "r": 6.2},
+	{"name": "gold rose", "val": 25, "col": Color(1.0, 0.82, 0.34), "mid": Color(1.0, 0.97, 0.82), "petals": 8, "r": 7.0},
+]
+# how much of the room can actually reach the stage on a given beat. NOT the seat count
+# (a thousand-seat arena raining a thousand flowers would bury the juggler and the
+# economy with him) - the ladder is deliberately gentle, one more thrower per rung.
+const FLOWER_THROWERS := [1, 2, 4, 5, 7, 9, 11]
+const FLOWER_FLIGHT := 46         # ticks a thrown flower spends in the air
+const FLOWER_PILE_MAX := 90       # props on the floor at once; older ones fade out under
+								  # the newer, so a long act never grows an endless heap
 const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
 const APPL_THROW_HEIGHT := 0.012      # a big throw excites the crowd: patience back, scaled by height
 # the crowd's patience economy, now that it is a CLOCK rather than decoration. The
@@ -575,7 +621,7 @@ const CROWD_LEAVE_BAND := 0.55   # draw_crowd: only seats below this applause le
 								  # have anyone leaving them, so ordinary play (applause
 								  # starts at 0.7 and a healthy set holds near it) never
 								  # thins the crowd - only a real crater toward a collapse does
-const BOOK_PAY_PER_SCORE := 0.0015    # gold per point banked across the booking (score already
+const BOOK_PAY_PER_SCORE := 0.0004    # gold per point banked across the booking (score already
 									  # scales with the venue, so this needs no separate venue term)
 # The Encore deck: each is a single named twist on the third set, and each is a couple
 # of lines because it toggles a constant or a draw call that already exists. Several
@@ -777,7 +823,7 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
 # them the default"): the growth-column sheet, card settings, and icon pause are now the
 # shipped look; F9 (debug) toggles each OFF to compare against the classic version.
-var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true, "slot_cards": false, "performer_polish": true}
+var experiments := {"talent_tree": true, "settings_cards": true, "pause_cards": true, "slot_cards": false, "performer_polish": true, "flowers": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
@@ -791,6 +837,8 @@ const EXPERIMENT_DEFS := [
 	 "desc": "Redraws the three save slots as tall portrait cards - a cascade motif, the level big, venue and gold below, a crown on a finished save - instead of wide text bars. Same slot_input, same keys."},
 	{"id": "performer_polish", "name": "Performer wardrobe (polished)",
 	 "desc": "Dresses the juggler in evening wear: satin peak lapels, a shirt front, bow tie, shirt cuffs on the solved wrists, pocket square, trouser stripes, a fringe and brows. Venue palette throughout. Visual only: same pose, hands, props and simulation."},
+	{"id": "flowers", "name": "FLOWERS instead of gold",
+	 "desc": "The crowd pays you in front of you. Play deep in the green and the room throws flowers at your feet - a plain one worth 1, a posy 5, a gold rose 25, and the rare tiers only come when the room is won over with nothing dropped. Lose the room and they throw tomatoes, worth nothing at the counter but eatable later, so a disastrous night still leaves you something. The pile on the boards replaces the score hat as the read on how the night is going, and everything reduces to the basic flower for spending. OFF restores gold and the hat."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -901,6 +949,14 @@ var splats: Array[Dictionary] = []
 # everything comes down, and only when the last prop lands does the round end.
 var falling: Array[Dictionary] = []
 var collapsing := false
+# what the ROOM throws (see the FLOWERS block above): each entry arcs in from a seat,
+# lands at the juggler's feet and stays there for the rest of the act, so the pile on
+# the floor is the running read on how the night is going.
+var thrown: Array[Dictionary] = []
+var run_flowers := 0        # basic-flower value earned this act (the night's whole pay)
+var run_tomatoes := 0       # ...and what they threw instead when it went badly
+var tomatoes := 0           # tomatoes in the pack, eaten in the day hub for stamina
+var last_tomatoes := 0      # how many the last act ended with, for the results card
 # cosmetic juice layer: particles (sparks, embers, confetti, shock rings), a short
 # hit-stop after big impacts, and the timers that drive HUD/results animation.
 # None of this touches the sim, so determinism and fairness are untouched.
@@ -2272,7 +2328,7 @@ func day_actions() -> Array[Dictionary]:
 	var tired_why := "too tired to work (stamina under %d)  -  sleep first" % int(TIRED_FLOOR)
 	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
-		"sub": "gold and reputation, while stamina lasts. P books it PURIST."})
+		"sub": "%s and reputation, while stamina lasts. P books it PURIST." % coin_word()})
 	out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
 		"sub": "no crowd, no pay. Work as long as you can stand."})
@@ -2282,27 +2338,35 @@ func day_actions() -> Array[Dictionary]:
 	var full := stamina >= stamina_max - 1.0
 	var eat_why := ""
 	if money < EAT_COST:
-		eat_why = "not enough gold"
+		eat_why = "not enough %s" % coin_word()
 	elif full:
 		eat_why = "not hungry yet"
 	out.append({"id": "eat", "grp": "rest", "icon": "plate", "name": "EAT a hot meal",
-		"cost": "%d gold" % EAT_COST, "ok": money >= EAT_COST and not full, "why": eat_why,
+		"cost": "%d %s" % [EAT_COST, coin_word()], "ok": money >= EAT_COST and not full, "why": eat_why,
 		"sub": "stamina back. Every third meal adds a point of Strength."})
 	out.append({"id": "inn", "grp": "rest", "icon": "bed", "name": "SLEEP at the inn",
-		"cost": "%d gold" % INN_COST, "ok": money >= INN_COST,
-		"why": "not enough gold  -  the innkeeper does not haggle" if money < INN_COST else "",
-		"sub": "ends the day, wake fully rested. Keep %d gold aside or the road ends." % INN_COST})
+		"cost": "%d %s" % [INN_COST, coin_word()], "ok": money >= INN_COST,
+		"why": "not enough %s  -  the innkeeper does not haggle" % coin_word() if money < INN_COST else "",
+		"sub": "ends the day, wake fully rested. Keep %d %s aside or the road ends." % [INN_COST, coin_word()]})
 	if pie_count > 0:
 		out.append({"id": "pie", "grp": "rest", "icon": "pie", "name": "EAT Uncle Dan's Pie",
 			"cost": "own %d" % pie_count, "ok": not pie_active, "why": "one is already working" if pie_active else "",
 			# the number comes from PIE_SLOW, never a written-out fraction: this line
 			# still said "a quarter slower" long after the slice was nerfed to 15%
 			"sub": "a stimulant slice: the whole day runs %d%% slower, until you sleep." % int(round(PIE_SLOW * 100.0))})
+	if tomatoes > 0:
+		# THE CROWD'S OTHER GIFT (2026-07-27, Louis): a night that fell apart sends you
+		# home pelted, and what you were pelted with is food. Free stamina with a bruise
+		# on it - the worse the act, the more of them you are carrying - so the road never
+		# ends purely because a performance went wrong.
+		out.append({"id": "tomato", "grp": "rest", "icon": "tomato", "name": "EAT a thrown tomato",
+			"cost": "have %d" % tomatoes, "ok": not full, "why": "not hungry yet" if full else "",
+			"sub": "free, and a little humbling: +%d stamina, no %s, no Strength." % [int(TOMATO_EAT_STAM), coin_word()]})
 	if have(PROP_EGGS) > 0:
 		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
 			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
-			"sub": "no gold and no Strength tick: just +%d stamina, and one fewer egg to juggle." % int(EGG_EAT_STAM)})
-	out.append({"id": "shop", "grp": "prep", "icon": "coin", "name": "SHOP",
+			"sub": "no %s and no Strength tick: just +%d stamina, and one fewer egg to juggle." % [coin_word(), int(EGG_EAT_STAM)]})
+	out.append({"id": "shop", "grp": "prep", "icon": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
 		"sub": "props and gear. A new prop teaches itself when you buy it."})
 	out.append({"id": "skills", "grp": "prep", "icon": "book", "name": "SKILLS",
@@ -2498,18 +2562,14 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			# vignette between the press and the shop was dead time)
 			shop_open = true
 			play_sfx("ui2", -13.0)
-		"pie":
-			pie_count -= 1
-			pie_active = true
-			set_day_msg("the pie hums in your blood  -  the world runs slow until you sleep")
-			save_progress()
-			play_sfx("ui2", -11.0)
-		"egg":
-			prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
-			stamina = minf(stamina_max, stamina + EGG_EAT_STAM)
-			set_day_msg("a raw egg down the hatch  -  a little stamina back, one fewer to juggle")
-			save_progress()
-			play_sfx("c_egg", -10.0)   # the same crack the stage already uses when one breaks
+		"pie", "egg", "tomato":
+			# EVERY thing you eat gets its beat of picture now (2026-07-27, Louis: only
+			# sleeping had one). Same contract as eat/inn above - the vignette plays, and
+			# day_anim_step lands the effect when it ends - so the hub never moves the
+			# ledger before the player has seen why.
+			day_anim = id
+			day_anim_start = cine_tick
+			play_sfx("ui2", -13.0)
 		"skills":
 			skills_open = true          # a reference card, no cost, no vignette
 			skills_sel = 0
@@ -2534,6 +2594,8 @@ func day_anim_len(id: String) -> int:
 	match id:
 		"inn": return 220
 		"eat": return 150
+		"pie", "tomato": return 140
+		"egg": return 120
 		_: return 100
 
 
@@ -2562,6 +2624,24 @@ func day_anim_step() -> void:
 			money -= INN_COST   # full price, always (the row blocks when short)
 			play_sfx("money", -9.0)
 			sleep_day()
+		"pie":
+			pie_count -= 1
+			pie_active = true
+			set_day_msg("the pie hums in your blood  -  the world runs slow until you sleep")
+			save_progress()
+			play_sfx("ui2", -11.0)
+		"egg":
+			prop_count[PROP_EGGS] = maxi(0, prop_count[PROP_EGGS] - 1)
+			stamina = minf(stamina_max, stamina + EGG_EAT_STAM)
+			set_day_msg("a raw egg down the hatch  -  a little stamina back, one fewer to juggle")
+			save_progress()
+			play_sfx("c_egg", -10.0)   # the same crack the stage already uses when one breaks
+		"tomato":
+			tomatoes = maxi(0, tomatoes - 1)
+			stamina = minf(stamina_max, stamina + TOMATO_EAT_STAM)
+			set_day_msg("still good  -  the crowd's opinion, eaten")
+			save_progress()
+			play_sfx("good", -12.0)
 
 
 func sleep_day() -> void:
@@ -2935,7 +3015,7 @@ func confirm_spend(id: String, cost: int, in_shop: bool) -> bool:
 		return true
 	_confirm_id = id
 	_confirm_ms = now
-	var wtext := "careful  -  that leaves you short of the inn (%d gold). press again to spend anyway" % INN_COST
+	var wtext := "careful  -  that leaves you short of the inn (%d %s). press again to spend anyway" % [INN_COST, coin_word()]
 	if in_shop:
 		shop_msg = wtext
 		shop_msg_ms = now
@@ -2975,7 +3055,7 @@ func try_top_up(kind: int) -> void:
 		want = num_balls   # already fielded: top up a spare set for the drops to come
 	var can := clampi(int(floor(float(money) / float(maxi(cost, 1)))), 0, want)
 	if can <= 0:
-		shop_msg = "not enough gold for even one"
+		shop_msg = "not enough %s for even one" % coin_word()
 		shop_msg_ms = int(Time.get_ticks_msec())
 		shop_msg_warn = true
 		play_sfx("whiff", -10.0)
@@ -2989,7 +3069,7 @@ func try_top_up(kind: int) -> void:
 	shop_buy_ms = int(Time.get_ticks_msec())
 	save_progress()
 	play_sfx("money", -4.0)
-	shop_msg = "%d %s  -  %s gold" % [can, String(PROPS[kind]["name"]).to_lower(), commafy(cost * can)]
+	shop_msg = "%d %s  -  %s %s" % [can, String(PROPS[kind]["name"]).to_lower(), commafy(cost * can), coin_word()]
 	if can < want:
 		shop_msg += "  (all the purse would take)"
 	shop_msg_ms = int(Time.get_ticks_msec())
@@ -4610,6 +4690,7 @@ func reset_new_game() -> void:
 	seg_used = 0
 	venue_pick = 0
 	meals = 0
+	tomatoes = 0           # nobody has thrown anything at a juggler who has not performed
 	started = false
 	seen_tuts.clear()      # a fresh slot re-teaches everything from scratch
 	pending_tuts.clear()
@@ -4637,7 +4718,7 @@ func slot_summary(i: int) -> String:
 	var g := int(cf.get_value("stats", "money", START_GOLD))
 	var rep := int(cf.get_value("stats", "reputation", 0))
 	var vn := String(venue_data(venue_index_of(rep))["name"])
-	var line := "Level %d   -   %s   -   %s gold" % [lv, vn, commafy(g)]
+	var line := "Level %d   -   %s   -   %s %s" % [lv, vn, commafy(g), coin_word()]
 	if bool(cf.get_value("prog", "won", false)):
 		line += "  -  WORLD'S GREATEST JUGGLER"   # this save has conquered the top stage
 	return line
@@ -5409,6 +5490,9 @@ func start_run(n: int) -> void:
 	last_streak_tick = -999
 	freeze = 0
 	parts.clear()
+	thrown.clear()      # a fresh act starts on clean boards: nothing at the feet yet
+	run_flowers = 0
+	run_tomatoes = 0
 	paused = false
 	round_scored = false
 	_prev_running = false
@@ -6685,10 +6769,27 @@ func resolve_act() -> void:
 	# PAY scales with the score that survived (the score already scales with the
 	# venue), lifted by Reputation and a Purist premium, with the busking floor so a
 	# broke juggler always leaves with something.
-	last_pay = int(round(float(score) * BOOK_PAY_PER_SCORE * pay_mult() * purist_mult))
+	if flowers_on():
+		# THE FLOWER ECONOMY: the night's pay is simply what the room threw, already
+		# earned in front of the player one flower at a time and lying at their feet.
+		# No formula, no multiplier, nothing to compute at the end - the pile IS the
+		# purse, which is the whole point of it (Louis). A Purist night still earns its
+		# premium, since that is a promise about the whole board, not about the crowd.
+		last_pay = int(round(float(run_flowers) * purist_mult))
+	else:
+		last_pay = int(round(float(score) * BOOK_PAY_PER_SCORE * pay_mult() * purist_mult))
 	if money < BROKE_GOLD and score > 0:
 		last_pay = maxi(last_pay, BUSK_FLOOR)
 	money += last_pay
+	# ...and the tomatoes, which are only KEPT when the night actually went wrong: a
+	# strong act that opened badly should not send the player home with a bag of them
+	# (Louis: "if you fail a performance you get some tomatoes"). Being pelted harder
+	# for a worse act is already true - the room throws more of them the longer it is
+	# in the red - so there is no separate badness formula to write.
+	# ...capped, so a long slow disaster cannot be farmed into a week of free stamina:
+	# a bad night is a consolation, never a strategy
+	last_tomatoes = mini(run_tomatoes, TOMATO_MAX_KEPT) if (set_collapsed or goals_hit == 0) else 0
+	tomatoes += last_tomatoes
 	if last_pay > 0:
 		play_sfx("coin", -8.0)
 	# a complete act (all three goals) raises this venue's standing bar for next time
@@ -6746,9 +6847,9 @@ func resolve_act() -> void:
 	if _demo:
 		# dev: report the whole-act outcome and quit, so --demo --booking is a
 		# one-shot end-to-end check of the resolve path (goals, stripping, pay, rep)
-		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s" % [
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d peakappl=%.2f" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
-			score, last_pay, last_rep_delta, str(results_record)])
+			score, last_pay, last_rep_delta, str(results_record), tick, run_flowers, run_tomatoes, peak_applause])
 		if daily_active:
 			print(daily_share)
 		get_tree().quit()
@@ -6919,8 +7020,10 @@ func perfect_window() -> int:
 
 func pay_mult() -> float:
 	# Reputation lifts earnings only. Score and catching are untouched (skill-first
-	# guardrail: rep must stay on the comfort axis, never the timing floor).
-	return 1.0 + float(reputation) / REP_PAY_DIV
+	# guardrail: rep must stay on the comfort axis, never the timing floor) - and it is
+	# CAPPED, see REP_PAY_CAP, so a long career cannot multiply an already-scaling score
+	# into absurdity.
+	return minf(REP_PAY_CAP, 1.0 + float(reputation) / REP_PAY_DIV)
 
 
 func run_clean() -> float:
@@ -7318,6 +7421,7 @@ func load_progress() -> void:
 		pie_count = int(cf.get_value("stats", "pies", 0))
 		pie_active = bool(cf.get_value("day", "pie_active", false))
 		money = int(cf.get_value("stats", "money", START_GOLD))
+		tomatoes = int(cf.get_value("stats", "tomatoes", 0))
 		reputation = int(cf.get_value("stats", "reputation", 0))
 		var pc: Variant = cf.get_value("stats", "prop_count", [])
 		if pc is Array:
@@ -7423,6 +7527,7 @@ func save_progress() -> void:
 	cf.set_value("stats", "pies", pie_count)
 	cf.set_value("day", "pie_active", pie_active)
 	cf.set_value("stats", "money", money)
+	cf.set_value("stats", "tomatoes", tomatoes)
 	cf.set_value("stats", "reputation", reputation)
 	cf.set_value("stats", "prop_count", prop_count)
 	cf.set_value("stats", "prop_type", prop_type)
@@ -7812,6 +7917,7 @@ func _draw_screen() -> void:
 	draw_juggler(s)
 	draw_targets()
 	draw_balls_in_flight()
+	draw_thrown()          # what the crowd threw: flowers (or tomatoes) at the feet
 	draw_falling()         # lost props tumbling down to the boards
 	draw_egg_shards()      # flying shell pieces read above the stage
 	draw_charge_gauges()   # the hold-to-throw height gauge beside a charging hand
@@ -9389,6 +9495,48 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 	draw_rect(Rect2(r.position.x + 10.0, r.position.y + 4.0, r.size.x - 20.0, 2.0), Color(accent.r, accent.g, accent.b, 0.65))
 
 
+func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
+	# THE GOAL, quietly, for when the flowers are doing the loud work (see flowers_on).
+	# A growing STEM with a bud at its tip and a notch at each goal line: the same
+	# concave curve and the same information as the money hat, in a fifth of the space
+	# and in the flowers' own language, so the rail does not compete with the stage.
+	var x := box.position.x + box.size.x * 0.5
+	var base := box.position.y + box.size.y
+	var h := box.size.y * clampf(frac, 0.0, 1.0)
+	var stem := Color(0.45, 0.70, 0.40)
+	# the unclimbed part of the stem is a visible TRACK, not a hairline: the goal has to
+	# read as a distance still to go, the same job the hat's empty crown did
+	draw_rect(Rect2(x - 3.0, box.position.y, 6.0, box.size.y), Color(0.20, 0.17, 0.18, 0.85))
+	draw_rect(Rect2(x - 3.0, box.position.y, 6.0, box.size.y), Color(0.42, 0.36, 0.34, 0.5), false, 1.0)
+	if h > 1.0:
+		draw_rect(Rect2(x - 3.0, base - h, 6.0, h), stem)
+		# a leaf every so often up the stem, so growth reads as growth
+		var leaves := int(h / 30.0)
+		for i in leaves:
+			var ly := base - 24.0 - float(i) * 30.0
+			var dir := 1.0 if i % 2 == 0 else -1.0
+			var lv := PackedVector2Array()
+			for k in 9:
+				var t := TAU * float(k) / 8.0
+				lv.append(Vector2(x + dir * 10.0, ly) + Vector2(cos(t) * 10.0, sin(t) * 4.4).rotated(dir * -0.35))
+			draw_colored_polygon(lv, Color(stem.r, stem.g, stem.b, 0.9))
+	for m in marks:
+		var my := base - box.size.y * clampf(m, 0.0, 1.0)
+		var passed := frac >= m
+		draw_line(Vector2(x - 10.0, my), Vector2(x + 10.0, my),
+			Color(1.0, 0.90, 0.55, 0.95) if passed else Color(0.62, 0.56, 0.50, 0.7), 2.2)
+	# the bud opens as the final goal comes in, and blooms outright past it
+	var bud := Vector2(x, base - maxf(h, 4.0))
+	if over > 0.0:
+		draw_glow(bud, 26.0 + 12.0 * over, Color(accent.r, accent.g, accent.b, 0.22 + 0.2 * over))
+		draw_flower(bud, 2, 1.6 + 0.5 * over, atick() * 0.01, 1.0)
+	elif frac >= 0.999:
+		draw_flower(bud, 1, 1.5, atick() * 0.008, 1.0)
+	else:
+		fill_ellipse(bud, 5.0, 7.5, Color(0.55, 0.72, 0.45))
+		fill_ellipse(bud + Vector2(-1.4, -1.6), 2.0, 3.0, Color(0.72, 0.86, 0.58, 0.8))
+
+
 func draw_money_hat(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
 	# THE HAT: the act's score requirement as an object that FILLS, not a bar with a
 	# percentage (Louis, 2026-07-27: "a sort of hat of money being filled (and special
@@ -10020,8 +10168,37 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		for gi in NUM_GOALS - 1:
 			marks.append(goal_bar_pos(float(goal_for(run_venue, gi)), float(g_final)))
 		var over := 0.0 if score <= g_final else clampf(float(score - g_final) / float(maxi(g_final, 1)), 0.0, 1.0)
-		draw_money_hat(Rect2(LX + 148.0, tcard_y + 8.0, 138.0, 162.0), tfrac, over, marks,
-			Color(venue_data(run_venue)["glow"]))
+		if flowers_on():
+			# THE HAT COMES OFF when the crowd is throwing (Louis). Its whole job was to
+			# make the goal legible as a thing that fills, and the pile of flowers at the
+			# juggler's feet now does that far better - on the stage itself, where the
+			# player is already looking. The rail keeps only what the stage cannot say:
+			# the climb toward the goal, as a slim stem, and TONIGHT'S TAKINGS, which the
+			# hat never showed at all.
+			# ...stopping clear of the cash-in line along the card's bottom edge
+			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
+				Color(venue_data(run_venue)["glow"]))
+			var fc := Color(0.98, 0.60, 0.72)
+			draw_string(font, Vector2(LX + 196.0, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, 96.0, 11, Color(0.85, 0.72, 0.66))
+			draw_flower(Vector2(LX + 205.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
+			draw_fit_string(title_font(), Vector2(LX + 219.0, tcard_y + 66.0), commafy(run_flowers),
+				HORIZONTAL_ALIGNMENT_LEFT, 74.0, 24, fc)
+			# and how the room is FEELING, in the one word the pile is saying
+			var mood := "quiet"
+			var mc := Color(0.70, 0.66, 0.62)
+			if applause <= TOMATO_RED:
+				mood = "turning"
+				mc = Color(1.0, 0.45, 0.38)
+			elif applause >= 0.85:
+				mood = "on their feet"
+				mc = Color(0.75, 0.95, 0.72)
+			elif applause >= FLOWER_GREEN:
+				mood = "warming"
+				mc = Color(0.95, 0.85, 0.55)
+			draw_fit_string(font, Vector2(LX + 196.0, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, 96.0, 12, mc)
+		else:
+			draw_money_hat(Rect2(LX + 148.0, tcard_y + 8.0, 138.0, 162.0), tfrac, over, marks,
+				Color(venue_data(run_venue)["glow"]))
 		# the ask, and the gamble, in the card's left column beside the hat
 		var goal_head := "FIRST GOAL"
 		if goals_hit >= NUM_GOALS:
@@ -10270,7 +10447,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var tval := "%d   (+%s)" % [tricks_landed, commafy(trick_score)] if trick_score > 0 else str(tricks_landed)
 	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99), ra.call(3)); y += rowh
 	draw_line(Vector2(lx, y - 6.0), Vector2(rx, y - 6.0), Color(0.9, 0.6, 0.35, 0.2), 1.0)
-	_result_row(font, lx, rx, y + 20.0, "Pay", "+%s gold" % commafy(last_pay), Color(1.0, 0.86, 0.45), ra.call(4)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "Pay", "+%s %s" % [commafy(last_pay), coin_word()], Color(1.0, 0.86, 0.45), ra.call(4)); y += rowh
 	var rsign := "+" if last_rep_delta >= 0 else ""
 	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
 	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
@@ -10946,11 +11123,11 @@ func draw_purse(font: Font, right_x: float, y: float) -> void:
 	var fl := clampf(1.0 - float(int(Time.get_ticks_msec()) - shop_buy_ms) / 450.0, 0.0, 1.0)
 	var fs := 24 + int(round(6.0 * fl))
 	var gc := Color(1.0, 0.86, 0.45).lerp(Color(1.0, 0.98, 0.85), fl)
-	var txt := "%s g" % commafy(money)
+	var txt := "%s %s" % [commafy(money), coin_short()]
 	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	# the coin grows a touch with the flash too, so gold changing hands is felt on the
 	# object and not only on the number beside it
-	draw_coin(Vector2(right_x - tw - 24.0, y - 8.0), 10.0 + 1.5 * fl, Color(1.0, 0.84, 0.4))
+	draw_coin_mark(Vector2(right_x - tw - 24.0, y - 8.0), 10.0 + 1.5 * fl, Color(1.0, 0.84, 0.4))
 	draw_string(font, Vector2(right_x - tw, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
 
 
@@ -11164,7 +11341,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			if int(gear_count[i]) > 0:
 				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
 			var gkey := str(7 + i) if i < 3 else "0"
-			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
+			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, "%s %s" % [commafy(int(gear_cost[i])), coin_short()], money >= int(gear_cost[i]))
 
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
 	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
@@ -11834,8 +12011,8 @@ func draw_day(font: Font, s: Vector2) -> void:
 		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 	var to_str := MEALS_PER_STR - (meals % MEALS_PER_STR)
 	var ledger := [
-		{"icon": "coin", "col": Color(1.0, 0.84, 0.42), "label": "PURSE",
-		 "big": "%s gold" % commafy(money), "note": "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"]},
+		{"icon": "coin", "col": Color(1.0, 0.84, 0.42) if not flowers_on() else Color(0.98, 0.60, 0.72), "label": "PURSE",
+		 "big": "%s %s" % [commafy(money), coin_word()], "note": "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"]},
 		{"icon": "star", "col": Color(0.84, 0.72, 0.92), "label": "REPUTATION",
 		 "big": commafy(reputation), "note": rep_tier()},
 	]
@@ -12019,40 +12196,114 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 				pts.append(c + Vector2(cos(a), sin(a)) * rr)
 			draw_colored_polygon(pts, col)
 		"loop":
-			draw_arc(c, 6.5, -2.2, 2.5, 18, col, 2.0, true)
-			draw_colored_polygon(PackedVector2Array([c + Vector2(2.0, -8.5), c + Vector2(8.0, -6.0), c + Vector2(2.5, -2.5)]), col)
+			# PRACTICE: a loop with its arrowhead ON the end of the arc, pointing along
+			# it (2026-07-27, Louis: the triangle was in the wrong place). It used to be
+			# a fixed triangle floating off the top-right corner, unrelated to where the
+			# arc actually stopped, which read as a stray shape rather than an arrow.
+			var a0 := -2.2
+			var a1 := 2.5
+			draw_arc(c, 6.5, a0, a1, 18, col, 2.0, true)
+			var tip := c + Vector2(cos(a1), sin(a1)) * 6.5
+			var tang := Vector2(-sin(a1), cos(a1))            # forward along the arc
+			var norm := Vector2(cos(a1), sin(a1))             # outward from the centre
+			draw_colored_polygon(PackedVector2Array([
+				tip + tang * 5.4, tip - tang * 1.6 + norm * 3.4, tip - tang * 1.6 - norm * 3.4]), col)
 		"cal":
 			draw_rect(Rect2(c.x - 7.0, c.y - 6.0, 14.0, 13.0), Color(col.r, col.g, col.b, 0.55))
 			draw_rect(Rect2(c.x - 7.0, c.y - 6.0, 14.0, 4.0), col)
 			draw_rect(Rect2(c.x - 3.5, c.y + 0.5, 3.0, 3.0), col)
 		"plate":
-			draw_arc(c, 8.0, 0.0, TAU, 20, col, 1.6, true)
-			draw_arc(c, 4.0, 0.0, TAU, 14, Color(col.r, col.g, col.b, 0.7), 1.4, true)
+			# A HOT MEAL: a fork and a table knife laid either side of a plate (Louis).
+			# Two bare concentric rings said "target" far more than "dinner"; cutlery is
+			# what makes a circle read as a plate, in any kitchen and at any size.
+			draw_arc(c, 7.6, 0.0, TAU, 22, Color(col.r, col.g, col.b, 0.85), 1.5, true)
+			draw_arc(c, 4.2, 0.0, TAU, 16, Color(col.r, col.g, col.b, 0.45), 1.2, true)
+			var fx := c.x - 11.5
+			draw_line(Vector2(fx, c.y - 1.0), Vector2(fx, c.y + 8.0), col, 1.6)          # fork handle
+			for ti in 3:                                                                  # ...and its tines
+				var tx2 := fx - 2.0 + float(ti) * 2.0
+				draw_line(Vector2(tx2, c.y - 8.5), Vector2(tx2, c.y - 1.5), col, 1.1)
+			draw_line(Vector2(fx - 2.2, c.y - 1.6), Vector2(fx + 2.2, c.y - 1.6), col, 1.4)
+			var nx := c.x + 11.5                                                          # table knife
+			draw_line(Vector2(nx, c.y + 1.0), Vector2(nx, c.y + 8.0), col, 1.6)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(nx - 1.8, c.y + 1.0), Vector2(nx + 1.8, c.y - 0.5),
+				Vector2(nx + 1.2, c.y - 8.5), Vector2(nx - 1.8, c.y - 7.5)]), col)
 		"bed":
-			draw_rect(Rect2(c.x - 8.0, c.y, 16.0, 5.0), col)
-			draw_rect(Rect2(c.x - 8.0, c.y - 5.0, 6.0, 5.0), Color(col.r, col.g, col.b, 0.7))
-			draw_line(Vector2(c.x - 8.0, c.y + 5.0), Vector2(c.x - 8.0, c.y + 8.0), col, 1.6)
-			draw_line(Vector2(c.x + 8.0, c.y + 5.0), Vector2(c.x + 8.0, c.y + 8.0), col, 1.6)
+			# REST: a bed with a pillow, a turned-down cover and legs, seen from the side.
+			# The old one was three bare rectangles that read as a filing tray.
+			draw_line(Vector2(c.x - 9.0, c.y - 7.0), Vector2(c.x - 9.0, c.y + 3.0), col, 1.8)  # headboard
+			draw_rect(Rect2(c.x - 9.0, c.y + 1.0, 18.0, 4.0), col)                              # mattress
+			draw_rect(Rect2(c.x - 9.0, c.y + 5.0, 18.0, 2.0), Color(col.r, col.g, col.b, 0.55)) # base
+			fill_ellipse(Vector2(c.x - 5.0, c.y - 1.0), 4.0, 2.4, Color(col.r, col.g, col.b, 0.9))  # pillow
+			draw_line(Vector2(c.x - 1.0, c.y + 0.6), Vector2(c.x + 9.0, c.y + 0.6), Color(col.r, col.g, col.b, 0.7), 1.6)
+			draw_line(Vector2(c.x - 8.0, c.y + 7.0), Vector2(c.x - 8.0, c.y + 9.5), col, 1.6)
+			draw_line(Vector2(c.x + 8.0, c.y + 7.0), Vector2(c.x + 8.0, c.y + 9.5), col, 1.6)
 		"pie":
-			draw_colored_polygon(PackedVector2Array([c + Vector2(-7.0, 5.0), c + Vector2(7.0, 5.0), c + Vector2(0.0, -7.0)]), col)
-			draw_line(c + Vector2(-7.0, 5.0), c + Vector2(7.0, 5.0), Color(1, 1, 1, 0.35), 1.6)
+			# UNCLE DAN'S PIE: a real slice - a crimped crust along the back, a filled
+			# wedge, and a lattice over it. A bare triangle read as a torch flame next to
+			# the torch card, which is exactly the mistake the gear icons already paid for.
+			var crust := Color(minf(1.0, col.r * 1.1), col.g * 0.86, col.b * 0.55)
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-8.0, 5.5), c + Vector2(8.0, 5.5), c + Vector2(0.0, -7.0)]), col)
+			draw_line(c + Vector2(-8.0, 5.5), c + Vector2(0.0, -7.0), Color(col.r, col.g, col.b, 0.55), 1.2)
+			# the lattice: two strips across the filling
+			draw_line(c + Vector2(-4.6, 0.4), c + Vector2(4.6, 0.4), Color(crust.r, crust.g, crust.b, 0.8), 1.3)
+			draw_line(c + Vector2(-6.4, 3.2), c + Vector2(6.4, 3.2), Color(crust.r, crust.g, crust.b, 0.8), 1.3)
+			# the crimped back crust, a row of little bumps
+			for pi in 5:
+				draw_circle(c + Vector2(-6.4 + float(pi) * 3.2, 5.8), 1.9, crust)
+		"tomato":
+			draw_tomato(c, 1.35, 0.4, col.a)
 		"egg":
 			fill_ellipse(c, 5.5, 7.5, col)
 		"coin":
-			draw_coin(c, 7.5, col)
+			draw_coin_mark(c, 7.5, col)
 		"book":
-			draw_rect(Rect2(c.x - 8.0, c.y - 7.0, 7.0, 14.0), col)
-			draw_rect(Rect2(c.x + 1.0, c.y - 7.0, 7.0, 14.0), Color(col.r, col.g, col.b, 0.65))
+			# SKILLS: an OPEN book (Louis) - two leaves rising to a spine, a page edge on
+			# each side and a few ruled lines. Two rectangles side by side read as a
+			# domino, which is what it was.
+			var spine := c + Vector2(0.0, -1.5)
+			for sgn in [-1.0, 1.0]:
+				draw_colored_polygon(PackedVector2Array([
+					spine, spine + Vector2(sgn * 9.0, -2.2), spine + Vector2(sgn * 9.0, 6.6),
+					spine + Vector2(0.0, 8.0)]), Color(col.r, col.g, col.b, 0.92 if sgn < 0.0 else 0.7))
+				for li in 2:
+					var ly := spine.y + 1.2 + float(li) * 2.6
+					draw_line(Vector2(spine.x + sgn * 2.2, ly), Vector2(spine.x + sgn * 7.4, ly - sgn * 0.0),
+						Color(0.10, 0.08, 0.10, 0.35), 0.9)
+			draw_line(spine, spine + Vector2(0.0, 9.5), Color(col.r * 0.6, col.g * 0.6, col.b * 0.6), 1.6)
 		"moon":
 			draw_arc(c + Vector2(2.0, 0.0), 7.5, 0.6, TAU - 0.6, 20, col, 3.2, true)
 		"bag":
 			draw_rect(Rect2(c.x - 7.5, c.y - 3.0, 15.0, 10.0), col)
 			draw_arc(c + Vector2(0.0, -3.0), 4.5, PI, TAU, 12, col, 1.8, true)
+		"shop":
+			# THE SHOP: a market STALL - a striped awning over a counter with something on
+			# it. The shop row used to borrow the coin, which said "money" rather than
+			# "the place you spend it", and now collides with the currency mark besides.
+			draw_rect(Rect2(c.x - 8.5, c.y + 1.0, 17.0, 6.0), Color(col.r * 0.75, col.g * 0.72, col.b * 0.68))
+			for si in 4:                                   # the awning, in stripes
+				var sx := c.x - 9.0 + float(si) * 4.5
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(sx, c.y - 5.0), Vector2(sx + 4.5, c.y - 5.0),
+					Vector2(sx + 4.5, c.y - 0.5), Vector2(sx, c.y - 0.5)]),
+					col if si % 2 == 0 else Color(1.0, 0.98, 0.92, 0.85))
+			draw_line(Vector2(c.x - 9.5, c.y - 5.4), Vector2(c.x + 9.5, c.y - 5.4), col, 1.6)
+			draw_line(Vector2(c.x - 8.0, c.y + 7.0), Vector2(c.x - 8.0, c.y + 9.0), Color(col.r * 0.7, col.g * 0.7, col.b * 0.7), 1.5)
+			draw_line(Vector2(c.x + 8.0, c.y + 7.0), Vector2(c.x + 8.0, c.y + 9.0), Color(col.r * 0.7, col.g * 0.7, col.b * 0.7), 1.5)
 		"spark":
-			draw_line(c + Vector2(0, -8), c + Vector2(0, 8), col, 2.0)
-			draw_line(c + Vector2(-8, 0), c + Vector2(8, 0), col, 2.0)
-			draw_line(c + Vector2(-5, -5), c + Vector2(5, 5), Color(col.r, col.g, col.b, 0.6), 1.4)
-			draw_line(c + Vector2(5, -5), c + Vector2(-5, 5), Color(col.r, col.g, col.b, 0.6), 1.4)
+			# LEARN SOMETHING NEW: a lit lamp, not a plus sign. Four equal crossed lines
+			# is the sparkle trap draw_star4 exists to avoid, and it read as "add".
+			draw_glow(c + Vector2(0.0, -2.0), 11.0, Color(col.r, col.g, col.b, 0.22))
+			draw_circle(c + Vector2(0.0, -2.5), 5.6, col)
+			draw_circle(c + Vector2(-1.6, -4.0), 2.0, Color(1.0, 1.0, 0.94, 0.75))
+			draw_rect(Rect2(c.x - 3.0, c.y + 2.6, 6.0, 2.0), Color(col.r * 0.65, col.g * 0.65, col.b * 0.65))
+			draw_rect(Rect2(c.x - 2.4, c.y + 5.0, 4.8, 1.8), Color(col.r * 0.55, col.g * 0.55, col.b * 0.55))
+			for ri in 3:                                    # three short rays, off-centre
+				var ra2 := -PI * 0.5 + (float(ri) - 1.0) * 0.85
+				draw_line(c + Vector2(0.0, -2.5) + Vector2(cos(ra2), sin(ra2)) * 7.4,
+					c + Vector2(0.0, -2.5) + Vector2(cos(ra2), sin(ra2)) * 10.2, Color(col.r, col.g, col.b, 0.7), 1.5)
 		"back":
 			draw_line(c + Vector2(7, 0), c + Vector2(-6, 0), col, 2.2)
 			draw_polyline(PackedVector2Array([c + Vector2(-1, -6), c + Vector2(-7, 0), c + Vector2(-1, 6)]), col, 2.2)
@@ -12095,6 +12346,53 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 				var zp := c + Vector2(70.0 + zt * 46.0 + float(z) * 8.0, -30.0 - zt * 70.0)
 				draw_string(font, zp, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 18 + z * 4, Color(0.9, 0.88, 0.8, (1.0 - zt) * 0.8))
 			draw_string(font, Vector2(0, c.y + 110.0), "the day ends", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.85, 0.7, ease_in))
+		"pie":
+			# UNCLE DAN'S PIE: the slice on its plate, and the hum that follows it - the
+			# whole reason to eat one is the slow motion, so the picture says so
+			var c := Vector2(s.x * 0.5, s.y * 0.52)
+			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
+			fill_ellipse(c + Vector2(0, 34.0), 78.0, 22.0, Color(0.80, 0.78, 0.75))
+			# the slice, shrinking as it is eaten
+			var eaten := clampf(t * 1.4, 0.0, 1.0)
+			var half := 62.0 * (1.0 - 0.75 * eaten)
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-half, 26.0), c + Vector2(half, 26.0), c + Vector2(0.0, -56.0 * (1.0 - 0.6 * eaten))]),
+				Color(0.92, 0.66, 0.30))
+			for pi in 6:
+				draw_circle(c + Vector2(-half + half * 2.0 * float(pi) / 5.0, 28.0), 5.0 * (1.0 - 0.5 * eaten), Color(0.98, 0.80, 0.46))
+			# the hum: slow rings widening out of the slice as it goes down
+			for ri in 3:
+				var rt := fposmod(t * 1.1 + float(ri) * 0.33, 1.0)
+				draw_arc(c, 30.0 + rt * 90.0, 0.0, TAU, 26, Color(0.75, 0.92, 1.0, (1.0 - rt) * 0.28 * ease_in), 2.0, true)
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "the world slows down", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(0.82, 0.94, 1.0, ease_in))
+		"egg":
+			# A RAW EGG: cracked over the mouth in one go, which is the joke
+			var c := Vector2(s.x * 0.5, s.y * 0.52)
+			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
+			var tip := clampf(t * 2.0, 0.0, 1.0)
+			var gap := 26.0 * tip
+			# the two shell halves parting, the yolk sliding out between them
+			fill_ellipse(c + Vector2(-gap, -20.0), 26.0, 20.0, Color(0.95, 0.92, 0.86))
+			fill_ellipse(c + Vector2(gap, -20.0), 26.0, 20.0, Color(0.90, 0.87, 0.80))
+			if tip > 0.25:
+				var fall := (tip - 0.25) / 0.75
+				fill_ellipse(c + Vector2(0.0, -10.0 + fall * 46.0), 13.0, 15.0, Color(1.0, 0.78, 0.24))
+				fill_ellipse(c + Vector2(-3.0, -14.0 + fall * 46.0), 4.5, 5.0, Color(1.0, 0.92, 0.62, 0.8))
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "down in one", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(1.0, 0.9, 0.65, ease_in))
+		"tomato":
+			# A THROWN TOMATO, eaten anyway. The bite is the picture, and the little
+			# bruise-coloured splash sells that it has been on the boards.
+			var c := Vector2(s.x * 0.5, s.y * 0.52)
+			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
+			var bite := clampf((t - 0.25) / 0.6, 0.0, 1.0)
+			draw_tomato(c + Vector2(0.0, -6.0), 6.5 * (1.0 - 0.35 * bite), 0.35, 1.0)
+			if bite > 0.0:
+				# the bite taken out of the top-right, in the panel's own colour
+				draw_circle(c + Vector2(30.0 * (1.0 - 0.35 * bite), -30.0 * (1.0 - 0.35 * bite)), 17.0 * bite, Color(0.10, 0.07, 0.09))
+			for si in 4:
+				var st2 := fposmod(t * 1.6 + float(si) * 0.27, 1.0)
+				draw_circle(c + Vector2(-46.0 + float(si) * 30.0, 44.0 + st2 * 16.0), 3.0 * (1.0 - st2), Color(0.82, 0.22, 0.20, (1.0 - st2) * 0.7 * ease_in))
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "still perfectly good", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(1.0, 0.82, 0.72, ease_in))
 
 
 #endregion
@@ -12590,7 +12888,7 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(kx, ky + 30.0), "YOUR STARTING KIT", HORIZONTAL_ALIGNMENT_CENTER, kw, 14, Color(0.95, 0.8, 0.55, ka))
 		draw_circle(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 0.84, 0.4, ka))
 		draw_circle(Vector2(kx + 117.0, ky + 63.0), 2.6, Color(1.0, 0.95, 0.7, ka))
-		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s gold" % commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
+		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s %s" % [commafy(money), coin_word()], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
 		for i in 3:
 			var bc := ball_color(i)
 			bc.a = ka
@@ -13453,6 +13751,7 @@ func draw_parts() -> void:
 
 func step_effects() -> void:
 	step_parts()
+	throw_step()   # what the room throws, on its own beat
 	# lit torches shed a lazy ember now and then, so fire reads as fire
 	if tick % 9 == 0:
 		for b in balls:
@@ -13513,6 +13812,159 @@ func step_effects() -> void:
 		d["vel"] = v
 		keep_f.append(d)
 	falling = keep_f
+
+
+#region WHAT THE ROOM THROWS (flowers and tomatoes)
+func flowers_on() -> bool:
+	# the whole feature behind its F9 switch, asked in one place
+	return bool(experiments.get("flowers", false))
+
+
+func coin_word() -> String:
+	# what the currency is CALLED, everywhere it is written. `money` is the same number
+	# either way - only what the crowd hands over changes - so every readout asks here
+	# rather than hard-coding "gold" and going stale the moment the switch is flipped.
+	return "flowers" if flowers_on() else "gold"
+
+
+func coin_word_one() -> String:
+	return "flower" if flowers_on() else "gold"
+
+
+func coin_short() -> String:
+	return "f" if flowers_on() else "g"   # the shop's compact readout
+
+
+func draw_coin_mark(c: Vector2, r: float, col: Color) -> void:
+	# the currency's own MARK, used by the purse readouts and the hub's ledger card:
+	# a coin in the gold economy, a flower in the flower one, so the two never disagree
+	# about what the number in front of them means
+	if flowers_on():
+		draw_flower(c, 0, r / 5.0, -PI * 0.5, col.a)
+	else:
+		draw_coin(c, r, col)
+
+
+func stage_floor_y() -> float:
+	return get_viewport_rect().size.y * 0.80   # the boards, where thrown things land
+
+
+func flower_tier_roll() -> int:
+	# WHICH flower, and the answer is almost always the plain one. A posy needs a room
+	# already won over; a gold rose needs one won over with NOTHING dropped all night
+	# (Louis: "only possible / likely when the player is very deep in the green / no
+	# drops at all"). So the colour of the pile says something the size cannot.
+	if dropped == 0 and applause > 0.94 and randf() < 0.06:
+		return 2
+	if dropped <= 1 and applause > 0.84 and randf() < 0.13:
+		return 1
+	return 0
+
+
+func throw_from_crowd(kind: String, tier: int) -> void:
+	# one flower (or tomato) leaves a seat and arcs down to the boards near the feet.
+	# It comes from a random point along the crowd line and lands in a loose scatter
+	# around the juggler, so a heavy shower reads as a shower and not as a stack.
+	var s := get_viewport_rect().size
+	var fy := stage_floor_y()
+	var from := Vector2(randf_range(s.x * 0.05, s.x * 0.95), fy + randf_range(16.0, 46.0))
+	var to := Vector2(s.x * 0.5 + randf_range(-165.0, 165.0), fy - randf_range(2.0, 16.0))
+	thrown.append({"kind": kind, "tier": tier, "from": from, "to": to,
+		"born": tick, "land": tick + FLOWER_FLIGHT + randi_range(-6, 6),
+		"arc": randf_range(90.0, 190.0), "rot": randf_range(0.0, TAU),
+		"spin": randf_range(-0.09, 0.09), "landed": false})
+
+
+func throw_step() -> void:
+	# THE ROOM'S OWN BEAT. Every FLOWER_BEAT ticks the people who can reach the stage
+	# each get one chance to throw something, and what they throw is decided entirely by
+	# how the act is going: deep in the green it is flowers, down in the red it is
+	# tomatoes, and in the wide middle the room just watches.
+	if not flowers_on() or mode != MODE_PERFORM or not running or tut_active:
+		return
+	if tick % FLOWER_BEAT != 0:
+		return
+	var vi := clampi(run_venue, 0, FLOWER_THROWERS.size() - 1)
+	var rolls := int(FLOWER_THROWERS[vi])
+	if applause >= FLOWER_GREEN:
+		# how far into the green, 0..1 - a room that is merely pleased throws the odd
+		# one, a room on its feet throws steadily
+		var green := clampf((applause - FLOWER_GREEN) / (1.0 - FLOWER_GREEN), 0.0, 1.0)
+		for _i in rolls:
+			if randf() < 0.25 + 0.50 * green:
+				var t := flower_tier_roll()
+				throw_from_crowd("flower", t)
+				run_flowers += int(FLOWER_TIERS[t]["val"])
+	elif applause <= TOMATO_RED and not collapsing:
+		# the room turning on you. Rarer than flowers by design: this is a warning you
+		# can still act on, not a punishment stacked on top of losing the crowd.
+		for _i in rolls:
+			if randf() < 0.10:
+				throw_from_crowd("tomato", 0)
+				run_tomatoes += 1
+	while thrown.size() > FLOWER_PILE_MAX:
+		thrown.remove_at(0)
+
+
+func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float) -> void:
+	# a flower drawn as a flower: petals round a lit centre, on the same "draw the
+	# object" rule the money hat and the coin follow. The petal COUNT and colour carry
+	# the tier, so a pile can be read at a glance without a single number on screen.
+	var td: Dictionary = FLOWER_TIERS[clampi(tier, 0, FLOWER_TIERS.size() - 1)]
+	var col: Color = td["col"]
+	var mid: Color = td["mid"]
+	var n := int(td["petals"])
+	var r := float(td["r"]) * sc
+	for i in n:
+		var ang := rot + TAU * float(i) / float(n)
+		var pc := Vector2(cos(ang), sin(ang)) * r * 0.72
+		# each petal an ellipse pointing outward - two circles would read as a berry
+		var pv := PackedVector2Array()
+		for k in 9:
+			var t := TAU * float(k) / 8.0
+			pv.append(p + pc + Vector2(cos(t) * r * 0.52, sin(t) * r * 0.34).rotated(ang))
+		draw_colored_polygon(pv, Color(col.r, col.g, col.b, a))
+	draw_circle(p, r * 0.38, Color(mid.r, mid.g, mid.b, a))
+	if tier >= 2:
+		draw_star4(p, r * 0.9, Color(1.0, 0.98, 0.85, 0.45 * a))   # a gold rose glints
+
+
+func draw_tomato(p: Vector2, sc: float, rot: float, a: float) -> void:
+	var r := 6.0 * sc
+	fill_ellipse(p, r * 1.05, r * 0.92, Color(0.86, 0.18, 0.16, a))
+	draw_circle(p + Vector2(-r * 0.32, -r * 0.34), r * 0.24, Color(1.0, 0.62, 0.54, 0.7 * a))
+	# the calyx, a few short leaves off the top - what stops it reading as a red ball
+	for i in 4:
+		var ang := rot + TAU * float(i) / 4.0
+		draw_line(p + Vector2(0, -r * 0.7), p + Vector2(0, -r * 0.7) + Vector2(cos(ang), sin(ang)) * r * 0.5,
+			Color(0.35, 0.60, 0.28, a), maxf(1.0, r * 0.22))
+
+
+func draw_thrown() -> void:
+	# in flight, and then at rest on the boards. A landed one FADES as newer ones arrive
+	# on top of it (the array is capped), so the pile stays a live read on the last
+	# stretch of the act rather than an ever-growing monument to its opening.
+	for i in thrown.size():
+		var d: Dictionary = thrown[i]
+		var lt := int(d["land"])
+		var p: Vector2 = d["to"]
+		var a := 1.0
+		var sc := 1.0
+		if tick < lt:
+			var f := clampf(float(tick - int(d["born"])) / float(maxi(1, lt - int(d["born"]))), 0.0, 1.0)
+			p = (d["from"] as Vector2).lerp(d["to"], f)
+			p.y -= 4.0 * float(d["arc"]) * f * (1.0 - f)   # the same parabola every prop flies
+			sc = 0.8 + 0.2 * f
+		else:
+			# older entries sit lower in the array; fade the oldest third of the pile so
+			# it settles into the boards instead of stacking forever
+			a = clampf(0.35 + 0.65 * float(i) / float(maxi(1, thrown.size() - 1)), 0.35, 1.0)
+		var rot := float(d["rot"]) + float(d["spin"]) * float(tick - int(d["born"]))
+		if String(d["kind"]) == "tomato":
+			draw_tomato(p, sc, rot, a)
+		else:
+			draw_flower(p, int(d["tier"]), sc, rot, a)
+#endregion
 
 
 func draw_falling() -> void:
