@@ -106,6 +106,9 @@ const HIT_EXCESS_KEEP := 0.15 # how much of a big prop's EXTRA bulk over a ball'
 							# keeps once a load needs the room (by 4 objects).
 const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_scale);
 							  # also the mid-air collision test's touching-circles radius
+const TRAIL_STEP_SQ := 36.0   # (6px)^2: the closest two comet-trail samples may sit.
+							  # Anything tighter folds the tapered ribbon through itself -
+							  # see the sampler in update_sim for why that matters
 const BLACKOUT_CUT := 0.68    # how far into a flight the Blackout Encore's lights die.
 							  # Just past the apex, so the throw and the top of the arc
 							  # are always seen and only the descent is dark.
@@ -479,18 +482,29 @@ const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
 # straight into a fast one. A step may override this floor with its own "slow" key.
 const TUT_SLOW_START := 0.5    # the first step of a lesson: half speed (the
 								# slow-stack cap, so lessons stay jitter-free too)
-const TUT_SLOW_END := 0.20     # the last step: nearly real time
-const TUT_FLOW_HOLD := 10      # ticks a GUIDED step lingers on its win before flowing to
-								# the next one - long enough to register "yes, that", short
-								# enough that the next key's prompt is up before the ball
-								# it refers to is halfway down
-# the BASICS lesson's adaptive pace (Louis): slow motion is EARNED away, not scripted.
-# The lesson opens at the game's own 50% cap and every run of clean catches steps the
-# world faster down this ladder; a drop steps it back up, so a struggling player gets
-# their thick time back instead of drowning. The lesson only ends with ten catches of
-# a true three-ball cascade at the ladder's floor: genuine full speed.
-const TUT_PACES: Array[float] = [0.5, 0.25, 0.15, 0.0]
-const TUT_PACE_STREAK := 4     # clean catches in a row that earn the next notch down
+# THE PACE LADDER, one shape for EVERY lesson (2026-07-27, Louis): every drill in
+# every lesson is run three times over - half speed, quarter speed, then full speed.
+# The two slow passes are GUIDED, which here means something much stronger than a
+# prompt: the world STOPS DEAD at every single action the drill asks for, names the
+# key (or the combination, in the order it goes) that unfreezes it, hears nothing
+# else, and makes the press land - a guided catch is always caught, a guided throw
+# always thrown. So the SHAPE of a pattern is learned with the timing taken away,
+# twice, before the last pass at 0% slowmo asks the player to find the beat alone.
+# This replaced an adaptive ladder [0.5, 0.25, 0.15, 0.0] that sped up on clean
+# catches and slowed on drops: it taught the rhythm by attrition, and a beginner who
+# could not find the first beat never saw the second.
+const TUT_PHASES: Array[float] = [0.5, 0.25, 0.0]
+const TUT_EXCHANGE_LEAD := 14  # ticks before a prop lands that its hand is stopped and
+								# asked for its beat. A hand still holding one is asked to
+								# THROW first and then catch (the "J then K" exchange the
+								# whole cascade is made of); an empty hand is just asked to
+								# catch. Small enough that the prop is visibly AT the hand,
+								# and far inside a lesson's Perfect window (W_LATE), so the
+								# guided press always scores Perfect.
+const TUT_HOLD_GAP := 8        # ticks of real motion after a satisfied beat before the
+								# next one may stop the world - so the throw and the catch
+								# the player just made are actually SEEN happening
+const TUT_STEP_READ := 30      # ...and a longer breath at the top of each step, to read it
 const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
 							   # and brighten (at the 50% slow cap, SLOW_TOTAL_CAP, that
 							   # is about 1.5 real seconds)
@@ -847,8 +861,13 @@ var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw
 var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
 var tut_keys := 0         # command-key presses banked this step (the R and P teaching
 						  # goals count on their own, so a stray catch cannot clear them)
-var tut_pace := 0         # the basics lesson's rung on TUT_PACES (0 = slowest)
-var tut_flow_streak := 0  # clean catches in a row toward the next rung; drops zero it
+# --- the guided BEAT (see TUT_PHASES): on a 50% or 25% step the world is frozen at
+# every action the drill asks for until the player makes it. tut_hold holds that ask.
+var tut_hold: Array = []  # entries {act, hand, rank, ok}; empty means the world runs
+var tut_hold_at := -1     # tick the current beat froze the world (its prompt eases in)
+var tut_hold_end := -999  # tick the last beat was satisfied (TUT_HOLD_GAP of motion after)
+var tut_last_throw := LEFT   # which hand threw last, so feed throws alternate hands -
+							 # which is the whole reason a cascade crosses
 var tut_prev_prop := PROP_BALLS  # the prop equipped BEFORE a trick/count/pattern lesson
 								 # started (those always drill with Balls); tut_finish
 								 # restores it, so a Torches juggler comes out on Torches
@@ -1335,6 +1354,23 @@ func _physics_process(delta: float) -> void:
 		update_hands()
 		queue_redraw()
 		return
+	# THE GUIDED BEAT (see the tutorial region): on a 50% or 25% lesson pass the world
+	# stops dead at every action the drill asks for. Same shape as the hit-stop above -
+	# input is polled, the hands ease, the sim's clock does not move - but it holds for
+	# as long as the player needs rather than a fixed few ticks. cine_tick keeps
+	# running so the scenery, the prompt's pulse and the music breathe through it: a
+	# stopped SIM must not read as a hung game.
+	if tut_active:
+		tut_hold_update()
+		if not tut_hold.is_empty():
+			cine_tick += 1
+			if _demo:
+				tut_hold_autoplay()
+			else:
+				_read_inputs()
+			update_hands()
+			queue_redraw()
+			return
 	# SLOW MOTION (ideas.rtf): the sim advances by FRACTIONAL ticks while real
 	# time flows on, so every catch window stretches in the player's hands. Input
 	# polls every real frame so slow motion can never eat a press. Sources stack
@@ -2953,6 +2989,45 @@ func offer_prop_tutorial(kind: int) -> void:
 #endregion
 
 #region TUTORIAL SYSTEM
+func tut_paced(base: Dictionary, needs: Array, after: String) -> Array:
+	# THE ladder every lesson runs (see TUT_PHASES): one drill, three times over, at
+	# half speed, then quarter speed, then full speed. The first two passes are
+	# GUIDED - the world freezes at each action and the asked-for press always lands -
+	# and only the last one is played unaided. `needs` is the goal count per pass
+	# (the slow ones are short: they are a rehearsal, not a grind), and `after` is
+	# what Enter promises once the whole ladder is behind the player.
+	#
+	# `juggle` (only-counts-if-something-else-is-airborne) and any other strictness is
+	# stripped from the guided passes on purpose: those passes deal the beats
+	# themselves, so failing one is not a thing a player did, and the drill would
+	# scold them for the script's own rhythm.
+	var out: Array = []
+	var last := TUT_PHASES.size() - 1
+	for i in TUT_PHASES.size():
+		var st: Dictionary = base.duplicate(true)
+		st["slow"] = TUT_PHASES[i]
+		st["phase"] = i
+		st["guide"] = i < last
+		if i < needs.size():
+			st["need"] = int(needs[i])
+		if i < last:
+			st.erase("juggle")
+			st["next"] = "the same, at quarter speed" if i == 0 else "the same, at FULL speed"
+		else:
+			st["next"] = after
+		out.append(st)
+	return out
+
+
+func tut_pace_line(step: Dictionary) -> String:
+	# the one line that says where on the ladder this step sits, in the words the
+	# player experiences rather than a phase number
+	var sl := float(step.get("slow", 0.0))
+	if not bool(step.get("guide", false)):
+		return "FULL SPEED  -  on your own now" if sl <= 0.001 else "%d%% slow" % int(round(sl * 100.0))
+	return "%d%% slow  -  guided, one press at a time" % int(round(sl * 100.0))
+
+
 func tut_lesson(id: String) -> Array:
 	if id.begins_with("prop_"):
 		var k := int(id.substr(5))
@@ -2965,31 +3040,28 @@ func tut_lesson(id: String) -> Array:
 		}
 		var quirk := String(quirks.get(k, "A new prop. Feel out its weight and timing."))
 		var need := 6 if k == PROP_TORCHES else 5
-		return [{"prop": k, "balls": 3, "hand": RIGHT, "goal": "catch", "need": need,
-			"text": "New prop: %s" % String(PROPS[k]["name"]), "sub": "%s Land %d clean catches." % [quirk, need]}]
+		return tut_paced({"prop": k, "balls": 3, "hand": RIGHT, "goal": "catch", "need": need,
+			"text": "New prop: %s" % String(PROPS[k]["name"]), "sub": quirk},
+			[4, 4, need], "finish the lesson")
 	if id.begins_with("trick_"):
 		return trick_lesson_steps(trick_by_id(id.substr(6)))
 	if id.begins_with("count_"):
 		return count_lesson_steps(int(id.substr(6)))
 	if id.begins_with("pattern_"):
 		return pattern_lesson_steps(pattern_by_id(id.substr(8)))
-	# THE BASICS, in two halves (reworked per Louis, who watched real people play it):
+	# THE BASICS. Three drills - one ball, then two, then three - and each of them run
+	# down the whole TUT_PHASES ladder before the next one starts: half speed guided,
+	# quarter speed guided, full speed alone. So a player meets one ball nine beats
+	# hand-held, plays it themselves, and only then is a second ball added; by the
+	# cascade they have already been walked through the exact throw-then-catch
+	# exchange twice at a speed where it cannot go wrong.
 	#
-	#   1. GUIDED. Deepest slow motion the sim has, one key at a time, named at the exact
-	#      moment it wants pressing - press J, now press D - with the ring on the hand
-	#      showing what "now" means. These steps FLOW: they carry themselves to the next
-	#      beat the instant they are done, because a scripted call-and-response that stops
-	#      to ask for Enter is not a call-and-response.
-	#   2. FREESTYLE. One ball, then two, then three, each held open for as long as the
-	#      player likes. Here - and ONLY here - Enter means something, and it means one
-	#      thing: give me another ball. Everyone tested got the juggling immediately and
-	#      then sat there, because the old lesson asked for Enter after every step and so
-	#      Enter had stopped meaning anything. Now it appears three times here - the first
-	#      two add a ball, the third (after the finale) hands off to the R-key drill below
-	#      instead - and the callout grows louder the longer it goes unanswered.
+	# The old shape (two scripted call-and-response steps, then freestyle on an
+	# adaptive pace ladder) is gone: the response was scripted for exactly two presses
+	# and everything after it was sink-or-swim.
 	#
-	# The two-ball and three-ball steps gate on REAL juggling (the "juggle" key): catches
-	# that leave the air empty behind them do not count toward the goal, so nobody walks
+	# Only the LAST pass of the three-ball drill gates on REAL juggling (the "juggle"
+	# key): catches that leave the air empty behind them do not count, so nobody walks
 	# out of the basics having only ever thrown one ball at a time. Key names come from
 	# the live bindings, so a remapped player is taught THEIR keys, and every step still
 	# names them (Louis: never assumed remembered).
@@ -2997,54 +3069,37 @@ func tut_lesson(id: String) -> Array:
 	var kf := OS.get_keycode_string(K_LT)
 	var kd := OS.get_keycode_string(K_LC)
 	var kk := OS.get_keycode_string(K_RC)
-	# the ADAPTIVE pace (Louis): the guided steps are pinned at the 50% cap; every
-	# freestyle step reads the TUT_PACES ladder instead, so clean runs speed the world
-	# up (50 - 25 - 15 - 0%) and drops give thick time back. The finale only counts at
-	# the ladder's floor: ten catches of a real cascade at genuine full speed.
-	return [
-		# --- guided: the right hand's half of the weave, one key at a time ---
-		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 1,
-			"slow": TUT_SLOW_START, "flow": true, "guide": true,
-			"text": "Press %s, then press %s" % [kj, kd],
-			"sub": "%s throws from your RIGHT hand. The ball crosses to your LEFT, and a ring closes around that hand as it arrives - press %s the moment the ring flashes gold. Time is running at half speed, so watch it come." % [kj, kd]},
-		# --- guided: the left hand's half, so both hands are taught before anything else ---
-		{"prop": PROP_BALLS, "balls": 1, "hand": LEFT, "goal": "catch", "need": 1,
-			"slow": TUT_SLOW_START, "flow": true, "guide": true,
-			"text": "Now the other way: %s, then %s" % [kf, kk],
-			"sub": "Every hand has its own two keys. %s throws from the LEFT, %s catches in the RIGHT. Same ring, same gold flash, same 'now'." % [kf, kk]},
-		# --- freestyle one: just the feel of one ball, hand to hand ---
-		{"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
-			"next": "add a second ball",
-			"text": "Now play with it",
-			"sub": "Both hands, as long as you like: %s and %s throw, %s and %s catch. Clean catches speed the world up, a drop slows it back down." % [kj, kf, kd, kk]},
-		# --- freestyle two: BOTH balls start stacked in one hand, so throw, throw,
-		#     catch, catch is the only sequence physically available - the player is
-		#     always juggling by construction, never scolded into it (Louis). The
-		#     throws CROSS (a forced cascade), rehearsing the weave three will ask for.
-		#     No "juggle" gate: the second catch of every pair always lands with
-		#     nothing else airborne, which is exactly the point of this drill, not
-		#     a failure of it - the finale is where that rule gets strict.
-		{"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
-			"pattern": CASCADE, "next": "add the third ball",
-			"text": "Two balls - throw, throw, catch, catch",
-			"sub": "Both start stacked in one hand. %s throws the first, %s throws the second BEFORE it lands - now catch them as they arrive. That handover, one ball crossing right after the other, is the whole weave three balls will ask for." % [kj, kj]},
-		# --- the finale: a real cascade, ten catches, at genuine full speed ---
-		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 10,
-			"juggle": true, "finale": true, "next": "learn the other keys",
-			"text": "Three balls. The cascade",
-			"sub": "As each ball comes down, throw the one waiting in that hand up under it FIRST, then catch. Clean catches keep speeding the world up - once it reaches FULL SPEED, land ten in a row. That is juggling, for real."},
-		# --- R, drilled rather than described: it is the key that rescues every tangle.
-		#     Named through k_restart, so a pad player is taught THEIR button ---
-		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "press_r", "need": 1,
-			"next": "see every key at once",
-			"text": "Tangled? %s starts you over" % String(k_restart()[0]),
-			"sub": "Press %s now and watch the balls come back to your hands. In any practice it re-deals - on stage it does nothing, because a performance is not restartable." % String(k_restart()[0])},
-		# --- and the whole command set, named, in one place ---
-		{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "read", "need": 0,
-			"next": "finish the lesson",
-			"text": "Every key you have",
-			"sub": "These work whenever you are juggling - practice or performance. You never need to memorise them: the row along the bottom of the screen always names the ones that matter."},
-	]
+	var out: Array = []
+	out += tut_paced({"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
+		"text": "One ball, hand to hand",
+		"sub": "Every hand has its own two keys: %s and %s throw, %s and %s catch. The ball crosses, and a ring closes around the hand it is arriving at." % [kf, kj, kd, kk]},
+		[4, 4, 6], "add a second ball")
+	# BOTH balls start stacked in one hand, so throw, throw, catch, catch is the only
+	# sequence physically available - the player is always juggling by construction,
+	# never scolded into it (Louis). The throws CROSS (a forced cascade), rehearsing
+	# the weave three will ask for.
+	out += tut_paced({"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
+		"pattern": CASCADE,
+		"text": "Two balls - throw, throw, catch, catch",
+		"sub": "Both start stacked in one hand. %s throws the first, %s throws the second BEFORE it lands. That handover, one ball crossing right after the other, is the whole weave three balls will ask for." % [kj, kj]},
+		[4, 4, 6], "add the third ball")
+	out += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 10,
+		"juggle": true,
+		"text": "Three balls. The cascade",
+		"sub": "As each ball comes down, throw the one waiting in that hand up under it FIRST, then catch. Throw, then catch, same hand - that is the whole exchange, and doing it over and over is juggling."},
+		[6, 6, 10], "learn the other keys")
+	# --- R, drilled rather than described: it is the key that rescues every tangle.
+	#     Named through k_restart, so a pad player is taught THEIR button ---
+	out.append({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "press_r", "need": 1,
+		"slow": 0.4, "next": "see every key at once",
+		"text": "Tangled? %s starts you over" % String(k_restart()[0]),
+		"sub": "Press %s now and watch the balls come back to your hands. In any practice it re-deals - on stage it does nothing, because a performance is not restartable." % String(k_restart()[0])})
+	# --- and the whole command set, named, in one place ---
+	out.append({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "read", "need": 0,
+		"slow": 0.4, "next": "finish the lesson",
+		"text": "Every key you have",
+		"sub": "These work whenever you are juggling - practice or performance. You never need to memorise them: the row along the bottom of the screen always names the ones that matter."})
+	return out
 
 
 const TRICK_TUT_SLOW := 0.55   # flat, generous slow motion for every trick-lesson step
@@ -3059,96 +3114,97 @@ func trick_lesson_steps(t: int) -> Array:
 	# a trick lesson mirrors the three INPUT GRAMMARS the game has, because the grammar
 	# is what confuses people, not the trick: a toggle switches on and off, an arm shot
 	# empowers one throw, a live trick acts on what is already in the air. Taught with
-	# plain balls (the trick shaping is prop-independent), slow throughout, shown once
-	# clearly and asked for only a couple of times - never a graduated drill.
+	# plain balls (the trick shaping is prop-independent).
+	#
+	# The SWITCH steps (on / off) are single presses of a key that is already named dead
+	# centre on screen, so they stay one-off and unguided at TRICK_TUT_SLOW - freezing
+	# the world to ask for a press the player is already staring at teaches nothing. It
+	# is the DRILL - the trick actually being used inside a running weave - that runs the
+	# full TUT_PHASES ladder, guided twice and then alone.
 	if t < 0 or t >= TRICKS.size():
-		return [{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
-			"text": "Keep the cascade going", "sub": "Land three."}]   # defensive: never index []
+		return tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
+			"text": "Keep the cascade going", "sub": "Land three."}, [3, 3, 3], "finish the lesson")
 	var td: Dictionary = TRICKS[t]
 	var nm := String(td["name"])
 	var kb := String(k_trick()[0])
 	var kcy := String(k_cycle()[0])
 	match String(td["kind"]):
 		"toggle":
-			return [
+			var out: Array = [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_on", "need": 1,
 					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
+					"next": "catch a few with it running",
 					"text": "%s: switch it ON" % nm,
 					"sub": "Press %s ONCE - not repeatedly. Every throw reshapes into %s until you switch it off." % [kb, nm]},
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 2,
-					"prompt": "catch", "slow": TRICK_TUT_SLOW,
-					"text": "Now catch a couple of them",
-					"sub": "Watch the weave change shape. The bottom-right card reads '%s - ON' whenever it runs." % nm.to_upper()},
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_off", "need": 1,
-					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
-					"text": "And switch it OFF",
-					"sub": "Press %s once more. One press ON, one press OFF - that is the whole toggle. %s swaps which trick %s carries." % [kb, kcy, kb]},
 			]
+			out += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
+				"prompt": "catch",
+				"text": "Now catch them with %s running" % nm,
+				"sub": "Watch the weave change shape. The bottom-right card reads '%s - ON' whenever it runs." % nm.to_upper()},
+				[3, 3, 4], "switch it off again")
+			out.append({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_off", "need": 1,
+				"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
+				"next": "finish the lesson",
+				"text": "And switch it OFF",
+				"sub": "Press %s once more. One press ON, one press OFF - that is the whole toggle. %s swaps which trick %s carries." % [kb, kcy, kb]})
+			return out
 		"arm":
-			return [
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
-					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
-					"text": "%s: arm it, then throw" % nm,
-					"sub": "Press %s once, then throw. Just that ONE next throw flies over the top, and it lands the trick." % kb},
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 2,
-					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
-					"text": "Once more - it is a one-shot, so arm it every time",
-					"sub": "%s, throw, catch - each trick is its own press. The bottom-right card says READY while one is armed; %s swaps tricks." % [kb, kcy]},
-			]
+			return tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
+				"trick": t, "prompt": "trick",
+				"text": "%s: arm it, then throw" % nm,
+				"sub": "Press %s once, then throw. Just that ONE next throw flies over the top, and it lands the trick - so it is a fresh press every single time. The bottom-right card says READY while one is armed; %s swaps tricks." % [kb, kcy]},
+				[1, 1, 2], "finish the lesson")
 		_:  # live (Spin): acts on the balls already airborne
-			return [
+			var out2: Array = [
 				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 2,
 					"prompt": "catch", "slow": TRICK_TUT_SLOW,
+					"next": "call the %s" % nm.to_lower(),
 					"text": "First get all three weaving",
 					"sub": "%s acts on the balls already in the air, so fill the air before you call it." % nm},
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
-					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
-					"text": "Now press it, and catch through the turn",
-					"sub": "Press %s once - it fires the moment you press. Catches come while you spin; the bottom-right card shows its cooldown. %s swaps tricks." % [kb, kcy]},
 			]
+			out2 += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
+				"trick": t, "prompt": "trick",
+				"text": "Now press it, and catch through the turn",
+				"sub": "Press %s once - it fires the moment you press, and it is landed the moment it fires. Catches come while you spin; the bottom-right card shows its cooldown. %s swaps tricks." % [kb, kcy]},
+				[1, 1, 2], "finish the lesson")
+			return out2
 
 
 func count_lesson_steps(n: int) -> Array:
-	# a new ball count: a slow drill to feel the higher, faster load, then a faster one.
-	# Whatever pattern is already running keeps running; Cascade itself reads
-	# either way (crossing odd, same-hand even), so a count change never strands it.
-	return [
-		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 6,
-			"prompt": "catch", "slow": 0.6,
-			"text": "%d balls now" % n,
-			"sub": "Your Strength carries another. It climbs higher and moves faster than before - throw a touch higher than feels right."},
-		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 10, "slow": 0.25,
-			"text": "Again, closer to real speed",
-			"sub": "Same pattern, less thick time. Land ten."},
-	]
+	# a new ball count: the same load felt three times over, half speed guided, quarter
+	# guided, then full speed alone. Whatever pattern is already running keeps running;
+	# Cascade itself reads either way (crossing odd, same-hand even), so a count change
+	# never strands it.
+	return tut_paced({"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 6,
+		"prompt": "catch",
+		"text": "%d balls now" % n,
+		"sub": "Your Strength carries another. It climbs higher and moves faster than before - throw a touch higher than feels right."},
+		[5, 5, 10], "finish the lesson")
 
 
 func pattern_lesson_steps(p: int) -> Array:
-	# a new pattern: forced via the "pattern" step key, run slow with the PATTERNS table's
-	# own desc as the teaching text (one source of truth), then drilled toward real speed.
+	# a new pattern: forced via the "pattern" step key, run down the whole pace ladder
+	# with the PATTERNS table's own desc as the teaching text (one source of truth).
 	if p < 0 or p >= PATTERNS.size():
-		return [{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
-			"text": "Keep the cascade going", "sub": "Land three."}]
+		return tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
+			"text": "Keep the cascade going", "sub": "Land three."}, [3, 3, 3], "finish the lesson")
 	var pd: Dictionary = PATTERNS[p]
 	var nm := String(pd["name"])
 	var desc := String(pd.get("desc", "Feel out its shape."))
 	var n := 3   # every pattern lesson reads at 3 (Cascade's own even-count face isn't
 				# taught as a separate lesson any more - it's the same skill, see PATTERNS)
-	return [
-		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p, "goal": "catch", "need": 5,
-			"prompt": "catch", "slow": 0.58,
-			"text": "New pattern: %s" % nm, "sub": desc},
-		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p, "goal": "catch", "need": 8, "slow": 0.28,
-			"text": "%s, closer to speed" % nm,
-			"sub": "Hold its shape as the world speeds up. Land eight."},
-		# the last step TEACHES the key that owns patterns: one press of P visibly hands
-		# the routine back to the plain weave. The lesson never touches pattern_sel, so
-		# what the player chose before the lesson is exactly what they keep after it.
-		{"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "press_p", "need": 1,
-			"prompt": "pattern", "slow": 0.4,
-			"text": "Patterns live on the P key",
-			"sub": "Press P once: the routine swaps back to the plain weave. In any practice, P chooses your pattern - the bottom-left card always names the one running."},
-	]
+	var out: Array = tut_paced({"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p,
+		"goal": "catch", "need": 5, "prompt": "catch",
+		"text": "New pattern: %s" % nm, "sub": desc},
+		[4, 4, 8], "see the key patterns live on")
+	# the last step TEACHES the key that owns patterns: one press of P visibly hands
+	# the routine back to the plain weave. The lesson never touches pattern_sel, so
+	# what the player chose before the lesson is exactly what they keep after it.
+	out.append({"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "press_p", "need": 1,
+		"prompt": "pattern", "slow": 0.4, "next": "finish the lesson",
+		"text": "Patterns live on the P key",
+		"sub": "Press P once: the routine swaps back to the plain weave. In any practice, P chooses your pattern - the bottom-left card always names the one running."})
+	return out
 
 
 func begin_tutorial(id: String) -> void:
@@ -3156,8 +3212,8 @@ func begin_tutorial(id: String) -> void:
 	tut_id = id
 	tut_step = 0
 	tut_active = true
-	tut_pace = 0          # the basics pace ladder re-arms: every lesson opens thick
-	tut_flow_streak = 0
+	tut_hold.clear()      # no beat from a previous lesson is still waiting on a press
+	tut_last_throw = LEFT
 	game_state = ST_PLAY
 	started = true            # a lesson is its own thing, not the opening "first run"
 	_slow_cur = tut_slow()    # a lesson opens ALREADY thick, it does not ease in over the
@@ -3274,8 +3330,15 @@ func tut_setup_step() -> void:
 	tut_tricks = 0
 	tut_keys = 0
 	tut_advance_at = -1
+	# the guided beat re-arms with a BREATH: nothing freezes the world until the step's
+	# own title has had TUT_STEP_READ ticks on screen, so a step never opens mid-ask.
+	# The feed alternation starts opposite the teaching hand, so the very first thing
+	# asked for is a throw from the hand the step deals into.
+	tut_hold.clear()
+	tut_hold_end = tick + TUT_STEP_READ
+	tut_last_throw = other(start_hand)
 	if _demo:
-		print("TUTTRACE setup step=%d goal=%s balls=%d slow=%.2f flow=%s juggle=%s tick=%d" % [tut_step, String(step["goal"]), num_balls, tut_slow(), str(step.get("flow", false)), str(step.get("juggle", false)), tick])
+		print("TUTTRACE setup step=%d goal=%s balls=%d slow=%.2f guide=%s juggle=%s tick=%d" % [tut_step, String(step["goal"]), num_balls, tut_slow(), str(step.get("guide", false)), str(step.get("juggle", false)), tick])
 	# a step with nothing to DO (the key legend) is already met the moment it opens, so
 	# its Enter prompt is live immediately rather than after some press that never comes.
 	# Safe to ask now: every counter above is zeroed, so a step with a real goal cannot
@@ -3287,6 +3350,213 @@ func tut_step_data() -> Dictionary:
 	# the current lesson step, always in range - the one source every tutorial reader uses
 	var steps := tut_lesson(tut_id)
 	return steps[clampi(tut_step, 0, steps.size() - 1)]
+
+
+# -----------------------------------------------------------------------------
+# THE GUIDED BEAT (2026-07-27, Louis). On the 50% and 25% passes of any drill the
+# world does not merely slow down, it STOPS at every action the drill asks for and
+# will not move again until the player makes that action. What it asks for is read
+# off the live sim, never scripted, so it works for one ball, for a five-ball
+# fountain, for a Shower, for a trick lesson - anything the lesson engine can deal.
+#
+# The three questions it asks, in the order a juggler asks them:
+#
+#   1. Does this step's own KEY want pressing right now? (arm the trick, spin) -
+#      first in the beat, because a trick has to be armed BEFORE the throw it shapes.
+#   2. Is a prop about to land? A hand that still holds one is asked to THROW it and
+#      then CATCH ("J then K"): that exchange, repeated, IS the cascade. An empty
+#      hand is asked only to catch.
+#   3. Is the air emptier than the pattern needs? Then the hand whose turn it is
+#      feeds another prop up. Turns alternate, which is what makes a cascade cross.
+#
+# Presses out of turn are swallowed silently (never a whiff, never a wrong throw), and
+# the asked-for press always succeeds - see tut_sure_catch, which takes the failure
+# branches out of on_catch while a beat is being guided. Failing a beat the SCRIPT
+# dealt teaches nothing; the full-speed pass is where failing means something.
+# -----------------------------------------------------------------------------
+func tut_guided() -> bool:
+	# is the step now running one of the two slow, hand-held passes?
+	return tut_active and bool(tut_step_data().get("guide", false))
+
+
+func tut_holding() -> bool:
+	return tut_active and not tut_hold.is_empty()
+
+
+func tut_sure_catch() -> bool:
+	# a catch the guided beat itself asked for cannot be allowed to fail: on_catch's
+	# stamina, collision and chance branches are skipped for it
+	return tut_holding() and tut_hold_names("catch", -1)
+
+
+func tut_air_target() -> int:
+	# how many props the beat keeps in the air at this count. A real cascade of three or
+	# more holds all but the one the hands are working on, so it is num_balls - 1 and the
+	# player is juggling by construction (juggling_catch is satisfied at every catch).
+	# One and TWO are the drills, not the pattern: one has nothing to keep up, and two is
+	# Louis's "throw, throw, catch, catch" - both go up, which is the whole exercise. At
+	# num_balls - 1 the two-ball step would have fed one at a time and quietly taught the
+	# opposite of what it says on the banner.
+	return num_balls if num_balls <= 2 else num_balls - 1
+
+
+func tut_feed_hand() -> int:
+	# whose turn it is to put another prop up: the hand that did NOT throw last, unless
+	# it is empty. Returns -1 when neither hand is holding anything to throw.
+	var h := other(tut_last_throw)
+	if stack(h).is_empty():
+		h = other(h)
+	return h if not stack(h).is_empty() else -1
+
+
+func tut_due_key(step: Dictionary) -> Array:
+	# the one key this step exists to teach, asked for only at a moment when pressing it
+	# would actually DO something - the same check that fixed the Spin prompt in
+	# tut_action_cue, now asked of the paused world too, so the beat can never freeze
+	# waiting on a press the trick gate would silently refuse.
+	if String(step["goal"]) != "trick_use":
+		return []
+	var ti := int(step.get("trick", trick_sel))
+	if ti < 0 or ti >= TRICKS.size() or tut_tricks >= int(step.get("need", 1)):
+		return []
+	var t: Dictionary = TRICKS[ti]
+	var e := {"act": "trick", "hand": -1, "rank": 0, "ok": false,
+		"key": String(k_trick()[0]), "what": String(t["name"]).to_upper()}
+	if String(t["kind"]) == "live":
+		if balls_airborne() >= int(t["min_air"]) and tick >= trick_ready:
+			return [e]
+		return []
+	if not trick_primed:
+		e["what"] = "arm %s" % String(t["name"]).to_upper()
+		return [e]
+	return []
+
+
+func tut_due_actions() -> Array:
+	# everything the paused world is entitled to ask for at this instant (see the
+	# region comment above). Ranks order the beat: trick, then throw, then catch.
+	var step := tut_step_data()
+	var out: Array = tut_due_key(step)
+	# the soonest prop arriving at each hand, if it is close enough to be this beat.
+	# A negative lead (the gap let it slip past) still counts - it is still catchable,
+	# and far inside a lesson's W_LATE window, so the guided catch is still a Perfect.
+	var soon := [9999, 9999]
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		var d := b.land_tick - tick
+		if d > TUT_EXCHANGE_LEAD:
+			continue
+		var h := clampi(b.to_hand, 0, 1)
+		if d < soon[h]:
+			soon[h] = d
+	var kt := k_throw()
+	var kc := k_catch()
+	for h: int in [LEFT, RIGHT]:
+		if soon[h] > TUT_EXCHANGE_LEAD:
+			continue
+		if not stack(h).is_empty():
+			# throw FIRST: the hand has to be empty to receive, and clearing it under
+			# the incoming prop is the exchange the whole pattern is made of
+			out.append({"act": "throw", "hand": h, "rank": 1, "ok": false,
+				"key": String(kt[h]), "what": "throw  %s hand" % ("left" if h == LEFT else "right")})
+		out.append({"act": "catch", "hand": h, "rank": 2, "ok": false,
+			"key": String(kc[h]), "what": "catch  %s hand" % ("left" if h == LEFT else "right")})
+	if not out.is_empty():
+		return out
+	# nothing arriving and no key owed: does the pattern want another prop in the air?
+	if balls_airborne() < tut_air_target():
+		var fh := tut_feed_hand()
+		if fh >= 0:
+			out.append({"act": "throw", "hand": fh, "rank": 1, "ok": false,
+				"key": String(kt[fh]), "what": "throw  %s hand" % ("left" if fh == LEFT else "right")})
+	return out
+
+
+func tut_hold_update() -> void:
+	# open a beat if the world has something to ask for. Never while one is already
+	# open, never before the step has been readable for a moment, and never once the
+	# step's goal is MET - a won step goes back to being free play, however slow it is,
+	# because "keep practising as long as you like" has to actually mean that.
+	if not tut_hold.is_empty() or not tut_guided():
+		return
+	if collapsing or results_open or tut_advance_at >= 0:
+		return
+	if tick - tut_hold_end < TUT_HOLD_GAP:
+		return
+	var due := tut_due_actions()
+	if due.is_empty():
+		return
+	due.sort_custom(func(a, b): return int(a["rank"]) < int(b["rank"]))
+	tut_hold = due
+	tut_hold_at = tick
+	play_sfx("ui", -20.0)
+
+
+func tut_hold_rank() -> int:
+	# the rank the beat will hear right now: a press for a LATER part of the beat is
+	# not accepted early, so the lesson can never teach catch-then-throw
+	var r := 99
+	for e in tut_hold:
+		if not bool(e.get("ok", false)):
+			r = mini(r, int(e["rank"]))
+	return r
+
+
+func tut_hold_names(act: String, h: int) -> bool:
+	# does the open beat still want this action? (h < 0 asks "any hand"). Queries only:
+	# the handler does the deed and then calls tut_hold_mark to bank it.
+	if not tut_holding():
+		return false
+	var rank := tut_hold_rank()
+	for e in tut_hold:
+		if bool(e.get("ok", false)) or int(e["rank"]) != rank:
+			continue
+		if String(e["act"]) == act and (h < 0 or int(e["hand"]) < 0 or int(e["hand"]) == h):
+			return true
+	return false
+
+
+func tut_hold_mark(act: String, h: int) -> void:
+	# the asked-for thing has actually HAPPENED. When the last of them has, the world
+	# moves again and the next beat may not stop it for TUT_HOLD_GAP ticks, so the
+	# throw and the catch just made are seen happening rather than teleporting.
+	if not tut_holding():
+		return
+	for e in tut_hold:
+		if bool(e.get("ok", false)):
+			continue
+		if String(e["act"]) == act and (int(e["hand"]) < 0 or h < 0 or int(e["hand"]) == h):
+			e["ok"] = true
+			break
+	for e in tut_hold:
+		if not bool(e.get("ok", false)):
+			return
+	tut_hold.clear()
+	tut_hold_end = tick
+
+
+func tut_hold_abort() -> void:
+	# something took the beat's subject away (a drop, an R re-deal): let the world go
+	# rather than sit frozen waiting on a catch that can never come
+	if tut_hold.is_empty():
+		return
+	tut_hold.clear()
+	tut_hold_end = tick
+
+
+func tut_hold_autoplay() -> void:
+	# --demo has no hands, so it performs the beat itself, one rank at a time: a dev
+	# run still walks a guided lesson end to end (never in normal play)
+	var rank := tut_hold_rank()
+	for e in tut_hold:
+		if bool(e.get("ok", false)) or int(e["rank"]) != rank:
+			continue
+		match String(e["act"]):
+			"throw": on_throw_press(int(e["hand"]))
+			"catch": on_catch(int(e["hand"]))
+			"trick": on_trick()
+		return
 
 
 func tut_incoming(h: int) -> bool:
@@ -3306,6 +3576,7 @@ func tut_reset_step() -> void:
 	_stack_r.clear()
 	charging = [false, false]
 	tut_advance_at = -1
+	tut_hold_abort()   # whatever beat was frozen was about props that no longer exist
 	tut_setup_step()   # balls now empty, so it deals the step fresh
 	play_sfx("ui2", -13.0)
 
@@ -3343,6 +3614,8 @@ func tut_on_throw(h: int) -> void:
 		tut_threw_l = true
 	else:
 		tut_threw_r = true
+	tut_last_throw = h   # feed throws alternate off this, which is what crosses a cascade
+	tut_hold_mark("throw", h)
 	tut_check()
 
 
@@ -3361,22 +3634,6 @@ func tut_on_catch(juggled: bool) -> void:
 		if tut_count > 0:
 			play_sfx("whiff", -14.0)
 		tut_count = 0
-		tut_flow_streak = 0   # a solo catch is a broken rhythm for the pace ladder too
-		return
-	# the PACE ladder (basics only): every TUT_PACE_STREAK clean catches in a row earn
-	# the next rung down, announced so speeding up reads as the reward it is
-	if tut_id == "balls":
-		tut_flow_streak += 1
-		if tut_flow_streak % TUT_PACE_STREAK == 0 and tut_pace < TUT_PACES.size() - 1:
-			tut_pace += 1
-			var pl := TUT_PACES[tut_pace]
-			var ptxt := "FULL SPEED" if pl <= 0.0 else "faster  -  %d%% slow" % int(round(pl * 100.0))
-			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), ptxt, Color(0.75, 0.92, 1.0))
-			play_sfx("streak", -9.0)
-	# the finale counts only at the ladder's floor (Louis: ten catches at 0 slowmo).
-	# Catches above the floor still feed the ladder - they are how the floor is
-	# reached - but the ten must all land at genuine full speed.
-	if bool(step.get("finale", false)) and tut_pace < TUT_PACES.size() - 1:
 		return
 	tut_count += 1
 	tut_check()
@@ -3400,10 +3657,12 @@ func tut_check() -> void:
 	if done:
 		# the goal is met, but the step HOLDS OPEN: the banner flips to "good job -
 		# Enter continues, or keep trying", and only the player's Enter moves on
-		# (Louis: never cut away while they are still trying it out). A GUIDED step is
-		# the exception - it flows on by itself from tut_maintain, a beat later and from
-		# a safe context. A "read" step is met at setup, so it makes no noise about it.
+		# (Louis: never cut away while they are still trying it out). A "read" step is
+		# met at setup, so it makes no noise about it.
 		tut_advance_at = tick
+		# the beat that was frozen is over too: a WON step goes back to free play, so a
+		# player who wants to keep going is not stopped at every prop from here on
+		tut_hold_abort()
 		if String(step["goal"]) != "read":
 			play_sfx("streak", -10.0)
 
@@ -3422,18 +3681,6 @@ func tut_advance() -> void:
 
 
 func tut_maintain() -> void:
-	# a GUIDED step carries itself: "press J, now press D" is a call-and-response, and
-	# stopping to ask for Enter between the call and the response would break the very
-	# thing it is teaching. So the moment its goal is met it waits one beat (long enough
-	# to read as a win) and flows to the next call. This runs HERE, on the tick, rather
-	# than from inside the catch that met the goal - tut_setup_step re-deals the table,
-	# and doing that underneath on_catch would pull the ball out from under the rest of
-	# it. Enter is left alone entirely, so that when it does appear on the freestyle
-	# steps it means one thing only: give me another ball.
-	if tut_advance_at >= 0 and bool(tut_step_data().get("flow", false)) \
-			and tick - tut_advance_at >= TUT_FLOW_HOLD:
-		tut_advance()
-		return   # the table is now the NEXT step's: nothing below may touch it
 	# the --demo autoplayer has no Enter: it takes each met goal after a beat, so a
 	# dev run can walk a whole lesson end to end unattended (never in normal play).
 	# It has no R or P either, so on a key-teaching step it mimes the press through
@@ -3521,6 +3768,12 @@ func tut_kind_tag() -> String:
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var step := tut_step_data()
 	var steps := tut_lesson(tut_id)
+	if tut_holding():
+		# a breath of dark over the STAGE while a beat has the world frozen: the picture
+		# stays readable, but the world visibly stops, which is the whole message. Laid
+		# down first, so everything the lesson draws to explain itself sits on top of it
+		# at full brightness rather than being dimmed along with the scenery.
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.30))
 	draw_tut_prompts(font, s, step)   # a timing ring + bare handed key over the hands, no boxes
 	# a SMALL rectangle at the top (2026-07-18, Louis: "not above and below, out of
 	# vision, long texts of what to do - that is bad design"): the lesson kind, its
@@ -3530,34 +3783,34 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var bw := s.x * 0.6
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := 24.0
-	var bh := 64.0
+	var bh := 82.0   # one line taller than it was: the PACE line below earns its place,
+					 # because "why is the world suddenly quick" is the question the
+					 # three-pass ladder would otherwise leave hanging
 	draw_rect(Rect2(bx, by, bw, bh), Color(0.05, 0.03, 0.05, 0.86))
 	draw_rect(Rect2(bx, by, bw, bh), Color(0.82, 0.62, 0.34, 0.55), false, 2.0)
 	var kind_col := Color(1.0, 0.72, 0.4) if tut_id.begins_with("trick_") else (Color(0.65, 0.85, 1.0) if tut_id.begins_with("pattern_") else Color(0.85, 0.75, 0.6))
 	draw_string(font, Vector2(bx, by + 18.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_CENTER, bw, 12, kind_col)
 	draw_fit_string(font, Vector2(bx, by + 42.0), String(step["text"]), HORIZONTAL_ALIGNMENT_CENTER, bw - 24.0, 20, Color(1.0, 0.9, 0.6))
+	# WHICH PASS this is, in the player's own terms - the guided ones say so outright,
+	# so the moment the hand-holding stops is announced rather than discovered
+	var guided := bool(step.get("guide", false))
+	var pace_col := Color(0.72, 0.88, 1.0) if guided else Color(1.0, 0.84, 0.5)
+	draw_fit_string(font, Vector2(bx, by + 60.0), tut_pace_line(step), HORIZONTAL_ALIGNMENT_CENTER, bw - 24.0, 12, pace_col)
 	# the progress line flips to the GOOD JOB state once the goal is met: the step
 	# stays fully playable, and Enter is the player's own "I am done trying" (Louis).
-	# A guided step never says it - it is already flowing on by itself - and a read
-	# step has nothing to be proud of yet.
+	# A read step has nothing to be proud of yet.
 	var done := tut_advance_at >= 0
-	var flow := bool(step.get("flow", false))
-	if done and not flow and String(step["goal"]) != "read":
+	if done and String(step["goal"]) != "read":
 		var ga := 0.75 + 0.25 * sin(atick() * 0.1)
-		draw_string(font, Vector2(bx, by + 58.0), "GOOD JOB  -  you got it", HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.72, 0.95, 0.7, ga))
+		draw_string(font, Vector2(bx, by + 76.0), "GOOD JOB  -  you got it", HORIZONTAL_ALIGNMENT_CENTER, bw, 13, Color(0.72, 0.95, 0.7, ga))
 	elif not done:
 		var prog := "Step %d of %d" % [tut_step + 1, steps.size()]
 		if int(step["need"]) > 1 and String(step["goal"]) == "catch":
 			# a juggle-gated step counts CONSECUTIVE juggling catches, so the label says
-			# so - otherwise a count that drops back to zero looks like a bug (Louis).
-			# The finale is plainer still: its ten only run at the pace ladder's floor,
-			# so until then the label says what the catches are actually buying.
-			if bool(step.get("finale", false)) and tut_pace < TUT_PACES.size() - 1:
-				prog += "   -   %d%% slow, clean catches speed it up" % int(round(TUT_PACES[tut_pace] * 100.0))
-			else:
-				var lbl := "at full speed" if bool(step.get("finale", false)) else ("juggled in a row" if bool(step.get("juggle", false)) else "caught")
-				prog += "   -   %s %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
-		draw_string(font, Vector2(bx, by + 58.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 12, Color(0.8, 0.75, 0.68))
+			# so - otherwise a count that drops back to zero looks like a bug (Louis)
+			var lbl := "juggled in a row" if bool(step.get("juggle", false)) else "caught"
+			prog += "   -   %s %d / %d" % [lbl, mini(tut_count, int(step["need"])), int(step["need"])]
+		draw_string(font, Vector2(bx, by + 76.0), prog, HORIZONTAL_ALIGNMENT_CENTER, bw, 12, Color(0.8, 0.75, 0.68))
 	# the controls that actually WORK in a lesson, always, along the very bottom - plus
 	# the lesson's own key (trick / pattern) so every command the game has gets its
 	# moment of attention in the lesson that owns it (Louis)
@@ -3573,15 +3826,13 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	items.append([k_pause(), "game menu"])
 	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
 	# ONE cue slot, and exactly one thing may hold it - a screen that asks for two keys
-	# at once has asked for neither. Enter wins whenever it is live, because the whole
-	# point of its own callout is that it stops being missable; otherwise the centred
-	# keycap (Louis: dead centre, not a sentence at either edge) names whatever the
-	# live sim wants pressed right now.
-	if done and flow:
-		# the beat a guided step takes on its win before flowing to the next call: the
-		# win, and nothing else. Naming the next key here (the cue would, the ball being
-		# in the other hand already) would ask for a press the banner has not explained.
-		draw_text_shout(font, Vector2(0, s.y - 68.0), "yes  -  that's it", HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.72, 0.95, 0.7))
+	# at once has asked for neither. A frozen BEAT wins outright: the world is not
+	# moving until it is answered, so nothing else on screen is the live question.
+	# Enter comes next, because the whole point of its own callout is that it stops
+	# being missable; otherwise the centred keycap (Louis: dead centre, not a sentence
+	# at either edge) names whatever the live sim wants pressed right now.
+	if tut_holding():
+		draw_tut_hold_cue(font, s)
 	elif done:
 		draw_tut_enter_callout(font, s, step, tut_step >= steps.size() - 1)
 	else:
@@ -3646,6 +3897,66 @@ func draw_tut_special_cue(font: Font, s: Vector2, cue: Dictionary) -> void:
 	draw_rect(Rect2(bx, by + 6.0, cw, bh - 12.0), Color(1.0, 0.72, 0.4, 0.82 + 0.18 * pulse))
 	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, fs, Color(0.12, 0.07, 0.03))
 	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.93, 0.72))
+
+
+func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
+	# THE frozen beat's own prompt, in the same central bottom slot the Enter callout and
+	# the special cue use (Louis approved that position; two prompt homes would be two
+	# places to look). It says three things and nothing else:
+	#
+	#   - the world has STOPPED and is waiting on you (a wash of dark over the stage,
+	#     so a stopped sim can never be mistaken for a hung game),
+	#   - the key, or the keys IN THEIR ORDER with a "then" between them - a two-key
+	#     beat like "J then K" is the exchange the cascade is made of and reads as one
+	#     move, not two asks,
+	#   - which hand each belongs to, spelled out, since that is the half beginners
+	#     get wrong.
+	#
+	# A key already pressed this beat goes green and quiet, so a combination shows its
+	# own progress with no counter anywhere. (The dark wash over the stage is laid down
+	# by draw_tutorial_banner BEFORE any of the lesson's own furniture, so it dims the
+	# WORLD and not the HUD that is explaining it.)
+	var fs := 22
+	var pulse := 0.5 + 0.5 * sin(atick() * 0.13)
+	# measure: keycap, its label, and a "then" separator before every entry but the first
+	var sep := "  then  "
+	var sepw := font.get_string_size(sep, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var caps := PackedFloat32Array()
+	var labs := PackedFloat32Array()
+	var total := 0.0
+	for i in tut_hold.size():
+		var e: Dictionary = tut_hold[i]
+		var cw := maxf(46.0, font.get_string_size(String(e["key"]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 26.0)
+		var lw := font.get_string_size(String(e["what"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		caps.append(cw)
+		labs.append(lw)
+		total += maxf(cw, lw) + (sepw if i > 0 else 0.0)
+	# the card is sized to the WIDEST thing in it, header included (Louis's standing
+	# rule: no text ever leaves its container - the header was being clipped mid-word
+	# by a card measured off the keycaps alone)
+	var head := "PAUSED  -  the world is waiting for you"
+	var bw := maxf(total + 56.0, font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 44.0)
+	var bh := 104.0
+	var bx := s.x * 0.5 - bw * 0.5
+	var by := s.y - 162.0
+	soft_card(Rect2(bx, by, bw, bh), Color(0.09, 0.05, 0.10, 0.94), Color(0.72, 0.88, 1.0, 0.40 + 0.35 * pulse), 2.0, 11.0, 14.0, 0.05)
+	draw_fit_string(font, Vector2(bx + 12.0, by + 24.0), head, HORIZONTAL_ALIGNMENT_CENTER, bw - 24.0, 12, Color(0.72, 0.88, 1.0, 0.9))
+	var x := bx + (bw - total) * 0.5
+	for i in tut_hold.size():
+		var e: Dictionary = tut_hold[i]
+		if i > 0:
+			draw_string(font, Vector2(x - sepw, by + 64.0), sep, HORIZONTAL_ALIGNMENT_CENTER, sepw, 14, Color(0.78, 0.74, 0.70, 0.85))
+		var slot := maxf(caps[i], labs[i])
+		var cw2: float = caps[i]
+		var cx := x + slot * 0.5 - cw2 * 0.5
+		var ok := bool(e.get("ok", false))
+		var col := Color(0.55, 0.90, 0.55) if ok else Color(1.0, 0.86, 0.42)
+		var a := 0.45 if ok else (0.82 + 0.18 * pulse)
+		draw_rect(Rect2(cx, by + 38.0, cw2, 34.0), Color(col.r, col.g, col.b, a))
+		draw_string(font, Vector2(cx, by + 64.0), String(e["key"]), HORIZONTAL_ALIGNMENT_CENTER, cw2, fs, Color(0.10, 0.06, 0.03))
+		draw_fit_string(font, Vector2(x, by + 92.0), String(e["what"]), HORIZONTAL_ALIGNMENT_CENTER, slot, 13,
+			Color(0.62, 0.86, 0.62, 0.8) if ok else Color(1.0, 0.93, 0.75, 0.95))
+		x += slot + sepw
 
 
 func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool) -> void:
@@ -3780,8 +4091,14 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 			continue
 		if d < soonest[h]:
 			soonest[h] = d
-	for h in [LEFT, RIGHT]:
+	# while a beat has the world frozen, ONLY the hands that beat names get a prompt: a
+	# calmer key over the other hand is a second ask, and the whole point of the pause
+	# is that there is exactly one thing to do
+	var beat := tut_holding()
+	for h: int in [LEFT, RIGHT]:
 		if soonest[h] > lead:
+			continue
+		if beat and not tut_hold_names("catch", h):
 			continue
 		var hp: Vector2 = hpos[h]
 		draw_timing_ring(hp, soonest[h])
@@ -3793,6 +4110,8 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	var goal := String(step["goal"])
 	for hh: int in [LEFT, RIGHT]:
 		if not holding[hh]:
+			continue
+		if beat and not tut_hold_names("throw", hh):
 			continue
 		# a GUIDED step is a call-and-response with one ball on the table, so the hand
 		# holding it IS the ask: its key burns as brightly as any named goal would. The
@@ -4893,6 +5212,18 @@ func on_catch(h: int) -> void:
 		return  # the act has fallen apart: you watch it all come down, you cannot save it.
 				# Without this a player (or the autoplayer) could keep catching the still-
 				# airborne props after the crowd walked, grinding score with the clock off.
+	var sure := false
+	if tut_holding():
+		if not tut_hold_names("catch", h):
+			return  # a frozen beat hears only what it asked for, and in the order it asked:
+					# a catch key pressed before the throw that makes room is not a whiff,
+					# it is simply not the ask yet
+		# a catch the guided beat itself asked for MUST land (Louis: "when he does, the
+		# game continues, with a successful catch executed of course"). Every way this
+		# function can lose a prop below is skipped for it: the beat froze the world at
+		# the prop's own arrival, so the timing is already Perfect, and being failed by
+		# a stamina bar or a chance roll on a press the script demanded teaches nothing.
+		sure = true
 	# a hand that already HOLDS a ball may still catch (Louis): the stack takes
 	# another. The old "hand occupied, no catch" traffic rule is gone - traffic
 	# is now the player's own problem, and holding two is a legitimate rescue.
@@ -4908,6 +5239,9 @@ func on_catch(h: int) -> void:
 				best = b
 				best_d = d
 	if best == null or best_d > COMMIT:
+		if sure:
+			tut_hold_abort()   # the beat asked for a catch and there is nothing to catch:
+			return             # let the world go rather than freeze on an impossible ask
 		# reached for empty air: a whiff. Discourage mashing with a small wobble.
 		applause = maxf(0.0, applause + APPL_WHIFF)
 		catch_flash[h] = tick
@@ -4915,21 +5249,21 @@ func on_catch(h: int) -> void:
 		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
 		play_sfx("whiff", -12.0)
 		return
-	if best_d > W_LATE:
+	if best_d > W_LATE and not sure:
 		# way off the arrival: a genuine mistime, the ball drops
 		drop_ball(best, "MISTIME")
 		return
 	# out of stamina: your hands simply cannot close (Louis). A well-timed arrival that
 	# would otherwise be caught slips through, which soon trips the drop limit and ends
 	# the set - see the exhaustion redirect in drop_ball, straight to eat/sleep.
-	if stamina <= 0.0:
+	if stamina <= 0.0 and not sure:
 		drop_ball(best, "SPENT")
 		return
 	# hard mode (set_collide): a ball that clacked another mid-air only catches
 	# on PERFECT timing - the full Perfect window (Louis: same frames as normal,
 	# not halved), but the Good/Late chance roll never applies. Saving one still
 	# counts as the Perfect it timing-wise is.
-	if best.bumped and best_d > perfect_window():
+	if best.bumped and best_d > perfect_window() and not sure:
 		drop_ball(best, "collided")
 		return
 	# Perfect timing always secures. A Good or Late catch is a chance that rises
@@ -4937,7 +5271,7 @@ func on_catch(h: int) -> void:
 	# The Perfect window itself shrinks for off-standard throws (Focus widens it),
 	# so a wrong-height throw is hard to catch cleanly and easy to lose.
 	var wperf := perfect_window()
-	if best_d > wperf:
+	if best_d > wperf and not sure:
 		# The Gale: the wind gives a Good or Late catch no chance at all - the
 		# roll below never runs, so only a genuine Perfect ever lands tonight
 		if encore_on("gale"):
@@ -4961,6 +5295,7 @@ func on_catch(h: int) -> void:
 	caught += 1
 	career["catches"] = int(career["catches"]) + 1
 	if tut_active:
+		tut_hold_mark("catch", h)   # the beat's catch has landed; the world may move again
 		tut_on_catch(juggled)   # a guided lesson counts your clean catches toward its goal
 	spend_stamina(STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	# NO per-prop catch texture here (Louis, 2026-07-18: only perfect/good/late/
@@ -5137,6 +5472,14 @@ func check_goals() -> void:
 func on_throw_press(h: int) -> void:
 	if collapsing or stack(h).is_empty():
 		return   # nothing you throw during a collapse counts; the set is already over
+	if tut_holding():
+		# a frozen beat throws on the PRESS, not the release: with the clock stopped
+		# there is no time to hold the key THROUGH, so hold-for-height cannot be read
+		# and the guided throw is always the snappy tap the drill is teaching. A press
+		# the beat did not ask for is swallowed whole - never a throw out of sequence.
+		if tut_hold_names("throw", h):
+			do_throw(h, 0)   # do_throw calls tut_on_throw, which banks it on the beat
+		return
 	charging[h] = true
 	charge_start[h] = tick
 
@@ -5731,6 +6074,8 @@ func on_trick() -> void:
 	# on the drill steps still acts on the taught trick, never on some other one.
 	# In any OTHER lesson Space is not part of the exercise: say so instead of firing
 	# a trick invisibly under a pattern drill.
+	if tut_holding() and not tut_hold_names("trick", -1):
+		return   # a frozen beat hears only what it asked for (see on_catch)
 	if tut_active and tut_id.begins_with("trick_"):
 		trick_sel = trick_by_id(tut_id.substr(6))
 	elif tut_active:
@@ -5758,6 +6103,16 @@ func on_trick() -> void:
 			trick_ready = tick + TRICK_COOLDOWN
 			set_trick_msg("SPIN")
 			play_sfx("streak", -7.0)
+			if tut_active:
+				# THE Spin lesson bug (Louis: "I do it but it won't register"). A
+				# "trick_use" step counts through reward_trick - and reward_trick is
+				# reached only from a catch whose BALL carries a trick tag, which
+				# nothing but an ARM trick ever sets, and it returns early on a zero
+				# bonus, which Spin's is. So the step's counter could never move and
+				# the lesson dead-ended however many perfect Spins were performed.
+				# A live trick has no shaped throw to land later: it IS the press, so
+				# it is banked right here, the moment it fires.
+				tut_tricks += 1
 		"toggle":
 			# one press ON, the next press OFF, smoothly mid-pattern (Louis).
 			# Only one toggle runs at a time; switching replaces the old one.
@@ -5780,6 +6135,7 @@ func on_trick() -> void:
 			set_trick_msg("%s  -  next throw" % String(t["name"]).to_upper())
 			play_sfx("ui2", -13.0)
 	if tut_active:
+		tut_hold_mark("trick", -1)   # the beat's key has been pressed
 		tut_check()   # a trick_on / trick_off lesson step clears the instant Space toggles
 
 
@@ -6165,22 +6521,18 @@ func slow_target() -> float:
 
 
 func tut_slow() -> float:
-	# the lesson's own slow-motion floor. A step may pin its own value ("slow" key, e.g.
-	# a trick step stays thick while its drill step speeds up). The BASICS lesson reads
-	# the earned pace ladder instead (Louis): clean catches step the world faster, drops
-	# step it slower, so the pace always matches the player rather than the script.
-	# Other lessons keep the gentle scripted ease from thick to near-real.
+	# the lesson's own slow-motion floor, and now always the step's OWN pinned value:
+	# every drill step is built by tut_paced, which writes one of TUT_PHASES into it,
+	# and the few one-off key-teaching steps pin their own. Nothing is derived from how
+	# far through the lesson we are any more, and nothing is earned or lost mid-step -
+	# the pace is a property of the pass being run, which is what makes "half speed,
+	# then quarter, then full" a promise the lesson can actually keep.
 	var steps := tut_lesson(tut_id)
 	if tut_step >= 0 and tut_step < steps.size():
 		var s: Dictionary = steps[tut_step]
 		if s.has("slow"):
 			return clampf(float(s["slow"]), 0.0, 1.0)
-	if tut_id == "balls":
-		return TUT_PACES[clampi(tut_pace, 0, TUT_PACES.size() - 1)]
-	if steps.size() <= 1:
-		return TUT_SLOW_START
-	var f := float(tut_step) / float(steps.size() - 1)
-	return lerpf(TUT_SLOW_START, TUT_SLOW_END, clampf(f, 0.0, 1.0))
+	return TUT_SLOW_START
 
 
 func slow_amount() -> float:
@@ -6859,16 +7211,14 @@ func drop_ball(b: Ball, why: String) -> void:
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
 	if tut_active:
-		# a drop in the basics hands the player their thick time back (Louis: bad
-		# performances move the slowmo back up), and it breaks any in-a-row count a
-		# juggle-gated step was building - ten at full speed means ten unbroken
-		tut_flow_streak = 0
+		# a drop breaks any in-a-row count a juggle-gated step was building - ten at
+		# full speed means ten unbroken
 		if bool(tut_step_data().get("juggle", false)):
 			tut_count = 0
-		if tut_id == "balls" and tut_pace > 0:
-			tut_pace -= 1
-			add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30),
-				"slower  -  find the rhythm again", Color(0.95, 0.78, 0.5))
+		# ...and it takes the subject of any frozen beat away with it. Without this the
+		# world would sit stopped forever waiting on a catch of a prop that is now on
+		# the floor: the one way a guided beat could deadlock.
+		tut_hold_abort()
 	if set_shake and not reduce_motion:
 		shake = 5.0
 	freeze = 1 if reduce_motion else 8   # a short hit-stop so the loss registers before play rolls on
@@ -6987,8 +7337,21 @@ func update_sim() -> void:
 			lost.append(b)
 		elif b.state == STATE_FLIGHT and tick % 2 == 0:
 			# the flight trail: sample the path so a comet tail follows the
-			# prop, longer for higher (riskier) throws, so risk is legible at a glance
-			b.trail.append(flight_pos(b))
+			# prop, longer for higher (riskier) throws, so risk is legible at a glance.
+			#
+			# Samples must be SPACED, not merely taken (2026-07-27). draw_trail offsets
+			# each one sideways by up to ~3px per side to build one tapered ribbon, and
+			# an offset that outruns the gap between two samples folds the ribbon back
+			# through itself - a self-intersecting polygon, which is the "Invalid
+			# polygon data, triangulation failed" spam the renderer has been printing.
+			# Two ways to crowd samples: a prop at the top of its arc (barely moving),
+			# and a prop sitting PAST its arrival in the MISS_GRACE beat before it is
+			# declared dropped, where flight_pos clamps and repeats exactly. TRAIL_STEP
+			# (squared) answers both - a slow prop simply keeps a shorter tail, which is
+			# what a comet tail does anyway.
+			var np := flight_pos(b)
+			if b.trail.is_empty() or b.trail[b.trail.size() - 1].distance_squared_to(np) > TRAIL_STEP_SQ:
+				b.trail.append(np)
 			var maxlen := 5 + int(clampf(b.height, 0.0, 1.4) * 8.0)
 			while b.trail.size() > maxlen:
 				b.trail.remove_at(0)
@@ -8298,6 +8661,19 @@ func draw_trail(b: Ball) -> void:
 	var cool := clampf(b.height * 0.5, 0.0, 0.6)
 	var base := b.color.lerp(Color(0.72, 0.82, 1.0), cool)
 	var sc := prop_scale(b.kind)
+	# A path that DOUBLES BACK cannot be one ribbon, and one pattern makes that the
+	# normal case: a Column goes straight up and straight down the same line, so the
+	# offset that builds the strip flips to the other side at the apex and the polygon
+	# ties itself in a bow. Godot's triangulator refuses it, once per prop per frame -
+	# the other half of the "Invalid polygon data" spam (the first half was crowded
+	# samples, fixed at the sampler in update_sim). A retracing tail has no width to
+	# show anyway, so it falls back to a plain stroked line: no triangulation, one draw
+	# call either way, and on screen the difference is a column's tail losing a taper
+	# nobody could have seen on a 6px-wide vertical path.
+	for i in range(1, n - 1):
+		if (b.trail[i] - b.trail[i - 1]).dot(b.trail[i + 1] - b.trail[i]) < 0.0:
+			draw_polyline(b.trail, Color(base.r, base.g, base.b, 0.16), 3.0 * sc, true)
+			return
 	# ONE tapered ribbon with a per-vertex alpha ramp, not one circle per sample. A
 	# trail runs to 16 samples and a big set has seven props in the air, so the old way
 	# was up to 112 draw calls a frame for the comet tails alone - measured at roughly
@@ -8861,6 +9237,45 @@ func draw_star4(c: Vector2, r: float, col: Color) -> void:
 		c + Vector2(0.0, -r), c + Vector2(i, -i), c + Vector2(r, 0.0), c + Vector2(i, i),
 		c + Vector2(0.0, r), c + Vector2(-i, i), c + Vector2(-r, 0.0), c + Vector2(-i, -i),
 	]), col)
+
+
+func draw_coin(c: Vector2, r: float, col: Color) -> void:
+	# THE money mark, in one place: the hub's PURSE card and every spending screen's
+	# gold readout both call it, so gold looks like one currency everywhere. It was a
+	# flat yellow dot with a white blob on it, which is the oldest-looking thing left
+	# on a screen next to the money hat - so it is drawn as a STRUCK COIN instead,
+	# on the hat's own rule (draw the object, let it glint, never a shape standing in
+	# for a thing): a dark milled rim, a raised face inside it, a four-point star
+	# pressed into the middle, a specular crescent up its top-left and the shadow
+	# opposite. Everything scales off r, so the same call serves a 7px card icon and
+	# a 12px shop readout.
+	# DETAIL IS A FUNCTION OF SIZE here, and getting that wrong is what makes small icons
+	# muddy: at the hub card's 7px radius a milled rim and a struck emblem crowd into a
+	# gear, so the small coin is only body, rim, shadow and glint - four marks - and the
+	# minting appears once there is room for it.
+	var big := r >= 9.0
+	var rim := Color(col.r * 0.58, col.g * 0.44, col.b * 0.16, col.a)
+	var face := Color(minf(1.0, col.r * 1.04), minf(1.0, col.g * 0.99), minf(1.0, col.b * 0.80), col.a)
+	if big:
+		# the milling: MANY SHORT teeth, barely proud of the rim, drawn under it so only
+		# their tips show. Fewer and longer (14 teeth reaching to 1.1r) turned the coin
+		# into a little sun - milling is a texture on an edge, not a set of rays.
+		for i in 20:
+			var a := TAU * float(i) / 20.0
+			draw_line(c + Vector2(cos(a), sin(a)) * (r * 0.94), c + Vector2(cos(a), sin(a)) * (r * 1.05), rim, maxf(1.0, r * 0.12))
+	draw_circle(c, r, rim)
+	draw_circle(c, r * 0.86, face)
+	# THE ROUNDNESS: a thin shadow crescent low-right and a thin light crescent up-left,
+	# both hugging the face's own edge. Thick central arcs read as a ring with a hole
+	# in it; hugging the edge reads as a disc catching the stage lights.
+	draw_arc(c, r * 0.70, PI * 0.05, PI * 0.85, 18, Color(0.32, 0.18, 0.03, 0.40 * col.a), maxf(1.0, r * 0.15), true)
+	draw_arc(c, r * 0.70, PI * 1.15, PI * 1.9, 18, Color(1.0, 0.99, 0.88, 0.5 * col.a), maxf(1.0, r * 0.15), true)
+	if big:
+		# the die STRIKE, a pressed impression rather than a bright emblem: a mark
+		# LIGHTER than its face reads as something stuck on the coin, not struck into it
+		draw_star4(c, r * 0.34, Color(col.r * 0.66, col.g * 0.50, col.b * 0.20, 0.8 * col.a))
+	# and the specular: a small bright cap up the top-left, where the lights are
+	draw_circle(c + Vector2(-r * 0.30, -r * 0.34), maxf(1.2, r * 0.20), Color(1.0, 1.0, 0.94, 0.9 * col.a))
 
 
 func ellipse_outline(c: Vector2, rx: float, ry: float, col: Color, w: float) -> void:
@@ -10182,8 +10597,9 @@ func draw_purse(font: Font, right_x: float, y: float) -> void:
 	var gc := Color(1.0, 0.86, 0.45).lerp(Color(1.0, 0.98, 0.85), fl)
 	var txt := "%s g" % commafy(money)
 	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	draw_circle(Vector2(right_x - tw - 22.0, y - 8.0), 9.0, Color(1.0, 0.84, 0.4))
-	draw_circle(Vector2(right_x - tw - 25.0, y - 11.0), 3.0, Color(1.0, 0.95, 0.7))
+	# the coin grows a touch with the flash too, so gold changing hands is felt on the
+	# object and not only on the number beside it
+	draw_coin(Vector2(right_x - tw - 24.0, y - 8.0), 10.0 + 1.5 * fl, Color(1.0, 0.84, 0.4))
 	draw_string(font, Vector2(right_x - tw, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
 
 
@@ -11272,8 +11688,7 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 		"egg":
 			fill_ellipse(c, 5.5, 7.5, col)
 		"coin":
-			draw_circle(c, 7.5, col)
-			draw_circle(c + Vector2(-2.0, -2.0), 2.2, Color(1.0, 1.0, 1.0, 0.45))
+			draw_coin(c, 7.5, col)
 		"book":
 			draw_rect(Rect2(c.x - 8.0, c.y - 7.0, 7.0, 14.0), col)
 			draw_rect(Rect2(c.x + 1.0, c.y - 7.0, 7.0, 14.0), Color(col.r, col.g, col.b, 0.65))
