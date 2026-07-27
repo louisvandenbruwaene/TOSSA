@@ -8093,10 +8093,18 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			draw_crate(Vector2(s.x * 0.20, fy), 26.0, 18.0)
 		2:   # small theatre: velvet wings and a valance frame the stage, a hung velvet
 			# back wall behind it (2026-07-27 - the middle of the room was a flat void),
-			# and a gilded proscenium arch over the whole picture
+			# and a gilded proscenium arch over the whole picture.
+			# 2026-07-27 (Louis: "the small theater in particular looks bland"): it had
+			# drapes and an arch and nothing else, while the Backyard next door has a
+			# tree, a fence, a house AND a washing line. So it gets the furniture a real
+			# little theatre has - boxes either side, sconces burning on the piers, and a
+			# row of footlights along the lip - all of it at the EDGES, because the
+			# middle of this picture belongs to the props.
 			draw_curtain_wall(s, fy, s.y * 0.06, Color(0.21, 0.045, 0.065), 26)
 			draw_theatre_wings(s, fy)
+			draw_theatre_boxes(s, fy)
 			draw_proscenium(s, fy)
+			draw_footlights(s, fy)
 		3:   # circus: the big-top canopy overhead and a string of lanterns
 			draw_circus_canopy(s)
 			draw_lantern_string(Vector2(-10.0, s.y * 0.20), Vector2(s.x + 10.0, s.y * 0.24))
@@ -8449,6 +8457,68 @@ func draw_theatre_wings(s: Vector2, fy: float) -> void:
 	draw_line(Vector2(0, vh + 2.0), Vector2(s.x, vh + 2.0), Color(0.85, 0.65, 0.3, 0.5), 2.0)
 
 
+func draw_theatre_boxes(s: Vector2, fy: float) -> void:
+	# A BOX either side, tucked against the wings above head height: a gilded balcony
+	# rail on a draped front, a dark opening behind it, and two or three silhouetted
+	# heads leaning on the rail. This is the single thing that turns "a stage with
+	# curtains" into "a stage in a ROOM with people in it", and it costs a dozen draws.
+	var ww := s.x * 0.085
+	var bw := s.x * 0.105
+	var by := s.y * 0.20
+	var bh := s.y * 0.20
+	for side in [0.0, 1.0]:
+		var bx := ww - bw * 0.16 if side == 0.0 else s.x - ww - bw * 0.84
+		# the opening: a recess with a lit velvet back. It has to be LIGHTER than the
+		# curtain wall behind it, not darker - a dark rectangle on a dark drape is a
+		# hole, and the people in it disappear with it (the same mistake the money hat's
+		# cutaway interior had to be rescued from)
+		draw_rect(Rect2(bx, by, bw, bh), Color(0.09, 0.03, 0.045, 0.98))
+		draw_gradient_v(Rect2(bx + 3.0, by + 3.0, bw - 6.0, bh * 0.62), Color(0.34, 0.09, 0.11),
+			Color(0.13, 0.03, 0.05), 8)
+		draw_glow(Vector2(bx + bw * 0.5, by + bh * 0.34), bw * 0.62, Color(1.0, 0.72, 0.36, 0.10))
+		# the people in it, leaning on the rail - silhouetted AGAINST that lit back
+		for hcount in 3:
+			var hx := bx + bw * (0.26 + 0.24 * float(hcount))
+			var hy := by + bh * 0.50 + sin(atick() * 0.02 + float(hcount) * 1.7 + side * 2.0) * 1.4
+			draw_rect(Rect2(hx - bw * 0.085, hy + bw * 0.02, bw * 0.17, bw * 0.12), Color(0.07, 0.03, 0.04))
+			draw_circle(Vector2(hx, hy), bw * 0.062, Color(0.07, 0.03, 0.04))
+		# the box front: a draped panel under a gilded rail, with a swag along it
+		draw_rect(Rect2(bx, by + bh * 0.60, bw, bh * 0.40), Color(0.24, 0.05, 0.07))
+		draw_rect(Rect2(bx, by + bh * 0.58, bw, 3.0), Color(0.78, 0.60, 0.30))
+		for k in 4:
+			var sx := bx + bw * (float(k) + 0.5) / 4.0
+			draw_arc(Vector2(sx, by + bh * 0.62), bw / 8.0, 0.3, PI - 0.3, 12, Color(0.80, 0.62, 0.32, 0.55), 2.0, true)
+		draw_rect(Rect2(bx, by, bw, bh), Color(0.55, 0.42, 0.22, 0.45), false, 2.0)
+		# a sconce burning on the pier beside the box
+		var sc_x := bx + (bw + 12.0 if side == 0.0 else -12.0)
+		var sc_y := by + bh * 0.30
+		var fl := 0.75 + 0.25 * sin(atick() * 0.07 + side * 3.0)
+		draw_glow(Vector2(sc_x, sc_y), 34.0, Color(1.0, 0.70, 0.34, 0.16 * fl))
+		draw_rect(Rect2(sc_x - 2.0, sc_y, 4.0, 16.0), Color(0.62, 0.48, 0.24))
+		draw_circle(Vector2(sc_x, sc_y - 4.0), 5.0, Color(1.0, 0.78, 0.40, 0.85 * fl))
+		draw_circle(Vector2(sc_x, sc_y - 5.5), 2.4, Color(1.0, 0.96, 0.80, 0.95 * fl))
+
+
+func draw_footlights(s: Vector2, fy: float) -> void:
+	# the row of shielded lamps along the lip of the stage, throwing UP. Every real
+	# theatre has them and they are the reason a stage performer is lit from below at
+	# all - so this also quietly explains the warm underlight the whole scene uses.
+	# they sit ABOVE the floor line, not on it: the boards are painted after the
+	# dressing, so anything drawn at fy is buried under them
+	var n := 11
+	var ly := fy - 13.0
+	for i in n:
+		var lx := s.x * (float(i) + 0.5) / float(n)
+		var fl := 0.72 + 0.28 * sin(atick() * 0.05 + float(i) * 0.9)
+		draw_glow(Vector2(lx, ly - 4.0), 34.0, Color(1.0, 0.74, 0.36, 0.13 * fl))
+		# the shield, a little hood open toward the stage
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(lx - 7.0, ly + 7.0), Vector2(lx + 7.0, ly + 7.0),
+			Vector2(lx + 5.0, ly - 1.0), Vector2(lx - 5.0, ly - 1.0)]), Color(0.22, 0.14, 0.10))
+		draw_circle(Vector2(lx, ly - 1.0), 3.6, Color(1.0, 0.80, 0.42, 0.9 * fl))
+		draw_circle(Vector2(lx, ly - 1.0), 1.7, Color(1.0, 0.97, 0.86, fl))
+
+
 func draw_circus_canopy(s: Vector2) -> void:
 	# striped tent cloth fanning down from the peak of the frame
 	var top := Vector2(s.x * 0.5, -s.y * 0.24)
@@ -8621,6 +8691,22 @@ func draw_juggler(s: Vector2) -> void:
 	draw_hand(LEFT)
 	draw_hand(RIGHT)
 
+	# THE GLOW KIT ON THE PERFORMER (2026-07-27, Louis). On a dark stage the juggler was
+	# a hole in the picture - the costume is deliberately near-black at the Midnight
+	# Show - so the Kit now tapes the FIGURE as well as the props: a line down each
+	# shoulder and arm, one round the waist, and a strip down each leg. It reads as
+	# exactly what it is, glow tape on a costume, and it means the pattern and the body
+	# holding it are legible together rather than props floating in the void.
+	if glow_kit_lit():
+		var gh := 1.0
+		draw_glow_strips([
+			Vector2(cx - 0.9 * H, shoulder_y), Vector2(cx + 0.9 * H, shoulder_y),      # the shoulder line
+			Vector2(cx - 0.8 * H, waist_y), Vector2(cx + 0.8 * H, waist_y),            # the cummerbund
+			Vector2(cx - 0.5 * H, hip_y), Vector2(cx - 0.45 * H, floor_y - 0.15 * H),  # left leg
+			Vector2(cx + 0.5 * H, hip_y), Vector2(cx + 0.45 * H, floor_y - 0.15 * H),  # right leg
+			shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT],                          # ...and along each arm
+			shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT],
+		], 2.0, gh)
 	# done with the (possibly spinning) figure: return to screen space, then lay the
 	# sweeping motion streaks over the top so the turn reads as fast
 	if spin_on:
@@ -9011,7 +9097,7 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 					else:
 						draw_blackout_afterglow(b, dark_pos, bp)
 						if has_glow_kit:
-							draw_glow_in_dark(dark_pos, b.color)
+							draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind))
 					continue
 			draw_trail(b)
 			var pos := flight_pos(b)
@@ -9155,15 +9241,76 @@ func draw_blackout_afterglow(b: Ball, pos: Vector2, flight_progress: float) -> v
 		draw_circle(pos, r0 * lerpf(0.45, spread, f), Color(g.r, g.g, g.b, core * lerpf(0.22, 0.03, f)))
 
 
-func draw_glow_in_dark(pos: Vector2, col: Color) -> void:
-	# the Glow-in-the-Dark Kit's own mark, ON TOP of the (now barely-fading) afterglow
-	# it already bought: a small bright centre that says exactly where the prop is.
-	# Still no shape and no outline - Blackout stays its own challenge, the Kit just
-	# takes the guesswork out of WHERE. The pulse is offset by x so a whole load of
-	# glowing props never flickers in lockstep.
+const GLOW_PHOS := Color(0.62, 1.0, 0.72)   # the Kit's phosphor: a cool green-white that
+											# reads as CHARGED rather than merely bright,
+											# and never collides with a venue's own palette
+
+func glow_kit_lit() -> bool:
+	# the Kit only shows where it would actually matter - a dark stage - which is the
+	# rule the prop halos already follow (Louis: a glow that is always on is just a
+	# colour, and stops meaning anything)
+	return has_glow_kit and is_dark_context()
+
+
+func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0) -> void:
+	# THE KIT, on stage (2026-07-27, Louis: it "needs a lot of love"). It used to be two
+	# flat circles - a coloured dot with a white dot inside - which said WHERE a prop was
+	# and nothing else, so paying for it bought a pair of pixels.
+	#
+	# Now it is a real phosphorescent prop: a wide soft bloom, the prop's OWN SILHOUETTE
+	# in charged green over it, and a hot core inside that. Because the silhouette is the
+	# real one, a glowing ring still reads as a ring and a glowing club as a club - the
+	# whole point of buying the thing is that the pattern stays legible in the dark, and
+	# a cascade of identical dots is not a legible pattern.
+	#
+	# Blackout stays its own challenge: this only ever runs where the Kit is owned, so
+	# a player without it still catches from the memory of the arc.
 	var fl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
-	draw_circle(pos, 6.0, Color(col.r, col.g, col.b, 0.40 * fl))
-	draw_circle(pos, 2.2, Color(1.0, 1.0, 1.0, 0.42 * fl))
+	var phos := Color(lerpf(GLOW_PHOS.r, col.r, 0.25), lerpf(GLOW_PHOS.g, col.g, 0.25), lerpf(GLOW_PHOS.b, col.b, 0.25))
+	draw_glow(pos, 26.0 * sc, Color(phos.r, phos.g, phos.b, 0.30 * fl))
+	if kind >= 0:
+		glow_silhouette(pos, kind, sc, 0.0, Color(phos.r, phos.g, phos.b, 0.85 * fl))
+	draw_circle(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))
+
+
+func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color) -> void:
+	# a prop's SHAPE in one flat phosphor colour. Deliberately not draw_club / draw_knife:
+	# those paint their own reds and steels, and a charged club coming out crimson kills
+	# the whole illusion the Kit is selling. What matters here is the outline, because
+	# that is what lets a player tell a club from a ring in the dark.
+	match kind:
+		PROP_RINGS:
+			draw_ring_prop(pos, col, sc)
+		PROP_EGGS:
+			draw_egg(pos, col, sc)
+		PROP_CLUBS:
+			draw_set_transform(pos, ang, Vector2.ONE * sc)
+			draw_line(Vector2(0, 14), Vector2(0, -4), col, 3.6)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16)]), col)
+			draw_circle(Vector2(0, -16.5), 6.0, col)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		PROP_KNIVES:
+			draw_set_transform(pos, ang, Vector2.ONE * sc)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(0, -26), Vector2(2.6, -18), Vector2(3.4, 2), Vector2(-3.4, 2), Vector2(-2.6, -18)]), col)
+			draw_line(Vector2(0, 4.0), Vector2(0, 12.5), col, 5.0)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		_:
+			draw_ball_shape(pos, col, sc)
+
+
+func draw_glow_strips(pts: Array, w: float, a: float) -> void:
+	# the Kit's tape on the PERFORMER: the same phosphor, run along a few lines of the
+	# costume so the juggler is a readable shape in the dark instead of a hole in it.
+	# Two passes, a wide soft one under a tight bright one, which is what makes a line
+	# look lit rather than merely pale.
+	var fl := 0.86 + 0.14 * sin(float(tick) * 0.32)
+	for i in range(0, pts.size() - 1, 2):
+		var p0: Vector2 = pts[i]
+		var p1: Vector2 = pts[i + 1]
+		draw_line(p0, p1, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.22 * a * fl), w * 3.0)
+		draw_line(p0, p1, Color(0.90, 1.0, 0.94, 0.75 * a * fl), w)
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
@@ -9188,6 +9335,13 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 			var halo := b.color
 			halo.a = 0.16 * dk
 			soft_disc(pos, 20.0 * sc, halo, 14)
+	if glow_kit_lit() and b.kind != PROP_TORCHES:
+		# THE GLOW KIT, earning its price on any dark stage rather than only inside a
+		# Blackout: the prop is charged, so it carries its own soft bloom wherever the
+		# house lights are poor. Torches are exempt - they are already the thing this
+		# is imitating, and a phosphor bloom on a flame reads as a bug.
+		var gfl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
+		draw_glow(pos, 24.0 * sc, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.26 * gfl))
 	if b.trick >= 0:
 		# a trick throw carries a warm glowing ring so the crowd (and player) reads it as special
 		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
@@ -9222,25 +9376,65 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 			draw_ball_shape(pos, b.color, sc)
 
 
+# THE LIT PROPS (2026-07-27, Louis: the torches and knives "stand out... because
+# everything else is just less taken care of"). Balls, eggs and rings were each a flat
+# shape with one paler blob stuck on it - the sticker look the coin was just rescued
+# from. They are lit properly now, on one consistent rule that costs almost nothing:
+#
+#   the key light is UP AND LEFT (where the stage's spot is), so every prop carries a
+#   broad soft highlight on that shoulder, a tight specular inside it, a shaded
+#   crescent on the opposite side, and a thin BOUNCE along its lower-left edge from
+#   the lit boards. Four marks and a silhouette is all a round thing needs to stop
+#   reading as a disc.
+#
+# Everything scales off sc, so the same call serves an 11px flying ball and a blown-up
+# shop card, and no draw count changed enough to matter (measured: the props were never
+# the expensive half of the frame - the trails were, and those are one call each now).
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
-	draw_circle(pos, BALL_RADIUS_PX * sc, col)
-	var hi := col.lightened(0.4)
-	hi.a = 0.9
-	draw_circle(pos + Vector2(-3, -3) * sc, 3.5 * sc, hi)
+	var r := BALL_RADIUS_PX * sc
+	draw_circle(pos, r, col)
+	# the shaded side, an arc hugging the lower-right edge rather than a second disc
+	draw_arc(pos, r * 0.74, -PI * 0.30, PI * 0.72, 16, Color(col.r * 0.62, col.g * 0.60, col.b * 0.62, 0.75), r * 0.5, true)
+	# the panel seam every juggling ball has, which is what says "ball" and not "sphere"
+	draw_arc(pos, r * 0.66, PI * 0.62, PI * 1.34, 12, Color(col.r * 0.72, col.g * 0.70, col.b * 0.72, 0.55), maxf(1.0, r * 0.11), true)
+	# key light: a broad soft shoulder, then a tight specular inside it
+	var hi := col.lightened(0.42)
+	draw_circle(pos + Vector2(-0.34, -0.36) * r, r * 0.40, Color(hi.r, hi.g, hi.b, 0.55))
+	draw_circle(pos + Vector2(-0.38, -0.42) * r, r * 0.19, Color(1.0, 1.0, 0.97, 0.85))
+	# and the bounce off the boards, along the lower-left rim
+	draw_arc(pos, r * 0.90, PI * 0.58, PI * 0.96, 10, Color(1.0, 0.92, 0.80, 0.28), maxf(1.0, r * 0.14), true)
 
 
 func draw_egg(pos: Vector2, col: Color, sc: float) -> void:
-	fill_ellipse(pos, 9.0 * sc, 12.0 * sc, col)
-	var hi := col.lightened(0.25)
-	hi.a = 0.9
-	draw_circle(pos + Vector2(-3, -4) * sc, 2.6 * sc, hi)
+	# a real ovoid: narrower at the top than the bottom. A symmetric ellipse is a
+	# pill, and the whole character of an egg is in that asymmetry.
+	var w := 9.0 * sc
+	var h := 12.0 * sc
+	var pts := PackedVector2Array()
+	for i in 25:
+		var a := TAU * float(i) / 24.0
+		var taper := 1.0 - 0.24 * clampf(-sin(a), 0.0, 1.0)   # pinch the top only
+		pts.append(pos + Vector2(cos(a) * w * taper, sin(a) * h))
+	draw_colored_polygon(pts, col)
+	draw_arc(pos + Vector2(0.0, h * 0.10), w * 0.72, -PI * 0.28, PI * 0.70, 16,
+		Color(col.r * 0.66, col.g * 0.62, col.b * 0.58, 0.65), w * 0.52, true)
+	var hi := col.lightened(0.30)
+	fill_ellipse(pos + Vector2(-w * 0.30, -h * 0.34), w * 0.34, h * 0.26, Color(hi.r, hi.g, hi.b, 0.6))
+	draw_circle(pos + Vector2(-w * 0.34, -h * 0.40), w * 0.16, Color(1.0, 1.0, 0.96, 0.8))
 
 
 func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
-	draw_arc(pos, 12.0 * sc, 0.0, TAU, 28, col, 5.0 * sc, true)
-	var hi := col.lightened(0.3)
-	hi.a = 0.7
-	draw_arc(pos, 12.0 * sc, -2.4, -1.0, 8, hi, 3.0 * sc, true)
+	# a ring has THICKNESS, and drawing it as one stroked circle threw that away. Three
+	# concentric arcs give it a rounded cross-section - dark edges, a lit body - and the
+	# hole gets its own inner rim, which is what stops it reading as a painted O.
+	var r := 12.0 * sc
+	var w := 5.0 * sc
+	draw_arc(pos, r, 0.0, TAU, 30, Color(col.r * 0.52, col.g * 0.50, col.b * 0.52), w, true)          # the dark edges
+	draw_arc(pos, r, 0.0, TAU, 30, col, w * 0.62, true)                                               # the body between them
+	draw_arc(pos, r, PI * 1.05, PI * 1.85, 14, Color(col.r, col.g, col.b, 1.0).lightened(0.45), w * 0.42, true)   # key light, upper left
+	draw_arc(pos, r, PI * 0.10, PI * 0.62, 12, Color(0.0, 0.0, 0.0, 0.28), w * 0.42, true)            # ...and the far side falling away
+	draw_arc(pos, r, PI * 0.62, PI * 0.98, 10, Color(1.0, 0.92, 0.80, 0.22), w * 0.30, true)          # bounce off the boards
+	draw_arc(pos, r - w * 0.5, 0.0, TAU, 24, Color(0.0, 0.0, 0.0, 0.30), maxf(1.0, sc), true)         # the hole's own rim
 
 
 func draw_club(pos: Vector2, ang: float, sc: float) -> void:
@@ -11181,30 +11375,59 @@ func draw_gear_icon(i: int, c: Vector2, cc: Color) -> void:
 					var t := float(k) / 3.0
 					draw_circle(Vector2(sx + sin(t * 4.0 + atick() * 0.03) * 3.0, c.y - 26.0 - t * 11.0),
 						2.4 - t * 1.2, Color(1.0, 0.95, 0.88, 0.20 - t * 0.14))
-		2:   # GLOW KIT: the halo it buys, ON a prop - the card IS the preview, the
-			# same visual language draw_glow_in_dark uses on the stage
-			draw_glow(c, 34.0, Color(cc.r, cc.g, cc.b, 0.45))
-			draw_ball_shape(c, Color(0.72, 0.95, 0.68), 1.7)
-			draw_circle(c, 4.0, Color(1.0, 1.0, 1.0, 0.75))
+		2:   # GLOW KIT: the card IS the preview, so it shows what the Kit actually buys -
+			# a whole charged SET, mid-weave, in the dark. One glowing ball said "a
+			# ball, but green"; three different props lit at once says "your pattern
+			# stays readable", which is the thing being sold.
+			var gfl := 0.86 + 0.14 * sin(atick() * 0.06)
+			var lay := [
+				[Vector2(-26.0, 12.0), PROP_BALLS, 1.5],
+				[Vector2(2.0, -22.0), PROP_RINGS, 1.15],
+				[Vector2(28.0, 8.0), PROP_CLUBS, 1.0],
+			]
+			for e in lay:
+				var gp: Vector2 = c + (e[0] as Vector2)
+				draw_glow(gp, 30.0 * float(e[2]), Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.34 * gfl))
+			for e2 in lay:
+				var gp2: Vector2 = c + (e2[0] as Vector2)
+				var gsc: float = float(e2[2])
+				glow_silhouette(gp2, int(e2[1]), gsc, 0.5, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.9 * gfl))
+				draw_circle(gp2, 3.2 * gsc, Color(1.0, 1.0, 1.0, 0.6 * gfl))
 		_:   # ENERGY-DRINK HELMET: the hat it actually is - a cap with a can either
 			# side and a straw running round to the mouth
+			# ...given the same lighting rule the props just got: cylinders that read as
+			# cylinders (a lit edge and a shaded one, not a flat rectangle), a peaked
+			# cap with a brim, and a bead climbing each straw so the thing looks in use
 			var cap := c + Vector2(0.0, 4.0)
 			for sgn3 in [-1.0, 1.0]:
 				var can := cap + Vector2(sgn3 * 27.0, -1.0)
-				draw_rect(Rect2(can.x - 7.5, can.y - 13.0, 15.0, 26.0), Color(0.86, 0.33, 0.24))
-				draw_rect(Rect2(can.x - 7.5, can.y - 13.0, 15.0, 4.5), Color(0.80, 0.82, 0.86))
-				draw_rect(Rect2(can.x - 7.5, can.y - 2.0, 15.0, 3.0), Color(1.0, 0.85, 0.4, 0.7))
+				var body := Color(0.86, 0.33, 0.24)
+				draw_rect(Rect2(can.x - 7.5, can.y - 13.0, 15.0, 26.0), body)
+				draw_rect(Rect2(can.x - 7.5, can.y - 13.0, 3.6, 26.0), Color(1.0, 0.58, 0.48, 0.55))   # lit edge
+				draw_rect(Rect2(can.x + 4.4, can.y - 13.0, 3.1, 26.0), Color(0.0, 0.0, 0.0, 0.26))     # shaded edge
+				fill_ellipse(Vector2(can.x, can.y - 13.0), 7.5, 2.6, Color(0.84, 0.86, 0.90))          # the rim, seen slightly from above
+				fill_ellipse(Vector2(can.x, can.y + 13.0), 7.5, 2.4, Color(0.0, 0.0, 0.0, 0.30))
+				draw_rect(Rect2(can.x - 7.5, can.y - 2.0, 15.0, 3.4), Color(1.0, 0.85, 0.4, 0.85))     # the label band
 				# the straw stays on its OWN side and comes down to the mouth: crossing
 				# them at the centre drew a plain white X over the cap
-				draw_line(can + Vector2(-sgn3 * 3.0, -13.0), cap + Vector2(sgn3 * 8.0, 14.0),
-					Color(0.92, 0.94, 0.98, 0.9), 2.2)
+				var s0 := can + Vector2(-sgn3 * 3.0, -13.0)
+				var s1 := cap + Vector2(sgn3 * 8.0, 14.0)
+				draw_line(s0, s1, Color(0.92, 0.94, 0.98, 0.9), 2.6)
+				draw_line(s0, s1, Color(1.0, 1.0, 1.0, 0.45), 1.0)
+				var bead := fposmod(atick() * 0.012 + (0.5 if sgn3 > 0.0 else 0.0), 1.0)
+				draw_circle(s1.lerp(s0, bead), 1.8, Color(1.0, 0.86, 0.42, 0.9))                       # a mouthful on its way up
 			var dome := PackedVector2Array()
 			for k in 17:
 				var a4 := lerpf(PI, TAU, float(k) / 16.0)
 				dome.append(cap + Vector2(cos(a4), sin(a4)) * 19.0)
 			draw_colored_polygon(dome, cc)
+			# the key light across the crown, and the brim that makes it a CAP
+			draw_arc(cap, 14.0, PI * 1.12, PI * 1.62, 12, Color(1.0, 1.0, 1.0, 0.22), 7.0, true)
+			draw_colored_polygon(PackedVector2Array([
+				cap + Vector2(-16.0, 1.0), cap + Vector2(-4.0, 8.5), cap + Vector2(10.0, 8.0), cap + Vector2(-15.0, 4.0)]),
+				Color(cc.r * 0.62, cc.g * 0.62, cc.b * 0.62))
 			fill_ellipse(cap + Vector2(0.0, 1.0), 22.0, 4.0, Color(cc.r * 0.7, cc.g * 0.7, cc.b * 0.7))
-			draw_circle(cap + Vector2(0.0, -19.0), 3.0, Color(cc.r * 0.7, cc.g * 0.7, cc.b * 0.7))
+			draw_circle(cap + Vector2(0.0, -19.0), 3.0, Color(cc.r * 0.55, cc.g * 0.55, cc.b * 0.55))
 
 
 #endregion
@@ -11280,7 +11503,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_meter(cx0 + 14.0, cy0 + 208.0, cw - 28.0, 7.0, setf, setc)
 		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
 		draw_fit_string(font, Vector2(cx0, cy0 + 232.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
-		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0), str(i + 1), "%s g" % commafy(cost), afford)
+		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0), str(i + 1), "%s %s" % [commafy(cost), coin_short()], afford)
 
 	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
 	# fourth for the Energy-Drink Helmet - same narrow vertical template the
@@ -11296,7 +11519,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var gear_names: Array[String] = ["Glasses", "Uncle Dan's Pie", "Glow-in-the-Dark Kit",
 		"Energy Drinks" if has_helmet else "Energy-Drink Helmet"]
 	var gear_desc: Array[String] = ["a better chance on off-Perfect catches",
-		"a whole day of slow, clear time", "props keep a faint glow through Blackout",
+		"a whole day of slow, clear time", "props AND you glow on any dark stage",
 		("+%d%% stamina each, auto-sipped the instant you run low" % int(ENERGY_DRINK_STAMINA_PCT * 100.0)) if has_helmet \
 			else "a hat that never lets your stamina run out - buying it fills the tank"]
 	var gear_accent := [Color(0.72, 0.86, 0.96), Color(0.9, 0.62, 0.3), Color(0.65, 0.95, 0.55), Color(0.95, 0.75, 0.35)]
