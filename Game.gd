@@ -776,8 +776,11 @@ const EXPERIMENT_DEFS := [
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
+const SHEET_REPEAT_RAMP := 0.55    # debug: ...and double the step size every this long held
+const SHEET_REPEAT_MAX := 16       # debug: the fastest it ever runs, points per step
 var _repeat_key := 0      # the debug stat-adjust key currently held for auto-repeat, 0 = none
 var _repeat_t := 0.0      # time accumulator for the held-key repeat
+var _repeat_held := 0.0   # how long the current key has been held, for the acceleration
 var _prev_running := false
 
 # game-flow state
@@ -1340,8 +1343,12 @@ func _physics_process(delta: float) -> void:
 		queue_redraw()
 		return
 	if sheet_open or shop_open or paused or debug_panel_open:
-		if sheet_open and debug_mode and not experiments.get("talent_tree", false):
-			sheet_repeat(delta)   # debug build only: holding a stat key keeps stepping it
+		if sheet_open and debug_mode:
+			# debug build only: holding a stat key keeps stepping it, faster the longer
+			# it is held. Runs in BOTH sheet pictures now - the talent tree reads the
+			# same stats through the same _adjust, so there was never a reason to
+			# exclude it, and its own pips are the best place to watch a stat climb
+			sheet_repeat(delta)
 		queue_redraw()   # the sheet, shop, pause menu, and debug panel all halt the sim
 		return
 	if freeze > 0:
@@ -6988,11 +6995,20 @@ func sheet_repeat(dt: float) -> void:
 	if key != _repeat_key:
 		_repeat_key = key       # newly held: hold off until the initial delay elapses
 		_repeat_t = -SHEET_REPEAT_DELAY
+		_repeat_held = 0.0
 		return
+	# ...and it ACCELERATES the longer it is held (Louis, 2026-07-27: "rapidly change
+	# their values"). A flat 25 points a second takes eight seconds to walk Accuracy to
+	# its cap, which is eight seconds of holding a key to set up one test. The rate
+	# doubles every SHEET_REPEAT_RAMP seconds, up to SHEET_REPEAT_MAX steps a tick, so a
+	# brief tap is still one point and a long hold crosses the whole range in a moment.
 	_repeat_t += dt
+	_repeat_held += dt
+	var burst := clampi(int(pow(2.0, _repeat_held / SHEET_REPEAT_RAMP)), 1, SHEET_REPEAT_MAX)
 	while _repeat_t >= SHEET_REPEAT_RATE:
 		_repeat_t -= SHEET_REPEAT_RATE
-		_adjust(which, delta)
+		for _i in burst:
+			_adjust(which, delta)
 
 
 func _adjust(which: String, delta: int) -> void:
@@ -8903,7 +8919,16 @@ func draw_knife(pos: Vector2, ang: float, sc: float) -> void:
 	draw_colored_polygon(PackedVector2Array([              # the fuller, a shade darker
 		Vector2(0, -21), Vector2(1.2, -16), Vector2(1.2, 0), Vector2(-1.2, 0), Vector2(-1.2, -16),
 	]), steel_dk)
-	draw_line(Vector2(0, -26), Vector2(-3.2, 0.5), edge, 1.4)   # the ground edge catches the light
+	# THE GROUND EDGE, as a polygon rather than a stroked line (2026-07-27, Louis: "the
+	# point is a bit too thick... it sticks out a tiny amount"). A 1.4-wide line ending
+	# ON the tip straddles the centreline there, so half its width hung outside the
+	# blade's own silhouette and blunted the point by a fraction. Built as a sliver that
+	# runs down the outer edge and CONVERGES to the same vertex the blade does, it
+	# cannot overhang at any scale: the point is exactly as sharp as the polygon says.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0, -26), Vector2(-2.6, -18), Vector2(-3.4, 2),      # down the cutting edge
+		Vector2(-2.1, 2), Vector2(-1.4, -17.6),                     # ...and back up, inset
+	]), edge)
 	draw_line(Vector2(-4.4, 3.0), Vector2(4.4, 3.0), Color(0.62, 0.64, 0.70), 3.0)   # guard
 	draw_line(Vector2(0, 4.0), Vector2(0, 12.5), handle, 5.0)   # grip
 	draw_line(Vector2(-1.4, 5.0), Vector2(-1.4, 11.5), handle_hi, 1.4)
@@ -10329,10 +10354,10 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 	if speed >= SPEED_CAP:
 		spd_note = "the world runs %d%% slower for you - at the cap" % spd_pct
 	var stats: Array = [
-		["ACCURACY", accuracy, acc_note, "1", Color(0.6, 0.8, 1.0)],
-		["STRENGTH", strength, str_note, "2", Color(0.95, 0.55, 0.4)],
-		["ENDURANCE", endurance, "raises your maximum stamina, the fuel every throw and catch burns", "3", Color(0.55, 0.8, 0.6)],
-		["SPEED", speed, spd_note, "4", Color(0.8, 0.7, 0.95)],
+		["ACCURACY", accuracy, acc_note, "1", Color(0.6, 0.8, 1.0), "acc"],
+		["STRENGTH", strength, str_note, "2", Color(0.95, 0.55, 0.4), "str"],
+		["ENDURANCE", endurance, "raises your maximum stamina, the fuel every throw and catch burns", "3", Color(0.55, 0.8, 0.6), "end"],
+		["SPEED", speed, spd_note, "4", Color(0.8, 0.7, 0.95), "spd"],
 	]
 	var gap := 16.0
 	var cw := (innerw - gap * 3.0) / 4.0
@@ -10350,9 +10375,12 @@ func draw_sheet(font: Font, s: Vector2) -> void:
 			var sa := 0.55 + 0.35 * sin(float(Time.get_ticks_msec()) * 0.006)
 			draw_rect(Rect2(cx0 - 4.0, y0 - 4.0, cw + 8.0, ch + 8.0), Color(1.0, 0.86, 0.45, sa), false, 2.5)
 		draw_fit_string(font, Vector2(cx0, y0 + 26.0), String(st[0]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(ac.r, ac.g, ac.b, 0.95))
-		draw_string(font, Vector2(cx0, y0 + 78.0), str(int(st[1])), HORIZONTAL_ALIGNMENT_CENTER, cw, 44, Color(1.0, 0.94, 0.76))
+		draw_string(font, Vector2(cx0, y0 + 74.0), str(int(st[1])), HORIZONTAL_ALIGNMENT_CENTER, cw, 44, Color(1.0, 0.94, 0.76))
+		# the climb: how far along the whole stat this is, every real threshold pipped,
+		# and the next one NAMED - so a point is never spent blind (Louis)
+		draw_stat_track(font, Rect2(cx0 + 14.0, y0 + 88.0, cw - 28.0, 7.0), String(st[5]), int(st[1]), ac)
 		# bounded by the gap down to the invest plate, so the blurb can never reach it
-		draw_wrap_fit(font, String(st[2]), Rect2(cx0 + 12.0, y0 + 98.0, cw - 24.0, ch - 158.0), 11,
+		draw_wrap_fit(font, String(st[2]), Rect2(cx0 + 12.0, y0 + 124.0, cw - 24.0, ch - 184.0), 11,
 			Color(0.78, 0.72, 0.64), HORIZONTAL_ALIGNMENT_CENTER)
 		# the invest plate: bright and green when a point can land here, quiet otherwise
 		var can := points > 0
@@ -10397,49 +10425,105 @@ func draw_sheet_screen(font: Font, s: Vector2) -> void:
 		draw_sheet(font, s)
 
 
-func talent_nodes(which: String) -> Array[Dictionary]:
-	# every threshold along one branch that the GAME ITSELF actually gates on this
-	# stat - pulled straight from PATTERNS/TRICKS' own "acc"/"str" fields, never
-	# invented - plus the stat's cap as the final node. Endurance and Speed gate no
-	# skill directly (they only raise max stamina / permanent slow-mo), so they get
-	# three even milestones instead, purely so all four branches have SOMETHING to
-	# show - the real number is still exactly what draw_sheet already displays.
-	var cap := ACC_CAP
-	if which == "str":
-		cap = STR_CAP
-	elif which == "end":
-		cap = END_CAP
-	elif which == "spd":
-		cap = SPEED_CAP
+func stat_cap(which: String) -> int:
+	match which:
+		"str": return STR_CAP
+		"end": return END_CAP
+		"spd": return SPEED_CAP
+		_: return ACC_CAP
+
+
+func stat_milestones(which: String) -> Array[Dictionary]:
+	# THE one list of what a stat's points actually BUY, and every reader of it - the
+	# classic sheet's track, the talent tree's pips - uses this and nothing else, so the
+	# two pictures can never disagree about what a point is worth.
+	#
+	# Every entry is a threshold the GAME ITSELF gates on, read out of the real tables
+	# (PATTERNS/TRICKS' own acc/str fields, PROPS' req, BALL_GATES) or computed from the
+	# real formula - never a decorative number. Louis, 2026-07-27: Speed had a line
+	# saying what its points do and the others did not, so nobody could tell what
+	# Accuracy or Strength were for.
+	var cap := stat_cap(which)
 	var by_val: Dictionary = {}
+	var add := func(v: int, s: String) -> void:
+		if v <= 0 or v > cap:
+			return
+		by_val[v] = String(by_val.get(v, "")) + (", " if by_val.has(v) else "") + s
+	# the skills each stat gates, straight from their own tables
 	if which == "acc" or which == "str":
 		for p in PATTERNS:
 			if p.has(which):
-				var v := int(p[which])
-				by_val[v] = String(by_val.get(v, "")) + (", " if by_val.has(v) else "") + String(p["name"])
+				add.call(int(p[which]), String(p["name"]))
 		for t in TRICKS:
 			if t.has(which):
-				var v2 := int(t[which])
-				by_val[v2] = String(by_val.get(v2, "")) + (", " if by_val.has(v2) else "") + String(t["name"])
+				add.call(int(t[which]), String(t["name"]))
+	match which:
+		"acc":
+			# the two Focus stages, in the words of what they DO at the counter
+			add.call(100, "Focus: cheaper stamina")
+			add.call(200, "Perfect window widens")
+			add.call(ACC_CAP, "Good becomes Perfect")
+		"str":
+			# what raw muscle opens: the heavy props, then the higher counts
+			for k in PROPS.size():
+				var pd: Dictionary = PROPS[k]
+				var pr := int(pd["req"])
+				if pr > 0:
+					add.call(pr, String(pd["name"]))
+			for n in BALL_GATES:
+				add.call(int(BALL_GATES[n]), "%d props" % int(n))
+		"end":
+			# no named skill: labelled with the stamina pool it reaches, which IS the effect
+			for frac in [0.25, 0.5, 0.75, 1.0]:
+				var ev := int(round(float(cap) * frac))
+				add.call(ev, "%d stamina" % int(round(100.0 + 9.0 * float(ev))))
+		"spd":
+			# every whole percent of slow motion is its own step: 8 points buys one, and
+			# it accrues CONTINUOUSLY (see slow_target) - a point is never wasted waiting
+			# for a milestone, the pips just mark where the number ticks over
+			for pct in [2, 5, 10, 15, 20, 25]:
+				add.call(pct * 8, "%d%% slow" % pct)
 	var out: Array[Dictionary] = []
 	var vals := by_val.keys()
 	vals.sort()
 	for v in vals:
 		out.append({"val": int(v), "label": String(by_val[v])})
-	# Endurance and Speed gate no named skill, so their milestones are labelled with the
-	# EFFECT they reach (Louis, 2026-07-26: "i don't know what they mean") - the stamina
-	# pool at that Endurance, the slow-motion % at that Speed - not a bare unlabelled dot.
-	if which == "end":
-		for frac in [0.25, 0.5, 0.75, 1.0]:
-			var ev := int(round(float(cap) * frac))
-			out.append({"val": ev, "label": "%d stam" % int(round(100.0 + 9.0 * float(ev)))})
-	elif which == "spd":
-		for frac in [0.25, 0.5, 0.75, 1.0]:
-			var sv := int(round(float(cap) * frac))
-			out.append({"val": sv, "label": "%d%% slow" % int(sv / 8)})
-	else:
+	if out.is_empty() or int(out[out.size() - 1]["val"]) < cap:
 		out.append({"val": cap, "label": "MAX"})
 	return out
+
+
+func stat_next_milestone(which: String, val: int) -> Dictionary:
+	# the next thing this stat is climbing toward, or {} at the top of the list
+	for m in stat_milestones(which):
+		if int(m["val"]) > val:
+			return m
+	return {}
+
+
+func talent_nodes(which: String) -> Array[Dictionary]:
+	return stat_milestones(which)   # the tree and the sheet read the same list
+
+
+func draw_stat_track(font: Font, r: Rect2, which: String, val: int, col: Color) -> void:
+	# a slim track under a stat's big number: how far along the whole climb this stat is,
+	# with a PIP at every real threshold (lit once passed) and the next one named
+	# underneath. This is the thing Speed had in words and the others had not at all.
+	var cap := stat_cap(which)
+	var f := clampf(float(val) / float(maxi(1, cap)), 0.0, 1.0)
+	var ty := r.position.y
+	draw_rect(Rect2(r.position.x, ty, r.size.x, 7.0), Color(0.16, 0.12, 0.14, 0.9))
+	draw_rect(Rect2(r.position.x, ty, r.size.x * f, 7.0), Color(col.r, col.g, col.b, 0.85))
+	for m in stat_milestones(which):
+		var mv := int(m["val"])
+		var mx := r.position.x + r.size.x * clampf(float(mv) / float(maxi(1, cap)), 0.0, 1.0)
+		var passed := val >= mv
+		draw_rect(Rect2(mx - 1.0, ty - 3.0, 2.0, 13.0),
+			Color(1.0, 0.94, 0.72, 0.95) if passed else Color(0.55, 0.50, 0.48, 0.75))
+	var nxt := stat_next_milestone(which, val)
+	var line := "at the ceiling" if nxt.is_empty() else "next at %d:  %s" % [int(nxt["val"]), String(nxt["label"])]
+	draw_fit_string(font, Vector2(r.position.x, ty + 26.0), line, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 11,
+		Color(0.86, 0.82, 0.74) if not nxt.is_empty() else Color(1.0, 0.88, 0.55))
 
 
 func draw_talent_tree(font: Font, s: Vector2) -> void:
@@ -10531,6 +10615,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 			if int(nodes[ni]["val"]) > val:
 				next_i = ni
 				break
+		var last_label_y := 1.0e9   # pips are labelled top-down with a spacing floor
 		for ni in nodes.size():
 			var nd: Dictionary = nodes[ni]
 			var nf := clampf(float(nd["val"]) / float(maxi(1, cap)), 0.0, 1.0)
@@ -10545,14 +10630,22 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 				if isnext and active and points > 0:
 					var pp := 0.5 + 0.5 * sin(float(tick) * 0.15)
 					draw_arc(ppos, 7.0 + 3.0 * pp, 0.0, TAU, 18, Color(bcol.r, bcol.g, bcol.b, 0.55 * (1.0 - pp)), 2.0, true)
-			# Endurance/Speed pips carry a short EFFECT label beside them (stamina, slow %),
-			# since they gate no named skill - the fix for "i don't know what they mean".
-			# acc/str pips stay bare (their next-line names the skill; low thresholds would
-			# overprint here anyway), so this is end/spd only.
-			var pl_id := String(b["id"])
-			if (pl_id == "end" or pl_id == "spd") and String(nd["label"]) != "":
+			# EVERY pip carries its label now (2026-07-27, Louis: Accuracy and Strength
+			# needed "the milestones like speed... that way the player knows what their
+			# points are doing"). They used to be bare on acc/str because their old
+			# labels were skill names at thresholds too close together to print; now
+			# stat_milestones gives them real EFFECTS too (the Focus stages, the props
+			# and counts Strength opens), and a spacing floor keeps a crowded column -
+			# Strength carries twelve ball gates - from printing through itself. The
+			# list is walked from the FOOT of the track upward, so the nearest
+			# thresholds always win the space and only distant ones are ever dropped.
+			if String(nd["label"]) != "" and last_label_y - ppos.y >= 15.0:
+				last_label_y = ppos.y
 				var plc := Color(0.9, 0.87, 0.78) if reached else (Color(bcol.r, bcol.g, bcol.b, 0.95) if isnext else Color(0.64, 0.61, 0.56, 0.85))
-				draw_string(font, Vector2(trk_x + trk_w + 7.0, ppos.y + 4.0), String(nd["label"]), HORIZONTAL_ALIGNMENT_LEFT, colw * 0.5 - 6.0, 10, plc)
+				# the width is measured to the CARD's inner edge, not half the column:
+				# the track sits centred, so a label starting at its right side has
+				# only (colw/2 - the track's own half-width - padding) to live in
+				draw_fit_string(font, Vector2(trk_x + trk_w + 7.0, ppos.y + 4.0), String(nd["label"]), HORIZONTAL_ALIGNMENT_LEFT, cx + colw - 8.0 - (trk_x + trk_w + 7.0), 10, plc)
 		# what the NEXT point in this column works toward - a named skill for acc/str, the
 		# effect it reaches for end/spd (their pips are effect-labelled above). Uniform now.
 		var nl1 := ""
