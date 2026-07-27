@@ -470,8 +470,12 @@ and deleted. History lives in git.
   than a false all-clear); `--calib N` prints the
   robot's score; `--booking` runs a real act end to end and prints `ACT ...` on
   resolve; `--tutorial <id>` jumps into a lesson (the demo walks lessons end to end,
-  miming Enter/R/P); `--remap` (add `--pad` for the gamepad column) opens the
-  Controls screen; `--capsule` renders pure key-art (no UI) for Steam store
+  miming Enter/R/P; a `--demo` lesson run never quits by itself, so give it a
+  `--shotat` or it hangs); `--remap` (add `--pad` for the gamepad column) opens the
+  Controls screen; `--wallcard` and `--legend` (2026-07-27) jump straight to the
+  scoped demo's wishlist card and the Purist Legend payoff card - the two end
+  screens previously reachable only by completing the run that triggers them, so
+  neither had a capture path at all; `--capsule` renders pure key-art (no UI) for Steam store
   assets - capture at native 1280x720 (`--shot <path> --shotat 30`), then
   `sips --cropToHeightWidth 706 1232 <path>` for a distortion-free 2x Main
   Capsule, `sips -z 353 616 <path>` to the real 616x353; `--glow` owns the
@@ -671,7 +675,15 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 
 ## Gotchas that keep biting
 
-- Godot user args need `--` (see above).
+- Godot user args need `--` (see above). And in ZSH, an unquoted `$var` holding
+  `--day work` is passed as ONE argument, not two, so `ua.find("--day")` misses it and
+  the run silently lands wherever `skip_menu` sent it (usually ST_PLAY). A two-word dev
+  flag that "does nothing" is nearly always this, not a game bug - pass the words as
+  separate arguments.
+- Numbers a player reads are DATA: run them through `commafy` (a five-figure pay read
+  "+15602" beside a score reading "951,875"), and never write a figure out in words in
+  a description - the pie's hub line still said "a quarter slower" long after PIE_SLOW
+  was nerfed to 0.15. Interpolate the constant.
 - Never accumulate a long-running phase in a PackedFloat32Array (loop clicks).
 - Array-indexed numeric literals infer Variant: type the array or cast.
 - `cine_tick` runs at 120/s: halve intuitive sin rates.
