@@ -877,6 +877,10 @@ var reduce_motion := false  # accessibility: master "reduce motion" - suppresses
 						 # shake outright, cuts the hit-stop freezes to a single tick, and
 						 # thins particle bursts. Never touches slow-mo (that stretches the
 						 # catch window, so it is a gameplay benefit, not a visual flourish)
+var dominant_hand := RIGHT  # which hand is the strong one (Settings). It holds the
+                            # extra prop on an odd count and starts the pattern -
+                            # every juggler deals the odd ball to their strong hand,
+                            # so a left-hander should not have to juggle mirrored.
 var set_collide := false  # hard mode: props that clack mid-air become nearly
 						  # uncatchable (half the Perfect window, no chance roll).
 						  # A PERFECT pattern never collides, so this only ever
@@ -975,6 +979,25 @@ var _shot_tick := 170
 var _shot_frames := 0
 var _calib := false        # dev: --calib prints the autoplayer's score at _calib_ticks, then quits
 var _calib_ticks := 3600   # 30 sim-seconds by default (deterministic ticks, not real time)
+# --- dev: the PERFORMANCE probe (--fps). This screen is drawn in immediate mode, so
+# what costs frames is the NUMBER of draw commands a frame issues, and that number is
+# invisible without measuring it - the first optimisation pass here was guesswork until
+# this existed. Prints a line a second: real fps, the engine's own process/draw times,
+# and the two counts that actually matter (draw calls and primitives per frame).
+var _fps := false
+var _fps_t := 0.0
+var _fps_frames := 0
+var _fps_min := 9999.0
+var _fps_sum := 0.0
+var _fps_lines := 0
+var _phys_us := 0
+var _phys_n := 0
+var _draw_us := 0      # microseconds spent inside _draw since the last report, and
+var _draw_n := 0       # how many draws that was: THE number this pass optimises.
+                       # fps alone is useless here - it is vsync-quantised (145, 72,
+                       # 48...) and drifts with whatever else the machine is doing,
+                       # so two runs minutes apart are not comparable. Time in _draw
+                       # is stable, and it is what actually got smaller.
 var _demo_next := RIGHT
 const DEMO_BEAT := 28
 
@@ -1042,6 +1065,8 @@ func _ready() -> void:
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
 		_force_demo = true     # "demo"-tagged export - see in_demo_build()
+	if ua.has("--fps"):        # dev: the performance probe (see _fps above)
+		_fps = true
 	var si := ua.find("--shot")
 	if si != -1 and si + 1 < ua.size():
 		_shot = true
@@ -1242,6 +1267,35 @@ func _ready() -> void:
 #endregion
 
 #region MAIN LOOP & INPUT ROUTING
+func _process(delta: float) -> void:
+	# dev only: the --fps probe. Everything the game does is in _physics_process and
+	# _draw; this runs per RENDERED frame, which is the only place real fps is visible.
+	if not _fps:
+		return
+	var fps := Engine.get_frames_per_second()
+	_fps_frames += 1
+	_fps_sum += fps
+	if _fps_frames > 20:
+		_fps_min = minf(_fps_min, fps)   # ignore the first frames: shader/font warm-up
+	_fps_t += delta
+	if _fps_t >= 1.0:
+		print("PHYS %.0fus/tick (%d ticks) | DRAW %.0fus/frame (%d draws) | fps avg=%.1f | calls=%d prims=%d | balls=%d parts=%d" % [
+			float(_phys_us) / float(maxi(_phys_n, 1)), _phys_n,
+			float(_draw_us) / float(maxi(_draw_n, 1)), _draw_n,
+			_fps_sum / float(maxi(_fps_frames, 1)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
+			balls.size(), parts.size()])
+		_draw_us = 0
+		_draw_n = 0
+		_phys_us = 0
+		_phys_n = 0
+		_fps_t = 0.0
+		_fps_frames = 0
+		_fps_sum = 0.0
+		_fps_lines += 1
+
+
 func _physics_process(delta: float) -> void:
 	# every screen fades in on arrival: detected passively here (game_state is SET
 	# from dozens of places - menu_input, day_input, results dismissal, and more -
@@ -1286,6 +1340,7 @@ func _physics_process(delta: float) -> void:
 	# polls every real frame so slow motion can never eat a press. Sources stack
 	# (Speed stat, Uncle Dan's Pie, an Amazing! catch, ten straight Perfects) and
 	# the rate floors at 0.12: near-frozen, never stopped.
+	var _phys_t0 := Time.get_ticks_usec() if _fps else 0
 	_frames += 1
 	if not _demo:
 		_read_inputs()
@@ -1329,6 +1384,9 @@ func _physics_process(delta: float) -> void:
 		tut_maintain()   # advance the lesson and keep the hands stocked
 	update_hands()
 	age_popups()
+	if _fps:
+		_phys_us += Time.get_ticks_usec() - _phys_t0
+		_phys_n += 1
 	# screen shake decays toward rest (uses cosmetic RNG so the sim stays deterministic)
 	if shake > 0.2:
 		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
@@ -3901,7 +3959,8 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 9   # music, sound, shake, reduce-motion, collisions, fullscreen, controls, records, Back
+	var n := 10  # music, sound, shake, reduce-motion, collisions, fullscreen, dominant
+				 # hand, controls, records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -3932,12 +3991,14 @@ func settings_input(kc: int) -> void:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
 				6:
+					dominant_hand = LEFT if dominant_hand == RIGHT else RIGHT
+				7:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				7:
-					game_state = ST_STATS   # the career ledger, back with Esc
 				8:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				9:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -4051,6 +4112,7 @@ func load_settings() -> void:
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
 		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
+		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
 		set_collide = bool(cf.get_value("opt", "collide", false))
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
@@ -4078,6 +4140,7 @@ func save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("opt", "shake", set_shake)
 	cf.set_value("opt", "reduce_motion", reduce_motion)
+	cf.set_value("opt", "dominant_hand", dominant_hand)
 	cf.set_value("opt", "collide", set_collide)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
@@ -4800,7 +4863,12 @@ func start_run(n: int) -> void:
 	catch_flash = [-999, -999]
 	throw_kick = [-999, -999]
 
-	# right hand gets the extra on odd counts (the classic two-in-one-hand start)
+	# THE DOMINANT HAND holds the extra prop on an odd count, and starts the pattern
+	# (2026-07-27, Louis). Every juggler starts the odd ball in their strong hand - it
+	# is the hand that throws first and the one that has to hold two - so this is a real
+	# comfort setting, not a cosmetic one. `dominant_hand` is chosen in Settings and
+	# persisted; the deal below simply fills that hand first.
+	var dom := dominant_hand
 	for i in num_balls:
 		var b := Ball.new()
 		b.state = STATE_HAND
@@ -4808,11 +4876,11 @@ func start_run(n: int) -> void:
 		b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
 		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
 		balls.append(b)
-		if i % 2 == 0:
+		if (i % 2 == 0) == (dom == RIGHT):
 			_stack_r.append(b)
 		else:
 			_stack_l.append(b)
-	_demo_next = RIGHT
+	_demo_next = dom
 
 
 # -----------------------------------------------------------------------------
@@ -5480,6 +5548,19 @@ func object_mult() -> float:
 	# but only a player who can actually sustain them gets there.
 	var ball_step := float(num_balls - MIN_BALLS)
 	return (1.0 + OBJ_BALL_BONUS * ball_step) * prop_score_mult()
+
+
+func stage_darkness() -> float:
+	# HOW DARK THIS HOUSE IS, 0 (a lit stage) to 1 (you are juggling by feel). Driven by
+	# the venue's own `spot` so it needs no second table to keep in sync: the Midnight
+	# Show reads 1.0, the Backyard about 0.6, the Circus and everything brighter 0.
+	# A dark CONTEXT (the Blackout encore, Stage Fright, the Midnight Show - the same
+	# set torches already earn their bonus in) pins it to full. Only cosmetics read
+	# this; nothing in the sim does.
+	if is_dark_context():
+		return 1.0
+	var spot := float(venue_data(cur_venue())["spot"])
+	return clampf((0.055 - spot) / 0.04, 0.0, 1.0)
 
 
 func is_dark_context() -> bool:
@@ -7016,11 +7097,15 @@ func flight_pos(b: Ball) -> Vector2:
 
 #region STAGE BACKDROP DRAWING
 func _draw() -> void:
+	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
 	_draw_state_fade()
 	if debug_panel_open:
 		draw_debug_panel()   # same trick as _draw_state_fade: drawn on top of WHATEVER
 							  # screen just drew, so no screen needs to know about it
+	if _fps:
+		_draw_us += Time.get_ticks_usec() - t0
+		_draw_n += 1
 
 
 func _draw_state_fade() -> void:
@@ -7157,11 +7242,10 @@ func draw_backdrop(s: Vector2) -> void:
 	# the hard target rings it used to be. A small floor keeps the stage from a void.
 	var pc := Vector2(s.x * 0.5, s.y * 0.50)
 	var pool := (0.045 + spot * 0.9) * (1.0 + 0.30 * hot)
-	for i in 26:
-		var f := float(i) / 25.0                       # 0 outer .. 1 inner
-		var r := lerpf(410.0 - 40.0 * hot, 34.0, f)
-		var a := pool * (0.06 + 0.94 * f) * 0.16
-		draw_circle(pc, r, Color(glow.r, glow.g, glow.b, a))
+	# ONE textured glow, where this used to be a stack of 26 flat discs (see draw_glow):
+	# same soft pool, one draw call instead of twenty-six, and no visible rings - which
+	# is what appeared the moment the stack was thinned to pay for itself.
+	draw_glow(pc, 410.0 - 40.0 * hot, Color(glow.r, glow.g, glow.b, pool * 1.15))
 
 	# stage floor, with a soft warm lip of light where it meets the light pool
 	draw_rect(Rect2(0, fy, s.x, s.y - fy), floor_c)
@@ -7177,8 +7261,8 @@ func draw_backdrop(s: Vector2) -> void:
 		for i in 12:
 			var lx := s.x * (float(i) + 0.5) / 12.0
 			var fl := 0.6 + 0.4 * sin(atick() * 0.05 + float(i) * 1.7)
-			draw_circle(Vector2(lx, fy + 3.0), 10.0, Color(glow.r, glow.g, glow.b, 0.05 * fl))
-			draw_circle(Vector2(lx, fy + 3.0), 3.0, Color(1.0, 0.85, 0.55, 0.4 * fl))
+			soft_disc(Vector2(lx, fy + 3.0), 10.0, Color(glow.r, glow.g, glow.b, 0.05 * fl), 8)
+			soft_disc(Vector2(lx, fy + 3.0), 3.0, Color(1.0, 0.85, 0.55, 0.4 * fl), 8)
 
 	draw_crowd(s, vi, fy, glow)
 
@@ -7199,9 +7283,18 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 	var bob_amp := (0.4 + 2.2 * applause) if performing else 0.6
 	var rows := 2 if vi >= 2 else 1
 	for r in rows:
-		var heads := 10 + vi * 7 - r * 3
+		# PERFORMANCE (2026-07-27, measured): this was the most expensive thing on the
+		# screen after the HUD - 600us a frame at the Championship, because the head
+		# count grew with the venue (38 across the front row) and every single person
+		# cost two draws. Two changes, no visible loss: the row's SHOULDERS are now one
+		# continuous band (a crowd's shoulders read as a mass anyway, and it is one draw
+		# instead of thirty-eight), and the count is capped so a grand venue reads as
+		# grand through its extra ROW and its stands, not through ever-smaller heads.
+		var heads := mini(10 + vi * 4, 22) - r * 3
 		var base_y := fy + 14.0 + float(r) * 21.0
 		var row_lit := lit * (1.0 - 0.35 * float(r))
+		var band_h := 13.0 + float(r) * 2.0
+		draw_rect(Rect2(0.0, base_y + 9.0, s.x, band_h), Color(glow.r, glow.g, glow.b, row_lit * 0.7))
 		for i in heads:
 			# a BAD night empties seats too, not just a good one lighting up (Still open:
 			# "the crowd reacting to a BAD night") - each seat has its own stable leave
@@ -7216,10 +7309,8 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			var bob := sin(atick() * 0.045 + float(i) * 1.31 + float(r) * 2.2) * bob_amp
 			var hy := base_y + fmod(float(i) * 1.7, 5.0) + bob
 			var hr := 6.0 + fmod(float(i) * 2.3, 3.0) + float(r)
-			var c := Color(glow.r, glow.g, glow.b, row_lit)
-			draw_circle(Vector2(hx, hy), hr, c)                                   # head
-			fill_ellipse(Vector2(hx, hy + hr + 5.0), hr * 1.9, hr * 0.9,
-				Color(glow.r, glow.g, glow.b, row_lit * 0.7))                     # shoulders, softer
+			# ONE draw per person: the row's band below is their shoulders
+			draw_circle(Vector2(hx, hy), hr, Color(glow.r, glow.g, glow.b, row_lit))
 			if performing and applause > 0.82 and (i + r * 3) % 4 == 0:
 				var up := absf(sin(atick() * 0.09 + float(i)))                     # hands up!
 				draw_circle(Vector2(hx - hr, hy - hr - 4.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
@@ -7286,7 +7377,8 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				if absf(x - s.x * 0.5) < s.x * 0.17 and y > s.y * 0.3:
 					continue   # keep the juggling window clear
 				var a := 0.25 + 0.35 * sin(atick() * 0.05 + seed)
-				draw_circle(Vector2(x, y), 1.6, Color(1.0, 0.82, 0.52, clampf(a, 0.08, 0.6)))
+				# 110 of these a frame: squares at 1.6px are the same two pixels of light
+				draw_rect(Rect2(x - 1.6, y - 1.6, 3.2, 3.2), Color(1.0, 0.82, 0.52, clampf(a, 0.08, 0.6)))
 			for k in 2:
 				var ang := sin(atick() * 0.008 + float(k) * 2.6) * 0.55
 				var src := Vector2(s.x * (0.22 + 0.56 * float(k)), -20.0)
@@ -7309,11 +7401,15 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				if absf(x - s.x * 0.5) < s.x * 0.17 and y > s.y * 0.3:
 					continue   # keep the juggling window clear
 				var a := 0.10 + 0.16 * sin(atick() * 0.05 + seed)
-				draw_circle(Vector2(x, y), 1.4, Color(1.0, 0.82, 0.52, clampf(a, 0.02, 0.24)))
-			# ...and the two things that say WHICH dark room this is (2026-07-27), both
-			# kept faint enough that the Glow-in-the-Dark Kit still has a job: the house
-			# clock, at midnight, and the candles the room is lit by
+				draw_rect(Rect2(x - 1.4, y - 1.4, 2.8, 2.8), Color(1.0, 0.82, 0.52, clampf(a, 0.02, 0.24)))
+			# ...and the things that say WHICH dark room this is (2026-07-27), all kept
+			# faint enough that the Glow-in-the-Dark Kit still has a job: the house
+			# clock at midnight, the candles the room is lit by (foreground), and the
+			# tall window the moon comes through - the one source of light in here that
+			# is not a flame, and the reason the boards have a pale slab lying on them.
 			draw_wall_clock(Vector2(s.x * 0.5, s.y * 0.13), 30.0, Color(0.55, 0.95, 0.68))
+			# clear of the left HUD rail (which reaches x 318) and of the juggling window
+			draw_moon_window(Vector2(s.x * 0.30, s.y * 0.30), 84.0, 190.0, fy)
 
 
 func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
@@ -7332,14 +7428,48 @@ func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var fyy := fy - 30.0 - fposmod(cos(seed) * 271.0, 1.0) * 150.0
 				var drift := Vector2(sin(atick() * 0.008 + seed) * 16.0, cos(atick() * 0.011 + seed) * 11.0)
 				var pulse := clampf(0.35 + 0.65 * sin(atick() * 0.03 + seed * 2.0), 0.0, 1.0)
-				draw_circle(Vector2(fx, fyy) + drift, 10.0, Color(0.9, 1.0, 0.5, 0.09 * pulse))
-				draw_circle(Vector2(fx, fyy) + drift, 2.4, Color(0.95, 1.0, 0.6, 0.95 * pulse))
+				soft_disc(Vector2(fx, fyy) + drift, 10.0, Color(0.9, 1.0, 0.5, 0.09 * pulse), 8)
+				soft_disc(Vector2(fx, fyy) + drift, 2.4, Color(0.95, 1.0, 0.6, 0.95 * pulse), 8)
 		1:   # the kerb, and the busker's own hat out on the pavement for coins
 			draw_line(Vector2(0.0, fy + 16.0), Vector2(s.x, fy + 16.0), Color(0.25, 0.24, 0.26, 0.5), 2.0)
 			draw_hat_prop(Vector2(s.x * 0.5 - 196.0, fy - 2.0))
-		6:   # the candles this room is actually lit by
+		6:   # the candles this room is actually lit by, and the mist lying on the boards
+			for i in 3:
+				var mx := s.x * (0.22 + 0.28 * float(i))
+				var drift := sin(atick() * 0.004 + float(i) * 2.1) * 26.0
+				fill_ellipse(Vector2(mx + drift, fy + 4.0), 190.0, 13.0, Color(0.35, 0.85, 0.55, 0.07))
 			draw_candle(Vector2(s.x * 0.13, fy - 2.0), 30.0)
 			draw_candle(Vector2(s.x * 0.87, fy - 2.0), 30.0)
+
+
+func draw_moon_window(c: Vector2, w: float, h: float, fy: float) -> void:
+	# a tall arched window with the moon behind it, and the slab of moonlight it lays
+	# across the boards. Cool and dim on purpose: it gives The Midnight Show a source
+	# and a shape without lighting the room the Glow Kit exists to survive.
+	var cool := Color(0.62, 0.86, 0.95)
+	var top := c.y - h * 0.5
+	var bot := c.y + h * 0.5
+	var pts := PackedVector2Array()
+	for i in 11:   # the arch
+		var a := lerpf(PI, TAU, float(i) / 10.0)
+		pts.append(Vector2(c.x + cos(a) * w * 0.5, top + w * 0.5 + sin(a) * w * 0.5))
+	pts.append(Vector2(c.x + w * 0.5, bot))
+	pts.append(Vector2(c.x - w * 0.5, bot))
+	# these alphas are set to survive draw_backdrop's 0.42 veil, which the dressing is
+	# drawn behind: at the value that looked right in isolation the window vanished
+	draw_colored_polygon(pts, Color(cool.r, cool.g, cool.b, 0.14))
+	draw_glow(Vector2(c.x, top + w * 0.55), w * 0.95, Color(cool.r, cool.g, cool.b, 0.26))
+	# the frame: a mullion and two transoms, which is what makes it read as a WINDOW
+	draw_line(Vector2(c.x, top + 6.0), Vector2(c.x, bot), Color(0.05, 0.07, 0.07, 0.9), 3.0)
+	for k in 2:
+		var ly := lerpf(top + w * 0.62, bot, (float(k) + 1.0) / 3.0)
+		draw_line(Vector2(c.x - w * 0.5, ly), Vector2(c.x + w * 0.5, ly), Color(0.05, 0.07, 0.07, 0.9), 3.0)
+	draw_line(Vector2(c.x - w * 0.5, bot), Vector2(c.x + w * 0.5, bot), Color(0.05, 0.07, 0.07, 0.9), 4.0)
+	# the light on the floor: the same opening, sheared, as if cast
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(c.x - w * 0.5, bot), Vector2(c.x + w * 0.5, bot),
+		Vector2(c.x + w * 1.15, fy), Vector2(c.x + w * 0.05, fy)]),
+		Color(cool.r, cool.g, cool.b, 0.10))
 
 
 func draw_hedge(s: Vector2, y: float, x0: float, x1: float, h: float) -> void:
@@ -7454,11 +7584,11 @@ func draw_tiers(s: Vector2, fy: float, rows: int, col: Color, lit: float) -> voi
 		draw_rect(Rect2(0.0, y, s.x, hgt), Color(col.r * shade, col.g * shade, col.b * shade))
 		draw_line(Vector2(0.0, y), Vector2(s.x, y), Color(col.r, col.g, col.b, 0.22 * lit), 1.0)
 		# heads along the front of the tier
-		var n := 26 - r * 2
+		var n := 14 - r * 2
 		for i in n:
 			var hx := s.x * (float(i) + 0.5) / float(n) + float(r) * 9.0
 			var a := 0.20 * lit * (1.0 - 0.15 * t)
-			draw_circle(Vector2(fposmod(hx, s.x), y + 3.0), 4.0 - t * 1.2, Color(col.r + 0.3, col.g + 0.3, col.b + 0.3, a))
+			soft_disc(Vector2(fposmod(hx, s.x), y + 3.0), 4.0 - t * 1.2, Color(col.r + 0.3, col.g + 0.3, col.b + 0.3, a), 8)
 
 
 func draw_truss(s: Vector2, y: float, col: Color) -> void:
@@ -7467,7 +7597,7 @@ func draw_truss(s: Vector2, y: float, col: Color) -> void:
 	var dark := Color(col.r * 0.22, col.g * 0.22, col.b * 0.24)
 	draw_rect(Rect2(0.0, y, s.x, 3.0), dark)
 	draw_rect(Rect2(0.0, y + 15.0, s.x, 3.0), dark)
-	var step := 34.0
+	var step := 64.0
 	var x := 0.0
 	var up := true
 	while x < s.x:
@@ -7480,8 +7610,8 @@ func draw_truss(s: Vector2, y: float, col: Color) -> void:
 			Vector2(lx - 7.0, y + 18.0), Vector2(lx + 7.0, y + 18.0),
 			Vector2(lx + 5.0, y + 30.0), Vector2(lx - 5.0, y + 30.0)]), dark)
 		var fl := 0.6 + 0.4 * sin(atick() * 0.04 + float(i) * 1.3)
-		draw_circle(Vector2(lx, y + 31.0), 4.0, Color(col.r, col.g, col.b, 0.55 * fl))
-		draw_circle(Vector2(lx, y + 31.0), 13.0, Color(col.r, col.g, col.b, 0.07 * fl))
+		soft_disc(Vector2(lx, y + 31.0), 4.0, Color(col.r, col.g, col.b, 0.55 * fl), 8)
+		soft_disc(Vector2(lx, y + 31.0), 13.0, Color(col.r, col.g, col.b, 0.07 * fl), 10)
 
 
 func draw_scoreboard(c: Vector2, w: float, h: float, col: Color, hang_y: float) -> void:
@@ -7491,8 +7621,8 @@ func draw_scoreboard(c: Vector2, w: float, h: float, col: Color, hang_y: float) 
 	draw_rect(Rect2(c.x - w * 0.5 - 6.0, c.y - h * 0.5 - 6.0, w + 12.0, h + 12.0), Color(0.07, 0.08, 0.11))
 	draw_rect(Rect2(c.x - w * 0.5 - 6.0, c.y - h * 0.5 - 6.0, w + 12.0, h + 12.0), Color(col.r, col.g, col.b, 0.22), false, 2.0)
 	draw_rect(Rect2(c.x - w * 0.5, c.y - h * 0.5, w, h), Color(0.03, 0.04, 0.07))
-	var cols := 22
-	var rows := 6
+	var cols := 15
+	var rows := 4
 	for i in cols:
 		for j in rows:
 			var px := c.x - w * 0.5 + w * (float(i) + 0.5) / float(cols)
@@ -7500,7 +7630,9 @@ func draw_scoreboard(c: Vector2, w: float, h: float, col: Color, hang_y: float) 
 			var wave := sin(float(i) * 0.5 - atick() * 0.03) * 0.5 + 0.5
 			var on := fposmod(sin(float(i) * 12.9 + float(j) * 78.2) * 43758.5, 1.0) > 0.55
 			var a := (0.30 + 0.45 * wave) if on else 0.05
-			draw_circle(Vector2(px, py), 2.2, Color(col.r, col.g, col.b, a))
+			# SQUARE lamps: a dot matrix board really is square lamps, and 132 rects a
+			# frame batch into almost nothing where 132 circles did not
+			draw_rect(Rect2(px - 2.0, py - 2.0, 4.0, 4.0), Color(col.r, col.g, col.b, a))
 	# hung off the truss above it: two visible hangers, so the board reads as rigged
 	# into the room rather than as a panel floating in the middle of the frame
 	for sgn in [-1.0, 1.0]:
@@ -7883,6 +8015,56 @@ func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
 	draw_colored_polygon(pts, col)
 
 
+# --- PERFORMANCE: what actually costs, MEASURED (2026-07-27) ------------------
+# The first version of this helper replaced `draw_circle` with a hand-built low-poly
+# polygon, on the theory that primitives were the cost. Measured with --fps, that made
+# the crowd 30% SLOWER (760us a frame against 550us): what dominates this renderer is
+# the PER-CALL overhead of a GDScript->engine draw, plus the PackedVector2Array each
+# hand-built polygon allocates. Vertex count barely registers. So the rule for this
+# file is: use ENGINE primitives (draw_circle / draw_rect / draw_line), and optimise by
+# making FEWER CALLS, never by making cheaper-looking ones. All this wrapper adds now is
+# the early-out that matters - a fully transparent glow costs nothing at all.
+func soft_disc(c: Vector2, r: float, col: Color, _seg: int = 0) -> void:
+	if col.a <= 0.004 or r <= 0.0:
+		return   # invisible: never pay for it (the whole point of this wrapper)
+	draw_circle(c, r, col)
+
+
+# THE GLOW, as one textured quad (2026-07-27). Every soft light in this game used to be
+# a STACK of flat discs at low alpha - the stage light pool was 26 of them, the street
+# lamp 6, a torch 4 - which cost one draw call each and, once the stack was thinned for
+# performance, showed its steps as visible rings around the performer. A radial gradient
+# texture, generated in code at startup like everything else here, is one draw call, has
+# no steps at any size, and can be tinted per use. Use draw_glow for any soft pool of
+# light; use soft_disc/draw_circle only where a defined edge is wanted.
+var _glow_tex: GradientTexture2D = null
+
+func glow_texture() -> GradientTexture2D:
+	if _glow_tex != null:
+		return _glow_tex
+	var g := Gradient.new()
+	# a bright core that falls away fast, then a long faint skirt - the shape a real
+	# lamp throws, and the shape the old 26-disc stack was approximating
+	g.offsets = PackedFloat32Array([0.0, 0.30, 0.62, 1.0])
+	g.colors = PackedColorArray([Color(1, 1, 1, 1.0), Color(1, 1, 1, 0.45),
+		Color(1, 1, 1, 0.12), Color(1, 1, 1, 0.0)])
+	var t := GradientTexture2D.new()
+	t.gradient = g
+	t.fill = GradientTexture2D.FILL_RADIAL
+	t.fill_from = Vector2(0.5, 0.5)
+	t.fill_to = Vector2(1.0, 0.5)
+	t.width = 128
+	t.height = 128
+	_glow_tex = t
+	return _glow_tex
+
+
+func draw_glow(c: Vector2, r: float, col: Color) -> void:
+	if col.a <= 0.004 or r <= 0.0:
+		return
+	draw_texture_rect(glow_texture(), Rect2(c.x - r, c.y - r, r * 2.0, r * 2.0), false, col)
+
+
 func face_mood() -> int:
 	# -1 wince (just dropped), 0 calm, 1 pleased (on a streak). Shared by the mouth and
 	# the wardrobe pass's brows so the two can never disagree about the expression.
@@ -8116,9 +8298,34 @@ func draw_trail(b: Ball) -> void:
 	var cool := clampf(b.height * 0.5, 0.0, 0.6)
 	var base := b.color.lerp(Color(0.72, 0.82, 1.0), cool)
 	var sc := prop_scale(b.kind)
+	# ONE tapered ribbon with a per-vertex alpha ramp, not one circle per sample. A
+	# trail runs to 16 samples and a big set has seven props in the air, so the old way
+	# was up to 112 draw calls a frame for the comet tails alone - measured at roughly
+	# half of everything the props cost. The shape it draws is the same comet: it
+	# widens toward the head and fades out toward the tail, just built as a strip.
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	pts.resize(n * 2)
+	cols.resize(n * 2)
 	for i in n:
 		var f := float(i + 1) / float(n)   # 0 tail .. 1 head
-		draw_circle(b.trail[i], (2.0 + 6.0 * f) * sc, Color(base.r, base.g, base.b, 0.16 * f * f))
+		var w := (1.4 + 5.2 * f) * sc
+		var d: Vector2
+		if i == 0:
+			d = b.trail[1] - b.trail[0]
+		elif i == n - 1:
+			d = b.trail[n - 1] - b.trail[n - 2]
+		else:
+			d = b.trail[i + 1] - b.trail[i - 1]
+		if d.length_squared() < 0.0001:
+			d = Vector2.RIGHT
+		var perp := Vector2(-d.y, d.x).normalized() * w
+		var c := Color(base.r, base.g, base.b, 0.20 * f * f)
+		pts[i] = b.trail[i] + perp                 # one side, tail to head...
+		cols[i] = c
+		pts[n * 2 - 1 - i] = b.trail[i] - perp     # ...and back down the other
+		cols[n * 2 - 1 - i] = c
+	draw_polygon(pts, cols)
 
 
 func draw_charge_gauges() -> void:
@@ -8207,14 +8414,24 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
 								   # (prop_hit_scale) ever shrinks - on a big load, or
 								   # always a bit for rings (mostly hollow rim)
-	# a soft halo reads the catch lane for every prop; the shape says which prop.
-	var halo := b.color
-	halo.a = 0.16
+	# THE HALO, dark stages only (2026-07-27, Louis: "the faint glow always being on...
+	# perhaps that should only be the case for in the dark juggling, where it's really
+	# needed"). It was a large soft circle under EVERY prop on EVERY frame - the single
+	# most repeated draw in a seven-object set - and on a lit stage it bought nothing,
+	# since the prop already reads against the floor. It now fades in with the room:
+	# full strength where the house is genuinely dark (see stage_darkness), gone where
+	# it is not. A clacked prop's warning halo is exempt and always shows: that one is
+	# information, not atmosphere.
 	if b.bumped:
 		# hard mode: a clacked prop glows warning-hot, so the player knows only
 		# a frame-tight catch can still save it
-		halo = Color(1.0, 0.4, 0.3, 0.24 + 0.1 * sin(float(tick) * 0.5))
-	draw_circle(pos, 20.0 * sc, halo)
+		soft_disc(pos, 20.0 * sc, Color(1.0, 0.4, 0.3, 0.24 + 0.1 * sin(float(tick) * 0.5)), 14)
+	else:
+		var dk := stage_darkness()
+		if dk > 0.02:
+			var halo := b.color
+			halo.a = 0.16 * dk
+			soft_disc(pos, 20.0 * sc, halo, 14)
 	if b.trick >= 0:
 		# a trick throw carries a warm glowing ring so the crowd (and player) reads it as special
 		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
@@ -8292,41 +8509,103 @@ func draw_club(pos: Vector2, ang: float, sc: float) -> void:
 
 
 func draw_knife(pos: Vector2, ang: float, sc: float) -> void:
+	# A LONGER BLADE (2026-07-27, Louis). The old one was 18 units of blade over 8 of
+	# grip - a stubby dagger. A juggling knife is mostly blade: this one runs 26 over 9,
+	# tapers from a broad ricasso to a real point, and carries a fuller (the groove down
+	# the middle) plus a bright ground edge, so it reads as a KNIFE at prop size and as
+	# something sharp on the shop card. Same origin and same overall balance point, so
+	# nothing about spin, hitbox or layering changes.
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
-	var steel := Color(0.82, 0.86, 0.92)
-	var edge := Color(1.0, 1.0, 1.0, 0.9)
+	var steel := Color(0.80, 0.85, 0.92)
+	var steel_dk := Color(0.55, 0.60, 0.68)
+	var edge := Color(1.0, 1.0, 1.0, 0.95)
 	var handle := Color(0.30, 0.20, 0.14)
-	draw_colored_polygon(PackedVector2Array([              # blade
-		Vector2(0, -15), Vector2(-4, 3), Vector2(4, 3),
+	var handle_hi := Color(0.44, 0.30, 0.20)
+	draw_colored_polygon(PackedVector2Array([              # blade: point, belly, ricasso
+		Vector2(0, -26), Vector2(2.6, -18), Vector2(3.4, 2), Vector2(-3.4, 2), Vector2(-2.6, -18),
 	]), steel)
-	draw_line(Vector2(0, -15), Vector2(-4, 3), edge, 1.5)  # bright edge
-	draw_line(Vector2(-3, 4), Vector2(3, 4), handle, 3.0)  # guard
-	draw_line(Vector2(0, 4), Vector2(0, 12), handle, 4.0)  # grip
+	draw_colored_polygon(PackedVector2Array([              # the fuller, a shade darker
+		Vector2(0, -21), Vector2(1.2, -16), Vector2(1.2, 0), Vector2(-1.2, 0), Vector2(-1.2, -16),
+	]), steel_dk)
+	draw_line(Vector2(0, -26), Vector2(-3.2, 0.5), edge, 1.4)   # the ground edge catches the light
+	draw_line(Vector2(-4.4, 3.0), Vector2(4.4, 3.0), Color(0.62, 0.64, 0.70), 3.0)   # guard
+	draw_line(Vector2(0, 4.0), Vector2(0, 12.5), handle, 5.0)   # grip
+	draw_line(Vector2(-1.4, 5.0), Vector2(-1.4, 11.5), handle_hi, 1.4)
+	draw_circle(Vector2(0, 13.2), 2.4, Color(0.62, 0.64, 0.70))  # pommel
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
-func draw_torch(pos: Vector2, ang: float, sc: float) -> void:
+func draw_torch(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void:
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var handle := Color(0.24, 0.16, 0.12)
 	draw_line(Vector2(0, 14), Vector2(0, -2), handle, 4.0)
+	if rich:
+		# the shop's torch is a still object on a card, so it can afford the wick
+		# wrapping and the char line the flying one cannot
+		draw_line(Vector2(0, 1), Vector2(0, -3), Color(0.14, 0.10, 0.09), 5.0)
+		draw_line(Vector2(-2.5, 8), Vector2(2.5, 8), Color(0.38, 0.26, 0.18), 1.6)
+		draw_line(Vector2(-2.5, 11), Vector2(2.5, 11), Color(0.38, 0.26, 0.18), 1.6)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_torch_flame(pos, ang, sc)
+	draw_torch_flame(pos, ang, sc, rich)
 
 
-func draw_torch_flame(pos: Vector2, ang: float, sc: float) -> void:
+# a flame's OUTLINE, half of it: wide at the base, pinched at the waist, curling to a
+# point. Written as fractions of (width, height) so one profile serves the 22px flame on
+# a flying torch and the big one on a shop card. The old flame was two triangles.
+const FLAME_PROFILE := [Vector2(0.00, 0.00), Vector2(0.52, -0.07), Vector2(0.62, -0.26),
+	Vector2(0.47, -0.48), Vector2(0.27, -0.70), Vector2(0.11, -0.87), Vector2(0.00, -1.00)]
+
+func flame_shape(base: Vector2, h: float, w: float, sway: float) -> PackedVector2Array:
+	# the profile up one side and back down the other, with the tip LEANING: a flame
+	# bends more the further it is from the wick, which is what sells it as burning
+	var pts := PackedVector2Array()
+	for i in FLAME_PROFILE.size():
+		var p: Vector2 = FLAME_PROFILE[i]
+		pts.append(base + Vector2(p.x * w + sway * p.y * p.y, p.y * h))
+	for j in range(FLAME_PROFILE.size() - 2, 0, -1):
+		var q: Vector2 = FLAME_PROFILE[j]
+		pts.append(base + Vector2(-q.x * w + sway * q.y * q.y, q.y * h))
+	return pts
+
+
+func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void:
 	# the FIRE only, no handle. Split out so Blackout's dark stretch can draw the very
 	# same flame the lit torch draws (same size, same tumble, same flicker) instead of
 	# a second, smaller hand-written one - the two used to disagree, and a torch
 	# visibly shrank to about half size the instant the lights went.
-	var fl := 1.0 + 0.2 * sin(float(tick) * 0.5)           # flicker
+	# REBUILT 2026-07-27 (Louis: "the torch can use a better flame look, which doesn't
+	# lag in gameplay, but looks great in the shop"): a real flame silhouette in three
+	# nested layers - body, heart, white core - each on its own flicker and lean, so it
+	# WRITHES instead of pulsing. In play that is three polygons, one more than the two
+	# flat triangles it replaces; `rich` adds the aura, the embers and the pool of light
+	# for the shop card, where nothing is moving and the cost is paid once.
+	var t := float(tick)
+	var fl := 1.0 + 0.16 * sin(t * 0.5) + 0.07 * sin(t * 1.31)     # two-rate flicker
+	var sway := 2.2 * sin(t * 0.29) + 0.9 * sin(t * 0.71)          # the lean
+	var base := Vector2(0.0, -3.0)
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
-	draw_colored_polygon(PackedVector2Array([              # outer flame
-		Vector2(-6, -4), Vector2(6, -4), Vector2(0, -18.0 * fl),
-	]), Color(1.0, 0.5, 0.15, 0.95))
-	draw_colored_polygon(PackedVector2Array([              # inner flame
-		Vector2(-3, -5), Vector2(3, -5), Vector2(0, -13.0 * fl),
-	]), Color(1.0, 0.85, 0.4, 0.95))
+	if rich:
+		draw_colored_polygon(flame_shape(base, 27.0 * fl, 9.6, sway * 1.2), Color(1.0, 0.32, 0.06, 0.35))
+	draw_colored_polygon(flame_shape(base, 22.0 * fl, 7.4, sway), Color(1.0, 0.44, 0.10, 0.95))
+	draw_colored_polygon(flame_shape(base, 15.0 * fl, 5.0, sway * 0.7), Color(1.0, 0.72, 0.20, 0.95))
+	draw_colored_polygon(flame_shape(base + Vector2(0.0, -1.0), 8.5 * fl, 3.1, sway * 0.35),
+		Color(1.0, 0.96, 0.72, 0.95))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if rich:
+		# embers climb off the tip - in WORLD space, not the prop's, since smoke rises
+		# whatever angle the torch is held at
+		var tipw := pos + Vector2(sway * 0.8, -24.0 * sc).rotated(ang)
+		for i in 4:
+			var ef := fposmod(t * 0.006 + float(i) * 0.25, 1.0)
+			var ex := sin(t * 0.05 + float(i) * 2.1) * 4.0 * sc
+			draw_circle(tipw + Vector2(ex, -ef * 20.0 * sc), (1.7 - ef * 1.1) * sc,
+				Color(1.0, 0.7, 0.3, 0.8 * (1.0 - ef)))
+	# the light the fire throws. In play this is the one thing that matters about a
+	# torch, so it is drawn only where it can be SEEN - a dark house, or a shop card.
+	var dk := 1.0 if rich else stage_darkness()
+	if dk > 0.02:
+		draw_glow(pos + Vector2(0.0, -10.0 * sc).rotated(ang), (54.0 if rich else 42.0) * sc,
+			Color(1.0, 0.60, 0.22, 0.34 * dk))
 
 
 func prop_spin_angle(b: Ball) -> float:
@@ -8347,8 +8626,8 @@ func prop_spin_angle(b: Ball) -> float:
 # subpar). `mag` gives the six a shared optical weight while keeping a mild heavier-is-
 # bigger hierarchy; `off` is the y of the shape's own centre in its local units, so the
 # icon can be hung on its middle instead of on its grip.
-const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.98, 2.50, 2.05]
-const PROP_ICON_OFF := [0.0, 0.0, 0.0, -2.4, -0.5, -2.0]
+const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.98, 1.90, 1.72]
+const PROP_ICON_OFF := [0.0, 0.0, 0.0, -2.4, -5.2, -8.0]
 
 func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
 	# the prop as SHOP GOODS: the very same shape the stage draws (never a second art
@@ -8365,14 +8644,11 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 	var bob := (sin(atick() * 0.022) * 3.0) if live and not spins else 0.0
 	var at := pos + Vector2(0.0, bob) - Vector2(0.0, PROP_ICON_OFF[kind] * sc).rotated(ang)
 	# the niche: a soft pool of the prop's OWN colour behind it, and a contact shadow
-	for i in 5:
-		draw_circle(pos, lerpf(48.0, 20.0, float(i) / 4.0) * mag, Color(col.r, col.g, col.b, 0.03))
+	draw_glow(pos, 54.0 * mag, Color(col.r, col.g, col.b, 0.16))
 	fill_ellipse(pos + Vector2(0.0, 42.0 * mag), 26.0 * mag, 6.0 * mag, Color(0.0, 0.0, 0.0, 0.32))
 	if kind == PROP_TORCHES:
 		# fire lights its own corner of the shop
-		for i in 4:
-			draw_circle(at + Vector2(0.0, -11.0 * sc), lerpf(40.0, 14.0, float(i) / 3.0) * mag,
-				Color(1.0, 0.6, 0.2, 0.05))
+		draw_glow(at + Vector2(0.0, -11.0 * sc), 44.0 * mag, Color(1.0, 0.62, 0.22, 0.30))
 	match kind:
 		PROP_EGGS:
 			draw_egg(at, col, sc)
@@ -8383,7 +8659,7 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 		PROP_KNIVES:
 			draw_knife(at, ang, sc)
 		PROP_TORCHES:
-			draw_torch(at, ang, sc)
+			draw_torch(at, ang, sc, true)   # the shop card gets the full fire
 		_:
 			draw_ball_shape(at, col, sc)
 
@@ -8391,31 +8667,44 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 #endregion
 
 #region HUD HELPERS & KEY-HINT LABELS
+# the two shared StyleBoxFlats soft_card re-dresses (see the note inside it)
+var _sb_card := _new_card_sb()
+var _sb_sheen := _new_card_sb()
+
+func _new_card_sb() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.anti_aliasing = true
+	return sb
+
+
 func soft_card(r: Rect2, fill: Color, border: Color, border_w: float = 1.0, radius: float = 9.0, shadow: float = 12.0, top_sheen := 0.0) -> void:
 	# THE shared card look (2026-07-26 UI pass): a rounded, softly shadowed, anti-aliased
 	# panel drawn via StyleBoxFlat in one call. Rounded corners + a real drop shadow are
 	# what lift the whole UI off the flat-coloured-rectangle look that read as cheap.
 	# `top_sheen` overlays a faint lighter band across the top third for a subtle glassy
 	# gradient - StyleBoxFlat has no gradient fill, so this fakes one cheaply.
-	var sb := StyleBoxFlat.new()
+	# PERFORMANCE (2026-07-27): the two StyleBoxFlats are made ONCE and re-dressed per
+	# call, never allocated per card per frame. draw_style_box bakes its geometry at the
+	# call, so a shared, mutated instance draws exactly what a fresh one would - and a
+	# busy screen (the shop deals sixteen of these, the HUD several a frame at 120Hz)
+	# stops churning two objects per card through the allocator.
+	var sb := _sb_card
 	sb.bg_color = fill
 	sb.set_corner_radius_all(int(radius))
 	sb.border_color = border
 	sb.set_border_width_all(int(ceil(border_w)))
+	sb.shadow_size = int(shadow) if shadow > 0.0 else 0
 	if shadow > 0.0:
 		sb.shadow_color = Color(0.0, 0.0, 0.0, 0.38)
-		sb.shadow_size = int(shadow)
 		sb.shadow_offset = Vector2(0.0, 3.0)
-	sb.anti_aliasing = true
 	draw_style_box(sb, r)
 	if top_sheen > 0.0:
-		var sheen := StyleBoxFlat.new()
+		var sheen := _sb_sheen
 		sheen.bg_color = Color(1.0, 0.95, 0.85, top_sheen)
 		sheen.set_corner_radius_all(int(radius))
 		# only the top corners carry the sheen's rounding; the bottom is a soft straight cut
 		sheen.corner_radius_bottom_left = 0
 		sheen.corner_radius_bottom_right = 0
-		sheen.anti_aliasing = true
 		draw_style_box(sheen, Rect2(r.position.x, r.position.y, r.size.x, r.size.y * 0.42))
 
 
@@ -8635,21 +8924,105 @@ func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color
 
 
 func draw_drop_marks(x: float, y: float, lim: int, used: int) -> void:
-	# the DROP limit, drawn as small DOWNWARD triangles (a falling prop, so it never
-	# reads as a count of balls in play - Louis). Solid warm = a drop you can still
-	# afford, hollow = spent; the last one left pulses in warning.
+	# THE DROPS YOU HAVE LEFT (redrawn 2026-07-27, Louis: "a cooler and more fitting
+	# icon"). A downward triangle said "down" and nothing else. Each pip is now the
+	# thing itself: a PROP still in the air, falling, with the streak of the fall behind
+	# it - and once it is spent, the prop is gone and what is left is where it landed,
+	# a dark smear on the boards. So the row reads as "two still catchable, one on the
+	# floor" at a glance, which is exactly what the number means.
 	for i in lim:
-		var cxm := x + float(i) * 22.0
+		var cxm := x + float(i) * 24.0
 		var spent := i < used
-		var last := (lim - used) == 1 and not spent
-		var pts := PackedVector2Array([Vector2(cxm - 7.0, y), Vector2(cxm + 7.0, y), Vector2(cxm, y + 12.0)])
 		if spent:
-			draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[0]]), Color(0.4, 0.24, 0.22, 0.7), 1.5)
+			# landed: a dull mark on the boards, and the two chips that bounced off it
+			fill_ellipse(Vector2(cxm, y + 11.0), 8.0, 2.8, Color(0.42, 0.26, 0.24, 0.75))
+			draw_rect(Rect2(cxm - 9.5, y + 8.0, 2.0, 2.0), Color(0.42, 0.26, 0.24, 0.6))
+			draw_rect(Rect2(cxm + 7.5, y + 7.0, 2.0, 2.0), Color(0.42, 0.26, 0.24, 0.6))
 		else:
-			var c := Color(0.96, 0.44, 0.34)
+			var last := (lim - used) == 1
+			var c := Color(0.98, 0.62, 0.34)
 			if last:
-				c = Color(1.0, 0.36, 0.28, 0.72 + 0.28 * sin(float(tick) * 0.28))
-			draw_colored_polygon(pts, c)
+				# the final one you can afford: it flashes, and it falls a little faster
+				c = Color(1.0, 0.42, 0.30, 0.75 + 0.25 * sin(float(tick) * 0.28))
+			var fall := 1.6 * sin(float(tick) * 0.05 + float(i) * 1.1)
+			var pc := Vector2(cxm, y + 6.0 + fall)
+			draw_line(pc + Vector2(0.0, -9.0), pc + Vector2(0.0, -3.0), Color(c.r, c.g, c.b, c.a * 0.35), 3.0)
+			draw_line(pc + Vector2(0.0, -6.0), pc + Vector2(0.0, -2.0), Color(c.r, c.g, c.b, c.a * 0.6), 4.0)
+			draw_circle(pc, 4.6, c)
+			draw_circle(pc + Vector2(-1.4, -1.4), 1.6, Color(1.0, 0.95, 0.85, c.a * 0.85))
+
+
+const GAUGE_ZONES := [
+	# where the needle sits and what that MEANS, from empty to full: the same four
+	# bands a fuel or temperature gauge uses, so the reading is understood before it is
+	# read. The thresholds are the fraction each band ENDS at.
+	{"to": 0.25, "col": Color(0.90, 0.26, 0.20)},   # the room is leaving
+	{"to": 0.50, "col": Color(0.95, 0.55, 0.22)},   # restless
+	{"to": 0.78, "col": Color(0.96, 0.82, 0.30)},   # with you
+	{"to": 1.00, "col": Color(0.45, 0.85, 0.42)},   # won over
+]
+
+func gauge_color(frac: float) -> Color:
+	for z in GAUGE_ZONES:
+		if frac <= float(z["to"]):
+			return Color(z["col"])
+	return Color(GAUGE_ZONES[GAUGE_ZONES.size() - 1]["col"])
+
+
+func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, font: Font) -> void:
+	# A DIAL, not a bar (2026-07-27, Louis: "the public satisfaction should be a gaming
+	# meter, like a fuel meter: a half circle with green, yellow and red"). The crowd's
+	# patience is the one number in the game you watch the way you watch a fuel gauge -
+	# it only ever falls unless you feed it - so it gets the instrument that means that.
+	# The band is coloured by ZONE (see GAUGE_ZONES) rather than by lerping one colour,
+	# because a driver reads "I am in the red" from where the needle IS, not from a hue.
+	frac = clampf(frac, 0.0, 1.0)
+	var a0 := PI          # 180 degrees: empty, hard left
+	var a1 := TAU         # 360: full, hard right
+	# the dial face, then each zone as one thick arc over it
+	draw_arc(c, r, a0, a1, 30, Color(0.05, 0.04, 0.05, 0.85), 13.0, true)
+	var from := 0.0
+	for z in GAUGE_ZONES:
+		var to := float(z["to"])
+		var zc: Color = z["col"]
+		var lit := frac >= from - 0.001   # zones already passed burn bright, the rest are dim
+		draw_arc(c, r, lerpf(a0, a1, from), lerpf(a0, a1, to), 14,
+			Color(zc.r, zc.g, zc.b, 0.85 if lit else 0.22), 11.0, true)
+		from = to
+	# ticks at every zone edge, so the bands read as a scale and not as decoration
+	for z2 in GAUGE_ZONES:
+		var ta := lerpf(a0, a1, float(z2["to"]))
+		var td := Vector2(cos(ta), sin(ta))
+		draw_line(c + td * (r - 8.0), c + td * (r + 8.0), Color(0.06, 0.05, 0.05, 0.9), 2.0)
+	# the best the room ever got this act: a bright pin left standing on the dial
+	if peak > 0.0:
+		var pa := lerpf(a0, a1, clampf(peak, 0.0, 1.0))
+		var pd := Vector2(cos(pa), sin(pa))
+		draw_line(c + pd * (r - 9.0), c + pd * (r + 9.0), Color(1.0, 0.97, 0.85, 0.75), 2.0)
+	# THE NEEDLE: a tapered blade off a hub, with a counterweight behind the pivot
+	var na := lerpf(a0, a1, frac)
+	var nd := Vector2(cos(na), sin(na))
+	var perp := Vector2(-nd.y, nd.x)
+	var tipc := gauge_color(frac)
+	# a dark under-blade first, so the white needle reads against a lit zone too
+	draw_colored_polygon(PackedVector2Array([
+		c + nd * (r + 3.0), c + perp * 5.0 - nd * 7.0, c - perp * 5.0 - nd * 7.0]),
+		Color(0.08, 0.06, 0.07, 0.85))
+	draw_colored_polygon(PackedVector2Array([
+		c + nd * (r + 1.0), c + perp * 3.4 - nd * 6.0, c - perp * 3.4 - nd * 6.0]),
+		Color(1.0, 0.96, 0.90))
+	draw_circle(c, 5.6, Color(0.10, 0.08, 0.09))
+	draw_circle(c, 3.2, tipc)
+	# the readout goes BELOW the hub: the needle sweeps the upper half only, so this is
+	# the one spot on the instrument it can never cross (it did, over the number)
+	if label != "":
+		draw_string(font, Vector2(c.x - r, c.y + 18.0), label, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, 14,
+			Color(tipc.r, tipc.g, tipc.b, 0.95))
+	# in the red, the band itself pulses: the one number in the game that kills a set
+	if frac <= float(GAUGE_ZONES[0]["to"]):
+		var warn := 0.35 + 0.35 * sin(float(tick) * 0.16)
+		draw_arc(c, r, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])), 12,
+			Color(1.0, 0.35, 0.28, warn), 11.0, true)
 
 
 func fit_text(font: Font, text: String, w: float, size: int) -> String:
@@ -8980,13 +9353,14 @@ func draw_hud(font: Font, s: Vector2) -> void:
 
 		# --- the CROWD (patience clock) and the DROP limit ---
 		var ccard_y := 286.0
-		hud_card(Rect2(LX, ccard_y, LW, 70), Color(0.95, 0.5, 0.4, 0.35))
+		var ccard_h := 108.0
+		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35))
 		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.72, 0.62))
-		var pcol := Color(0.9, 0.3, 0.2).lerp(Color(1.0, 0.85, 0.42), applause)
-		draw_meter(LX + 14, ccard_y + 28, LW - 28, 12.0, applause, pcol)
-		draw_rect(Rect2(LX + 14 + (LW - 28) * peak_applause - 1.0, ccard_y + 26, 2.0, 16.0), Color(1.0, 0.95, 0.8, 0.6))
-		draw_string(font, Vector2(LX + 14, ccard_y + 58), "DROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.6, 0.55))
-		draw_drop_marks(LX + 72, ccard_y + 48, drop_limit(), dropped)
+		# the DIAL on the left, the drops you have left on the right
+		draw_gauge(Vector2(LX + 80.0, ccard_y + 74.0), 48.0, applause, peak_applause,
+			"%d%%" % int(round(applause * 100.0)), font)
+		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.6, 0.55))
+		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
 
 		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
 		if encore >= 0 and encore < ENCORES.size():
@@ -8995,9 +9369,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# 15px line each), so a longer challenge is never clipped by its own border
 			var edesc := String(ENCORES[encore]["desc"])
 			var elines := _wrap_lines(font, edesc, LW - 28, 11)
-			hud_card(Rect2(LX, 364, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
-			draw_fit_string(font, Vector2(LX + 14, 386), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
-			_wrap_text(font, edesc, LX + 14, 404, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+			# ...and it sits under the crowd card, whose own height is now a variable
+			# (the dial is taller than the bar it replaced), so this follows it
+			var eay := ccard_y + ccard_h + 8.0
+			hud_card(Rect2(LX, eay, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
+			draw_fit_string(font, Vector2(LX + 14, eay + 22.0), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
+			_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
 		# here (Louis: no redundancy) - the routine card at the foot of the stage
@@ -9862,8 +10239,7 @@ func draw_gear_icon(i: int, c: Vector2, cc: Color) -> void:
 						2.4 - t * 1.2, Color(1.0, 0.95, 0.88, 0.20 - t * 0.14))
 		2:   # GLOW KIT: the halo it buys, ON a prop - the card IS the preview, the
 			# same visual language draw_glow_in_dark uses on the stage
-			for k in 5:
-				draw_circle(c, lerpf(32.0, 12.0, float(k) / 4.0), Color(cc.r, cc.g, cc.b, 0.10))
+			draw_glow(c, 34.0, Color(cc.r, cc.g, cc.b, 0.45))
 			draw_ball_shape(c, Color(0.72, 0.95, 0.68), 1.7)
 			draw_circle(c, 4.0, Color(1.0, 1.0, 1.0, 0.75))
 		_:   # ENERGY-DRINK HELMET: the hat it actually is - a cap with a can either
@@ -10002,8 +10378,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		var plate_top := gy0 + gh - (36.0 if owned else 46.0)
 		var icx := cx0 + 52.0
 		var icy := gy0 + 54.0
-		for k in 4:
-			draw_circle(Vector2(icx, icy), lerpf(40.0, 18.0, float(k) / 3.0), Color(cc.r, cc.g, cc.b, 0.035))
+		draw_glow(Vector2(icx, icy), 46.0, Color(cc.r, cc.g, cc.b, 0.16))
 		draw_gear_icon(i, Vector2(icx, icy + (sin(atick() * 0.022) * 2.5 if gsel else 0.0)), cc)
 		var txw := gw - 104.0
 		# a gear NAME is data and two of them are long ("Glow-in-the-Dark Kit"), so the
@@ -10397,10 +10772,7 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		Vector2(o.x, inner.position.y + 4.0),
 		Vector2(o.x - box.size.x * 0.30, fy), Vector2(o.x + box.size.x * 0.30, fy)]),
 		Color(glow.r, glow.g, glow.b, 0.05))
-	for i in 9:
-		var f := float(i) / 8.0
-		fill_ellipse(Vector2(o.x, fy), lerpf(box.size.x * 0.36, 22.0, f), lerpf(18.0, 4.0, f),
-			Color(glow.r, glow.g, glow.b, 0.03))
+	draw_glow(Vector2(o.x, fy), box.size.x * 0.34, Color(glow.r, glow.g, glow.b, 0.16))
 	draw_rect(Rect2(inner.position.x, fy, inner.size.x, inner.position.y + inner.size.y - fy),
 		Color(0.09, 0.06, 0.07, 0.92))
 	draw_line(Vector2(inner.position.x, fy), Vector2(inner.position.x + inner.size.x, fy),
@@ -11182,7 +11554,9 @@ func draw_settings(font: Font, s: Vector2) -> void:
 	draw_string(title_font(), Vector2(0, s.y * 0.17), "SETTINGS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
 
 	# Music / Sound are volume sliders (float 0..1); the rest stay plain on/off bools
-	var rows := [["Screen shake", set_shake], ["Reduce motion  (fewer jolts and bursts)", reduce_motion], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen]]
+	# NOTE (standing invariant): draw_settings, draw_settings_cards and settings_input
+	# must carry the SAME rows in the SAME order - menu_sel is a bare index into all three.
+	var rows := [["Screen shake", set_shake], ["Reduce motion  (fewer jolts and bursts)", reduce_motion], ["Hard collisions  (clacks ruin catches)", set_collide], ["Fullscreen  (F11 anywhere)", set_fullscreen], ["Dominant hand  (holds the odd prop)", dominant_hand == RIGHT]]
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var oy := s.y * 0.28
@@ -11201,7 +11575,10 @@ func draw_settings(font: Font, s: Vector2) -> void:
 		var nm := String(rows[i][0])
 		var on := bool(rows[i][1])
 		draw_string(font, Vector2(px, ry), ("> " if sel else "  ") + nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.9, 0.6) if sel else Color(0.8, 0.74, 0.66))
-		draw_string(font, Vector2(px + pw - 60.0, ry), "ON" if on else "OFF", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
+		# the dominant hand is the one row whose value is not a yes/no
+		var vtext := ("RIGHT" if on else "LEFT") if i == rows.size() - 1 else ("ON" if on else "OFF")
+		var vcol := Color(1.0, 0.86, 0.5) if i == rows.size() - 1 else (Color(0.6, 0.9, 0.6) if on else Color(0.85, 0.6, 0.55))
+		draw_string(font, Vector2(px + pw - 70.0, ry), vtext, HORIZONTAL_ALIGNMENT_LEFT, -1, 20, vcol)
 	var rows_total := rows.size() + sliders.size()
 
 	var csel := menu_sel == rows_total
@@ -11249,6 +11626,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
 		{"kind": "bool", "name": "Hard collisions", "val": set_collide, "note": "clacks ruin catches", "col": Color(0.9, 0.5, 0.45)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
+		{"kind": "pick", "name": "Dominant hand", "val": dominant_hand == RIGHT, "note": "holds the odd prop and starts the pattern", "col": Color(0.95, 0.7, 0.55)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
 		{"kind": "nav", "name": "Records and history", "val": false, "note": "your career ledger", "col": Color(0.95, 0.82, 0.5)},
 		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},
@@ -11258,16 +11636,18 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 	# card shifts to leave room for the section headers between groups.
 	var sections := [
 		{"head": "AUDIO", "rows": [0, 1]},
-		{"head": "GAME FEEL", "rows": [2, 3, 4, 5]},
-		{"head": "MORE", "rows": [6, 7, 8]},
+		{"head": "GAME FEEL", "rows": [2, 3, 4, 5, 6]},
+		{"head": "MORE", "rows": [7, 8, 9]},
 	]
 	var pw := minf(620.0, s.x - 90.0)
 	var px := s.x * 0.5 - pw * 0.5
-	var card_h := 42.0
-	var gap := 7.0
-	var sec_gap := 16.0
-	var head_h := 20.0
-	var y := s.y * 0.185
+	# sized so TEN rows plus three section headers still finish above the footer: the
+	# dominant-hand row was the tenth, and at the old spacing Back sat under the hints
+	var card_h := 38.0
+	var gap := 6.0
+	var sec_gap := 14.0
+	var head_h := 18.0
+	var y := s.y * 0.172
 	for sec in sections:
 		draw_string(font, Vector2(px + 4.0, y + 13.0), String(sec["head"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.95, 0.8, 0.55, 0.85))
 		y += head_h
@@ -11298,6 +11678,14 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 						HORIZONTAL_ALIGNMENT_RIGHT, 34.0, 14, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.86, 0.92, 0.84))
 				"bool":
 					draw_pill_toggle(px + pw - 74.0, y + card_h * 0.5 - 13.0, 54.0, 26.0, bool(r["val"]))
+				"pick":
+					# a two-way PICK, not a yes/no: the unchosen side stays visible so the
+					# row reads as "left or right", which is what the setting is
+					var isr := bool(r["val"])
+					draw_string(font, Vector2(px + pw - 118.0, y + card_h * 0.5 + 6.0), "LEFT", HORIZONTAL_ALIGNMENT_LEFT, 60.0, 15,
+						Color(0.55, 0.5, 0.46) if isr else Color(1.0, 0.88, 0.55))
+					draw_string(font, Vector2(px + pw - 62.0, y + card_h * 0.5 + 6.0), "RIGHT", HORIZONTAL_ALIGNMENT_LEFT, 60.0, 15,
+						Color(1.0, 0.88, 0.55) if isr else Color(0.55, 0.5, 0.46))
 				"nav":
 					draw_string(font, Vector2(px + pw - 42.0, y + card_h * 0.5 + 7.0), ">", HORIZONTAL_ALIGNMENT_RIGHT, 28.0, 20, Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
 			y += card_h + gap
@@ -12206,7 +12594,7 @@ func draw_dust(s: Vector2, n: int, glow: Color) -> void:
 		var px := bx * s.x + sin(atick() * 0.01 + seed) * 12.0
 		var py := by * s.y
 		var a := 0.10 + 0.10 * sin(atick() * 0.03 + seed)
-		draw_circle(Vector2(px, py), 1.4, Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
+		draw_rect(Rect2(px - 1.4, py - 1.4, 2.8, 2.8), Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
 
 
 #endregion
@@ -12571,17 +12959,60 @@ func ext_midnight(s: Vector2) -> void:
 	# fraction of the crowd lights, dimmer still - echoes venue_data's spot
 	# 0.015 (half the Backyard's) so the establishing card promises the same
 	# genuinely dark house the stage itself now delivers
-	var gy := s.y * 0.80
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.01, 0.02, 0.02), Color(0.03, 0.05, 0.04), 26)
-	draw_stars(s, 30, 0.55)
-	draw_arena_bowl(Vector2(s.x * 0.5, gy), s.x * 0.96, s.y * 0.5, Color(0.04, 0.05, 0.045), Color(0.35, 0.85, 0.55))
-	for i in 20:
-		var seed := float(i) * 17.7
-		var x := s.x * 0.5 + (fposmod(sin(seed) * 99.0, 1.0) - 0.5) * s.x * 0.7
-		var y := gy - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.26 - 12.0
-		var a := 0.12 + 0.16 * sin(float(cine_tick) * 0.05 + seed)
-		draw_circle(Vector2(x, y), 1.3, Color(0.55, 0.95, 0.65, clampf(a, 0.03, 0.3)))
-	draw_dust(s, 8, Color(0.55, 0.95, 0.65))
+	# REBUILT 2026-07-27 (Louis: "the midnight show is literally just black in preview").
+	# It was the World Arena's giant bowl in near-black, which is a dark blob and says
+	# nothing. The Midnight Show is not a big room - it is the LAST room, the one that
+	# opens after everyone has gone home - so its picture is a narrow door down an alley:
+	# one green lamp, a clock striking twelve, three people who waited, and the moon.
+	var gy := s.y * 0.82
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.010, 0.020, 0.018), Color(0.05, 0.08, 0.06), 22)
+	draw_stars(s, 34, 0.55)
+	draw_moon(Vector2(s.x * 0.19, s.y * 0.16), 19.0)
+	# the alley: two blank walls leaning in, the venue's door between them
+	for sgn in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(s.x * 0.5 + sgn * s.x * 0.5, 0.0), Vector2(s.x * 0.5 + sgn * s.x * 0.5, gy),
+			Vector2(s.x * 0.5 + sgn * s.x * 0.20, gy), Vector2(s.x * 0.5 + sgn * s.x * 0.26, s.y * 0.06)]),
+			Color(0.028, 0.042, 0.036))
+	var fw := s.x * 0.34
+	var fh := s.y * 0.58
+	var fx := s.x * 0.5
+	draw_rect(Rect2(fx - fw * 0.5, gy - fh, fw, fh), Color(0.062, 0.088, 0.074))
+	draw_line(Vector2(fx - fw * 0.5, gy - fh), Vector2(fx + fw * 0.5, gy - fh), Color(0.35, 0.85, 0.55, 0.20), 2.0)
+	for i in 4:   # shuttered windows: the rest of the house is asleep
+		var wx := fx - fw * 0.32 + float(i % 2) * fw * 0.42
+		var wy2 := gy - fh * (0.62 - float(i / 2) * 0.16)
+		draw_rect(Rect2(wx, wy2, fw * 0.22, fh * 0.10), Color(0.030, 0.045, 0.038))
+	# the clock over the door, at twelve
+	draw_wall_clock(Vector2(fx, gy - fh * 0.80), 30.0, Color(0.45, 0.95, 0.60))
+	# the doorway: a narrow one, with the room's own green light spilling out on the stones
+	var dw := 82.0
+	var dh := 142.0
+	draw_rect(Rect2(fx - dw * 0.5, gy - dh, dw, dh), Color(0.020, 0.048, 0.034))
+	draw_glow(Vector2(fx, gy - dh * 0.55), dw * 1.1, Color(0.35, 0.90, 0.55, 0.30))
+	draw_rect(Rect2(fx - dw * 0.5, gy - dh, dw, dh), Color(0.35, 0.85, 0.55, 0.35), false, 2.0)
+	draw_colored_polygon(PackedVector2Array([   # the light on the ground
+		Vector2(fx - dw * 0.5, gy), Vector2(fx + dw * 0.5, gy),
+		Vector2(fx + dw * 1.2, s.y), Vector2(fx - dw * 1.2, s.y)]), Color(0.35, 0.85, 0.55, 0.07))
+	# the one lamp over it, and the board that says there is a show at all
+	draw_glow(Vector2(fx, gy - dh - 12.0), 78.0, Color(0.40, 0.95, 0.60, 0.32))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(fx - 11.0, gy - dh - 18.0), Vector2(fx + 11.0, gy - dh - 18.0),
+		Vector2(fx + 7.0, gy - dh - 6.0), Vector2(fx - 7.0, gy - dh - 6.0)]), Color(0.55, 0.95, 0.65, 0.85))
+	draw_rect(Rect2(fx - 62.0, gy - dh - 54.0, 124.0, 22.0), Color(0.045, 0.075, 0.060))
+	draw_rect(Rect2(fx - 62.0, gy - dh - 54.0, 124.0, 22.0), Color(0.35, 0.85, 0.55, 0.28), false, 1.5)
+	for k in 6:
+		var bl := 0.5 + 0.5 * sin(float(cine_tick) * 0.05 + float(k) * 1.1)
+		draw_rect(Rect2(fx - 54.0 + float(k) * 19.0, gy - dh - 48.0, 9.0, 10.0),
+			Color(0.55, 0.95, 0.65, 0.20 + 0.35 * bl))
+	# the ones who waited: three silhouettes by the door, breathing
+	for i in 3:
+		var px := fx + (-1.0 if i == 0 else (1.0 if i == 1 else 1.35)) * (dw * 0.85 + float(i) * 12.0)
+		var bob := sin(float(cine_tick) * 0.02 + float(i) * 1.7) * 1.4
+		draw_capsule(Vector2(px, gy + bob), Vector2(px, gy - 52.0 + bob), 26.0, 19.0, Color(0.014, 0.024, 0.020))
+		draw_circle(Vector2(px, gy - 61.0 + bob), 9.0, Color(0.014, 0.024, 0.020))
+	draw_rect(Rect2(0.0, gy, s.x, s.y - gy), Color(0.03, 0.045, 0.038))
+	draw_dust(s, 10, Color(0.55, 0.95, 0.65))
 
 
 # --- exterior building / prop primitives -------------------------------------
@@ -12592,7 +13023,7 @@ func draw_stars(s: Vector2, n: int, topfrac: float) -> void:
 		var x := fposmod(sin(seed) * 43758.5, 1.0) * s.x
 		var y := fposmod(cos(seed) * 24137.0, 1.0) * s.y * topfrac
 		var a := 0.3 + 0.5 * sin(atick() * 0.04 + seed)
-		draw_circle(Vector2(x, y), 1.3, Color(1, 1, 1, clampf(a, 0.05, 0.7)))
+		draw_rect(Rect2(x - 1.3, y - 1.3, 2.6, 2.6), Color(1, 1, 1, clampf(a, 0.05, 0.7)))
 
 
 func draw_moon(pos: Vector2, r: float) -> void:
@@ -12674,8 +13105,7 @@ func draw_city_row(s: Vector2, gy: float) -> void:
 
 
 func draw_streetlamp(base: Vector2, gy: float) -> void:
-	for k in range(6, 0, -1):
-		draw_circle(Vector2(base.x, gy + 6.0), 20.0 + float(k) * 22.0, Color(1.0, 0.72, 0.36, 0.05 * (1.0 - float(k) / 7.0)))
+	draw_glow(Vector2(base.x, gy + 6.0), 150.0, Color(1.0, 0.72, 0.36, 0.22))
 	fill_ellipse(Vector2(base.x, gy + 4.0), 92.0, 20.0, Color(1.0, 0.7, 0.35, 0.12))
 	# the post reads as a SILHOUETTE against the night, not as black on black: at
 	# 0.06 it simply vanished and left the lamp head glowing in mid-air
@@ -12745,17 +13175,60 @@ func draw_lantern_string(a: Vector2, b: Vector2) -> void:
 			p2.y += sin(t2 * PI) * 26.0
 			draw_line(p, p2, Color(0.3, 0.2, 0.15), 1.5)
 		var fl := 0.7 + 0.3 * sin(atick() * 0.08 + float(i))
-		draw_circle(p, 7.0, Color(1.0, 0.72, 0.35, 0.18 * fl))
-		draw_circle(p, 4.0, Color(1.0, 0.8, 0.4, fl))
+		soft_disc(p, 7.0, Color(1.0, 0.72, 0.35, 0.18 * fl), 8)
+		soft_disc(p, 4.0, Color(1.0, 0.8, 0.4, fl), 8)
 
 
 func draw_arena_bowl(base: Vector2, w: float, h: float, body: Color, rim: Color) -> void:
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(base.x - w * 0.5, base.y), Vector2(base.x + w * 0.5, base.y),
-		Vector2(base.x + w * 0.4, base.y - h), Vector2(base.x - w * 0.4, base.y - h)]), body)
-	fill_ellipse(Vector2(base.x, base.y - h), w * 0.4, h * 0.16, body)
-	draw_arc(Vector2(base.x, base.y - h), w * 0.4, PI, TAU, 44, Color(rim.r, rim.g, rim.b, 0.5), 3.0)
-	draw_circle(Vector2(base.x, base.y - h), w * 0.30, Color(rim.r, rim.g, rim.b, 0.06))
+	# THE STADIUM (rebuilt 2026-07-27, Louis: the exteriors "need more attention"). It
+	# was one huge trapezoid with an ellipse on top, which at s.x * 0.96 wide filled the
+	# card with a featureless grey hill. It is a BUILDING now: three tiers stepping back,
+	# ribs down the face, a band of lit boxes along the top, a rim of light where the
+	# roof lifts off it, and floodlight masts either side throwing real beams. Same
+	# signature, so the Championship and the World Arena both get it.
+	var tiers := 3
+	for i in tiers:
+		var f := float(i) / float(tiers)          # 0 front tier .. 1 top
+		var tw := w * (0.50 - 0.07 * float(i))
+		var ty := base.y - h * (0.42 + 0.29 * float(i))
+		var shade := 1.0 - 0.16 * float(i)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(base.x - tw, base.y), Vector2(base.x + tw, base.y),
+			Vector2(base.x + tw * 0.94, ty), Vector2(base.x - tw * 0.94, ty)]),
+			Color(body.r * shade, body.g * shade, body.b * shade))
+		draw_line(Vector2(base.x - tw * 0.94, ty), Vector2(base.x + tw * 0.94, ty),
+			Color(rim.r, rim.g, rim.b, 0.16 + 0.10 * f), 1.5)
+	var topw := w * 0.36
+	var topy := base.y - h
+	# the roof: a shallow arc lifting off the top tier, with light under its lip
+	fill_ellipse(Vector2(base.x, topy), topw, h * 0.10, Color(body.r * 0.62, body.g * 0.62, body.b * 0.62))
+	draw_arc(Vector2(base.x, topy), topw, PI, TAU, 40, Color(rim.r, rim.g, rim.b, 0.45), 2.5)
+	draw_glow(Vector2(base.x, topy + h * 0.06), topw * 0.9, Color(rim.r, rim.g, rim.b, 0.16))
+	# ribs down the face, and the lit boxes between them
+	var ribs := 13
+	for i in ribs:
+		var rx := base.x + lerpf(-w * 0.49, w * 0.49, float(i) / float(ribs - 1))
+		draw_line(Vector2(rx, base.y), Vector2(rx, base.y - h * 0.40), Color(0.0, 0.0, 0.0, 0.22), 2.0)
+		if i < ribs - 1:
+			var bx := rx + w * 0.98 / float(ribs - 1) * 0.5
+			var lit2 := fposmod(sin(float(i) * 7.3) * 91.0, 1.0) > 0.35
+			if lit2:
+				draw_rect(Rect2(bx - 7.0, base.y - h * 0.36, 14.0, 11.0),
+					Color(rim.r, rim.g, rim.b, 0.32))
+	# floodlight masts: the thing that says STADIUM from a mile off
+	for sgn in [-1.0, 1.0]:
+		var mx: float = base.x + sgn * w * 0.46
+		var my := base.y - h * 1.16
+		draw_rect(Rect2(mx - 2.5, my, 5.0, base.y - my), Color(0.06, 0.06, 0.08))
+		draw_rect(Rect2(mx - 22.0, my - 16.0, 44.0, 18.0), Color(0.09, 0.09, 0.11))
+		for k in 6:
+			draw_circle(Vector2(mx - 16.0 + float(k % 3) * 16.0, my - 11.0 + float(k / 3) * 8.0), 3.2,
+				Color(1.0, 0.96, 0.82, 0.85))
+		draw_glow(Vector2(mx, my - 7.0), 70.0, Color(rim.r, rim.g, rim.b, 0.30))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(mx - 20.0, my), Vector2(mx + 20.0, my),
+			Vector2(base.x + sgn * w * 0.12 + 150.0, base.y), Vector2(base.x + sgn * w * 0.12 - 150.0, base.y)]),
+			Color(rim.r, rim.g, rim.b, 0.05))
 
 
 func draw_banner(top: Vector2, col: Color) -> void:
