@@ -109,7 +109,11 @@ const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_
 const TRAIL_STEP_SQ := 36.0   # (6px)^2: the closest two comet-trail samples may sit.
 							  # Anything tighter folds the tapered ribbon through itself -
 							  # see the sampler in update_sim for why that matters
-const BLACKOUT_CUT := 0.68    # how far into a flight the Blackout Encore's lights die.
+const BLACKOUT_UNLIT := 0.55  # how brightly an UNCHARGED prop glows through a Blackout,
+							   # against 1.0 for one carrying the Glow Kit. The shape is
+							   # legible either way (juggling blind was tried and rejected);
+							   # the Kit is the difference between reading a prop and
+							   # merely finding it.
 							  # Just past the apex, so the throw and the top of the arc
 							  # are always seen and only the descent is dark.
 
@@ -647,7 +651,7 @@ const ENCORES := [
 	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
 	{"id": "gale",      "name": "The Gale",           "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "The lights are cut on the way down: past its apex a prop is a shapeless glow. A torch keeps its flame."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "The house lights are out. In the air a prop is only the glow it carries, from throw to catch. A torch keeps its flame."},
 	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
 	{"id": "long",      "name": "The Long Set",       "desc": "The final goal is doubled, but the crowd is patient. An endurance test."},
 	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
@@ -9264,26 +9268,36 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 		if b.state == STATE_FLIGHT:
 			if _btb_behind(b) != behind:
 				continue
-			# BLACKOUT challenge: the throw and the apex stay VISIBLE - the lights only
-			# swallow the prop on its way down, so the challenge is catching from the
-			# memory of the arc, not juggling blind (fully invisible flight was way too
-			# difficult - Louis). Past BLACKOUT_CUT the OBJECT is gone for everything:
-			# no shape, no rim, no comet trail, no miniature stand-in. What is left is
-			# a shapeless afterglow, dimming as it falls but never out. A TORCH is the
-			# exception the whole Encore is built around: its handle goes, its flame
-			# does not.
+			# BLACKOUT, rebuilt 2026-07-27 (Louis's own call, picked over two alternatives).
+			# THE CHALLENGE IS SIMPLY THAT THE ROOM IS DARK. A prop is its glow-in-the-dark
+			# self for the WHOLE flight - same look on the rise, at the apex and on the way
+			# down - and nothing about it changes partway.
+			#
+			# What this replaces, and why: the lights used to be cut at BLACKOUT_CUT (0.68
+			# of the flight), swapping a full-colour prop for a shapeless afterglow in a
+			# single frame. Two things were wrong with it. The switch was abrupt - the
+			# object visibly changed colour mid-air - and there is no good place to put
+			# such a switch, because any threshold is a cliff. Louis: "perhaps you should
+			# even just make the challenge entirely: the objects are hard to see, because
+			# it is dark. then you don't need to fade." Which is the better design: no
+			# cliff, no cross-fade to tune, one honest rule, and the encore text can now
+			# say exactly what happens.
+			#
+			# The SHAPE is kept for everyone, deliberately. Handing the non-Kit player a
+			# shapeless glow for a whole flight would be juggling blind, which was tried
+			# and rejected once already as "way too difficult" (Louis) - and it was only
+			# ever survivable before because the rise was fully lit. The Glow Kit is now
+			# the difference between a prop you can READ and one you can only find (see
+			# `lit`), which is a better thing to sell than a mercy on one Encore. A TORCH
+			# is still the exception the Encore is built around: it carries its own fire.
 			if encore_on("blackout"):
-				var bspan := maxi(1, b.land_tick - b.launch_tick)
-				var bp := clampf(float(tick - b.launch_tick) / float(bspan), 0.0, 1.0)
-				if bp > BLACKOUT_CUT:
-					var dark_pos := flight_pos(b)
-					if b.kind == PROP_TORCHES:
-						draw_flame_in_dark(b, dark_pos)
-					else:
-						draw_blackout_afterglow(b, dark_pos, bp)
-						if has_glow_kit:
-							draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind))
-					continue
+				var dark_pos := flight_pos(b)
+				if b.kind == PROP_TORCHES:
+					draw_flame_in_dark(b, dark_pos)
+				else:
+					draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind),
+						prop_spin_angle(b), 1.0 if has_glow_kit else BLACKOUT_UNLIT)
+				continue
 			draw_trail(b)
 			var pos := flight_pos(b)
 			draw_prop(b, pos)
@@ -9392,40 +9406,6 @@ func draw_flame_in_dark(b: Ball, pos: Vector2) -> void:
 	draw_torch_flame(pos, prop_spin_angle(b), sc)
 
 
-func draw_blackout_afterglow(b: Ball, pos: Vector2, flight_progress: float) -> void:
-	# every prop that is not a torch, past the apex: NOT a dimmed prop, NOT a small
-	# stand-in shape, and not the ordinary comet trail either. What is left is light
-	# with no object in it - a soft radial bloom with no edge anywhere, trailed by the
-	# few positions it just came from, so the eye reads a moving glow it can still
-	# track but no longer a thing it can see. It spreads and dims on the way down;
-	# it never goes out, because catching a genuinely invisible prop is not a
-	# challenge, it is a coin flip (Louis).
-	var sc := prop_scale(b.kind)
-	var r0 := BALL_RADIUS_PX * sc                                  # the prop's own size
-	var down := clampf((flight_progress - BLACKOUT_CUT) / (1.0 - BLACKOUT_CUT), 0.0, 1.0)
-	if has_glow_kit:
-		# the Kit's mercy, in the SAME visual language rather than a second halo laid
-		# over the top: 60,000g buys a glow that barely decays at all across the fall
-		down *= 0.22
-	var core := lerpf(0.85, 0.38, down)      # peak brightness at the centre
-	var spread := lerpf(1.7, 2.6, down)      # outer reach, in prop radii
-	var g := b.color.lightened(0.18)
-	# where it has just been, dimmest first: this lag is what makes it read as an
-	# AFTERglow instead of a dim prop
-	var n := b.trail.size()
-	if n >= 2:
-		var keep := mini(n, 6)
-		for i in range(n - keep, n):
-			var f := float(i - n + keep + 1) / float(keep)   # 0 oldest .. 1 newest
-			draw_circle(b.trail[i], r0 * (0.35 + 0.85 * f), Color(g.r, g.g, g.b, core * 0.13 * f * f))
-	# the bloom itself: concentric shells, widest first. Eight of them rather than a
-	# couple of discs, because a hard-edged circle at low alpha reads as a dim OBJECT -
-	# it is the smooth falloff that makes this light instead of a thing.
-	for i in 8:
-		var f := 1.0 - float(i) / 7.0                        # 1 outermost .. 0 core
-		draw_circle(pos, r0 * lerpf(0.45, spread, f), Color(g.r, g.g, g.b, core * lerpf(0.22, 0.03, f)))
-
-
 const GLOW_PHOS := Color(0.62, 1.0, 0.72)   # the Kit's phosphor: a cool green-white that
 											# reads as CHARGED rather than merely bright,
 											# and never collides with a venue's own palette
@@ -9437,7 +9417,8 @@ func glow_kit_lit() -> bool:
 	return has_glow_kit and is_dark_context()
 
 
-func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0) -> void:
+func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0,
+		ang: float = 0.0, lit: float = 1.0) -> void:
 	# THE KIT, on stage (2026-07-27, Louis: it "needs a lot of love"). It used to be two
 	# flat circles - a coloured dot with a white dot inside - which said WHERE a prop was
 	# and nothing else, so paying for it bought a pair of pixels.
@@ -9448,13 +9429,18 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	# whole point of buying the thing is that the pattern stays legible in the dark, and
 	# a cascade of identical dots is not a legible pattern.
 	#
-	# Blackout stays its own challenge: this only ever runs where the Kit is owned, so
-	# a player without it still catches from the memory of the arc.
-	var fl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
+	# `ang` IS THE PROP'S OWN TUMBLE, and forgetting to pass it was a real bug (2026-07-27,
+	# Louis: "the clubs stop turning when descending"). This called glow_silhouette with a
+	# hard-coded 0.0 while the function has always taken an angle and used it for the
+	# three spinning props - so the moment the lights took a club it snapped upright and
+	# froze there for the rest of the fall. `lit` is how strongly the prop is charged:
+	# the Glow Kit is the difference between a prop you can read and one you can only
+	# find, which is what 60,000 buys now that the shape itself never goes away.
+	var fl := (0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)) * lit
 	var phos := Color(lerpf(GLOW_PHOS.r, col.r, 0.25), lerpf(GLOW_PHOS.g, col.g, 0.25), lerpf(GLOW_PHOS.b, col.b, 0.25))
 	draw_glow(pos, 26.0 * sc, Color(phos.r, phos.g, phos.b, 0.30 * fl))
 	if kind >= 0:
-		glow_silhouette(pos, kind, sc, 0.0, Color(phos.r, phos.g, phos.b, 0.85 * fl))
+		glow_silhouette(pos, kind, sc, ang, Color(phos.r, phos.g, phos.b, 0.85 * fl))
 	draw_circle(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))
 
 
