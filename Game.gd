@@ -7993,15 +7993,20 @@ func draw_club(pos: Vector2, ang: float, sc: float) -> void:
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var body := Color(0.90, 0.35, 0.38)
 	var band := Color(0.96, 0.92, 0.85)
-	draw_line(Vector2(0, 12), Vector2(0, -2), band, 4.0)   # handle
-	draw_circle(Vector2(0, 13), 2.6, band)                 # knob
+	# PROPORTION (2026-07-27): the body runs longer and the head narrower than it did.
+	# At 7 units of head against 14 of body the club was as wide as it was long above
+	# the grip, which read as a LOLLIPOP - never more so than blown up on a shop card.
+	# A real club is roughly three times as long as it is wide, which is what this is.
+	draw_line(Vector2(0, 14), Vector2(0, -4), band, 3.6)   # handle
+	draw_circle(Vector2(0, 15), 2.8, band)                 # knob
 	draw_colored_polygon(PackedVector2Array([              # tapered body
-		Vector2(-3, 0), Vector2(3, 0), Vector2(7, -14), Vector2(-7, -14),
+		Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16),
 	]), body)
-	draw_circle(Vector2(0, -14), 7.0, body)                # rounded head
+	draw_circle(Vector2(0, -16.5), 6.0, body)              # rounded head
+	draw_line(Vector2(-2.8, -2.4), Vector2(2.8, -2.4), Color(0.98, 0.92, 0.86, 0.8), 2.0)   # collar
 	# a soft same-hue sheen INSIDE the head - the old pale band arc sat on the rim
 	# and read as a white chip stuck to the club (Louis), worst at shop-card size
-	draw_circle(Vector2(-2.2, -16.2), 2.6, Color(1.0, 0.55, 0.56, 0.45))
+	draw_circle(Vector2(-1.9, -18.4), 2.3, Color(1.0, 0.55, 0.56, 0.45))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -8054,24 +8059,52 @@ func prop_spin_angle(b: Ball) -> float:
 	return b.spin_dir * p * TAU * 2.0
 
 
-func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0) -> void:
-	# a small, still version of the prop shape, for menus. mag blows it up for the
-	# shop's big cards, where the tiny list-row size read as clutter (Louis)
+# the shop icon's two per-prop numbers (2026-07-27). The old icon simply blew the raw
+# stage shape up 2.6x about the origin the SIM uses, which is a hand position, not the
+# middle of the object - so a club floated high in its card, a torch sat low, and every
+# prop came out the same nominal size whatever it actually is (Louis: the icons are
+# subpar). `mag` gives the six a shared optical weight while keeping a mild heavier-is-
+# bigger hierarchy; `off` is the y of the shape's own centre in its local units, so the
+# icon can be hung on its middle instead of on its grip.
+const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.98, 2.50, 2.05]
+const PROP_ICON_OFF := [0.0, 0.0, 0.0, -2.4, -0.5, -2.0]
+
+func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
+	# the prop as SHOP GOODS: the very same shape the stage draws (never a second art
+	# style for the same object), set in a small lit niche with a shadow under it, hung
+	# on its own centre, and tilted the way a prop reads in the air rather than standing
+	# to attention. `live` breathes the selected card's icon - a spinning prop turns, a
+	# ball bobs - so the cursor has something to land on.
 	var col := prop_color(kind)
-	var sc := minf(prop_scale(kind), 1.0) * mag
+	var sc: float = PROP_ICON_MAG[kind] * mag
+	var spins := bool(PROPS[kind]["spins"])
+	var ang := 0.0
+	if spins:
+		ang = -0.34 + (0.34 * sin(atick() * 0.016) if live else 0.0)
+	var bob := (sin(atick() * 0.022) * 3.0) if live and not spins else 0.0
+	var at := pos + Vector2(0.0, bob) - Vector2(0.0, PROP_ICON_OFF[kind] * sc).rotated(ang)
+	# the niche: a soft pool of the prop's OWN colour behind it, and a contact shadow
+	for i in 5:
+		draw_circle(pos, lerpf(48.0, 20.0, float(i) / 4.0) * mag, Color(col.r, col.g, col.b, 0.03))
+	fill_ellipse(pos + Vector2(0.0, 42.0 * mag), 26.0 * mag, 6.0 * mag, Color(0.0, 0.0, 0.0, 0.32))
+	if kind == PROP_TORCHES:
+		# fire lights its own corner of the shop
+		for i in 4:
+			draw_circle(at + Vector2(0.0, -11.0 * sc), lerpf(40.0, 14.0, float(i) / 3.0) * mag,
+				Color(1.0, 0.6, 0.2, 0.05))
 	match kind:
 		PROP_EGGS:
-			draw_egg(pos, col, sc)
+			draw_egg(at, col, sc)
 		PROP_RINGS:
-			draw_ring_prop(pos, col, sc)
+			draw_ring_prop(at, col, sc)
 		PROP_CLUBS:
-			draw_club(pos, 0.0, sc)
+			draw_club(at, ang, sc)
 		PROP_KNIVES:
-			draw_knife(pos, 0.0, sc)
+			draw_knife(at, ang, sc)
 		PROP_TORCHES:
-			draw_torch(pos, 0.0, sc)
+			draw_torch(at, ang, sc)
 		_:
-			draw_ball_shape(pos, col, sc)
+			draw_ball_shape(at, col, sc)
 
 
 #endregion
@@ -9507,6 +9540,70 @@ func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, aff
 		HORIZONTAL_ALIGNMENT_RIGHT, r.size.x - 12.0, 16, cc)
 
 
+func draw_gear_icon(i: int, c: Vector2, cc: Color) -> void:
+	# the four pieces of gear, drawn as the OBJECTS they are rather than as a glyph
+	# each: the pie especially, which was a bare triangle and read as a torch flame
+	# next to the torch card. Everything is built from the same filled-shape language
+	# the rest of the game's art uses - no thin decorative strokes standing in for a
+	# thing (the lesson the performer wardrobe pass paid for).
+	match i:
+		0:   # GLASSES: two glazed lenses in a real frame, with temples going back
+			for sgn in [-1.0, 1.0]:
+				var lc := c + Vector2(sgn * 15.0, 0.0)
+				draw_circle(lc, 13.0, Color(cc.r, cc.g, cc.b, 0.20))
+				draw_arc(lc, 13.0, 0.0, TAU, 26, cc, 2.6, true)
+				draw_line(lc + Vector2(-6.0, 4.0), lc + Vector2(-1.0, -3.0), Color(1.0, 1.0, 1.0, 0.22), 2.2)
+				draw_line(lc + Vector2(sgn * 13.0, -2.0), lc + Vector2(sgn * 21.0, -8.0), cc, 2.4)
+			draw_line(c + Vector2(-3.0, -2.0), c + Vector2(3.0, -2.0), cc, 3.0)
+		1:   # UNCLE DAN'S PIE: a real slice - golden crust along the wide edge, a
+			# baked filling inside, and two curls of steam coming off it
+			var apex := c + Vector2(0.0, 24.0)
+			var fill := PackedVector2Array([apex])
+			var top := PackedVector2Array([apex])
+			for k in 15:
+				var a := lerpf(-2.44, -0.70, float(k) / 14.0)
+				fill.append(apex + Vector2(cos(a), sin(a)) * 40.0)
+			for k in 15:
+				var a2 := lerpf(-2.44, -0.70, float(k) / 14.0)
+				top.append(apex + Vector2(cos(a2), sin(a2)) * 33.0)
+			draw_colored_polygon(fill, Color(0.76, 0.48, 0.20))     # the crust edge
+			draw_colored_polygon(top, Color(0.93, 0.68, 0.28))      # the baked top
+			for k in 3:
+				var a3 := lerpf(-2.05, -1.09, float(k) / 2.0)
+				draw_circle(apex + Vector2(cos(a3), sin(a3)) * 22.0, 2.0, Color(0.70, 0.40, 0.16))
+			for sgn2 in [-1.0, 1.0]:
+				var sx: float = c.x + sgn2 * 12.0
+				for k in 4:
+					var t := float(k) / 3.0
+					draw_circle(Vector2(sx + sin(t * 4.0 + atick() * 0.03) * 3.0, c.y - 26.0 - t * 11.0),
+						2.4 - t * 1.2, Color(1.0, 0.95, 0.88, 0.20 - t * 0.14))
+		2:   # GLOW KIT: the halo it buys, ON a prop - the card IS the preview, the
+			# same visual language draw_glow_in_dark uses on the stage
+			for k in 5:
+				draw_circle(c, lerpf(32.0, 12.0, float(k) / 4.0), Color(cc.r, cc.g, cc.b, 0.10))
+			draw_ball_shape(c, Color(0.72, 0.95, 0.68), 1.7)
+			draw_circle(c, 4.0, Color(1.0, 1.0, 1.0, 0.75))
+		_:   # ENERGY-DRINK HELMET: the hat it actually is - a cap with a can either
+			# side and a straw running round to the mouth
+			var cap := c + Vector2(0.0, 4.0)
+			for sgn3 in [-1.0, 1.0]:
+				var can := cap + Vector2(sgn3 * 27.0, -1.0)
+				draw_rect(Rect2(can.x - 7.5, can.y - 13.0, 15.0, 26.0), Color(0.86, 0.33, 0.24))
+				draw_rect(Rect2(can.x - 7.5, can.y - 13.0, 15.0, 4.5), Color(0.80, 0.82, 0.86))
+				draw_rect(Rect2(can.x - 7.5, can.y - 2.0, 15.0, 3.0), Color(1.0, 0.85, 0.4, 0.7))
+				# the straw stays on its OWN side and comes down to the mouth: crossing
+				# them at the centre drew a plain white X over the cap
+				draw_line(can + Vector2(-sgn3 * 3.0, -13.0), cap + Vector2(sgn3 * 8.0, 14.0),
+					Color(0.92, 0.94, 0.98, 0.9), 2.2)
+			var dome := PackedVector2Array()
+			for k in 17:
+				var a4 := lerpf(PI, TAU, float(k) / 16.0)
+				dome.append(cap + Vector2(cos(a4), sin(a4)) * 19.0)
+			draw_colored_polygon(dome, cc)
+			fill_ellipse(cap + Vector2(0.0, 1.0), 22.0, 4.0, Color(cc.r * 0.7, cc.g * 0.7, cc.b * 0.7))
+			draw_circle(cap + Vector2(0.0, -19.0), 3.0, Color(cc.r * 0.7, cc.g * 0.7, cc.b * 0.7))
+
+
 #endregion
 
 #region SHOP SCREEN
@@ -9531,7 +9628,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(tx, py + 96.0), "PROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
 	var gap := 14.0
 	var cw := (innerw - gap * 5.0) / 6.0
-	var ch := 272.0
+	var ch := 282.0
 	var y0 := py + 110.0
 	for i in PROPS.size():   # balls included: every prop is bought stock now (Louis)
 		var sel := i == shop_sel
@@ -9553,8 +9650,12 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(cx0 + 12.0, cy0 + 24.0), "own %d" % own, HORIZONTAL_ALIGNMENT_LEFT, cw - 70.0, 13, oc)
 		if available(i):
 			draw_string(font, Vector2(cx0, cy0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
-		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, cy0 + 88.0), 2.6)
-		draw_fit_string(font, Vector2(cx0, cy0 + 148.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
+		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, cy0 + 82.0), 1.0, sel)
+		# a hairline under the goods, so the card reads as a lit object above and its
+		# NUMBERS below, rather than as one column of loose rows
+		draw_line(Vector2(cx0 + 16.0, cy0 + 130.0), Vector2(cx0 + cw - 16.0, cy0 + 130.0),
+			Color(pcol.r, pcol.g, pcol.b, 0.22), 1.0)
+		draw_fit_string(font, Vector2(cx0, cy0 + 156.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
 		var req := int(PROPS[i]["req"])
 		var reqline := "weight %d  ·  light throw" % int(PROPS[i]["weight"]) if req == 0 else "weight %d  ·  Str %d" % [int(PROPS[i]["weight"]), req]
 		if i == PROP_EGGS:
@@ -9562,10 +9663,10 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		var reqcol := Color(0.75, 0.68, 0.6)
 		if req > strength:
 			reqcol = Color(0.95, 0.6, 0.45)   # under-strength: flag it before the buy
-		draw_string(font, Vector2(cx0, cy0 + 168.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
+		draw_string(font, Vector2(cx0, cy0 + 178.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
 		# the REWARD, quantified: this prop's own score multiplier, so the harder-pays-more
 		# trade is legible at the point of choice (context bonuses stack on top, in play)
-		draw_string(font, Vector2(cx0, cy0 + 186.0), "pays  ×%.2f" % float(PROPS[i]["smult"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
+		draw_string(font, Vector2(cx0, cy0 + 198.0), "pays  ×%.2f" % float(PROPS[i]["smult"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
 		# THE SET: you need one prop per object you juggle, so what actually matters at
 		# the counter is stock against YOUR count - not the raw number owned. A short
 		# meter and one line say whether tonight's routine is fielded, and the top-up key
@@ -9573,10 +9674,10 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		var need := num_balls
 		var setf := clampf(float(own) / float(maxi(need, 1)), 0.0, 1.0)
 		var setc := Color(0.55, 0.85, 0.55) if own >= need else Color(0.95, 0.68, 0.35)
-		draw_meter(cx0 + 14.0, cy0 + 194.0, cw - 28.0, 8.0, setf, setc)
+		draw_meter(cx0 + 14.0, cy0 + 208.0, cw - 28.0, 7.0, setf, setc)
 		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
-		draw_string(font, Vector2(cx0, cy0 + 216.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
-		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 46.0, cw - 20.0, 40.0), str(i + 1), "%s g" % commafy(cost), afford)
+		draw_fit_string(font, Vector2(cx0, cy0 + 232.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
+		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0), str(i + 1), "%s g" % commafy(cost), afford)
 
 	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
 	# fourth for the Energy-Drink Helmet - same narrow vertical template the
@@ -9584,7 +9685,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var gy := y0 + ch + 30.0
 	draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
 	var gw := (innerw - gap * 3.0) / 4.0
-	var gh := 160.0
+	var gh := 152.0
 	var gy0 := gy + 14.0
 	# the 4th card is two items sharing one slot: the Helmet (a one-time unlock,
 	# like Glasses/Glow Kit) until owned, then Energy Drinks (a repeat buy, like
@@ -9610,42 +9711,33 @@ func draw_shop(font: Font, s: Vector2) -> void:
 				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
 		else:
 			hud_card(Rect2(cx0, gy0, gw, gh), Color(cc.r, cc.g, cc.b, 0.4))
-		var icx := cx0 + gw * 0.5
-		match i:
-			0:   # Glasses: two lens arcs and a bridge
-				draw_arc(Vector2(icx - 14.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, cc, 2.5, true)
-				draw_arc(Vector2(icx + 14.0, gy0 + 40.0), 12.0, 0.0, TAU, 20, cc, 2.5, true)
-				draw_line(Vector2(icx - 2.0, gy0 + 40.0), Vector2(icx + 2.0, gy0 + 40.0), cc, 2.5)
-			1:   # Pie: a wedge with a crust line
-				draw_colored_polygon(PackedVector2Array([
-					Vector2(icx - 22.0, gy0 + 52.0), Vector2(icx + 22.0, gy0 + 52.0), Vector2(icx, gy0 + 24.0)]), cc)
-				draw_line(Vector2(icx - 22.0, gy0 + 52.0), Vector2(icx + 22.0, gy0 + 52.0), Color(0.6, 0.36, 0.16), 4.0)
-			2:   # Glow Kit: the exact halo it buys, so the card IS a preview
-				draw_circle(Vector2(icx, gy0 + 40.0), 15.0, Color(cc.r, cc.g, cc.b, 0.22))
-				draw_circle(Vector2(icx, gy0 + 40.0), 8.0, Color(cc.r, cc.g, cc.b, 0.6))
-				draw_circle(Vector2(icx, gy0 + 40.0), 2.5, Color(1.0, 1.0, 1.0, 0.8))
-			_:   # Helmet: a hard-hat dome, with its own energy drink can riding on
-				# top once owned - the card IS the preview, same as the Glow Kit
-				draw_colored_polygon(PackedVector2Array([
-					Vector2(icx - 20.0, gy0 + 48.0), Vector2(icx + 20.0, gy0 + 48.0),
-					Vector2(icx + 15.0, gy0 + 26.0), Vector2(icx - 15.0, gy0 + 26.0)]), cc)
-				draw_arc(Vector2(icx, gy0 + 26.0), 15.0, PI, TAU, 16, cc, 6.0, true)
-				if has_helmet:
-					draw_rect(Rect2(icx - 5.0, gy0 + 8.0, 10.0, 15.0), Color(0.95, 0.55, 0.25, 0.95))
-					draw_rect(Rect2(icx - 5.0, gy0 + 8.0, 10.0, 4.0), Color(0.85, 0.85, 0.85, 0.95))
-		draw_fit_string(font, Vector2(cx0, gy0 + 70.0), gear_names[i], HORIZONTAL_ALIGNMENT_CENTER, gw - 16.0, 17, Color(1.0, 0.88, 0.6))
+		# a GEAR card is wide and short, so it is laid out ACROSS (2026-07-27): the
+		# object on the left in its own lit disc, the words to the right of it, the
+		# price along the foot. The old portrait layout borrowed the prop cards'
+		# template and left a third of every card empty above a floating icon.
+		var owned := bool(gear_owned[i])
+		var plate_top := gy0 + gh - (36.0 if owned else 46.0)
+		var icx := cx0 + 52.0
+		var icy := gy0 + 54.0
+		for k in 4:
+			draw_circle(Vector2(icx, icy), lerpf(40.0, 18.0, float(k) / 3.0), Color(cc.r, cc.g, cc.b, 0.035))
+		draw_gear_icon(i, Vector2(icx, icy + (sin(atick() * 0.022) * 2.5 if gsel else 0.0)), cc)
+		var txw := gw - 104.0
+		# a gear NAME is data and two of them are long ("Glow-in-the-Dark Kit"), so the
+		# type SHRINKS to fit rather than ellipsizing - an ellipsis in a two-word product
+		# name eats the word that identifies it (see fit_size's own note)
+		draw_fit_string(font, Vector2(cx0 + 92.0, gy0 + 40.0), gear_names[i], HORIZONTAL_ALIGNMENT_LEFT, txw,
+			fit_size(font, gear_names[i], txw, 17, 12), Color(1.0, 0.88, 0.6))
 		# the description gets a BOX, not a start point: whatever it says, it now stops
 		# above the price plate instead of wrapping down through it (which is what the
 		# two-line Energy Drinks text did)
-		var owned := bool(gear_owned[i])
-		var plate_top := gy0 + gh - (36.0 if owned else 46.0)
-		draw_wrap_fit(font, gear_desc[i], Rect2(cx0 + 10.0, gy0 + 78.0, gw - 20.0, plate_top - gy0 - 82.0), 11,
-			Color(0.75, 0.68, 0.6), HORIZONTAL_ALIGNMENT_CENTER)
+		draw_wrap_fit(font, gear_desc[i], Rect2(cx0 + 92.0, gy0 + 50.0, txw, plate_top - gy0 - 58.0), 11,
+			Color(0.75, 0.68, 0.6))
 		if owned:
-			draw_string(font, Vector2(cx0, gy0 + gh - 22.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, 16, Color(0.6, 0.9, 0.6))
+			draw_string(font, Vector2(cx0, gy0 + gh - 20.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, 16, Color(0.6, 0.9, 0.6))
 		else:
 			if int(gear_count[i]) > 0:
-				draw_string(font, Vector2(cx0, gy0 + 18.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
+				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
 			var gkey := str(7 + i) if i < 3 else "0"
 			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, "%s g" % commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
