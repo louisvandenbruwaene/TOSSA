@@ -959,6 +959,29 @@ var collapsing := false
 # lands at the juggler's feet and stays there for the rest of the act, so the pile on
 # the floor is the running read on how the night is going.
 var thrown: Array[Dictionary] = []
+# THE PILE IS ONE DRAW CALL (2026-07-27, Louis: "the game is lagging again with all the
+# flowers"). MEASURED with --fps at venue 6, 7 torches, pile full: draw calls ran
+# 331 -> 1140 as the boards filled and the frame went 2.1ms -> 6.3ms. The +810 is exactly
+# 90 flowers x ~9 draw calls each (5 petal ellipses, a centre, a stem, a leaf), which is
+# the per-call overhead this renderer is known to be bound by - `prims` only went 16k ->
+# 29k over the same stretch, so it was never the triangles.
+#
+# Since landed flowers no longer turn or move, the pile is STATIC geometry: it is baked
+# once into an indexed triangle soup and re-emitted with a single
+# canvas_item_add_triangle_array. Rebuilding it is the one thing that must stay rare -
+# building 90 flowers' triangles in GDScript costs about as much as the draw calls it
+# replaces - so a bake is throttled to PILE_REBAKE ticks, and anything that landed since
+# the last bake is drawn by the per-frame path until the next one (so nothing ever pops).
+const PILE_REBAKE := 10   # min ticks between bakes; alphas step 0.007 per flower, so a
+						   # slightly stale fade is not visible, and a bake is ~2ms
+var _pile_pts := PackedVector2Array()
+var _pile_cols := PackedColorArray()
+var _pile_idx := PackedInt32Array()
+var _pile_bake_tick := -1000000   # every item whose land tick is <= this is IN the bake
+var _pile_dirty := true
+var _soup_pts := PackedVector2Array()
+var _soup_cols := PackedColorArray()
+var _soup_idx := PackedInt32Array()
 var run_flowers := 0        # basic-flower value earned this act (the night's whole pay)
 var run_tomatoes := 0       # ...and what they threw instead when it went badly
 var tomatoes := 0           # tomatoes in the pack, eaten in the day hub for stamina
@@ -5545,6 +5568,11 @@ func start_run(n: int) -> void:
 	freeze = 0
 	parts.clear()
 	thrown.clear()      # a fresh act starts on clean boards: nothing at the feet yet
+	_pile_pts.clear()   # ...and the baked pile goes with it, or last night's flowers
+	_pile_cols.clear()  # would still be drawn under this one's feet
+	_pile_idx.clear()
+	_pile_bake_tick = -1000000
+	_pile_dirty = true
 	run_flowers = 0
 	run_tomatoes = 0
 	paused = false
@@ -11376,10 +11404,13 @@ func draw_purse(font: Font, right_x: float, y: float) -> void:
 	# when the economy switches.
 	var txt := commafy(money)
 	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	# the coin grows a touch with the flash too, so gold changing hands is felt on the
-	# object and not only on the number beside it
-	draw_coin_mark(Vector2(right_x - tw - 24.0, y - 8.0), 10.0 + 1.5 * fl, Color(1.0, 0.84, 0.4), true)
-	draw_string(font, Vector2(right_x - tw, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
+	# amount THEN mark, same order as the price plates below it - a shop that asked
+	# "20 flowers" while the purse answered "flowers 50,582" read as two currencies.
+	# The mark grows a touch with the flash too, so money changing hands is felt on the
+	# object and not only on the number beside it.
+	var mr := 10.0 + 1.5 * fl
+	draw_string(font, Vector2(right_x - tw - mr * 2.0 - 8.0, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
+	draw_coin_mark(Vector2(right_x - mr, y - 8.0), mr, Color(1.0, 0.84, 0.4), true)
 
 
 func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, afford: bool) -> void:
@@ -11391,16 +11422,17 @@ func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, aff
 	draw_rect(r, bg)
 	draw_rect(r, line, false, 1.0)
 	draw_keycap(font, r.position.x + 8.0, r.position.y + r.size.y * 0.5 - 9.5, keylabel)
-	# the price is a NUMBER plus the currency's own MARK, never a letter - the same mark
-	# the purse above it draws, so what is being asked for and what is being held look
-	# like the same thing. Right-aligned as a unit: measure the digits, put the mark in
-	# front of them. `price` is data (it can run to "60,000"), so the mark is placed off
-	# the measured width rather than a guessed offset.
+	# the price is a NUMBER FOLLOWED BY the currency's own MARK, never a letter - "20
+	# flowers", the way an amount is actually said (2026-07-27, Louis: the flower comes
+	# after the price). Right-aligned as a unit: the mark's outer edge sits on the
+	# margin and the digits are measured back from it, because `price` is data and can
+	# run to "60,000".
 	var baseline := r.position.y + r.size.y * 0.5 + 6.0
+	var mr := 7.0
+	var mx := r.position.x + r.size.x - 12.0 - mr
 	var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	var px := r.position.x + r.size.x - 12.0 - pw
-	draw_string(font, Vector2(px, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
-	draw_coin_mark(Vector2(px - 12.0, baseline - 5.5), 7.0, cc, true)
+	draw_string(font, Vector2(mx - mr - 5.0 - pw, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+	draw_coin_mark(Vector2(mx, baseline - 5.5), mr, cc, true)
 
 
 func draw_gear_icon(i: int, c: Vector2, cc: Color) -> void:
@@ -14164,6 +14196,7 @@ func throw_from_crowd(kind: String, tier: int) -> void:
 		"born": tick, "land": tick + FLOWER_FLIGHT + randi_range(-6, 6),
 		"arc": randf_range(90.0, 190.0), "rot": randf_range(0.0, TAU),
 		"settle": settle})
+	_pile_dirty = true   # a new entry shifts every landed flower's index, so its fade too
 
 
 func throw_step() -> void:
@@ -14193,6 +14226,7 @@ func throw_step() -> void:
 				run_tomatoes += 1
 	while thrown.size() > FLOWER_PILE_MAX:
 		thrown.remove_at(0)
+		_pile_dirty = true   # the oldest left the boards; the bake still has it
 
 
 func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: float = 0.0) -> void:
@@ -14243,13 +14277,144 @@ func draw_tomato(p: Vector2, sc: float, rot: float, a: float) -> void:
 			Color(0.35, 0.60, 0.28, a), maxf(1.0, r * 0.22))
 
 
+# --- the triangle soup: many shapes, ONE draw call -----------------------------------
+# Everything here appends into `_soup_*` and is flushed by _soup_emit. The shapes are
+# the same ones draw_flower/draw_tomato paint; only the delivery changes, so a batched
+# flower and a per-frame one are the same picture. Segment counts are lower than the
+# immediate-mode originals because a landed flower is about 10px across, where a 6-sided
+# petal and an 8-sided one are indistinguishable - and the bake loop is the cost here.
+func _soup_clear() -> void:
+	_soup_pts.clear()
+	_soup_cols.clear()
+	_soup_idx.clear()
+
+
+func _soup_fan(c: Vector2, ring: PackedVector2Array, col: Color) -> void:
+	# a filled shape as a triangle fan: centre, then the ring, then indices round it
+	var base := _soup_pts.size()
+	_soup_pts.append(c)
+	_soup_cols.append(col)
+	for q in ring:
+		_soup_pts.append(q)
+		_soup_cols.append(col)
+	for k in ring.size() - 1:
+		_soup_idx.append(base)
+		_soup_idx.append(base + 1 + k)
+		_soup_idx.append(base + 2 + k)
+
+
+func _soup_ellipse(c: Vector2, rx: float, ry: float, rot: float, seg: int, col: Color) -> void:
+	var ring := PackedVector2Array()
+	for k in seg + 1:
+		var t := TAU * float(k) / float(seg)
+		ring.append(c + Vector2(cos(t) * rx, sin(t) * ry).rotated(rot))
+	_soup_fan(c, ring, col)
+
+
+func _soup_line(a: Vector2, b: Vector2, w: float, col: Color) -> void:
+	# a thick line is a quad; two triangles, no cap (nothing here needs one)
+	var d := b - a
+	if d.length_squared() < 0.0001:
+		return
+	var n := Vector2(-d.y, d.x).normalized() * (w * 0.5)
+	var base := _soup_pts.size()
+	_soup_pts.append(a - n)
+	_soup_pts.append(a + n)
+	_soup_pts.append(b + n)
+	_soup_pts.append(b - n)
+	for _k in 4:
+		_soup_cols.append(col)
+	_soup_idx.append(base)
+	_soup_idx.append(base + 1)
+	_soup_idx.append(base + 2)
+	_soup_idx.append(base)
+	_soup_idx.append(base + 2)
+	_soup_idx.append(base + 3)
+
+
+func _soup_emit() -> void:
+	if _soup_idx.is_empty():
+		return
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _soup_idx, _soup_pts, _soup_cols)
+
+
+func _soup_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: float) -> void:
+	if stem > 0.0:
+		var dir := Vector2(cos(rot + PI * 0.5), sin(rot + PI * 0.5))
+		var tip := p + dir * stem * sc
+		_soup_line(p, tip, maxf(1.0, 1.6 * sc), Color(0.30, 0.56, 0.28, a))
+		var mid := p.lerp(tip, 0.55)
+		var side := Vector2(-dir.y, dir.x)
+		_soup_ellipse(mid + side * 3.4 * sc, 3.6 * sc, 1.6 * sc, dir.angle(), 6, Color(0.34, 0.60, 0.30, a))
+	var td: Dictionary = FLOWER_TIERS[clampi(tier, 0, FLOWER_TIERS.size() - 1)]
+	var col: Color = td["col"]
+	var midc: Color = td["mid"]
+	var n := int(td["petals"])
+	var r := float(td["r"]) * sc
+	for i in n:
+		var ang := rot + TAU * float(i) / float(n)
+		_soup_ellipse(p + Vector2(cos(ang), sin(ang)) * r * 0.72, r * 0.52, r * 0.34, ang, 6,
+			Color(col.r, col.g, col.b, a))
+	_soup_ellipse(p, r * 0.38, r * 0.38, 0.0, 6, Color(midc.r, midc.g, midc.b, a))
+	if tier >= 2:
+		var sr := r * 0.9
+		var si := sr * 0.26
+		_soup_fan(p, PackedVector2Array([
+			p + Vector2(0.0, -sr), p + Vector2(si, -si), p + Vector2(sr, 0.0), p + Vector2(si, si),
+			p + Vector2(0.0, sr), p + Vector2(-si, si), p + Vector2(-sr, 0.0), p + Vector2(-si, -si),
+			p + Vector2(0.0, -sr)]), Color(1.0, 0.98, 0.85, 0.45 * a))
+
+
+func _soup_tomato(p: Vector2, sc: float, rot: float, a: float) -> void:
+	var r := 6.0 * sc
+	_soup_ellipse(p, r * 1.05, r * 0.92, 0.0, 8, Color(0.86, 0.18, 0.16, a))
+	_soup_ellipse(p + Vector2(-r * 0.32, -r * 0.34), r * 0.24, r * 0.24, 0.0, 6, Color(1.0, 0.62, 0.54, 0.7 * a))
+	for i in 4:
+		var ang := rot + TAU * float(i) / 4.0
+		var b := p + Vector2(0, -r * 0.7)
+		_soup_line(b, b + Vector2(cos(ang), sin(ang)) * r * 0.5, maxf(1.0, r * 0.22), Color(0.35, 0.60, 0.28, a))
+
+
+func _bake_pile() -> void:
+	# every flower that had landed as of this tick, as one indexed triangle soup
+	_soup_clear()
+	var last := maxi(1, thrown.size() - 1)
+	for i in thrown.size():
+		var d: Dictionary = thrown[i]
+		if int(d["land"]) > tick:
+			continue
+		var a := clampf(0.35 + 0.65 * float(i) / float(last), 0.35, 1.0)
+		if String(d["kind"]) == "tomato":
+			_soup_tomato(d["to"], 1.0, float(d["settle"]), a)
+		else:
+			_soup_flower(d["to"], int(d["tier"]), 1.0, float(d["settle"]), a, FLOWER_STEM_FLAT)
+	_pile_pts = _soup_pts.duplicate()
+	_pile_cols = _soup_cols.duplicate()
+	_pile_idx = _soup_idx.duplicate()
+	_pile_bake_tick = tick
+	_pile_dirty = false
+
+
 func draw_thrown() -> void:
 	# in flight, and then at rest on the boards. A landed one FADES as newer ones arrive
 	# on top of it (the array is capped), so the pile stays a live read on the last
 	# stretch of the act rather than an ever-growing monument to its opening.
+	#
+	# THE PILE IS BAKED (see the PILE_REBAKE block by `thrown`): everything already at
+	# rest goes out as ONE triangle-array call, and only what is still moving - plus
+	# anything that landed since the last bake, so nothing ever pops - is drawn per
+	# frame below. Re-bake only when something actually changed AND the throttle allows.
+	if _pile_dirty and tick - _pile_bake_tick >= PILE_REBAKE:
+		_bake_pile()
+	if not _pile_idx.is_empty():
+		RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _pile_idx, _pile_pts, _pile_cols)
+	_soup_clear()   # the airborne batch is rebuilt from scratch every frame
+	var last_i := maxi(1, thrown.size() - 1)
 	for i in thrown.size():
 		var d: Dictionary = thrown[i]
 		var lt := int(d["land"])
+		if lt <= _pile_bake_tick:
+			continue   # already in the baked pile
 		var p: Vector2 = d["to"]
 		var a := 1.0
 		var sc := 1.0
@@ -14261,7 +14426,11 @@ func draw_thrown() -> void:
 		else:
 			# older entries sit lower in the array; fade the oldest third of the pile so
 			# it settles into the boards instead of stacking forever
-			a = clampf(0.35 + 0.65 * float(i) / float(maxi(1, thrown.size() - 1)), 0.35, 1.0)
+			a = clampf(0.35 + 0.65 * float(i) / float(last_i), 0.35, 1.0)
+			# it has come to rest but missed the last bake - ask for the next one. Free:
+			# this loop is already running, and it is the only place a landing is noticed
+			# without walking the array a second time every frame just to look for one.
+			_pile_dirty = true
 		# THE TUMBLE SETTLES, it does not just stop (2026-07-27, Louis). Two bugs in one
 		# line before this: the rotation accumulated off `tick - born`, which never stops
 		# growing, so a flower went on spinning where it lay for the rest of the act (a
@@ -14277,7 +14446,7 @@ func draw_thrown() -> void:
 			var rf := clampf(float(tick - int(d["born"])) / float(maxi(1, lt - int(d["born"]))), 0.0, 1.0)
 			rot = lerp_angle(float(d["rot"]), float(d["settle"]), rf * rf * (3.0 - 2.0 * rf))
 		if String(d["kind"]) == "tomato":
-			draw_tomato(p, sc, rot, a)
+			_soup_tomato(p, sc, rot, a)
 		else:
 			# the stem foreshortens as the flower turns to face the boards - full length
 			# while it is side-on in the air, about half once it lies pointing at us
@@ -14285,7 +14454,11 @@ func draw_thrown() -> void:
 			if tick < lt:
 				var sf := clampf(float(tick - int(d["born"])) / float(maxi(1, lt - int(d["born"]))), 0.0, 1.0)
 				stem = lerpf(FLOWER_STEM_AIR, FLOWER_STEM_FLAT, sf * sf * (3.0 - 2.0 * sf))
-			draw_flower(p, int(d["tier"]), sc, rot, a, stem)
+			_soup_flower(p, int(d["tier"]), sc, rot, a, stem)
+	# ...and the whole shower goes out as ONE call too. These move every frame so they
+	# cannot be baked, but building ~19 flowers' triangles in GDScript is still cheaper
+	# than the ~170 individual draws it replaces - measured, not assumed.
+	_soup_emit()
 #endregion
 
 

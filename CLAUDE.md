@@ -520,6 +520,31 @@ and deleted. History lives in git.
   instead of allocating two per card per frame; and the scoreboard/tiers/truss lost
   their excess detail. `soft_disc` survives only as an early-out wrapper for
   fully-transparent glows.
+- **THE FLOWER PILE, and the batching primitive that came out of it (2026-07-27).**
+  Louis: "the game is lagging again with all the flowers". The same probe, at the World
+  Arena with seven torches: as the boards filled, draw calls went **331 -> 1140** and
+  the frame went **2.1ms -> 6.3ms**, while primitives only went 16k -> 29k. That ratio
+  is the rule above restating itself - the +810 is exactly 90 flowers (`FLOWER_PILE_MAX`)
+  times the ~9 calls `draw_flower` makes (five petal ellipses, a centre, a stem, a leaf).
+  The fix was available only because the flowers had just been made to STOP TURNING: a
+  pile that never moves is static geometry. It is baked into one indexed triangle soup
+  and re-emitted with a single `RenderingServer.canvas_item_add_triangle_array`, and the
+  airborne ones - which do move - are rebuilt each frame into a second soup and emitted
+  the same way. **Result: 1140 -> 368 calls, 6.3ms -> 2.55ms**, i.e. a full pile now
+  costs ~0.45ms where it cost 4.2ms, and 368 is barely above the 331 an EMPTY stage
+  draws. Measured after: the venue and the prop count barely move the call count at all
+  (324 at the Backyard with 3 balls, 329 at the Arena with 7 torches), so props and
+  crowd were never the lag - the flowers were.
+  **The two things to copy, and the one trap.** Copy: `_soup_fan` / `_soup_ellipse` /
+  `_soup_line` / `_soup_emit` are general - anything that draws many small shapes of the
+  same kind can go through them. And a bake must be THROTTLED (`PILE_REBAKE`, 10 ticks):
+  building 90 flowers of triangles in GDScript costs about as much as the draw calls it
+  replaces, so re-baking every frame wins nothing - the whole gain is in not rebuilding.
+  The trap: with a throttle, anything landing between bakes would be invisible until the
+  next one, so the per-frame path draws everything whose land tick is newer than
+  `_pile_bake_tick`. That predicate, not a flag, is what makes the split exact - every
+  item is drawn once and nothing pops. The pile is also explicitly cleared with `thrown`
+  at `start_run`, or last night's flowers draw under tonight's feet.
 - **THE CROWD GAUGE and the DROP PIPS** (2026-07-27, Louis): the applause meter is a
   half-circle instrument now (`draw_gauge`), red through amber and yellow to green
   (`GAUGE_ZONES`), with a needle, ticks at every zone edge, a bright pin left standing
