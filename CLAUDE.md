@@ -76,6 +76,17 @@ and deleted. History lives in git.
   bottom border - the venue board grew a seventh row and the career list a ninth), the
   live goal-bar label (a goal notch drew a white line through the lettering; it is
   `draw_text_shout` now, outlined), and the lesson/toast/slot/settings/records names.
+  **AND A NUMBER SHRINKS, IT NEVER TRIMS** (2026-07-27). The rule above says data goes
+  through one of the three primitives and stops there, which is one distinction short:
+  `fit_text` ELLIPSISES, and an ellipsised number is not a number. The rail's takings
+  read `draw_fit_string(... commafy(run_flowers), 74.0, 24)`, so a good night at the
+  Arena (measured: a real seeded act paid 3,212, and 12,400 is 77px against that 74)
+  would have printed "12,4..." where the player expects their money. `fit_size` is the
+  right primitive for anything the player has to READ AS A VALUE: it hands back the
+  largest size that fits and the digits stay whole. Same reasoning gave the crowd's mood
+  line a floor of 10pt instead of a trim, because "throwing flow..." loses the only word
+  in it that means anything. **When a string is a number, an amount, or a phrase whose
+  last word carries the sense, reach for `fit_size`, not `fit_text`.**
 - **UI look (2026-07-26 polish pass):** the shared `soft_card` primitive (StyleBoxFlat:
   rounded corners, soft drop shadow, faint top sheen) is THE card now - `hud_card`,
   `hud_panel`, `draw_meter`, and every big screen container route through it, so depth is
@@ -144,6 +155,15 @@ and deleted. History lives in git.
   used to print "50,582 f" NEXT TO a flower, naming the currency twice and abbreviating
   it the once. `coin_short()` is deleted. `draw_price_plate` takes the bare number and
   places the mark off the MEASURED digit width, since a price is data ("60,000").
+  **AND THE WORD IS `coin_word()`, EVERY TIME** (swept 2026-07-27). Six player-facing
+  strings still had "gold" typed into them while the purse beside them read "57,546
+  flowers": the Records screen's "gold earned on stage" and "mastery points turned to
+  gold", the save-slot card's purse line, the demo wall's "all of it spent" line, the
+  MASTERY level-up popup, and the sheet's "New levels now pay gold". They are all
+  interpolated now. The rule this entry already stated is the right one, it just has to
+  be applied at the point of writing: `money` is one variable and only its NAME changes,
+  so a literal "gold" anywhere outside a `const` identifier is a bug waiting for the
+  switch to be flipped. `coin_word_one()` (the singular) was deleted, unused.
 - **A SELF-INTERSECTING POLYGON DRAWS NOTHING, SILENTLY** - and the error names no line,
   so here is how to find one. The shop logged "Invalid polygon data, triangulation
   failed" on every frame for an unknown length of time. Capturing at three different
@@ -239,6 +259,26 @@ and deleted. History lives in git.
   thing that fills, and the stage does that better now, so the rail keeps a slim
   `draw_goal_stem` (a growing stem, a notch per goal, a bud that blooms past the last),
   tonight's takings, and one word for the room's mood.
+- **A DECORATION THAT LEAVES ITS BOX IS A LAYOUT CONSTRAINT, so write the number down**
+  (2026-07-27, Louis: "the flower overlaps with 'tonight' when performing"). The goal
+  stem's bud opens past the final goal into a tier-2 flower at scale 3.2 and then up to
+  4.4, and `draw_flower` puts petals out to 1.24 times its radius, so the celebration
+  reaches 38.3px from the stem's centre line out of a box only 34px wide. It was
+  therefore eating the first 11px of the word TONIGHT, but only from the moment the act
+  went past its final goal, which is why an ordinary screenshot of the rail looks fine
+  and the report still stands. The takings column is anchored at
+  `stem centre + STEM_BLOOM_REACH + 7`, and STEM_BLOOM_REACH is COMPUTED from the same
+  `STEM_BLOOM_SC`/`STEM_SHED_R`/`FLOWER_REACH` constants `draw_goal_stem` draws with,
+  so making the bloom bigger later moves the text instead of colliding with it. **The
+  general rule: when one thing is drawn deliberately outside its own rect, the amount by
+  which it overhangs belongs in a named constant next to the shape, not in the head of
+  whoever placed the neighbour.** Verified by forcing `over = 1.0` in a scratch copy of
+  the project rather than hunting the one frame a `--demo` act spends past its final
+  goal (the autoplayer cashes in the instant the third goal falls, so `over > 0` is
+  effectively unreachable through the harness). The bloom does still open up THROUGH the
+  top of the SCORE card and over the venue card above it. Left alone deliberately: it
+  clears that card's own lettering, and a flower growing up out of the rail is the
+  picture the feature is going for.
 - **PAY, rebalanced** (2026-07-27, Louis: "20000 gold is just insane for the theater").
   `pay_mult` was an UNBOUNDED `1 + rep/400` - a fifteenfold multiplier by mid-career,
   sitting on top of a score that already scales with venue, prop, count and streak.
@@ -337,16 +377,24 @@ and deleted. History lives in git.
   (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an
   alternate version of a screen on or off live, no restart and no code edit - the
   point being to compare two real implementations side by side rather than guess from
-  a description. **2026-07-26: the reworked variants were all polished and four
-  (`talent_tree`, `settings_cards`, `pause_cards`, `performer_polish`) now DEFAULT ON -
-  they are the shipped look, F9 toggles each OFF to compare with the classic.
-  `slot_cards` (Save files as portrait cards) is default OFF for Louis to choose.**
-  Debug choices persist
+  a description. **AN EXPERIMENT THAT WINS LEAVES THE PANEL** (the shape this settled
+  into, written down 2026-07-27): `talent_tree`, `settings_cards`, `pause_cards`,
+  `slot_cards` and `performer_polish` were all toggles here, Louis picked them, and
+  their entries came out of `EXPERIMENT_DEFS` while the losing version was deleted, so
+  a switch never survives the thing it used to switch to. What is left is what still
+  has two real sides: `prop_art`, `round_v3`, `soft_light`, `flowers`, all defaulting
+  ON. The retired ones left `draw_sheet_screen`/`draw_settings_screen`/
+  `draw_pause_screen`/`draw_slots_screen` behind as one-line pass-throughs, and those
+  are KEPT on purpose: they are the single call site each screen is opened through, so
+  a future second picture is one line rather than a hunt. Debug choices persist
   across debug relaunches, but load/save of experiment state is itself gated behind
-  `OS.is_debug_build()`, so a release export always uses its shipped defaults. Adding
-  another experiment later is one `EXPERIMENT_DEFS` entry
-  plus whatever `if experiments.get("id", false):` branch it actually switches -
-  `talent_tree` below is the template.
+  `OS.is_debug_build()`, so a release export always uses its shipped defaults. **The
+  dictionary literal on `var experiments` IS that shipped default, so every reader's
+  `experiments.get("id", <fallback>)` must repeat the same value** - `flowers_on()`
+  read `false` against a declaration of `true` for a while, which is harmless only for
+  as long as nothing ever rebuilds the dictionary without that key. Adding another
+  experiment later is one `EXPERIMENT_DEFS` entry plus whatever
+  `if experiments.get("id", ...):` branch it actually switches.
 - **PERFORMER WARDROBE** (2026-07-26, behind `performer_polish`, DEFAULT ON, verified
   on screen at three venues plus a Spin): the juggler in evening dress -
   `draw_performer_polish` (satin peak lapels, a filled shirt front, bow tie, breast
@@ -785,9 +833,9 @@ and deleted. History lives in git.
   the game sits at the menu forever (looks like a hang - burned two sessions).
 - **F9** (a real key, not a `--` dev flag - works in any debug run, editor or export)
   opens the EXPERIMENTS panel from anywhere and pauses the sim while it's up, same as
-  the pause menu. Toggle `talent_tree` there, then open the sheet (Tab) to compare it
-  against the classic cards live, no relaunch. Debug builds only, per `OS.is_debug_
-  build()` - see the EXPERIMENTS panel entry above.
+  the pause menu. Toggle `flowers` there, then look at the rail and the boards to hold
+  the flower economy against the gold one live, no relaunch. Debug builds only, per
+  `OS.is_debug_build()` - see the EXPERIMENTS panel entry above.
 - `--demo` autoplays; `--collcheck` audits mid-air clearance (self-drives now: it
   implies `--demo`, so a bare `--collcheck` actually juggles instead of reporting the
   1000000 px sentinel - and a run that still measured nothing prints a WARNING rather
@@ -852,6 +900,24 @@ and deleted. History lives in git.
   the parse check that counts.
 - Dev flags parse only in debug builds (`OS.is_debug_build()`); release exports
   ignore them all.
+- **TWO MECHANICAL SWEEPS worth re-running after any big pass**, both a few seconds of
+  shell over the one file and both of which found real things on 2026-07-27. (1) THE
+  UNCALLED-FUNCTION SCAN: list every `^func name`, count references to `name(`, and
+  report the ones whose only mention is their own definition. It found six dead
+  functions left behind by features that had moved on (`coin_word_one`,
+  `draw_letterbox` from the cut cutscenes, `draw_stat_track` and
+  `stat_next_milestone` from the deleted classic sheet, `slot_summary` from the classic
+  save list, `incoming_low` from the deleted sideways-dodge, `tut_sure_catch` whose job
+  `on_catch`'s own `sure` took over). Expect Godot's own callbacks (`_ready`, `_draw`,
+  `_physics_process`, `_input`, `_process`, `_notification`), the signal-connected
+  `_on_joy_connection`, and the deliberately-kept `_click`/`_mix_into` audio helpers in
+  the output every time. **A dead function is worse than clutter here: its comment goes
+  on describing a mechanic that no longer exists**, which is how `incoming_low` was
+  still explaining a dodge that the arms-reach-two-points pass deleted. (2) THE
+  SAVE/LOAD KEY DIFF: pull every `set_value("sec", "key"` out of `save_progress` /
+  `save_settings` and every `get_value` out of their loaders, and diff the two sets in
+  both directions. Both came back symmetric, which is the answer you want and takes ten
+  seconds to confirm.
 - **ALWAYS TEST MUTED AND IN THE BACKGROUND** (Louis, 2026-07-27: sound suddenly playing
   while he works "disturbs me a lot"). Put `--audio-driver Dummy` BEFORE the bare `--`:
   `godot --path . --audio-driver Dummy -- --demo --booking --venue 2 --shot /tmp/x.png
@@ -1046,5 +1112,13 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
 - `cine_tick` runs at 120/s: halve intuitive sin rates.
 - Screenshot captures of BACKGROUND windows can show a stale render: foreground the
   window, or capture early frames.
+- **The shutdown noise every run prints is benign, and here is what it actually is** so
+  nobody has to wonder again (checked 2026-07-27 with `--verbose`, which is what prints
+  the detail): "6 ObjectDB instances were leaked at exit" and "2 resources still in use"
+  are the two music `AudioStreamMP3`s (`Juggling Game.mp3` and the Chill Trio Mix), their
+  two playbacks, and a generated `AudioStreamWAV` with its playback. They are held by
+  live `AudioStreamPlayer`s at the moment `get_tree().quit()` runs, which is exactly what
+  a player that is still playing looks like. Nothing is accumulating and nothing is
+  unfreed per act. Only worry if the COUNT grows with the length of a run.
 - The IACTO juggler figure (stance, proportions) is settled: never reshape it as a
   side effect of a mechanics fix.

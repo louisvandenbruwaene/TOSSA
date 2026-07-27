@@ -644,6 +644,26 @@ const TOMATO_STAIN_FADE := 900.0  # ticks one takes to wipe off (7.5s) - long en
 								   # a bad stretch visibly accumulates on the costume
 const FLOWER_PILE_MAX := 90       # props on the floor at once; older ones fade out under
 								  # the newer, so a long act never grows an endless heap
+# HOW FAR A DRAWN FLOWER ACTUALLY REACHES, as a multiple of its tier radius: a petal is
+# centred 0.72r out and is 0.52r long from there. Written down because it is the number
+# a NEIGHBOURING layout needs and the one nobody has when they place text beside one -
+# see STEM_BLOOM_REACH, which is the whole reason the rail's takings column sits where
+# it does. Anything that changes draw_flower's petal geometry must change this too.
+const FLOWER_REACH := 1.24
+# the goal stem's bud opens past the final goal, and it is deliberately much bigger than
+# its own 34px box (Louis: the cleared goal has to be an event). These are the numbers
+# draw_goal_stem draws it at, kept here so the reach below is derived from the real
+# shape rather than measured off a screenshot.
+const STEM_BLOOM_SC := 3.2        # the bloom at the moment the final goal falls...
+const STEM_BLOOM_GROW := 1.2      # ...plus this much again at full overflow
+const STEM_SHED_R := 26.0         # the ring of shed petals orbits at this...
+const STEM_SHED_GROW := 8.0       # ...widening by this much as the overflow grows
+const STEM_SHED_SC := 0.7         # each shed petal's own scale
+# ...so this is how far the celebration reaches out from the stem's centre line. The
+# bloom and the ring it sheds race for the outer edge and neither wins by much.
+const STEM_BLOOM_REACH := maxf(
+	7.0 * (STEM_BLOOM_SC + STEM_BLOOM_GROW) * FLOWER_REACH,        # FLOWER_TIERS[2].r
+	STEM_SHED_R + STEM_SHED_GROW + 5.0 * STEM_SHED_SC * FLOWER_REACH)   # FLOWER_TIERS[0].r
 const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
 const APPL_THROW_HEIGHT := 0.012      # a big throw excites the crowd: patience back, scaled by height
 # the crowd's patience economy, now that it is a CLOCK rather than decoration. The
@@ -876,9 +896,13 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # same as set_shake/set_collide) so a chosen experiment survives a relaunch, but the
 # panel that can ever FLIP one is gated behind OS.is_debug_build() same as every
 # other dev surface - a release export always sees every experiment at its default.
-# DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
-# them the default"): the growth-column sheet, card settings, and icon pause are now the
-# shipped look; F9 (debug) toggles each OFF to compare against the classic version.
+# AN EXPERIMENT THAT WINS LEAVES THE PANEL. The growth-column sheet, the card settings,
+# the icon pause and the portrait save slots were all toggles here once; when Louis
+# picked them they became the only version and their entries came out of
+# EXPERIMENT_DEFS, because a switch with nothing on its other side is just a way to
+# break the game from a debug key. What remains below is what still has two real sides.
+# The dictionary IS the shipped default for each - keep every reader's fallback equal to
+# the value here, or a missing key silently ships the other look.
 var experiments := {"prop_art": true, "flowers": true, "round_v3": true, "soft_light": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
@@ -3684,8 +3708,8 @@ func tut_step_data() -> Dictionary:
 #      feeds another prop up. Turns alternate, which is what makes a cascade cross.
 #
 # Presses out of turn are swallowed silently (never a whiff, never a wrong throw), and
-# the asked-for press always succeeds - see tut_sure_catch, which takes the failure
-# branches out of on_catch while a beat is being guided. Failing a beat the SCRIPT
+# the asked-for press always succeeds - see on_catch's own `sure`, which takes the
+# failure branches out of it while a beat is being guided. Failing a beat the SCRIPT
 # dealt teaches nothing; the full-speed pass is where failing means something.
 # -----------------------------------------------------------------------------
 func tut_guided() -> bool:
@@ -3695,12 +3719,6 @@ func tut_guided() -> bool:
 
 func tut_holding() -> bool:
 	return tut_active and not tut_hold.is_empty()
-
-
-func tut_sure_catch() -> bool:
-	# a catch the guided beat itself asked for cannot be allowed to fail: on_catch's
-	# stamina, collision and chance branches are skipped for it
-	return tut_holding() and tut_hold_names("catch", -1)
 
 
 func tut_style() -> String:
@@ -4894,22 +4912,6 @@ func slot_path(i: int) -> String:
 	return "user://iacto_slot%d.cfg" % i
 
 
-func slot_summary(i: int) -> String:
-	if not FileAccess.file_exists(slot_path(i)):
-		return "empty"
-	var cf := ConfigFile.new()
-	if cf.load(slot_path(i)) != OK:
-		return "empty"
-	var lv := int(cf.get_value("prog", "level", 1))
-	var g := int(cf.get_value("stats", "money", START_GOLD))
-	var rep := int(cf.get_value("stats", "reputation", 0))
-	var vn := String(venue_data(venue_index_of(rep))["name"])
-	var line := "Level %d   -   %s   -   %s %s" % [lv, vn, commafy(g), coin_word()]
-	if bool(cf.get_value("prog", "won", false)):
-		line += "  -  WORLD'S GREATEST JUGGLER"   # this save has conquered the top stage
-	return line
-
-
 func delete_slot(i: int) -> void:
 	var dir := DirAccess.open("user://")
 	var fn := "iacto_slot%d.cfg" % i
@@ -5448,16 +5450,6 @@ func assign_lane(b: Ball, h: int) -> void:
 			b.lane_x = x
 			return
 	b.lane_x = columns_x(clampi(lo, 0, num_balls - 1))   # fallback: never leave it unset
-
-
-func incoming_low(h: int) -> bool:
-	# is any NON-over-the-top ball airborne toward hand h's catch point right now?
-	# The corner between an outgoing throw and this incoming ball is where every
-	# mid-air overlap lived, so throws made over it dodge sideways (see do_throw)
-	for b in balls:
-		if b.state == STATE_FLIGHT and b.to_hand == h and not b.over_top:
-			return true
-	return false
 
 
 func next_throw_over_top(h: int) -> bool:
@@ -6861,7 +6853,7 @@ func add_xp(amount: int) -> void:
 			money += mg
 			career["mastery"] = int(career.get("mastery", 0)) + points
 			points = 0
-			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d  -  MASTERY  +%d gold" % [level, mg], Color(1.0, 0.9, 0.5))
+			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d  -  MASTERY  +%d %s" % [level, mg, coin_word()], Color(1.0, 0.9, 0.5))
 			play_sfx("money", -8.0)
 		else:
 			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
@@ -10227,11 +10219,14 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# growing with the overflow - so the rail says "cleared" and then "still climbing".
 	var bud := Vector2(x, base - maxf(h, 4.0))
 	if over > 0.0:
+		# every size here is a named constant because the rail's takings column is placed
+		# off STEM_BLOOM_REACH, which is derived from them - grow the bloom and the text
+		# beside it moves out of the way on its own (see draw_hud's `col_x`)
 		draw_glow(bud, 40.0 + 22.0 * over, Color(accent.r, accent.g, accent.b, 0.28 + 0.24 * over))
 		for i in 6:                                    # petals shed round a finished act
 			var sa := atick() * 0.02 + TAU * float(i) / 6.0
-			draw_flower(bud + Vector2(cos(sa), sin(sa)) * (26.0 + 8.0 * over), 0, 0.7, sa, 0.5)
-		draw_flower(bud, 2, 3.2 + 1.2 * over, atick() * 0.01, 1.0)
+			draw_flower(bud + Vector2(cos(sa), sin(sa)) * (STEM_SHED_R + STEM_SHED_GROW * over), 0, STEM_SHED_SC, sa, 0.5)
+		draw_flower(bud, 2, STEM_BLOOM_SC + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
 	elif frac >= 0.999:
 		draw_glow(bud, 32.0, Color(1.0, 0.86, 0.45, 0.26))
 		draw_flower(bud, 1, 2.8, atick() * 0.008, 1.0)
@@ -10891,11 +10886,24 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# ...stopping clear of the cash-in line along the card's bottom edge
 			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
 				Color(venue_data(run_venue)["glow"]))
+			# THE TAKINGS COLUMN STARTS CLEAR OF THE BLOOM (2026-07-27, Louis: the flower
+			# overlapped the word TONIGHT). The stem's bud sits on the centre line of the
+			# box above (its x + half its 34px width), and past the final goal it opens
+			# into a flower whose petals reach STEM_BLOOM_REACH - deliberately out past
+			# that box - so anything drawn nearer than that is inside the celebration
+			# rather than beside it. The column is anchored off the reach itself, not a
+			# hand-picked x, so growing the bloom later moves the text out of its way.
+			var col_x := LX + 152.0 + 17.0 + STEM_BLOOM_REACH + 7.0
+			var col_w := LW - 8.0 - (col_x - LX)     # to the card's own right margin
 			var fc := Color(0.98, 0.60, 0.72)
-			draw_string(font, Vector2(LX + 196.0, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, 96.0, 11, Color(0.85, 0.72, 0.66))
-			draw_flower(Vector2(LX + 205.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
-			draw_fit_string(title_font(), Vector2(LX + 219.0, tcard_y + 66.0), commafy(run_flowers),
-				HORIZONTAL_ALIGNMENT_LEFT, 74.0, 24, fc)
+			draw_string(font, Vector2(col_x, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, 11, Color(0.85, 0.72, 0.66))
+			draw_flower(Vector2(col_x + 9.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
+			# the night's take SHRINKS to fit, never trims: fit_text would render a good
+			# night's 12,400 as "12,4...", and a truncated number is not a number
+			var take := commafy(run_flowers)
+			var take_x := col_x + 23.0
+			draw_string(title_font(), Vector2(take_x, tcard_y + 66.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
+				fit_size(title_font(), take, LX + LW - 8.0 - take_x, 24, 14), fc)
 			# and how the room is FEELING, in the one word the pile is saying
 			# ...in the SAME bands the crowd dial is coloured in, so the word and the
 			# needle can never disagree about whether flowers are coming
@@ -10916,7 +10924,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			elif applause >= FLOWER_FLOOR:
 				mood = "restless"
 				mc = Color(0.96, 0.62, 0.30)
-			draw_fit_string(font, Vector2(LX + 196.0, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, 96.0, 12, mc)
+			# the mood is a phrase, and the longest of them ("throwing flowers") is wider
+			# than the column the bloom leaves - so it steps down a size or two rather
+			# than losing the word that carries the meaning
+			draw_string(font, Vector2(col_x, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
+				fit_size(font, mood, col_w, 12, 10), mc)
 		else:
 			draw_money_hat(Rect2(LX + 148.0, tcard_y + 8.0, 138.0, 162.0), tfrac, over, marks,
 				Color(venue_data(run_venue)["glow"]))
@@ -11226,10 +11238,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 
 
 func draw_pause_screen(font: Font, s: Vector2) -> void:
-	# the one call site every screen uses to open the pause menu - routes to
-	# whichever version the pause_cards EXPERIMENT currently points at, same shape
-	# as draw_sheet_screen/draw_settings_screen. draw_pause never changes;
-	# pause_input/pause_activate (pause_sel 0..2) are shared unmodified by both.
+	# the one call site every screen uses to open the pause menu, same seam as
+	# draw_sheet_screen/draw_settings_screen (see there). pause_input/pause_activate
+	# (pause_sel 0..2) own the behaviour; this side is only the picture.
 	draw_pause_cards(font, s)
 
 
@@ -11533,10 +11544,11 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 
 
 func draw_sheet_screen(font: Font, s: Vector2) -> void:
-	# the ONE call site every screen uses to open "the sheet" (Tab) - routes to
-	# whichever version the talent_tree EXPERIMENT currently points at. Both
-	# versions share sheet_sel/sheet_input/invest()/_adjust() untouched, so this
-	# function is the entire difference between them: draw_sheet never changes.
+	# the ONE call site every screen uses to open "the sheet" (Tab). It was the switch
+	# between the classic four cards and the growth columns while both existed; the
+	# columns won and the classic version is gone, so this is now just the seam - keep
+	# opening the sheet through it, and a future second picture costs one line here
+	# rather than a hunt through every screen that can open it.
 	draw_talent_tree(font, s)
 
 
@@ -11549,9 +11561,9 @@ func stat_cap(which: String) -> int:
 
 
 func stat_milestones(which: String) -> Array[Dictionary]:
-	# THE one list of what a stat's points actually BUY, and every reader of it - the
-	# classic sheet's track, the talent tree's pips - uses this and nothing else, so the
-	# two pictures can never disagree about what a point is worth.
+	# THE one list of what a stat's points actually BUY. Every reader of it - the growth
+	# columns' pips, the "next point buys" line - uses this and nothing else, so no two
+	# places on screen can disagree about what a point is worth.
 	#
 	# Every entry is a threshold the GAME ITSELF gates on, read out of the real tables
 	# (PATTERNS/TRICKS' own acc/str fields, PROPS' req, BALL_GATES) or computed from the
@@ -11608,37 +11620,8 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 	return out
 
 
-func stat_next_milestone(which: String, val: int) -> Dictionary:
-	# the next thing this stat is climbing toward, or {} at the top of the list
-	for m in stat_milestones(which):
-		if int(m["val"]) > val:
-			return m
-	return {}
-
-
 func talent_nodes(which: String) -> Array[Dictionary]:
 	return stat_milestones(which)   # the tree and the sheet read the same list
-
-
-func draw_stat_track(font: Font, r: Rect2, which: String, val: int, col: Color) -> void:
-	# a slim track under a stat's big number: how far along the whole climb this stat is,
-	# with a PIP at every real threshold (lit once passed) and the next one named
-	# underneath. This is the thing Speed had in words and the others had not at all.
-	var cap := stat_cap(which)
-	var f := clampf(float(val) / float(maxi(1, cap)), 0.0, 1.0)
-	var ty := r.position.y
-	draw_rect(Rect2(r.position.x, ty, r.size.x, 7.0), Color(0.16, 0.12, 0.14, 0.9))
-	draw_rect(Rect2(r.position.x, ty, r.size.x * f, 7.0), Color(col.r, col.g, col.b, 0.85))
-	for m in stat_milestones(which):
-		var mv := int(m["val"])
-		var mx := r.position.x + r.size.x * clampf(float(mv) / float(maxi(1, cap)), 0.0, 1.0)
-		var passed := val >= mv
-		draw_rect(Rect2(mx - 1.0, ty - 3.0, 2.0, 13.0),
-			Color(1.0, 0.94, 0.72, 0.95) if passed else Color(0.55, 0.50, 0.48, 0.75))
-	var nxt := stat_next_milestone(which, val)
-	var line := "at the ceiling" if nxt.is_empty() else "next at %d:  %s" % [int(nxt["val"]), String(nxt["label"])]
-	draw_fit_string(font, Vector2(r.position.x, ty + 26.0), line, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 11,
-		Color(0.86, 0.82, 0.74) if not nxt.is_empty() else Color(1.0, 0.88, 0.55))
 
 
 func draw_talent_tree(font: Font, s: Vector2) -> void:
@@ -11668,12 +11651,20 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	draw_meter(xbx, py + 81.0, xbw, 15.0, xf, Color(0.92, 0.72, 0.36))
 	draw_text_shout(font, Vector2(xbx, py + 92.0), "%s / %s xp" % [commafy(xp), commafy(need)], HORIZONTAL_ALIGNMENT_CENTER, xbw, 11, Color(1.0, 0.96, 0.85))
 	var by0 := py + 110.0
-	if points > 0:
+	# MASTERY OUTRANKS THE POINTS BANNER, because a capped juggler can be holding points
+	# and there is nothing left to put them in: capping the last stat with a couple in
+	# hand leaves them banked until the next level-up converts the lot. Asking that
+	# player to "press a column's number" is an instruction that does nothing.
+	if all_stats_capped():
+		var mt := "MASTERY  -  every stat at its ceiling. New levels now pay %s." % coin_word()
+		if points > 0:
+			mt = "MASTERY  -  every stat at its ceiling. Your %d point%s turn%s to %s at the next level." % [
+				points, "" if points == 1 else "s", "s" if points == 1 else "", coin_word()]
+		draw_fit_string(font, Vector2(tx, by0 + 22.0), mt, HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
+	elif points > 0:
 		var pa := 0.72 + 0.28 * sin(float(Time.get_ticks_msec()) * 0.006)
 		soft_card(Rect2(tx, by0, innerw, 32.0), Color(0.22, 0.17, 0.06, 0.45 + 0.2 * pa), Color(1.0, 0.86, 0.45, 0.75), 1.5, 9.0, 6.0)
 		draw_string(font, Vector2(tx, by0 + 22.0), "%d POINT%s TO SPEND  -  press a column's number, or Left / Right then Enter" % [points, "" if points == 1 else "S"], HORIZONTAL_ALIGNMENT_CENTER, innerw, 15, Color(1.0, 0.92, 0.7))
-	elif all_stats_capped():
-		draw_string(font, Vector2(tx, by0 + 22.0), "MASTERY  -  every stat at its ceiling. New levels now pay gold.", HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
 	else:
 		draw_string(font, Vector2(tx, by0 + 22.0), "Skill sets your score; stats ease the climb. The next point comes with the next level.", HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
 
@@ -13349,7 +13340,7 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 		if exists:
 			draw_string(title_font(), Vector2(cx, cy + 186.0), "Lv %d" % int(info["level"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 34, Color(1.0, 0.95, 0.82))
 			draw_fit_string(font, Vector2(cx, cy + 214.0), String(info["venue"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(0.84, 0.78, 0.68))
-			draw_string(font, Vector2(cx, cy + 238.0), "%s gold" % commafy(int(info["gold"])), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(1.0, 0.86, 0.45))
+			draw_fit_string(font, Vector2(cx, cy + 238.0), "%s %s" % [commafy(int(info["gold"])), coin_word()], HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(1.0, 0.86, 0.45))
 			if crowned:
 				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.4))
 			draw_string(font, Vector2(cx, cy + ch - 18.0), "[X] delete", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(0.88, 0.55, 0.5) if sel else Color(0.7, 0.5, 0.47, 0.7))
@@ -13369,15 +13360,15 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 
 
 func draw_settings_screen(font: Font, s: Vector2) -> void:
-	# the one call site every screen uses to open Settings - routes to whichever
-	# version the settings_cards EXPERIMENT currently points at, same shape as
-	# draw_sheet_screen. draw_settings never changes; settings_input (menu_sel 0..7,
-	# fixed row meanings) is shared unmodified by both - only the drawing differs.
+	# the one call site every screen uses to open Settings, same seam as
+	# draw_sheet_screen (see there). settings_input owns the behaviour: menu_sel is a
+	# bare index 0..9 into the rows, which is why the row list below and settings_input
+	# must always carry the SAME rows in the SAME order.
 	draw_settings_cards(font, s)
 
 
 func draw_settings_cards(font: Font, s: Vector2) -> void:
-	# SETTINGS as cards - the same nine rows in the same menu_sel order settings_input
+	# SETTINGS as cards - the same TEN rows in the same menu_sel order settings_input
 	# already drives, in the Balatro-card language the shop and sheet use
 	# (hud_card/draw_meter/a toggle plate). This screen alone never picked it up and was
 	# bare text rows. (Shipped 2026-07-27, no longer a variant.)
@@ -13401,8 +13392,9 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},
 	]
 	# grouped into sections so it reads as a designed panel, not a wall of identical
-	# bars. The row INDEX still matches settings_input 0..8 exactly - only the y of each
-	# card shifts to leave room for the section headers between groups.
+	# bars. The row INDEX still matches settings_input 0..9 exactly - only the y of each
+	# card shifts to leave room for the section headers between groups. Every row must
+	# appear in exactly one section, or a row the input can select is never drawn.
 	var sections := [
 		{"head": "AUDIO", "rows": [0, 1]},
 		{"head": "GAME FEEL", "rows": [2, 3, 4, 5, 6]},
@@ -13494,7 +13486,7 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%s performances,  %s catches" % [commafy(int(career["perfs"])), commafy(int(career["catches"]))],
 		"best streak %s,  highest score %s" % [commafy(int(career["best_streak"])), commafy(int(career["best_score"]))],
-		"%s gold earned, and all of it spent" % commafy(int(career["gold_earned"])),
+		"%s %s earned, and all of it spent" % [commafy(int(career["gold_earned"])), coin_word()],
 	]
 	for i in lines.size():
 		var la := clampf(float(cine_tick - 80 - i * 30) / 40.0, 0.0, 1.0)
@@ -13656,10 +13648,10 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		["longest streak ever", commafy(int(career["best_streak"]))],
 		["highest score anywhere", commafy(int(career["best_score"]))],
 		["tricks landed", commafy(int(career["tricks"]))],
-		["gold earned on stage", commafy(int(career["gold_earned"]))],
+		["%s earned on stage" % coin_word(), commafy(int(career["gold_earned"]))],
 	]
 	if int(career.get("mastery", 0)) > 0:
-		lines.append(["mastery points turned to gold", commafy(int(career["mastery"]))])
+		lines.append(["mastery points turned to %s" % coin_word(), commafy(int(career["mastery"]))])
 	for i in lines.size():
 		var ry := ly + 34.0 + float(i) * 30.0
 		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66))
@@ -14295,13 +14287,6 @@ func draw_vignette(s: Vector2, strength: float = 0.55) -> void:
 	draw_gradient_h(Rect2(s.x - band, 0, band, s.y), clear, dk, 18)
 
 
-func draw_letterbox(s: Vector2, top: float, bot: float) -> void:
-	draw_rect(Rect2(0, 0, s.x, top), Color(0.02, 0.01, 0.02, 1.0))
-	draw_rect(Rect2(0, s.y - bot, s.x, bot), Color(0.02, 0.01, 0.02, 1.0))
-	draw_line(Vector2(0, top), Vector2(s.x, top), Color(0.8, 0.6, 0.32, 0.5), 1.5)
-	draw_line(Vector2(0, s.y - bot), Vector2(s.x, s.y - bot), Color(0.8, 0.6, 0.32, 0.5), 1.5)
-
-
 func draw_frame(s: Vector2, inset: float, col: Color) -> void:
 	# a royal double gold border with small corner ticks
 	var r := Rect2(inset, inset, s.x - 2.0 * inset, s.y - 2.0 * inset)
@@ -14529,8 +14514,10 @@ func step_effects() -> void:
 
 #region WHAT THE ROOM THROWS (flowers and tomatoes)
 func flowers_on() -> bool:
-	# the whole feature behind its F9 switch, asked in one place
-	return bool(experiments.get("flowers", false))
+	# the whole feature behind its F9 switch, asked in one place. The fallback matches
+	# the `experiments` declaration on purpose: it read false here while the dictionary
+	# said true, which is harmless only for as long as the key is never missing.
+	return bool(experiments.get("flowers", true))
 
 
 func coin_word() -> String:
@@ -14538,10 +14525,6 @@ func coin_word() -> String:
 	# either way - only what the crowd hands over changes - so every readout asks here
 	# rather than hard-coding "gold" and going stale the moment the switch is flipped.
 	return "flowers" if flowers_on() else "gold"
-
-
-func coin_word_one() -> String:
-	return "flower" if flowers_on() else "gold"
 
 
 func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> void:
@@ -14717,7 +14700,9 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 	for i in n:
 		var ang := rot + TAU * float(i) / float(n)
 		var pc := Vector2(cos(ang), sin(ang)) * r * 0.72
-		# each petal an ellipse pointing outward - two circles would read as a berry
+		# each petal an ellipse pointing outward - two circles would read as a berry.
+		# 0.72 out plus 0.52 long is FLOWER_REACH: change either and change that too,
+		# or a layout placed clear of a flower stops being clear of it
 		var pv := PackedVector2Array()
 		for k in 9:
 			var t := TAU * float(k) / 8.0
