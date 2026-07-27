@@ -103,6 +103,66 @@ and deleted. History lives in git.
   repeats exactly) are now refused below a 6px spacing floor; and a path that genuinely
   DOUBLES BACK - a Column goes straight up and down the same line - falls back to a
   plain `draw_polyline`, still one draw call.
+- **...AND NOTHING PER-FRAME MAY BE MEASURED OFF THAT TRAIL** (2026-07-27, `flight_vel`).
+  The corollary nobody drew at the time, and it cost the round props their whole look.
+  `draw_prop`'s squash/stretch took velocity as `pos - b.trail[last]`. Because samples
+  are spaced 6px apart ON PURPOSE, that difference ramps from ~0 up to 6px and SNAPS
+  BACK each time a new one lands: the stretch sawtoothed at the sampling rate, and right
+  after each snap `vel.angle()` is the angle of a near-zero vector, i.e. noise. Measured
+  on a real throw the prop's ORIENTATION was moving up to **72 degrees in one frame**
+  (44 mean). That was the "jittery in the air" Louis reported - not the shading, which
+  is where three sessions would have looked first. `flight_pos` is a closed-form
+  parabola, so `flight_vel` differentiates it instead: worst case 2.4 deg/frame. **Rule:
+  a decimated buffer is not a motion source. If the sim has closed-form position,
+  differentiate it.**
+- **THE ROUND PROPS ARE FLAT** (2026-07-27, Louis: "get rid of the 'light' and 'shadows'
+  of both"; F9 `round_v3`, ON). Two relight attempts were rejected. The reason to stop
+  trying: a painted highlight is a claim about where the light is, and this stage's
+  lighting genuinely changes (venue palettes, Blackout, the Glow Kit, the spotlight
+  pool), so the claim is wrong most of the time - and both attempts built that claim out
+  of 1-2px features (a crescent that is the GAP between two near-equal circles, a 1px
+  seam, a 1.3px hot point), which shimmer on a moving object however well drawn. Now:
+  one flat disc of the prop's own colour inside a rim that is darker THE WHOLE WAY ROUND
+  (`ball_rim`, floored at 1.6px so it never enters the shimmering band). A concentric rim
+  has no direction, so it states a solid edge without claiming a light source, and it
+  survives every palette. Same rule on the egg's ovoid. `glow_silhouette` no longer
+  routes through either shape - its contract is one flat phosphor tone, and a dark rim
+  on a charged prop read as a hole punched in the bloom.
+- **AN OBJECT AT REST DOES NOT TURN** - a whole bug CLASS, found twice in one pass, so
+  check it whenever anything tumbles. Both were accumulators keyed on a clock that never
+  stops: a thrown flower's `rot` grew with `tick - born`, so a settled pile on the boards
+  was a field of pinwheels (Louis), and an eggshell shard kept revolving about seven
+  times a second where it lay for the rest of its 150-tick life. `draw_thrown` now
+  clamps the accumulator at the landing tick and `step_effects` only turns a shard while
+  it is still moving; the falling props already had it right (they skip the whole update
+  once `rest` is set) and are the pattern to copy. **The same mark may still turn where
+  it is a UI ICON rather than an object** - `draw_coin_mark(..., turning)` is opt-in, on
+  for the purse and the shop's price plates, off everywhere a flower is a thing lying on
+  a stage.
+- **THE MARK IS THE UNIT** (2026-07-27, Louis: "the currency in shop should not be f but
+  the flower icon"). Prices and purses draw `draw_coin_mark`, never a letter. The shop
+  used to print "50,582 f" NEXT TO a flower, naming the currency twice and abbreviating
+  it the once. `coin_short()` is deleted. `draw_price_plate` takes the bare number and
+  places the mark off the MEASURED digit width, since a price is data ("60,000").
+- **A SELF-INTERSECTING POLYGON DRAWS NOTHING, SILENTLY** - and the error names no line,
+  so here is how to find one. The shop logged "Invalid polygon data, triangulation
+  failed" on every frame for an unknown length of time. Capturing at three different
+  `--shotat` values gave counts of exactly N-1 each time, which pins it to a STATIC
+  shape (an animated one would vary) drawn ONCE per frame - that is most of the search
+  done before reading any code. It was the Energy-Drink Helmet's brim: four corners
+  listed out of perimeter order (2nd and 4th swapped) so edge 0 crossed edge 2. It had
+  therefore never rendered, and the hat had been missing the part its own comment calls
+  the thing that makes it a cap. **Watch for collinear points on one edge too** - that is
+  why the softened spotlight's base is bowed rather than flat.
+- **THE SPOTLIGHT HAS EDGES** (2026-07-27, F9 `soft_light`, ON): the title/key-art beam
+  was one flat polygon at a single alpha, so the light stopped dead along two straight
+  lines and read as a wedge laid over the picture; its half-width was a hard 300px, so
+  the beam changed proportion with the window instead of with the stage. It is
+  `draw_polygon` with PER-VERTEX ALPHA now - transparent at the two lower corners, warm
+  down the middle - which is still ONE draw call. That matters given the `draw_glow`
+  finding that stacking low-alpha shapes to fake a gradient measured 30% slower and
+  banded once thinned. Width is `s.x * 0.234` (the old 300px at the 1280 it was picked
+  for). Shared by the menu, the key-art and the venue backdrop, so all three improved.
 - **THE HAT** (2026-07-27, `draw_money_hat`, verified on screen empty, part-filled, brim-
   full and overflowing): the act's score requirement is a busker's top hat, turned over
   the way a busker leaves it, filling with the night's take. It replaced the horizontal
@@ -682,10 +742,25 @@ and deleted. History lives in git.
   `--wallcard` and `--legend` (2026-07-27) jump straight to the
   scoped demo's wishlist card and the Purist Legend payoff card - the two end
   screens previously reachable only by completing the run that triggers them, so
-  neither had a capture path at all; `--capsule` renders pure key-art (no UI) for Steam store
-  assets - capture at native 1280x720 (`--shot <path> --shotat 30`), then
-  `sips --cropToHeightWidth 706 1232 <path>` for a distortion-free 2x Main
-  Capsule, `sips -z 353 616 <path>` to the real 616x353; `--glow` owns the
+  neither had a capture path at all; `--capsule` renders pure key-art (no UI) for Steam
+  store assets - **and as of 2026-07-27 it is resolution-independent, so do NOT crop it
+  out of a 720p frame any more.** Its positions were always relative to the viewport but
+  its logo, ornament, subtitle, frame and bulbs were absolute pixels, so a bigger render
+  used to give a big backdrop with a postage-stamp wordmark - which is the only reason
+  the old instruction here was "capture at 1280x720 and crop", i.e. upscale, for the one
+  job (a storefront thumbnail) where softness costs most. Everything now scales off
+  `k = min(s.x/1280, s.y/720)`; the min, not the max, so a PORTRAIT render for the
+  600x900 library capsule cannot push the wordmark out through the sides. Render each
+  slot at ITS OWN aspect with the engine flag `--resolution WxH` (before the bare `--`)
+  and then resample: `scratchpad/capsules.sh` does the whole set into `store/`.
+  **The one hard constraint:** macOS clamps a window to the usable desktop (measured
+  1920x1016 here) and Godot cannot screenshot headless (no viewport texture), so asking
+  for 3840x1240 silently returns a clamped, WRONG-ASPECT frame that `sips` then squashes
+  to size - distortion, the thing the capsule brief rules out. Ask only for boxes that
+  fit AND match the target aspect. Everything up to the 600x900 vertical downsamples
+  crisply; the 3840x1240 library hero is the one slot that must be upscaled 2x, and it
+  is the one most tolerant of it (a wide atmospheric banner Valve overlays the logo on).
+  `--glow` owns the
   Glow-in-the-Dark Kit for the session (no save touched) - pair with
   `--booking --encore blackout` to screenshot it. `--day <work|rest|prep>` opens the
   hub with that drawer already open, and `--f9` opens the EXPERIMENTS overlay (both

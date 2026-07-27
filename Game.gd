@@ -610,6 +610,10 @@ const FLOWER_TIERS := [
 # economy with him) - the ladder is deliberately gentle, one more thrower per rung.
 const FLOWER_THROWERS := [1, 2, 4, 5, 7, 9, 11]
 const FLOWER_FLIGHT := 46         # ticks a thrown flower spends in the air
+const FLOWER_STEM_AIR := 13.0     # stem length in flight: seen side-on, so its full length
+const FLOWER_STEM_FLAT := 7.0     # ...and at rest, where it points at the audience and so
+								   # nearly at the camera. Drawing the airborne length on a
+								   # landed flower made it read as GROWING out of the stage
 const FLOWER_PILE_MAX := 90       # props on the floor at once; older ones fade out under
 								  # the newer, so a long act never grows an endless heap
 const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
@@ -829,7 +833,7 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # DEFAULTED ON 2026-07-26 (Louis: the reworked variants "look absolutely amazing, make
 # them the default"): the growth-column sheet, card settings, and icon pause are now the
 # shipped look; F9 (debug) toggles each OFF to compare against the classic version.
-var experiments := {"prop_art": true, "flowers": true, "round_v3": true}
+var experiments := {"prop_art": true, "flowers": true, "round_v3": true, "soft_light": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
@@ -837,6 +841,8 @@ const EXPERIMENT_DEFS := [
 	 "desc": "The three round props shaded rather than flat: a shadow crescent left between two smooth outlines, a panel seam on the balls, a true ovoid for the eggs, and a concentric dark-body-bright cross-section on the rings. OFF restores the old flat fill with one paler blob on it. Visual only - same sizes, same hitboxes, same physics."},
 	{"id": "round_v3", "name": "Balls and eggs: flat, and steady in the air",
 	 "desc": "No fake light on the round props: one flat disc of the prop's own colour inside a darker rim that runs the whole way round, so the shape is stated without a light direction. Also fixes the real cause of the jitter - the squash/stretch read its velocity off the SPACED comet trail, which sawtoothed and spun the prop. It is analytic now. OFF restores the previous relit balls and eggs (and prop_art below still picks relit-vs-flat there)."},
+	{"id": "soft_light", "name": "The spotlight has edges",
+	 "desc": "The title and key-art beam fades out sideways and down the length instead of stopping dead along two straight lines, and its width is now a fraction of the stage rather than a fixed 300px that changed proportion with the window. One draw call either way - the softness is per-vertex alpha, not a stack of shapes. OFF restores the flat wedge."},
 	{"id": "flowers", "name": "FLOWERS instead of gold",
 	 "desc": "The crowd pays you in front of you. Play deep in the green and the room throws flowers at your feet - a plain one worth 1, a posy 5, a gold rose 25, and the rare tiers only come when the room is won over with nothing dropped. Lose the room and they throw tomatoes, worth nothing at the counter but eatable later, so a disastrous night still leaves you something. The pile on the boards replaces the score hat as the read on how the night is going, and everything reduces to the basic flower for spending. OFF restores gold and the hat."},
 ]
@@ -9513,6 +9519,10 @@ func round_props_v3() -> bool:
 	return bool(experiments.get("round_v3", true))
 
 
+func soft_light_on() -> bool:
+	return bool(experiments.get("soft_light", true))
+
+
 func ball_rim(r: float) -> float:
 	# the rim's thickness: proportional, but never thin enough to shimmer. Below about
 	# 1.6px an antialiased ring crawls as the object moves sub-pixel, which is the very
@@ -14125,11 +14135,35 @@ func throw_from_crowd(kind: String, tier: int) -> void:
 	var s := get_viewport_rect().size
 	var fy := stage_floor_y()
 	var from := Vector2(randf_range(s.x * 0.05, s.x * 0.95), fy + randf_range(16.0, 46.0))
-	var to := Vector2(s.x * 0.5 + randf_range(-165.0, 165.0), fy - randf_range(2.0, 16.0))
+	var lx := s.x * 0.5 + randf_range(-165.0, 165.0)
+	# HOW A THROWN FLOWER COMES TO REST (2026-07-27, Louis: "blossom facing the player
+	# and the stem facing the public"). The crowd is drawn BELOW the floor line
+	# (draw_crowd's `fy + 14 + r*21`), so the public is down-screen and the juggler is
+	# up-screen - and a thrown flower lands heavy end first, blossom leading, with the
+	# stem trailing back toward whoever threw it. In draw_flower the stem runs along
+	# `rot + PI/2`, so rot = 0 puts it at (0, +1): straight down-screen at the public,
+	# blossom up toward the performer. A little spread either side of 0 so a pile is not
+	# a row of identical stamps, but never enough to turn one around.
+	var settle := randf_range(-0.42, 0.42)
+	# ...and it LIES on the boards rather than standing in them. A stem pointing at the
+	# audience is pointing nearly at the camera, so it foreshortens to about half what
+	# the same flower shows side-on in the air (FLOWER_STEM_FLAT against
+	# FLOWER_STEM_AIR) - drawn at full length it read as a flower GROWING out of the
+	# stage. The blossom then sits just that shortened stem clear of the floor line, so
+	# the stem reaches down to the boards instead of through them into the crowd.
+	var ly := fy - FLOWER_STEM_FLAT - randf_range(0.0, 6.0)
+	# A PILE, not a plane: each flower already lying near this spot lifts the next one a
+	# little, so a heavy shower builds a shallow heap instead of everything sharing one
+	# line. Capped, or a long green night would stack a tower up the backdrop.
+	var near := 0
+	for d in thrown:
+		if absf(float((d["to"] as Vector2).x) - lx) < 20.0:
+			near += 1
+	var to := Vector2(lx, ly - minf(float(near) * 1.5, 8.0))
 	thrown.append({"kind": kind, "tier": tier, "from": from, "to": to,
 		"born": tick, "land": tick + FLOWER_FLIGHT + randi_range(-6, 6),
 		"arc": randf_range(90.0, 190.0), "rot": randf_range(0.0, TAU),
-		"spin": randf_range(-0.09, 0.09)})   # tumble in the air only; draw_thrown freezes it on landing
+		"settle": settle})
 
 
 func throw_step() -> void:
@@ -14228,18 +14262,30 @@ func draw_thrown() -> void:
 			# older entries sit lower in the array; fade the oldest third of the pile so
 			# it settles into the boards instead of stacking forever
 			a = clampf(0.35 + 0.65 * float(i) / float(maxi(1, thrown.size() - 1)), 0.35, 1.0)
-		# A FLOWER ON THE BOARDS DOES NOT TURN (2026-07-27, Louis). The tumble was
-		# accumulated off `tick - born`, which never stops growing - so a flower kept
-		# spinning where it lay, for the whole rest of the act, and a settled pile was a
-		# field of pinwheels. Clamping the accumulator at the landing tick freezes each
-		# one at the angle it came to rest at: still a loose scatter (every flower has
-		# its own `rot` and its own tumble), but a STILL one.
-		var spun := float(mini(tick, lt) - int(d["born"]))
-		var rot := float(d["rot"]) + float(d["spin"]) * spun
+		# THE TUMBLE SETTLES, it does not just stop (2026-07-27, Louis). Two bugs in one
+		# line before this: the rotation accumulated off `tick - born`, which never stops
+		# growing, so a flower went on spinning where it lay for the rest of the act (a
+		# settled pile was a field of pinwheels); and even frozen it froze at whatever
+		# arbitrary angle it happened to reach, so half the pile lay stem-up.
+		# It now turns from its random launch angle to its OWN resting angle across the
+		# flight and holds there - which is both the tumble and the landing orientation,
+		# from one number. lerp_angle takes the short way round, so it reads as a flower
+		# turning over once and coming to rest, never as a spin-down. Eased so most of
+		# the turning happens early, the way a tumbling thing does as drag catches it.
+		var rot: float = float(d["settle"])
+		if tick < lt:
+			var rf := clampf(float(tick - int(d["born"])) / float(maxi(1, lt - int(d["born"]))), 0.0, 1.0)
+			rot = lerp_angle(float(d["rot"]), float(d["settle"]), rf * rf * (3.0 - 2.0 * rf))
 		if String(d["kind"]) == "tomato":
 			draw_tomato(p, sc, rot, a)
 		else:
-			draw_flower(p, int(d["tier"]), sc, rot, a, 13.0)   # thrown flowers keep their stems
+			# the stem foreshortens as the flower turns to face the boards - full length
+			# while it is side-on in the air, about half once it lies pointing at us
+			var stem := FLOWER_STEM_FLAT
+			if tick < lt:
+				var sf := clampf(float(tick - int(d["born"])) / float(maxi(1, lt - int(d["born"]))), 0.0, 1.0)
+				stem = lerpf(FLOWER_STEM_AIR, FLOWER_STEM_FLAT, sf * sf * (3.0 - 2.0 * sf))
+			draw_flower(p, int(d["tier"]), sc, rot, a, stem)
 #endregion
 
 
@@ -14733,8 +14779,38 @@ func draw_banner(top: Vector2, col: Color) -> void:
 
 
 func draw_spotlight_cone(s: Vector2, cx: float, strength: float) -> void:
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx, -30.0), Vector2(cx - 300.0, s.y * 0.86), Vector2(cx + 300.0, s.y * 0.86)]), Color(1.0, 0.85, 0.55, strength))
+	# A BEAM WITH EDGES, not a triangle (2026-07-27). The old one was a single flat
+	# polygon at one alpha, so the light stopped dead along two straight lines - at
+	# capsule size especially it read as a geometric wedge laid over the picture rather
+	# than as a lamp. Its half-width was a hard 300px too, which meant the beam changed
+	# proportion with the window instead of with the stage.
+	#
+	# Softened with PER-VERTEX ALPHA through draw_polygon, which is one draw call. That
+	# matters: the note on draw_glow records that stacking low-alpha shapes to fake a
+	# gradient measured 30% SLOWER and banded visibly once the stack was thinned. Here
+	# the interpolation is free - the rasterizer already does it.
+	#
+	# The base is bowed rather than flat because four collinear points on one edge is
+	# exactly the degenerate case Godot's triangulator is fussy about (see the helmet
+	# brim), and a beam's far end genuinely is an ellipse on the floor, not a straight cut.
+	if not soft_light_on():
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx, -30.0), Vector2(cx - 300.0, s.y * 0.86), Vector2(cx + 300.0, s.y * 0.86)]), Color(1.0, 0.85, 0.55, strength))
+		return
+	var hw := s.x * 0.234           # the old 300px at the 1280 the number was picked for
+	var ay := -0.04 * s.y
+	var yb := s.y * 0.86
+	var bow := s.y * 0.012
+	var warm := Color(1.0, 0.85, 0.55)
+	draw_polygon(
+		PackedVector2Array([
+			Vector2(cx, ay),
+			Vector2(cx - hw, yb), Vector2(cx - hw * 0.38, yb + bow),
+			Vector2(cx + hw * 0.38, yb + bow), Vector2(cx + hw, yb)]),
+		PackedColorArray([
+			Color(warm.r, warm.g, warm.b, strength),
+			Color(warm.r, warm.g, warm.b, 0.0), Color(warm.r, warm.g, warm.b, strength * 0.5),
+			Color(warm.r, warm.g, warm.b, strength * 0.5), Color(warm.r, warm.g, warm.b, 0.0)]))
 
 
 func draw_shadow(feet: Vector2, w: float) -> void:
