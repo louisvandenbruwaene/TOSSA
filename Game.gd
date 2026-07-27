@@ -7289,7 +7289,13 @@ func venue_data(i: int) -> Dictionary:
 			# actually worth wearing. The costume carries the whole theme: a suit
 			# that nearly vanishes into the dark, and a vest the same phosphor
 			# green as the Kit's own halo, so the performer visibly glows.
-			return {"name": "The Midnight Show", "glow": Color(0.35, 0.85, 0.55), "floor": Color(0.02, 0.04, 0.03), "spot": 0.015,
+			# `veil` 0.10: this set is already the darkest in the game, so the standard
+			# 0.42 push-back had nothing left to take and simply erased it (see the note
+			# at the veil in draw_backdrop). The floor is lifted off pure black for the
+			# same reason - a dark room is not an unlit one, and the boards have to read
+			# as boards for a landed prop to read as landed.
+			return {"name": "The Midnight Show", "glow": Color(0.40, 0.92, 0.62), "floor": Color(0.045, 0.075, 0.06), "spot": 0.015,
+				"veil": 0.10,
 				"suit": Color(0.08, 0.10, 0.09), "suit_dk": Color(0.04, 0.05, 0.045), "vest": Color(0.55, 0.95, 0.65), "collar": Color(0.75, 0.92, 0.8)}
 
 
@@ -8100,7 +8106,16 @@ func draw_backdrop(s: Vector2) -> void:
 	# back into the depth, so the escalating ladder is FELT without ever competing
 	# with the props (ART pillars 1 and 4)
 	draw_venue_dressing(s, vi, fy, glow)
-	draw_rect(Rect2(0, 0, s.x, fy), Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5, 0.42))
+	# THE VEIL IS PER-VENUE (2026-07-27, Louis: some stages are "some blurry line in the
+	# dark ... most stages do fine: like the circus. but some don't; like the midnight
+	# event"). This flat 42% wash exists to push the set behind the props, and on a bright
+	# set - the Circus canopy, the Arena bowl - that is exactly right. On an already-dark
+	# set it is applied to dressing that had no brightness to spare, and what survives is
+	# a faint smudge: the Midnight Show's clock, moon window and candles were all being
+	# drawn and then wiped off. Each venue now says how much push-back its own set can
+	# take (`veil`), so a dark house keeps its detail without any venue losing its depth.
+	draw_rect(Rect2(0, 0, s.x, fy), Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5,
+		float(v.get("veil", 0.42))))
 
 	# spotlight cone from above centre: it narrows and warms a touch as a streak
 	# builds, the light literally rewarding focus (ART doc, Section 2)
@@ -8285,8 +8300,12 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var y := fy - 30.0 - fposmod(cos(seed) * 71.0, 1.0) * s.y * 0.34
 				if absf(x - s.x * 0.5) < s.x * 0.17 and y > s.y * 0.3:
 					continue   # keep the juggling window clear
-				var a := 0.10 + 0.16 * sin(atick() * 0.05 + seed)
-				draw_rect(Rect2(x - 1.4, y - 1.4, 2.8, 2.8), Color(1.0, 0.82, 0.52, clampf(a, 0.02, 0.24)))
+				# brighter and a touch larger than they were: at 0.24 peak alpha on a
+				# 2.8px square these were below the threshold where a light reads as a
+				# light at all, which is what left the house looking merely under-exposed
+				var a := 0.30 + 0.34 * sin(atick() * 0.05 + seed)
+				draw_circle(Vector2(x, y), 2.1, Color(1.0, 0.86, 0.58, clampf(a, 0.10, 0.66)))
+				draw_glow(Vector2(x, y), 13.0, Color(1.0, 0.84, 0.55, clampf(a * 0.32, 0.03, 0.20)))
 			# ...and the things that say WHICH dark room this is (2026-07-27), all kept
 			# faint enough that the Glow-in-the-Dark Kit still has a job: the house
 			# clock at midnight, the candles the room is lit by (foreground), and the
@@ -8682,6 +8701,27 @@ func draw_juggler(s: Vector2) -> void:
 	var suit_dk: Color = v["suit_dk"]
 	var vest: Color = v["vest"]
 	var collar: Color = v["collar"]
+	var accent: Color = v["glow"]
+	# THE WHOLE COSTUME IS THE KIT (2026-07-27, Louis: "i want the glow in the dark
+	# costume to look way better: it should be a costume that is pretty much completely
+	# glow in the dark"). It used to be six strips of tape laid over a near-black suit,
+	# which said "this juggler has some tape on him", not "this juggler glows".
+	#
+	# Done by RECOLOURING AT SOURCE rather than by paint-overs: swap the four costume
+	# colours here and every piece the wardrobe already draws - lapels, cummerbund,
+	# buttons, cuffs, tails, trouser stripe - comes out in phosphor, in its right shape,
+	# for free. Drawing a second glowing figure on top would have meant maintaining two
+	# copies of the same costume and risking the one thing that must never drift (the
+	# figure's stance and proportions). The values are still a LADDER - deep phosphor
+	# suit, brighter vest, near-white collar - because a costume lit to one flat green
+	# is a silhouette, not a costume. Skin and hair stay their own colours: the man is
+	# not glowing, his clothes are.
+	if glow_kit_lit():
+		suit = Color(0.20, 0.72, 0.40)
+		suit_dk = Color(0.10, 0.42, 0.24)
+		vest = Color(0.78, 1.0, 0.86)
+		collar = Color(0.90, 1.0, 0.94)
+		accent = Color(0.70, 1.0, 0.80)
 	var button := Color(0.34, 0.20, 0.11)
 
 	# the eight-head canon, so the in-play juggler reads as a real adult person:
@@ -8710,6 +8750,14 @@ func draw_juggler(s: Vector2) -> void:
 	# a soft ground shadow so the figure stands ON the stage instead of floating (drawn
 	# BEFORE the spin transform, so it stays put on the ground while the body turns)
 	draw_shadow(Vector2(cx, floor_y + 2.0), 96.0)
+	# ...and, wearing the Kit, the light the costume is throwing OFF. This is what makes
+	# the recolour above read as EMITTING rather than as a man in a green suit: a lit
+	# thing spills onto its surroundings, and without that spill any colour is just
+	# paint. Two pools, torso and legs, drawn under the body so nothing is washed out.
+	if glow_kit_lit():
+		var bfl := 0.88 + 0.12 * sin(atick() * 0.05)
+		draw_glow(Vector2(cx, (shoulder_y + hip_y) * 0.5), 5.4 * H, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.30 * bfl))
+		draw_glow(Vector2(cx, (hip_y + floor_y) * 0.5), 3.4 * H, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.20 * bfl))
 
 	# a live Spin turns the WHOLE figure about its vertical axis. A 2D pirouette is faked
 	# by scaling the body width by cos(turn angle) about the centreline: full width facing
@@ -8786,7 +8834,7 @@ func draw_juggler(s: Vector2) -> void:
 	var polished := true   # the wardrobe pass is the costume now, not a variant
 	if polished:
 		draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, floor_y,
-			suit, suit_dk, collar, Color(v["glow"]), facing_back)
+			suit, suit_dk, collar, accent, facing_back)
 
 	# head: a full head of hair framing the crown and temples. Facing the crowd, the skin
 	# face sits over it; facing away mid-spin, the back of the head is all hair with a
@@ -8825,21 +8873,24 @@ func draw_juggler(s: Vector2) -> void:
 	draw_hand(LEFT)
 	draw_hand(RIGHT)
 
-	# THE GLOW KIT ON THE PERFORMER (2026-07-27, Louis). On a dark stage the juggler was
-	# a hole in the picture - the costume is deliberately near-black at the Midnight
-	# Show - so the Kit now tapes the FIGURE as well as the props: a line down each
-	# shoulder and arm, one round the waist, and a strip down each leg. It reads as
-	# exactly what it is, glow tape on a costume, and it means the pattern and the body
-	# holding it are legible together rather than props floating in the void.
+	# THE PIPING, over the now-glowing costume. These were the whole effect once (six
+	# strips of tape on a near-black suit); with the costume itself in phosphor they do
+	# the job good piping does on real evening dress - they pick out the shoulder line,
+	# the cummerbund and the outseam, so the figure has EDGES at a distance instead of
+	# being one bright mass. Brighter than the cloth they sit on, or they vanish into it.
 	if glow_kit_lit():
 		var gh := 1.0
+		# ONLY the trouser outseams are left of the old tape. The two horizontal runs
+		# (across the shoulders, round the waist) were struck straight across the figure
+		# rather than along any seam, so against a costume that now glows by itself they
+		# read as bars laid over the man. The two arm runs were worse: they were drawn
+		# shoulder-to-HAND as one straight chord while the arm itself bends at the elbow,
+		# so the line left the sleeve and crossed open air - a wire, not piping. The
+		# sleeve is lit cloth now and needs no help; the bare forearm reading as skin is
+		# correct, because he is wearing a glowing costume, not covered in phosphor.
 		draw_glow_strips([
-			Vector2(cx - 0.9 * H, shoulder_y), Vector2(cx + 0.9 * H, shoulder_y),      # the shoulder line
-			Vector2(cx - 0.8 * H, waist_y), Vector2(cx + 0.8 * H, waist_y),            # the cummerbund
-			Vector2(cx - 0.5 * H, hip_y), Vector2(cx - 0.45 * H, floor_y - 0.15 * H),  # left leg
-			Vector2(cx + 0.5 * H, hip_y), Vector2(cx + 0.45 * H, floor_y - 0.15 * H),  # right leg
-			shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT],                          # ...and along each arm
-			shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT],
+			Vector2(cx - 0.5 * H, hip_y), Vector2(cx - 0.45 * H, floor_y - 0.15 * H),  # left outseam
+			Vector2(cx + 0.5 * H, hip_y), Vector2(cx + 0.45 * H, floor_y - 0.15 * H),  # right outseam
 		], 2.0, gh)
 	# done with the (possibly spinning) figure: return to screen space, then lay the
 	# sweeping motion streaks over the top so the turn reads as fast
@@ -14788,54 +14839,73 @@ func ext_midnight(s: Vector2) -> void:
 	# nothing. The Midnight Show is not a big room - it is the LAST room, the one that
 	# opens after everyone has gone home - so its picture is a narrow door down an alley:
 	# one green lamp, a clock striking twelve, three people who waited, and the moon.
+	# A VALUE LADDER, not a uniform dark (2026-07-27, Louis, second pass: the details are
+	# still "some blurry line in the dark"). The composition here was already right - an
+	# alley, a marquee, three people who waited - but every structural tone sat between
+	# 0.014 and 0.09, a band far too narrow for any of them to separate from each other or
+	# from the sky. Brightening them all equally would only make grey fog; what a night
+	# picture needs is SPREAD: sky darkest, then the alley walls, then the facade clearly
+	# lighter than both, with the lit accents well above all three. The silhouettes stay
+	# near-black on purpose - they are read against the lit doorway, not against the sky.
 	var gy := s.y * 0.82
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.010, 0.020, 0.018), Color(0.05, 0.08, 0.06), 22)
-	draw_stars(s, 34, 0.55)
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.030, 0.052, 0.046), Color(0.085, 0.135, 0.105), 22)
+	draw_stars(s, 34, 0.75)
 	draw_moon(Vector2(s.x * 0.19, s.y * 0.16), 19.0)
 	# the alley: two blank walls leaning in, the venue's door between them
 	for sgn in [-1.0, 1.0]:
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(s.x * 0.5 + sgn * s.x * 0.5, 0.0), Vector2(s.x * 0.5 + sgn * s.x * 0.5, gy),
 			Vector2(s.x * 0.5 + sgn * s.x * 0.20, gy), Vector2(s.x * 0.5 + sgn * s.x * 0.26, s.y * 0.06)]),
-			Color(0.028, 0.042, 0.036))
+			Color(0.068, 0.100, 0.086))
 	var fw := s.x * 0.34
 	var fh := s.y * 0.58
 	var fx := s.x * 0.5
-	draw_rect(Rect2(fx - fw * 0.5, gy - fh, fw, fh), Color(0.062, 0.088, 0.074))
-	draw_line(Vector2(fx - fw * 0.5, gy - fh), Vector2(fx + fw * 0.5, gy - fh), Color(0.35, 0.85, 0.55, 0.20), 2.0)
+	draw_rect(Rect2(fx - fw * 0.5, gy - fh, fw, fh), Color(0.150, 0.205, 0.175))
+	# the moon catches the parapet and the near corner: an edge is what tells you a flat
+	# shape is a building, and it costs two lines
+	draw_line(Vector2(fx - fw * 0.5, gy - fh), Vector2(fx + fw * 0.5, gy - fh), Color(0.55, 0.95, 0.70, 0.55), 2.5)
+	draw_line(Vector2(fx - fw * 0.5, gy - fh), Vector2(fx - fw * 0.5, gy), Color(0.45, 0.88, 0.62, 0.28), 2.0)
 	for i in 4:   # shuttered windows: the rest of the house is asleep
 		var wx := fx - fw * 0.32 + float(i % 2) * fw * 0.42
 		var wy2 := gy - fh * (0.62 - float(i / 2) * 0.16)
-		draw_rect(Rect2(wx, wy2, fw * 0.22, fh * 0.10), Color(0.030, 0.045, 0.038))
+		draw_rect(Rect2(wx, wy2, fw * 0.22, fh * 0.10), Color(0.055, 0.080, 0.068))
+		draw_rect(Rect2(wx, wy2, fw * 0.22, fh * 0.10), Color(0.42, 0.80, 0.58, 0.22), false, 1.0)
 	# the clock over the door, at twelve
 	draw_wall_clock(Vector2(fx, gy - fh * 0.80), 30.0, Color(0.45, 0.95, 0.60))
 	# the doorway: a narrow one, with the room's own green light spilling out on the stones
 	var dw := 82.0
 	var dh := 142.0
-	draw_rect(Rect2(fx - dw * 0.5, gy - dh, dw, dh), Color(0.020, 0.048, 0.034))
-	draw_glow(Vector2(fx, gy - dh * 0.55), dw * 1.1, Color(0.35, 0.90, 0.55, 0.30))
-	draw_rect(Rect2(fx - dw * 0.5, gy - dh, dw, dh), Color(0.35, 0.85, 0.55, 0.35), false, 2.0)
+	# the doorway is the BRIGHTEST thing in the picture: it is the only opening, it is
+	# what the three of them are waiting at, and it is what the silhouettes read against
+	draw_rect(Rect2(fx - dw * 0.5, gy - dh, dw, dh), Color(0.10, 0.26, 0.16))
+	draw_glow(Vector2(fx, gy - dh * 0.55), dw * 1.35, Color(0.40, 1.0, 0.62, 0.62))
+	draw_rect(Rect2(fx - dw * 0.5, gy - dh, dw, dh), Color(0.55, 1.0, 0.70, 0.75), false, 2.5)
 	draw_colored_polygon(PackedVector2Array([   # the light on the ground
 		Vector2(fx - dw * 0.5, gy), Vector2(fx + dw * 0.5, gy),
-		Vector2(fx + dw * 1.2, s.y), Vector2(fx - dw * 1.2, s.y)]), Color(0.35, 0.85, 0.55, 0.07))
+		Vector2(fx + dw * 1.2, s.y), Vector2(fx - dw * 1.2, s.y)]), Color(0.38, 0.92, 0.58, 0.20))
 	# the one lamp over it, and the board that says there is a show at all
-	draw_glow(Vector2(fx, gy - dh - 12.0), 78.0, Color(0.40, 0.95, 0.60, 0.32))
+	draw_glow(Vector2(fx, gy - dh - 12.0), 88.0, Color(0.45, 1.0, 0.64, 0.55))
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(fx - 11.0, gy - dh - 18.0), Vector2(fx + 11.0, gy - dh - 18.0),
 		Vector2(fx + 7.0, gy - dh - 6.0), Vector2(fx - 7.0, gy - dh - 6.0)]), Color(0.55, 0.95, 0.65, 0.85))
-	draw_rect(Rect2(fx - 62.0, gy - dh - 54.0, 124.0, 22.0), Color(0.045, 0.075, 0.060))
-	draw_rect(Rect2(fx - 62.0, gy - dh - 54.0, 124.0, 22.0), Color(0.35, 0.85, 0.55, 0.28), false, 1.5)
+	draw_rect(Rect2(fx - 62.0, gy - dh - 54.0, 124.0, 22.0), Color(0.075, 0.115, 0.095))
+	draw_rect(Rect2(fx - 62.0, gy - dh - 54.0, 124.0, 22.0), Color(0.50, 0.95, 0.65, 0.60), false, 1.5)
 	for k in 6:
 		var bl := 0.5 + 0.5 * sin(float(cine_tick) * 0.05 + float(k) * 1.1)
+		# a marquee bulb is a LAMP: it needs a halo, or it is a rectangle that changes
+		# brightness. The halo is what makes the board read as lit from six points.
+		draw_glow(Vector2(fx - 49.5 + float(k) * 19.0, gy - dh - 43.0), 15.0,
+			Color(0.55, 1.0, 0.68, 0.10 + 0.22 * bl))
 		draw_rect(Rect2(fx - 54.0 + float(k) * 19.0, gy - dh - 48.0, 9.0, 10.0),
-			Color(0.55, 0.95, 0.65, 0.20 + 0.35 * bl))
+			Color(0.62, 1.0, 0.72, 0.45 + 0.50 * bl))
 	# the ones who waited: three silhouettes by the door, breathing
 	for i in 3:
 		var px := fx + (-1.0 if i == 0 else (1.0 if i == 1 else 1.35)) * (dw * 0.85 + float(i) * 12.0)
 		var bob := sin(float(cine_tick) * 0.02 + float(i) * 1.7) * 1.4
 		draw_capsule(Vector2(px, gy + bob), Vector2(px, gy - 52.0 + bob), 26.0, 19.0, Color(0.014, 0.024, 0.020))
 		draw_circle(Vector2(px, gy - 61.0 + bob), 9.0, Color(0.014, 0.024, 0.020))
-	draw_rect(Rect2(0.0, gy, s.x, s.y - gy), Color(0.03, 0.045, 0.038))
+	draw_rect(Rect2(0.0, gy, s.x, s.y - gy), Color(0.062, 0.090, 0.078))
+	draw_line(Vector2(0.0, gy), Vector2(s.x, gy), Color(0.42, 0.85, 0.60, 0.30), 1.5)   # the kerb
 	draw_dust(s, 10, Color(0.55, 0.95, 0.65))
 
 

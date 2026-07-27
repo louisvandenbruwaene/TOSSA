@@ -163,6 +163,41 @@ and deleted. History lives in git.
   finding that stacking low-alpha shapes to fake a gradient measured 30% slower and
   banded once thinned. Width is `s.x * 0.234` (the old 300px at the 1280 it was picked
   for). Shared by the menu, the key-art and the venue backdrop, so all three improved.
+- **A DARK SCENE NEEDS A VALUE LADDER, not less light** (2026-07-27, Louis: some stages
+  are "some blurry line in the dark ... most stages do fine: like the circus. but some
+  don't; like the midnight event"). Two separate causes, and the first is the one to
+  check FIRST on any venue that reads as a smudge. (1) `draw_backdrop` washes a flat
+  dark veil over the set dressing to push it behind the props. On a bright set - the
+  Circus canopy, the Arena bowl - that is exactly right; on an already-dark set it is
+  applied to dressing with no brightness to spare and simply erases it. The Midnight
+  Show's clock, moon window and candles were all being drawn and then wiped off. The
+  veil is a per-venue `veil` field now (default 0.42, the Midnight Show 0.10). (2) In
+  `ext_midnight` every structural tone sat between 0.014 and 0.09 - a band far too
+  narrow for sky, alley wall and facade to separate from each other. **Brightening them
+  all equally only makes grey fog; what a night picture needs is SPREAD**: sky darkest,
+  walls above it, facade clearly lighter than both, light sources well above all three,
+  and the silhouettes left near-black because they are read against the lit doorway, not
+  against the sky. Same lesson on the stage's own scattered house lights: at 0.24 peak
+  alpha on a 2.8px square a light is below the size/brightness threshold where it reads
+  as a light at all, which is what left the house looking merely under-exposed rather
+  than dark. A lamp needs a halo or it is just a brighter rectangle.
+- **THE GLOW KIT RECOLOURS THE COSTUME, it does not paint over it** (2026-07-27, Louis:
+  "it should be a costume that is pretty much completely glow in the dark"). It used to
+  be six strips of tape on a near-black suit, which said "this juggler has some tape on
+  him". `draw_juggler` now swaps its four costume colours (`suit`/`suit_dk`/`vest`/
+  `collar`, plus the polish `accent`) at source when `glow_kit_lit()`, so every piece
+  the wardrobe already draws - lapels, cummerbund, buttons, cuffs, tails - comes out in
+  phosphor, in its right shape, for free. **Drawing a second glowing figure on top was
+  the obvious move and the wrong one**: two copies of the same costume to maintain, and
+  a standing rule that the figure's stance and proportions must never drift as a side
+  effect. Keep the swapped values a LADDER (deep suit, brighter vest, near-white collar)
+  or the costume flattens into a silhouette, and leave skin and hair alone - the man is
+  not glowing, his clothes are. A bloom under the body is what makes the recolour read
+  as EMITTING rather than as a man in a green suit: a lit thing spills onto its
+  surroundings, and without that spill any colour is just paint. Of the old tape only
+  the trouser outseams survive; the horizontal runs were struck across the figure rather
+  than along a seam, and the arm runs were drawn shoulder-to-HAND as one straight chord
+  while the arm bends at the elbow, so they left the sleeve and crossed open air.
 - **THE HAT** (2026-07-27, `draw_money_hat`, verified on screen empty, part-filled, brim-
   full and overflowing): the act's score requirement is a busker's top hat, turned over
   the way a busker leaves it, filling with the night's take. It replaced the horizontal
