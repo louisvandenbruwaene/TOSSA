@@ -127,6 +127,49 @@ and deleted. History lives in git.
   "highlight along the brim" ballooned into a 66px dome out through the top of the card
   (`ellipse_outline`), and two crossed equal lines read as a plus sign, not a sparkle
   (`draw_star4`).
+- **FLOWERS, the crowd's own currency** (2026-07-27, Louis; F9 `flowers`, ON by
+  default). The crowd pays you in front of you: play deep in the green and the room
+  throws flowers at your feet on its own beat (`throw_step`, every `FLOWER_BEAT`, one
+  roll per `FLOWER_THROWERS[venue]`), and the PILE ON THE BOARDS is the read on how the
+  night is going - no meter, a look down tells you. Tiers: flower 1, posy 5, gold rose
+  25, and `flower_tier_roll` only offers the rare ones deep in the green AND with drops
+  at or near zero, so the pile's COLOUR says what its size cannot. Lose the room
+  (`applause <= TOMATO_RED`) and they throw TOMATOES instead: worth nothing at the
+  counter, eaten later in the hub for stamina, kept only when the act actually failed
+  and capped at `TOMATO_MAX_KEPT` so a disaster stays a consolation and never a
+  strategy. The night's pay is simply `run_flowers` - no end-of-act formula, because it
+  was already earned in front of the player. `money` is the same variable either way;
+  only how it is earned, drawn (`draw_coin_mark`) and named (`coin_word`) changes.
+  **THE MONEY HAT COMES OFF when this is on**: its job was making the goal read as a
+  thing that fills, and the stage does that better now, so the rail keeps a slim
+  `draw_goal_stem` (a growing stem, a notch per goal, a bud that blooms past the last),
+  tonight's takings, and one word for the room's mood.
+- **PAY, rebalanced** (2026-07-27, Louis: "20000 gold is just insane for the theater").
+  `pay_mult` was an UNBOUNDED `1 + rep/400` - a fifteenfold multiplier by mid-career,
+  sitting on top of a score that already scales with venue, prop, count and streak.
+  Four compounding curves is three too many: it is capped at `REP_PAY_CAP` (3.5) off a
+  gentler `REP_PAY_DIV`, and `BOOK_PAY_PER_SCORE` came down with it. Measured: a strong
+  Theatre act pays ~200 flowers or ~500 gold, against costs that did not move.
+- **THE ART RULE, restated** (2026-07-27): the torches and knives set a bar the rest of
+  the props were below, so balls, eggs and rings were relit on ONE rule - key light up
+  and left, a broad soft highlight on that shoulder, a tight specular inside it, a
+  shaded crescent opposite, a thin bounce along the lower-left rim from the boards.
+  Four marks and a silhouette is all a round thing needs to stop reading as a disc. The
+  egg is a true ovoid (pinched at the top only - a symmetric ellipse is a pill), the
+  ring has a rounded cross-section and its own inner-hole rim. The GLOW KIT went from
+  two flat circles to real phosphor: a bloom, the prop's own silhouette in charged
+  green (`glow_silhouette` - deliberately NOT `draw_club`/`draw_knife`, which paint
+  their own reds and steels), a hot core, and glow tape on the PERFORMER
+  (`draw_glow_strips`) so the figure is legible in the dark instead of a hole in it. It
+  now lights on any dark stage (`glow_kit_lit`), not only inside a Blackout.
+- **THE SMALL THEATRE** had drapes and an arch and nothing else while the Backyard next
+  door has a tree, a fence, a house and a washing line. It gained the furniture a real
+  little theatre has: `draw_theatre_boxes` (a box either side, lit velvet back, gilded
+  rail, silhouetted heads leaning on it, a sconce burning on the pier) and
+  `draw_footlights` along the lip - all at the EDGES, because the middle belongs to the
+  props. Two traps: a box interior must be LIGHTER than the curtain behind it or it is
+  a hole, and anything drawn AT the floor line is buried under the boards, which are
+  painted after the dressing.
 - **THE ACT (performances):** one continuous act at the chosen venue, three GOALS
   (first/second/final = VENUE_BASE x GOAL_STEP [1.0, 1.9, 3.2] x ante). From the
   first goal on you may CASH IN at any time: press Enter, or catch every ball and
