@@ -210,6 +210,15 @@ const REP_PAY_CAP := 3.5      # REP_PAY_CAP (2026-07-27, Louis: "20000 gold is j
 							  # Four compounding curves is three too many: Reputation now
 							  # tops out as a modest premium and the score carries the pay.
 const REP_SWING := 60         # reputation gained by a great set, lost by a poor one
+# A NAME SURVIVES A BAD NIGHT BETTER THAN A NOBODY DOES (2026-07-27, Louis: "it is
+# slightly too hard early game to gain reputation: make it such that the more games you
+# play, the less reputation you lose each time ... after 10 performances you only lose 29
+# and gain 31. and so on"). Every REP_EXP_EVERY performances shifts the whole swing one
+# point in the player's favour - the gain up, the loss down - which is a gentle curve by
+# design: it never rescues a bad act, it just stops an early career being sawn off at the
+# knees by two unlucky nights. Capped, or a long career would make failure free.
+const REP_EXP_EVERY := 10     # performances per point of seasoning
+const REP_EXP_MAX := 20       # ...and the most it ever shifts: +80 / -10 at the ceiling
 const PURIST_BONUS := 1.4     # Purist pay and reputation both get this multiplier: a
 							   # Purist set is objectively harder to run clean (catch
 							   # chance capped as if Accuracy were 5), so without a real
@@ -270,9 +279,9 @@ const TENNIS := 5
 const PATTERNS := [
 	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0, "room": 0.65,
 	 "desc": "The weave. Odd counts cross to the other hand; even counts keep each hand's own circle."},
-	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 50, "mult": 1.15, "room": 1.0,
+	{"id": "columns",    "name": "Columns",     "lvl": 6, "acc": 50, "perf": 14, "mult": 1.15, "room": 1.0,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
-	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 150, "ven": 1, "mult": 1.25, "room": 0.05,
+	{"id": "halfshower", "name": "Half Shower", "lvl": 10, "acc": 150, "ven": 1, "perf": 24, "mult": 1.25, "room": 0.05,
 	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
 	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4, "room": 0.7,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
@@ -300,6 +309,9 @@ const HALFSHOWER_LOW := 0.2   # the weave side's MAXIMUM height fraction (2026-0
 							   # role WATERFALL_LOW played before that pattern was cut
 const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
 							   # Reverse Cascade, Tennis's marked ball)
+const COL_HAND_MIN := 40.0    # a Columns hand never comes closer to the centre line than
+							   # this: the torso is about 25px of half-width, so a hand sent
+							   # to a centre column vanished into the chest
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
 							   # lanes' running height (0 = pure hold-timing, 1 = locked)
 # --- object load (ideas.rtf comments): more balls in the air and heavier props
@@ -460,13 +472,13 @@ const TR_HIGH := 1
 const TR_SPIN := 2
 const TR_OVER := 3
 const TRICKS := [
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 4, "str": 50, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
 	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 6, "spd": 40, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
-	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 8, "str": 100, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
+	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 12, "str": 100, "perf": 30, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
@@ -937,6 +949,10 @@ var pending_tuts: Array[String] = []  # lessons queued by an unlock, taught at t
 # flags pace the gifts so a struggling player is helped and a farming player is not.
 var gifted: Array = []             # skill ids unlocked by pity (skill_req_met honours these)
 var perfs_since_unlock := 0        # acts played since ANY skill unlocked (pity trigger)
+const PITY_DROUGHT := 12           # acts of drought before the director gifts a skill.
+								    # Was 6, which on its own handed out the whole toolkit
+								    # over a couple of sessions whatever the player's stats
+								    # (Louis: "i have them all already")
 var aid_pie_day := -1              # the day a pie was last gifted (one per day at most)
 var aid_meal_used := false         # the once-per-career stamina rescue has been spent
 									  # (an unlock happens mid-set; the lesson must wait)
@@ -2280,9 +2296,14 @@ func next_venue_rep() -> int:
 	# names The Midnight Show's Reputation gate, though that stage also needs
 	# `won` - close enough as a hint (by the time Reputation alone gets there,
 	# a win is generally close behind).
-	var steps := [100, 300, 700, 1500, 3000, 6000]
+	# OFF VENUE_REP, never a copy of it. This held its own literal list of the same six
+	# numbers, so re-balancing the ladder (2026-07-27) left the hub promising the next
+	# stage at the OLD figure while the door actually opened at the new one - caught only
+	# because a screenshot happened to show a player 20 short of a gate it said was 40
+	# away. rep_tier() had the identical bug. If a fourth reader of this ladder is ever
+	# added, derive it here too.
 	var vi := venue_index()
-	return int(steps[vi]) if vi < steps.size() else 0
+	return int(VENUE_REP[vi + 1]) if vi + 1 < VENUE_REP.size() else 0
 
 
 #endregion
@@ -2327,7 +2348,7 @@ func reward_director() -> void:
 	# shoved into a set. Practice is the promoted answer for a stuck player: it
 	# costs no crowd, grants XP (same as a stage since this batch), and the pity
 	# message says so in words.
-	if perfs_since_unlock >= 6:
+	if perfs_since_unlock >= PITY_DROUGHT:
 		pity_grant()
 	if money < 30 and pie_count == 0 and not pie_active and day != aid_pie_day:   # 30: too
 		# poor to risk a shop trip, but not yet the meal-rescue's real emergency below
@@ -2355,7 +2376,14 @@ func pity_grant() -> void:
 	for tab: Array in [TRICKS, PATTERNS]:
 		for d: Dictionary in tab:
 			var id := String(d.get("id", ""))
-			if skill_req_met(d) or venue_index() < int(d.get("ven", 0)):
+			# ...and never one whose TIME requirement is unmet either. This is the same
+			# rule the venue gate already had, for the same reason: the director exists
+			# to break a stat drought, not to hand a beginner the whole toolkit. Without
+			# this it walked straight past the new `perf` wall and undid it (six quiet
+			# acts used to gift a skill outright, which is how the walls stopped mattering
+			# at all - see skill_req_met).
+			if skill_req_met(d) or venue_index() < int(d.get("ven", 0)) \
+					or int(career["perfs"]) < int(d.get("perf", 0)):
 				continue
 			var gap := maxi(0, int(d.get("lvl", 1)) - level) \
 				+ maxi(0, int(d.get("str", 0)) - strength) \
@@ -5472,8 +5500,37 @@ func hand_target(h: int) -> Vector2:
 	# catching is decided by timing, never by where the hand is drawn.
 	if not stack(h).is_empty():
 		p = slot_pos(h, throw_slot(h))
+		# COLUMNS: STAND UNDER THE COLUMN YOU ARE ABOUT TO THROW (2026-07-27, Louis:
+		# "the columns pattern looks awful: the hands are wrongly placed, the objects do
+		# strange things"). Both complaints were one mismatch. A lane ball flies straight
+		# up and down its own `lane_x` (columns_x spreads them symmetrically about
+		# centre), but a HOLDING hand was pinned to the fixed inner slot at 54px - and
+		# the two were never made to agree. Measured: at 3 balls the gap is 10px, at 5
+		# it is 34, at 7 it is 66. So the ball leapt sideways out of the hand on every
+		# throw, and because a CATCHING hand does go to the lane (`inc.to_pos`, below)
+		# the hand also snapped in and out sideways once per cycle - the "wrongly placed"
+		# hand and the "strange" objects were the same bug seen from two ends.
+		#
+		# pop_front is what do_throw takes, so stack[0] is the next one out. A ball keeps
+		# its lane for the whole run once assigned, so only its very first throw - before
+		# it has a lane at all - falls back to the slot, which is a beat nobody sees.
+		if pattern == COLUMNS and stack(h)[0].lane_x >= 0.0:
+			p.x = stack(h)[0].lane_x
 	else:
 		p = inc.to_pos if inc != null else slot_pos(h, hand_catch_rest[h])
+	# ...AND A HAND NEVER GOES INSIDE THE TORSO. On an odd count the middle column sits
+	# on the centre line, and both the throwing and the catching hand were being sent
+	# straight to it - which is inside the body (the trunk is about 25px of half-width,
+	# the normal inner slot 54). That is the other half of "the hands are wrongly
+	# placed": one hand disappearing into the chest every time the middle ball came
+	# round. The hand now waits just outside the body on its OWN side and the ball
+	# covers the last stretch itself, which is what a real toss to the centre line looks
+	# like anyway. Applies to both branches above, so holding and catching agree.
+	if pattern == COLUMNS:
+		var ccx := stage_center().x
+		var side := -1.0 if h == LEFT else 1.0
+		if (p.x - ccx) * side < COL_HAND_MIN:
+			p.x = ccx + side * COL_HAND_MIN
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -6122,9 +6179,11 @@ func do_throw(h: int, hold: int) -> void:
 	# ball removed), one ball renders as a middle lane, so the pattern reads as a
 	# genuinely symmetric left / middle / right instead of a lopsided double lane.
 	var mid_ball := false
-	var was_mid := false   # already the marked middle ball BEFORE this throw (its 2nd+ throw)
 	if lanes and num_balls % 2 == 1:
-		was_mid = col_mid_ball == b
+		# (`was_mid` lived here: it told the launch point whether this was the ball's
+		# first throw as the middle one, because a first throw launched from the hand
+		# and later ones from stage centre. The middle ball always launches from the
+		# hand now, so the distinction has nothing left to decide.)
 		if col_mid_ball == null or not balls.has(col_mid_ball):
 			col_mid_ball = b   # the first ball thrown once lanes engage claims the middle
 		mid_ball = b == col_mid_ball
@@ -6172,9 +6231,14 @@ func do_throw(h: int, hold: int) -> void:
 		b.from_pos = Vector2(b.lane_x, cy)
 		b.to_pos = Vector2(b.lane_x + drift, cy)
 	elif mid_ball:
-		# the middle ball rests at centre once marked (was_mid), but on the throw
-		# that first marks it, it launches from wherever it was actually held
-		b.from_pos = stage_center() if was_mid else inner_pos(h)
+		# the middle ball LAUNCHES FROM THE HAND, wherever that hand is standing - which
+		# for Columns is just outside the torso on its own side (COL_HAND_MIN). It used
+		# to launch from stage centre regardless, to match a held position that was also
+		# forced to centre; both of those were compensating for a hand that did not
+		# follow its column, and with that fixed they only pulled the ball off the hand.
+		# It still RISES up the centre line, so the middle column still reads as middle.
+		var mhx := stage_center().x + (-COL_HAND_MIN if h == LEFT else COL_HAND_MIN)
+		b.from_pos = Vector2(mhx, cy)
 		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
 	elif over_top:
 		# the over-the-top lob leaves from the OUTER catch corner and rides a tall
@@ -6261,6 +6325,16 @@ func dev_meet_req(d: Dictionary) -> void:
 func skill_req_met(d: Dictionary) -> bool:
 	if gifted.has(String(d.get("id", ""))):
 		return true   # the pity director granted it outright; the wall is forgiven
+	# TIME AT THE JOB, before anything else (2026-07-27, Louis: "i want less tricks
+	# unlocked so early in the game. i have barely any reputation or stats and yet i have
+	# them all already ... make sure the player has to play quite a bit and gets used to
+	# the game before bringing in the new stuff"). Every other wall here is a STAT, and
+	# stats can be rushed - a few good nights buys levels faster than a player learns to
+	# juggle, which is exactly how he ended up holding the whole toolkit while still
+	# unknown. Acts PLAYED cannot be rushed. It is the only requirement that measures
+	# what he actually asked for, so it is the one that comes first.
+	if int(career["perfs"]) < int(d.get("perf", 0)):
+		return false
 	if level < int(d.get("lvl", 1)):
 		return false
 	if strength < int(d.get("str", 0)):
@@ -6279,6 +6353,10 @@ func skill_req_met(d: Dictionary) -> bool:
 func skill_req_text(d: Dictionary) -> String:
 	# the requirement, said plainly, for lock messages and the Skills screen
 	var parts: Array[String] = []
+	# stage time first, because it is usually the binding one early on and it is the one
+	# a player can do nothing about except keep performing - saying so is the whole point
+	if int(d.get("perf", 0)) > 0:
+		parts.append("%d performances" % int(d["perf"]))
 	if int(d.get("lvl", 1)) > 1:
 		parts.append("level %d" % int(d["lvl"]))
 	if int(d.get("str", 0)) > 0:
@@ -6878,6 +6956,14 @@ func resolve_act() -> void:
 	# complete act, roughly nothing for one goal, -0.5 for a night with none.
 	var frac := float(goals_hit) / float(NUM_GOALS)
 	var rep_delta := int(round(float(REP_SWING) * (frac * 1.5 - 0.5) * purist_mult))
+	# ...then experience shifts it one point per REP_EXP_EVERY acts played, asymmetrically:
+	# a gain grows, a loss shrinks TOWARD ZERO and never past it (a bad night must never
+	# start paying). Read off career perfs, which is already counted and already saved.
+	var seasoning := mini(int(career["perfs"]) / REP_EXP_EVERY, REP_EXP_MAX)
+	if rep_delta >= 0:
+		rep_delta += seasoning
+	else:
+		rep_delta = mini(0, rep_delta + seasoning)
 	# a single act's rep swing is capped so it can never leap past the NEXT venue
 	# tier in one night (cur_tier + 2, since VENUE_REP[cur_tier + 1] is the tier
 	# just ahead): reaching a stage always takes at least one more act played there
@@ -7180,23 +7266,28 @@ func grade_color(g: String) -> Color:
 		_: return Color(0.95, 0.55, 0.45)
 
 
+const REP_TIER_NAMES := ["Unknown", "Street Name", "Rising Talent", "Known Act",
+	"Headliner", "Renowned", "Legend"]
+
 func rep_tier() -> String:
-	if reputation >= 6000:
-		return "Legend"
-	if reputation >= 3000:
-		return "Renowned"
-	if reputation >= 1500:
-		return "Headliner"
-	if reputation >= 700:
-		return "Known Act"
-	if reputation >= 300:
-		return "Rising Talent"
-	if reputation >= 100:
-		return "Street Name"
-	return "Unknown"
+	# READ OFF VENUE_REP, never a second copy of the same numbers. These thresholds used
+	# to be six hard-coded literals that happened to match the ladder - so re-balancing
+	# the ladder (2026-07-27) would have left a player standing at the World Arena still
+	# being called a Headliner, with nothing in the code to say the two were related.
+	var t := 0
+	for i in VENUE_REP.size():
+		if reputation >= int(VENUE_REP[i]):
+			t = i
+	return REP_TIER_NAMES[clampi(t, 0, REP_TIER_NAMES.size() - 1)]
 
 
-const VENUE_REP := [0, 100, 300, 700, 1500, 3000, 6000]   # reputation at each venue's
+                                                           # (rebalanced 2026-07-27: the
+# first two doors are CHEAPER, because the early career is where Louis found the climb
+# too steep, and the last three are DEARER, to pay for the experience bonus that is by
+# then adding up to +20 a night. The ladder was almost exactly doubling; it now grows a
+# little faster than that, which is the "slightly exponentially growing amounts" the
+# bonus is balanced against. Was [0, 100, 300, 700, 1500, 3000, 6000].)
+const VENUE_REP := [0, 80, 260, 700, 1700, 4000, 9000]    # reputation at each venue's
 														   # door; 6000 is also Legend,
 														   # rep_tier()'s top rank
 const TOP_VENUE := 5   # the World Arena: the summit of the climb, where the game is won -
@@ -7258,18 +7349,17 @@ func venue_index_of(rep: int) -> int:
 	# The Midnight Show (2026-07-18) is a 7th, bonus rung on TOP of that: it asks
 	# BOTH Legend reputation AND `won` (Louis: post-game content, never reachable
 	# before the real win, however high reputation alone happens to climb)
-	if rep >= 6000 and won:
+	# THE FOURTH AND LAST READER OF THIS LADDER, and the one that actually opens the
+	# doors - so it is the one a stale copy would hurt most. It held its own six literals
+	# (100/300/700/1500/3000/6000) until 2026-07-27, when the ladder was re-balanced and
+	# every one of them silently disagreed with VENUE_REP. rep_tier() and next_venue_rep()
+	# had the same bug. All four read the constant now: **VENUE_REP is the ladder, and
+	# nothing else may restate it.**
+	if rep >= int(VENUE_REP[MAX_VENUE]) and won:
 		return MAX_VENUE
-	if rep >= 3000:
-		return 5
-	if rep >= 1500:
-		return 4
-	if rep >= 700:
-		return 3
-	if rep >= 300:
-		return 2
-	if rep >= 100:
-		return 1
+	for i in range(TOP_VENUE, 0, -1):
+		if rep >= int(VENUE_REP[i]):
+			return i
 	return 0
 
 
@@ -9250,12 +9340,16 @@ func draw_hand(h: int) -> void:
 	fill_ellipse(pos + Vector2(inward * openf * 1.5, -stretch * 0.5), 11.5, 11.5 + stretch, sk)
 	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
 
-	# held ball(s) rest in the palm - except the Columns middle ball, which rests
-	# at stage center even while held, so it never hops between its held spot and
-	# where it actually lands/launches (see the from_pos comment in do_throw)
+	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
+	# drawn at stage centre while held. That was a fix for an older hand placement: the
+	# ball was put where it would launch from, because the hand was not there. Now the
+	# hand goes to its own column (hand_target) and stops just outside the torso, so a
+	# middle ball drawn at centre would be the thing floating free of the hand instead.
+	# A prop in a hand is drawn in that hand, with no exceptions - that is the rule that
+	# stops these two ever disagreeing again.
 	var st := stack(h)
 	for i in st.size():
-		var bp := stage_center() if st[i] == col_mid_ball else pos
+		var bp := pos
 		draw_prop(st[i], bp + Vector2(0, -3 - float(i) * 6.0))
 
 
@@ -12507,6 +12601,29 @@ func draw_day(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 62.0),
 		"worn out  -  throws are getting wild" if sfrac < STAM_LOW else "rested enough to work",
 		HORIZONTAL_ALIGNMENT_LEFT, lw - 36.0, 11, Color(1.0, 0.6, 0.45) if sfrac < STAM_LOW else Color(0.74, 0.70, 0.64, 0.9))
+	# UNSPENT POINTS ARE THE ONE THING HERE THE PLAYER SHOULD ACT ON (2026-07-27, Louis:
+	# "there should also be a more clear indicator that you have xp points to spend into
+	# stats"). They were mentioned only in small print - one line in the play HUD and a
+	# clause in the results footer - both of which sit next to numbers that are merely
+	# information. This is a card of its own, in the ledger column where the player is
+	# already reading their situation, and it BREATHES: nothing else on this screen
+	# moves, so a slow pulse is unmissable without being loud. It appears only when
+	# there is something to spend, so it can never become furniture.
+	if points > 0:
+		var pr := Rect2(lx, ly + 240.0, lw, 60.0)
+		var pulse := 0.5 + 0.5 * sin(atick() * 0.055)
+		var pc := Color(1.0, 0.86, 0.42)
+		soft_card(pr, Color(0.13, 0.10, 0.04, 0.92), Color(pc.r, pc.g, pc.b, 0.35 + 0.5 * pulse), 1.5, 11.0, 12.0, 0.05)
+		draw_rect(Rect2(pr.position.x + 1.0, pr.position.y + 10.0, 3.0, pr.size.y - 20.0), Color(pc.r, pc.g, pc.b, 0.7 + 0.3 * pulse))
+		var pic := Vector2(pr.position.x + 30.0, pr.position.y + 30.0)
+		draw_circle(pic, 15.0, Color(pc.r, pc.g, pc.b, 0.14 + 0.14 * pulse))
+		draw_star4(pic, 10.0, Color(pc.r, pc.g, pc.b, 0.85 + 0.15 * pulse))
+		draw_fit_string(font, Vector2(pr.position.x + 54.0, pr.position.y + 27.0),
+			"%d STAT POINT%s TO SPEND" % [points, "" if points == 1 else "S"],
+			HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 15, pc)
+		draw_fit_string(font, Vector2(pr.position.x + 54.0, pr.position.y + 46.0),
+			"%s opens the sheet" % String(k_sheet()[0]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 11,
+			Color(0.86, 0.80, 0.66, 0.9))
 
 	# THE ACTIONS: a column of cards on the RIGHT edge, off the stage picture. Each card
 	# carries its own explanation, so there is no detached tooltip block under the list
