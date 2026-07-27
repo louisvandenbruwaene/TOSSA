@@ -295,7 +295,15 @@ and deleted. History lives in git.
   is the intended fix, no sim value touched. Gear got real objects instead of glyphs
   (`draw_gear_icon`): a pie slice with crust and steam where a bare triangle used to
   read as the torch card's flame, glazed lenses in a frame, the Kit's own halo on a
-  prop, and the Helmet as the cap-with-two-cans-and-straws it actually is. The gear
+  prop, and the Helmet as the cap-with-two-cans-and-straws it actually is. **The TORCH
+  and the KNIFE were redrawn 2026-07-27** (Louis): the flame is a real silhouette in
+  three nested layers on two flicker rates plus a lean (`FLAME_PROFILE` / `flame_shape`),
+  which writhes instead of pulsing, and it takes a `rich` flag - in play that is three
+  polygons and a pool of light only where the stage is dark, on a shop card it adds the
+  aura, the climbing embers and a bigger glow, since nothing there is moving. The knife
+  went from 18 units of blade over 8 of grip (a stubby dagger) to 26 over 9, with a
+  fuller, a ground edge, a guard and a pommel. Both changed `PROP_ICON_MAG`/`OFF`, which
+  is where a prop's icon size and centring live. The gear
   CARD is laid out across now (object left, words right, price along the foot) instead
   of borrowing the tall prop template and leaving a third of itself empty.
 - **The day loop:** day segments spent on perform/practice/eat/sleep/shop/skills.
@@ -335,6 +343,50 @@ and deleted. History lives in git.
   still would not fit FADES and hands over to a top-edge marker - which is exactly
   what a High Toss does anyway. `--skills [N]` opens it for a screenshot, optionally
   selecting entry N (0-3 tricks, 4-9 patterns in unlock order).
+- **PERFORMANCE, and the one rule that came out of measuring it (2026-07-27).** Louis:
+  "the game is a bit laggy right now". `--fps` is the probe that settled it, and it is
+  now a permanent dev flag: it prints, once a second, microseconds spent inside
+  `_draw`, microseconds per physics tick, real fps, and the engine's own draw-call and
+  primitive counts. What it showed: the SIM is not the problem (a physics tick is
+  ~100us of an 8.3ms budget at 120Hz), and neither is fill rate (quartering the window
+  to 640x360 changed nothing). The cost is `_draw`, and inside `_draw` the cost is
+  almost exactly **the NUMBER of draw calls times ~5us** - vertex counts barely
+  register. So: **optimise by making fewer engine calls, never by making cheaper
+  polygons.** That was learned the hard way - the first attempt replaced `draw_circle`
+  with hand-built low-poly polygons and made the crowd 30% SLOWER, because a
+  GDScript-built `PackedVector2Array` per shape costs more than the vertices it saves.
+  Also beware `fps` as a metric: it is vsync-quantised (145, 72, 48...) and drifts with
+  the machine's thermal state, so two runs minutes apart are not comparable - compare
+  `DRAW us` and the call/primitive counts instead. What the pass did, at the
+  Championship with seven props: draw calls 681 -> ~340, primitives 38.5k -> ~18.5k.
+  The changes, each of which is just "one call where there were many": the prop HALO
+  now only draws where the house is dark (`stage_darkness`, Louis's own diagnosis -
+  "that should only be the case for in the dark juggling"); every soft light is one
+  textured quad off a generated radial gradient (`draw_glow` / `glow_texture`) instead
+  of a stack of flat discs, which also killed the visible ring banding that thinning
+  the stack had introduced; a prop's comet TRAIL is one tapered `draw_polygon` with a
+  per-vertex alpha ramp instead of one circle per sample (up to 112 calls a frame on a
+  seven-prop set); the crowd's shoulders are one band per row instead of one shape per
+  person, and its head count is capped; `soft_card` re-dresses two shared StyleBoxFlats
+  instead of allocating two per card per frame; and the scoreboard/tiers/truss lost
+  their excess detail. `soft_disc` survives only as an early-out wrapper for
+  fully-transparent glows.
+- **THE CROWD GAUGE and the DROP PIPS** (2026-07-27, Louis): the applause meter is a
+  half-circle instrument now (`draw_gauge`), red through amber and yellow to green
+  (`GAUGE_ZONES`), with a needle, ticks at every zone edge, a bright pin left standing
+  at the act's PEAK, the percentage read out below the hub (the one spot the needle
+  cannot sweep across), and a pulse on the red band when the room is walking out. The
+  crowd's patience only ever falls unless it is fed, which is exactly what a fuel gauge
+  means. The DROPS row is no longer three red triangles: each pip is a prop still
+  falling, with the streak of the fall behind it, and a spent one is the dark smear it
+  left on the boards - so "two catchable, one on the floor" reads without counting.
+- **THE DOMINANT HAND** (2026-07-27, Louis): a Settings row (LEFT / RIGHT, persisted as
+  `dominant_hand`) that decides which hand holds the extra prop on an odd count and
+  which one the demo starts from. Every juggler deals the odd ball to their strong
+  hand, so a left-hander should not have to play mirrored. It is a tenth Settings row,
+  which is why both settings views were re-spaced - remember the standing invariant
+  that `draw_settings`, `draw_settings_cards` and `settings_input` must carry the same
+  rows in the same order, since `menu_sel` is a bare index into all three.
 - **THE STAGES, dressed (2026-07-27, verified on screen at all seven):** the Circus was
   the only venue with a real set - the other six were a tinted void with a spotlight
   cone and a crowd (Louis: "all the stages except circus could use some attention").
@@ -355,8 +407,23 @@ and deleted. History lives in git.
   board hung off that truss on two visible hangers. **World Arena** deeper stands, a
   truss, and two big screens flanking the top centre at x 0.31/0.69 - the only band
   wide enough to clear both HUD rails and the props. **The Midnight Show** stays
-  deliberately dark (the Glow Kit must keep its job): only the house clock, reading
-  midnight, and the two candles the room is lit by.
+  deliberately dark (the Glow Kit must keep its job): the house clock reading midnight,
+  the two candles the room is lit by, mist on the boards, and (2026-07-27) a tall
+  arched WINDOW with the moon behind it, laying a pale slab of light across the floor -
+  the one source in that room that is not a flame. Its alphas are tuned to survive
+  draw_backdrop's 0.42 veil, and it sits at x 0.30 to clear both the left HUD rail and
+  the juggling window.
+- **THE VENUE EXTERIORS** (the establishing card and the day hub's backdrop; reworked
+  2026-07-27, Louis: "the stages' preview need more attention, the midnight show is
+  literally just black"). `draw_arena_bowl` was one huge trapezoid with an ellipse on
+  top, which at 96% of the screen width read as a featureless grey hill for BOTH the
+  Championship and the World Arena. It is a building now: three tiers stepping back,
+  ribs down the face, lit boxes between them, a roof lifting off with light under its
+  lip, and floodlight masts either side throwing real beams. `ext_midnight` was that
+  same shape in near-black, which is a dark blob that says nothing; it is now the thing
+  the venue actually is - the last room, the one that opens after everyone has gone
+  home - drawn as a narrow door down an alley: one green lamp, a marquee with blinking
+  bulbs, a clock striking twelve, the moon, and three silhouettes who waited.
 - **Arms reach exactly two points, `inner_pos` and `outer_pos`** - the same two the
   3-ball Cascade always used, and now with NO exceptions at all (2026-07-27). Every
   plain throw leaves inner and lands outer, INCLUDING the even-count Cascade's
@@ -472,7 +539,10 @@ and deleted. History lives in git.
   resolve; `--tutorial <id>` jumps into a lesson (the demo walks lessons end to end,
   miming Enter/R/P; a `--demo` lesson run never quits by itself, so give it a
   `--shotat` or it hangs); `--remap` (add `--pad` for the gamepad column) opens the
-  Controls screen; `--wallcard` and `--legend` (2026-07-27) jump straight to the
+  Controls screen; `--fps` prints the performance probe once a second (see the
+  PERFORMANCE entry: draw microseconds, physics microseconds, draw calls, primitives -
+  fps itself is the least useful number on that line, being vsync-quantised);
+  `--wallcard` and `--legend` (2026-07-27) jump straight to the
   scoped demo's wishlist card and the Purist Legend payoff card - the two end
   screens previously reachable only by completing the run that triggers them, so
   neither had a capture path at all; `--capsule` renders pure key-art (no UI) for Steam store
