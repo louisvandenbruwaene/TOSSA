@@ -83,6 +83,26 @@ and deleted. History lives in git.
   `soft_card`, not a bare `draw_rect`. The shop gained a detail strip that names the
   selected prop's signature edge and a "pays xN.NN" line per card (the reward, legible at
   the point of choice).
+- **THE COIN** (2026-07-27, `draw_coin`): one money mark shared by the hub's PURSE card
+  (`day_icon "coin"`) and every spending screen's readout (`draw_purse`), so gold looks
+  like one currency everywhere. Was a flat disc with a white blob; now a struck coin -
+  darker rim, raised face, a thin shadow crescent low-right and a light one up-left
+  hugging the face's edge, a specular cap top-left. **Detail is a function of radius**
+  and getting that wrong is what makes small icons muddy: milling and the struck star
+  only appear at `r >= 9`, because at the hub card's 7px they crowd into a gear. Milling
+  is MANY SHORT teeth barely proud of the rim (20, to 1.05r) - fewer and longer made a
+  little sun. The strike is DARKER than its face: a lighter mark reads as something
+  stuck on the coin rather than pressed into it.
+- **Comet trails must be SPACED, not just sampled** (`TRAIL_STEP_SQ`, the sampler in
+  `update_sim`). `draw_trail` builds one tapered ribbon by offsetting each sample
+  sideways; an offset that outruns the gap between two samples folds the ribbon through
+  itself, and Godot's triangulator refuses a self-intersecting polygon - the long-
+  standing "Invalid polygon data, triangulation failed" spam (51 of them in a single
+  lesson run before this). Two causes, both fixed: crowded samples (a prop at its apex,
+  or one sitting past its arrival in the MISS_GRACE beat, where `flight_pos` clamps and
+  repeats exactly) are now refused below a 6px spacing floor; and a path that genuinely
+  DOUBLES BACK - a Column goes straight up and down the same line - falls back to a
+  plain `draw_polyline`, still one draw call.
 - **THE HAT** (2026-07-27, `draw_money_hat`, verified on screen empty, part-filled, brim-
   full and overflowing): the act's score requirement is a busker's top hat, turned over
   the way a busker leaves it, filling with the night's take. It replaced the horizontal
@@ -488,12 +508,52 @@ and deleted. History lives in git.
 - **A crossed even-count trick** stays a captured, unbuilt idea (see Still open
   below) - Louis confirmed the underlying odd/even mechanic itself is correct and
   should stay exactly as it is; only the separate "Fountain" PRESENTATION went.
-- **Tutorial (the basics):** two guided call-and-response steps at 50% slowmo, then
-  freestyle 1 ball, 2 balls (forced cascade so throws cross), then the finale: ten
-  consecutive juggling catches of the 3-ball cascade at genuine full speed. The pace
-  ladder TUT_PACES [0.5, 0.25, 0.15, 0.0] steps faster every 4 clean catches and
-  back up on a drop. Enter appears ONLY between freestyle steps and always adds a
-  ball. Trick/pattern/prop/count lessons queue at the hub's LEARN row on unlock.
+- **THE PACE LADDER, in every lesson (2026-07-27, Louis).** Every DRILL in every
+  lesson runs three times over: `TUT_PHASES [0.5, 0.25, 0.0]` - half speed, quarter
+  speed, full speed - built by the one helper `tut_paced(base, needs, after)`, which
+  also strips `juggle` from the slow passes (they deal their own beats, so scolding
+  the player for the script's rhythm is nonsense) and writes the Enter label. This
+  replaced an ADAPTIVE ladder [0.5, 0.25, 0.15, 0.0] that sped up every 4 clean
+  catches and slowed on a drop: it taught the rhythm by attrition, and a beginner who
+  never found the first beat never saw the second. Only one-off KEY-teaching steps
+  (`trick_on`/`trick_off`/`press_r`/`press_p`/`read`) sit outside the ladder, once
+  each, at their own pinned `slow` - freezing the world to demand a key that is
+  already named dead centre teaches nothing.
+- **THE GUIDED BEAT** (the two slow passes; `tut_hold` and friends). Not a prompt: the
+  world STOPS DEAD at every action the drill asks for, names the key - or the keys in
+  their order, "J then K" - hears nothing else, and makes the press land. Sits in
+  `_physics_process` next to the `freeze` hit-stop (input polled, hands ease, the sim
+  clock does not move) but holds indefinitely; `cine_tick` keeps running so scenery,
+  pulse and music breathe through it, because a stopped sim must never read as a hung
+  game. What it asks for is READ OFF THE LIVE SIM, never scripted, so it works for one
+  ball, a five-ball fountain, a Shower or a trick lesson (`tut_due_actions`):
+  1. the step's own key first (`tut_due_key`, `trick_use` only) - an arm trick has to
+     be armed BEFORE the throw it shapes;
+  2. a prop within `TUT_EXCHANGE_LEAD` (14 ticks) of landing: a hand still HOLDING one
+     is asked to throw and then catch - that exchange, repeated, IS the cascade - an
+     empty hand only to catch;
+  3. otherwise, if `balls_airborne() < tut_air_target()`, the hand whose turn it is
+     feeds another prop up (turns alternate off `tut_last_throw`, which is what makes
+     a cascade cross). `tut_air_target` is `num_balls - 1` at three or more (so every
+     catch satisfies `juggling_catch` by construction) but `num_balls` at one and two,
+     because two IS Louis's "throw, throw, catch, catch" drill.
+  Ranks order the beat (trick 0, throw 1, catch 2) and an out-of-turn press is
+  swallowed silently - never a whiff, never a wrong throw. A guided throw fires on the
+  PRESS (a stopped clock cannot read hold-for-height, so it is always the tap the drill
+  teaches) and a guided catch skips every failure branch in `on_catch` (`sure`). Three
+  things clear a stuck beat: a drop (`drop_ball`), an R re-deal, and the step's goal
+  being met (`tut_check` calls `tut_hold_abort`, so a WON step is free play again).
+  `TUT_HOLD_GAP` (8) gives the world a breath of motion after each beat so the throw
+  and catch are seen; `TUT_STEP_READ` (30) does the same at the top of a step.
+  Prompt: `draw_tut_hold_cue`, in the same central bottom slot as the Enter callout,
+  with a dark wash laid over the STAGE first (before the lesson's own furniture, so the
+  HUD explaining the pause is not dimmed along with the scenery); pressed keys go green.
+  `draw_tut_prompts` draws only the hands the beat names while one is open.
+  `--demo` performs beats itself (`tut_hold_autoplay`), one rank a frame.
+- **Tutorial (the basics):** one ball, two balls (both stacked in one hand, forced
+  cascade so throws cross), three balls - each down the full ladder, so nine drill
+  steps - then the R key and the full key legend. Eleven steps.
+  Trick/pattern/prop/count lessons queue at the hub's LEARN row on unlock.
   **Lesson UI (2026-07-18):** a small top card carries only the kind tag, the
   step's one-line title, and progress - the old two-line paragraph is gone from
   the live HUD. Throw/catch keys are bare letters over each hand (`draw_tut_key`
@@ -508,6 +568,14 @@ and deleted. History lives in git.
   pressing it would actually fire - enough balls airborne AND off cooldown -
   which is what fixed "I press Space, it doesn't recognise": the old prompt was
   baked into the step text with no check against on_trick()'s own gate.
+  A SECOND, unrelated Spin-lesson bug (2026-07-27, Louis: "I do it but it won't
+  register") was that the lesson could not be completed at all: a `trick_use` step
+  counts through `reward_trick`, which is only ever reached from a catch whose BALL
+  carries a trick tag - and nothing but an ARM trick tags one - and which returns
+  early on a zero bonus, which Spin's is by design (its reward is the x2 catch
+  multiplier). Two closed gates, so the counter could never move however many perfect
+  Spins were performed. A LIVE trick has no shaped throw to land later: it IS the
+  press, and is now banked in `on_trick` the moment it fires.
 - **Unlocks (reward design):** never XP alone. Each new stage guarantees one arrival
   skill gated on the venue only: Street=Behind the Back, Theatre=Spin, Circus=Shower,
   Championship=Reverse Cascade, World Arena=Tennis. Composite level/stat walls fill
