@@ -1292,6 +1292,13 @@ func _ready() -> void:
 		_demo = true            # the autoplayer actually juggling or nothing is ever thrown,
 								# and the clearance stays at its sentinel - a silent no-op run
 								# (bare --collcheck used to report 1000000 px, measuring nothing)
+	if ua.has("--calib"):       # dev: same reasoning, and it was the same silent hang. A calib
+		_demo = true            # IS a measurement of the autoplayer (its own printout says so),
+								# but it never reached play: without --demo, skip_menu below
+								# stayed false, the run sat at the main menu, `tick` never
+								# advanced, and the quit condition it is waiting on
+								# (tick >= _calib_ticks) could never fire. A bare
+								# `--calib 3` ran for 24 minutes and printed nothing.
 	var lci := ua.find("--latecatch")   # dev: --collcheck --latecatch N - a realistic-timing
 	if lci != -1 and lci + 1 < ua.size():   # variant of the audit (see _late_catch_n above)
 		_late_catch_n = int(ua[lci + 1])

@@ -840,7 +840,13 @@ and deleted. History lives in git.
   implies `--demo`, so a bare `--collcheck` actually juggles instead of reporting the
   1000000 px sentinel - and a run that still measured nothing prints a WARNING rather
   than a false all-clear); `--calib N` prints the
-  robot's score; `--booking` runs a real act end to end and prints `ACT ...` on
+  robot's score at tick N and **implies `--demo` too, as of 2026-07-27 - it did not,
+  and a bare `--calib` was a silent infinite hang** (it never entered `skip_menu`, so
+  the run sat at the main menu where `tick` does not advance, and the `tick >=
+  _calib_ticks` quit it waits on could never come. A bare `--calib 3` was left running
+  for 24 minutes and printed nothing. Every past calib sweep must have been passing
+  `--demo` by hand). Note N is a TICK COUNT floored at 120, not a number of balls;
+  `--booking` runs a real act end to end and prints `ACT ...` on
   resolve; `--tutorial <id>` jumps into a lesson (the demo walks lessons end to end,
   miming Enter/R/P; a `--demo` lesson run never quits by itself, so give it a
   `--shotat` or it hangs); `--remap` (add `--pad` for the gamepad column) opens the
