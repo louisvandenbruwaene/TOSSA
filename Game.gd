@@ -852,9 +852,14 @@ var trick_unlock_tick := -999
 var ucard_kind := -1      # -1 none, 0 a trick, 1 a pattern
 var ucard_idx := 0
 var ucard_tick := -99999.0
+var ucard_out_tick := -1.0 # when the player dismissed it; -1 while it still waits
 const UCARD_IN := 26.0     # ticks to pop in
-const UCARD_HOLD := 300.0  # ...to sit there
-const UCARD_OUT := 46.0    # ...and to fade away
+const UCARD_OUT := 46.0    # ...and to fade away once dismissed
+const UCARD_ARM := 20.0    # ...but it ignores keys for this long first. An unlock is
+						    # granted the instant an act resolves, which is usually one
+						    # frame after the player pressed Enter to finish it - without
+						    # an arming beat that same press would deal the card and throw
+						    # it away again too fast to read.
 var sheet_open := false
 var shop_open := false
 # the card CURSOR on the sheet and the shop (Louis: select with arrows / sticks / dpad,
@@ -1504,6 +1509,18 @@ func _physics_process(delta: float) -> void:
 	elif _state_fade_t < STATE_FADE_FRAMES:
 		_state_fade_t += 1
 	audio_update()   # pick the music theme and glide the layer volumes, every state
+	# the unlock card clears itself once its dismissal fade has run out. Done here,
+	# above every early return below, so it expires from whatever screen it was dealt on.
+	if ucard_kind >= 0 and ucard_out_tick >= 0.0 and atick() - ucard_out_tick > UCARD_OUT:
+		ucard_kind = -1
+		ucard_out_tick = -1.0
+	# ...and the autoplayer presses the key for itself. It has no hands, and the card now
+	# HOLDS the sim until one arrives - so an unlock landing inside a --demo/--calib run
+	# would stop that run dead, with no ACT line and no quit, looking exactly like a hang.
+	# (--shotat still captures either way: the shot counter is above this.) Same move
+	# --demo already makes to dismiss the establishing card.
+	if ucard_kind >= 0 and _demo and ucard_out_tick < 0.0 and atick() - ucard_tick >= UCARD_ARM + 40.0:
+		ucard_out_tick = atick()
 	if _shot or _collcheck or _handlog:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
 		if _shot_frames >= _shot_tick:
@@ -1516,6 +1533,18 @@ func _physics_process(delta: float) -> void:
 		if _demo and game_state == ST_ESTABLISH and cine_tick > 40:
 			establish_key()          # dev: the autoplayer dismisses each set's card, so
 									 #      --demo --booking runs a whole booking end to end
+		queue_redraw()
+		return
+	# THE UNLOCK CARD HOLDS THE ACT. It waits for a key now, so without this the crowd
+	# would drain and props would fall behind a card the player is reading. cine_tick is
+	# advanced by hand because the card's pop-in, its glow and its "press any key" pulse
+	# are all timed on atick() - a stopped clock would freeze the card into a still
+	# picture and make a waiting game look like a hung one. Same reasoning, and the same
+	# shape, as the guided-beat hold further down. Above the sheet/shop/pause gate,
+	# because that one returns WITHOUT advancing any clock.
+	if ucard_kind >= 0:
+		cine_tick += 1
+		update_hands()
 		queue_redraw()
 		return
 	if sheet_open or shop_open or paused or debug_panel_open:
@@ -1702,6 +1731,17 @@ func _input(event: InputEvent) -> void:
 		debug_panel_sel = 0
 		play_sfx("ui2", -12.0)
 		save_settings()
+		return
+	if ucard_kind >= 0:
+		# ANY key dismisses the unlock card, and the key is EATEN here - it never reaches
+		# the screen underneath. That is the whole reason this sits above the per-state
+		# dispatch: the card usually lands on the results card or in the day hub, where
+		# the very same Enter would otherwise confirm whatever was selected behind it and
+		# the player would lose a menu choice they never saw themselves make. Keys stay
+		# eaten through the fade-out too, so a second press cannot land early either.
+		if ucard_out_tick < 0.0 and atick() - ucard_tick >= UCARD_ARM:
+			ucard_out_tick = atick()
+			play_sfx("ui2", -11.0)
 		return
 	if debug_panel_open:
 		debug_panel_input(kc)
@@ -11001,7 +11041,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
 	# is announced once by the card and then quietly reinforced where the hands are
 	if not tut_active and running and trick_unlock >= 0 and tick - trick_unlock_tick < 360 \
-			and atick() - ucard_tick > UCARD_IN + UCARD_HOLD + UCARD_OUT:
+			and ucard_kind < 0:
 		draw_trick_unlock_banner(font, s)
 	# trick feedback line, tucked LOW under the performer so it never sits in the arcs
 	if not tut_active and trick_msg != "" and tick - trick_msg_tick < 90:
@@ -11292,10 +11332,13 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 	if ucard_kind < 0:
 		return
 	var age := atick() - ucard_tick
-	if age < 0.0 or age > UCARD_IN + UCARD_HOLD + UCARD_OUT:
+	if age < 0.0:
 		return
 	var d: Dictionary = TRICKS[ucard_idx] if ucard_kind == 0 else PATTERNS[ucard_idx]
-	# pop: overshoot to 1.06 then settle. `a` fades the whole thing at both ends.
+	# pop in, then WAIT (2026-07-27, Louis: it waits for a keypress rather than timing
+	# out). It holds for as long as it takes - the sim is held with it, see
+	# _physics_process - and only starts leaving once `ucard_out_tick` is stamped by the
+	# key that dismissed it.
 	var grow := 1.0
 	var a := 1.0
 	if age < UCARD_IN:
@@ -11303,9 +11346,11 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 		var e := 1.0 - pow(1.0 - t, 3.0)          # ease-out cubic
 		grow = 0.74 + 0.32 * e - 0.06 * sin(PI * e)
 		a = clampf(t * 1.8, 0.0, 1.0)
-	elif age > UCARD_IN + UCARD_HOLD:
-		a = clampf(1.0 - (age - UCARD_IN - UCARD_HOLD) / UCARD_OUT, 0.0, 1.0)
+	if ucard_out_tick >= 0.0:
+		a = clampf(1.0 - (atick() - ucard_out_tick) / UCARD_OUT, 0.0, 1.0)
 		grow = 1.0 + 0.05 * (1.0 - a)
+		if a <= 0.0:
+			return
 	var kindcol := Color(1.0, 0.84, 0.42) if ucard_kind == 0 else Color(0.82, 0.70, 0.98)
 	# SIZED AROUND THE ART, not guessed. The preview figure is a fixed pixel height (its
 	# floor, arc and body constants are absolute), so a box that is too short does not
@@ -11356,9 +11401,16 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 	var dbox := Rect2(r.position.x + 18.0 * grow, art.position.y + art.size.y + 58.0 * grow,
 		cw - 36.0 * grow, r.position.y + ch - 34.0 * grow - (art.position.y + art.size.y + 58.0 * grow))
 	draw_wrap_fit(font, String(d["desc"]), dbox, int(maxf(8.0, 12.0 * grow)), Color(0.88, 0.83, 0.75, 0.95 * a))
-	draw_string(font, Vector2(r.position.x, r.position.y + ch - 14.0 * grow),
+	draw_string(font, Vector2(r.position.x, r.position.y + ch - 30.0 * grow),
 		"SKILLS shows you how" if ucard_kind == 0 else "P switches patterns in training",
 		HORIZONTAL_ALIGNMENT_CENTER, cw, int(maxf(8.0, 11.0 * grow)), Color(0.72, 0.68, 0.62, 0.9 * a))
+	# ...and the prompt, which only appears once the card will actually listen. Pulsed,
+	# because a card that waits forever has to say so or it reads as a freeze.
+	if ucard_out_tick < 0.0 and age >= UCARD_ARM:
+		var pa := 0.55 + 0.45 * sin(atick() * 0.09)
+		draw_string(font, Vector2(r.position.x, r.position.y + ch - 13.0 * grow),
+			"press any key", HORIZONTAL_ALIGNMENT_CENTER, cw, int(maxf(8.0, 12.0 * grow)),
+			Color(kindcol.r, kindcol.g, kindcol.b, pa * a))
 
 
 func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
