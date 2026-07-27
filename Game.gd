@@ -109,7 +109,7 @@ const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_
 const TRAIL_STEP_SQ := 36.0   # (6px)^2: the closest two comet-trail samples may sit.
 							  # Anything tighter folds the tapered ribbon through itself -
 							  # see the sampler in update_sim for why that matters
-const BLACKOUT_UNLIT := 0.55  # how brightly an UNCHARGED prop glows through a Blackout,
+const BLACKOUT_UNLIT := 0.34  # how brightly an UNCHARGED prop glows through a Blackout,
 							   # against 1.0 for one carrying the Glow Kit. The shape is
 							   # legible either way (juggling blind was tried and rejected);
 							   # the Kit is the difference between reading a prop and
@@ -448,8 +448,15 @@ const HAND_INNER := 1        # the throw point, standard; also the catch point f
 # is a skill choice, never a free bonus. A running toggle SURVIVES an R restart
 # in training, so a trick can be drilled run after run. Unlocks are spread over
 # the career like the patterns' (lvl / str / acc / ven keys, all must be met).
-const TR_HIGH := 0
-const TR_BTB := 1
+# THESE MUST MATCH THE TABLE BELOW, INDEX FOR INDEX (fixed 2026-07-27, Louis: "in the
+# trick menu; behind the back and high toss are swapped"). They did not: TR_HIGH was 0
+# and TR_BTB 1, while TRICKS[0] is "btb" and TRICKS[1] is "high". Because these are used
+# as TRICKS indices AND as the tags on a throw, every rule keyed to one was landing on
+# the other - `_btb_behind` sent the HIGH TOSS behind the body, and the 1.8 held-height
+# ceiling was applied to BEHIND THE BACK. Nothing was mislabelled; the two tricks had
+# genuinely swapped mechanics. Add a trick and this pairing is the first thing to check.
+const TR_BTB := 0
+const TR_HIGH := 1
 const TR_SPIN := 2
 const TR_OVER := 3
 const TRICKS := [
@@ -1111,6 +1118,11 @@ var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effe
 var _shot := false
 var _shot_path := ""
 var _boo := false      # dev (--boo): hold the crowd in the red so tomatoes actually fly
+var _empty_air := 0    # consecutive ticks with nothing in the air, mid-act (see update_sim)
+const EMPTY_AIR_GRACE := 26   # ...and how many of them end the act. About a fifth of a
+							   # second: long enough that the gap between a catch and the
+							   # next throw is never mistaken for a bow, short enough that
+							   # a genuine stop reads as immediate.
 var _shot_tick := 170
 var _shot_frames := 0
 var _calib := false        # dev: --calib prints the autoplayer's score at _calib_ticks, then quits
@@ -1315,6 +1327,10 @@ func _ready() -> void:
 			has_glow_kit = true
 		if ua.has("--boo"):         # dev: pin the room in the red, so the tomato path
 			_boo = true             # can be seen at all - see the note in update_sim
+		if ua.has("--nokit"):       # dev: the mirror of --glow. The demo save OWNS the
+			has_glow_kit = false    # Glow Kit (glow_kit=true), so every --demo capture of
+									# a dark stage was silently the charged version and the
+									# un-charged one had no capture path at all
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -7879,6 +7895,26 @@ func update_sim() -> void:
 					play_sfx("whiff", -14.0, 1.6)   # a soft airy knock
 	for b in lost:
 		drop_ball(b, "DROP")
+	# THE AIR BEING EMPTY ENDS THE ACT, however it emptied (2026-07-27, Louis: "if there
+	# are no objects in the air during a performance, that the performance stops if any
+	# milestone has been reached"). on_catch already handles the deliberate version - you
+	# catch the last prop and stand there holding them all, which is the bow - but that
+	# path only runs on a CATCH. Empty the air any other way, and nothing was watching:
+	# DROP the last airborne prop with a goal banked and the act just sat there, running,
+	# with every prop in a hand or on the floor, until the crowd drained into a collapse.
+	# Checked here rather than in a draw pass because it is a rule about the act, and
+	# after the drops above so a prop lost this very tick is already counted.
+	# The grace exists so a single tick of bare air - the frame between a catch and the
+	# throw that follows it - can never read as a bow.
+	if mode == MODE_PERFORM and booking_active and running and not collapsing \
+			and not results_open and not tut_active and goals_hit >= 1 and balls_airborne() == 0:
+		_empty_air += 1
+		if _empty_air >= EMPTY_AIR_GRACE:
+			_empty_air = 0
+			finish_performance()
+			return
+	else:
+		_empty_air = 0
 	if _boo:
 		# dev (--boo): pin the room in the red. The tomato path was unreachable for a
 		# screenshot any other way - the auto-player performs too well to lose a crowd,
@@ -8059,6 +8095,14 @@ func _draw_screen() -> void:
 	draw_balls_in_flight(true)   # Behind-the-Back balls still BEHIND the body
 	draw_juggler(s)
 	draw_tomato_stains()   # what the room landed on him, worn on top of the costume
+	# ...and in a Blackout the performer is in the same dark as his room. Drawn HERE, so
+	# it dims the backdrop and the figure (and the props in his hands) but nothing after
+	# it - the airborne props keep every bit of the little glow they have. He stays
+	# readable rather than going black: the challenge is finding the PROPS, and a player
+	# who cannot see where the hands are is not being challenged, only blindfolded.
+	# Skipped entirely when the Glow Kit is worn, which is the whole point of owning it.
+	if encore_on("blackout") and not glow_kit_lit():
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.42))
 	draw_targets()
 	draw_balls_in_flight()
 	draw_thrown()          # what the crowd threw: flowers (or tomatoes) at the feet
@@ -8166,6 +8210,18 @@ func draw_backdrop(s: Vector2) -> void:
 	if game_state == ST_PLAY and tick - last_drop_tick < 26 and tick - last_drop_tick >= 0:
 		var da := 0.12 * (1.0 - float(tick - last_drop_tick) / 26.0)
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.35, 0.45, 0.65, da))
+	# BLACKOUT ACTUALLY CUTS THE LIGHTS (2026-07-27, Louis: the challenge "is too easy: i
+	# just see a different color ball"). He was right, and the reason is worse than a
+	# tuning miss: the Encore never darkened the house AT ALL. `spot` is read straight
+	# from venue_data with no override, so a Blackout at the Circus ran on the Circus's
+	# full stage lighting and the only thing that changed was the colour of the props -
+	# which is exactly what he described. The room goes dark HERE, over the finished
+	# backdrop and everything in it, and the props are drawn afterwards, so their glow is
+	# genuinely the only light in the picture instead of a green repaint of a lit one.
+	# The performer is deliberately left legible enough to time a catch against: the
+	# challenge is finding the props, not guessing where his hands are.
+	if encore_on("blackout"):
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.88))
 
 
 func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
@@ -8849,8 +8905,12 @@ func draw_juggler(s: Vector2) -> void:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)   # hair mass, up and a touch larger
 	if facing_back:
-		draw_circle(head, head_r, hair)                                   # back of the head, all hair
-		draw_circle(head + Vector2(0, head_r * 0.62), head_r * 0.42, skin)   # a sliver of nape
+		# ALL HAIR, no nape (2026-07-27, Louis: "during spin, the back of the players
+		# head should be entirely hair: brown"). A skin patch used to sit at the bottom
+		# of the skull to suggest a neck, but the neck is already drawn below the head
+		# as its own column - so what the patch actually read as, mid-turn, was the face
+		# still half showing from behind.
+		draw_circle(head, head_r, hair)
 	else:
 		draw_circle(head, head_r, skin)                                   # face over the hair
 		draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
@@ -9441,7 +9501,11 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	draw_glow(pos, 26.0 * sc, Color(phos.r, phos.g, phos.b, 0.30 * fl))
 	if kind >= 0:
 		glow_silhouette(pos, kind, sc, ang, Color(phos.r, phos.g, phos.b, 0.85 * fl))
-	draw_circle(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))
+	# the hot white centre is the single biggest reason an uncharged prop was easy to
+	# track, so it is the KIT'S: a bright point that says exactly where, for the player
+	# who paid for one. Without it the prop is its own dim phosphor and nothing else.
+	if lit >= 0.99:
+		draw_circle(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))
 
 
 func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color) -> void:
@@ -9489,6 +9553,20 @@ func draw_glow_strips(pts: Array, w: float, a: float) -> void:
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
+	# A PROP IN THE HAND IS IN THE SAME DARK ROOM (2026-07-27, Louis: "in the hand the
+	# balls are their original color again, which shouldn't happen"). The flight path had
+	# its own Blackout branch; this one - which every HELD prop goes through, and the
+	# fallen ones too - did not, so a ball turned green in the air and back to red the
+	# instant it was caught. Handled at the top, before any of the halo work below, since
+	# none of that applies when the house is dark.
+	if encore_on("blackout"):
+		var bsc := prop_scale(b.kind)
+		if b.kind == PROP_TORCHES:
+			draw_flame_in_dark(b, pos)   # fire is fire, in the hand as in the air
+		else:
+			draw_glow_in_dark(pos, b.color, b.kind, bsc, prop_spin_angle(b),
+				1.0 if has_glow_kit else BLACKOUT_UNLIT)
+		return
 	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
 								   # (prop_hit_scale) ever shrinks - on a big load, or
 								   # always a bit for rings (mostly hollow rim)
@@ -9606,21 +9684,17 @@ func soft_light_on() -> bool:
 	return bool(experiments.get("soft_light", true))
 
 
-func ball_rim(r: float) -> float:
-	# the rim's thickness: proportional, but never thin enough to shimmer. Below about
-	# 1.6px an antialiased ring crawls as the object moves sub-pixel, which is the very
-	# artifact this art pass exists to remove.
-	return maxf(1.6, r * 0.13)
-
-
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
 	var r := BALL_RADIUS_PX * sc
 	if round_props_v3():
-		# darker disc first, body inset over it: the rim is what is left showing. Drawn
-		# as two filled circles rather than a stroked outline because a filled shape has
-		# no line-join or cap behaviour to go wrong at any radius.
-		draw_circle(pos, r, Color(col.r * 0.62, col.g * 0.60, col.b * 0.64))
-		draw_circle(pos, r - ball_rim(r), col)
+		# ONE SOLID DISC, and nothing else on it (2026-07-27, Louis: "i don't like the
+		# dark border on the balls: i prefer their original solid colors ... also when
+		# held in hands"). The rim was the last survivor of three attempts to give these
+		# some modelling - a highlight, then a shadow crescent, now an outline - and the
+		# answer each time has been the same: the round props want to be flat colour.
+		# It holds in the hand as well as in the air, so this one branch covers both;
+		# every held prop routes through here too.
+		draw_circle(pos, r, col)
 		return
 	if not prop_art_new():
 		draw_circle(pos, r, col)
@@ -9657,11 +9731,10 @@ func draw_egg(pos: Vector2, col: Color, sc: float) -> void:
 	var w := 9.0 * sc
 	var h := 12.0 * sc
 	if round_props_v3():
-		# same rule as the ball, on the ovoid: the egg's whole character is its
-		# asymmetric silhouette, so the rim traces that and nothing is painted inside it.
-		var rim := ball_rim(w)
-		ovoid(pos, w, h, Color(col.r * 0.62, col.g * 0.60, col.b * 0.64))
-		ovoid(pos, w - rim, h - rim, col)
+		# same rule as the ball: one solid shape. The egg's whole character is its
+		# asymmetric silhouette, so the ovoid does all the work and nothing is drawn
+		# on top of it.
+		ovoid(pos, w, h, col)
 		return
 	if not prop_art_new():
 		fill_ellipse(pos, w, h, col)
@@ -12054,8 +12127,7 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # the head keeps its round size through a turn
 	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)
 	if facing_back:
-		draw_circle(head, head_r, hair)
-		draw_circle(head + Vector2(0, head_r * 0.62), head_r * 0.42, skin)
+		draw_circle(head, head_r, hair)   # all hair, same as the stage figure
 	else:
 		draw_circle(head, head_r, skin)
 		draw_circle(head + Vector2(-head_r * 0.34, -head_r * 0.06), head_r * 0.17, Color(0.16, 0.10, 0.08))
