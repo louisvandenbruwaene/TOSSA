@@ -170,6 +170,32 @@ and deleted. History lives in git.
   props. Two traps: a box interior must be LIGHTER than the curtain behind it or it is
   a hole, and anything drawn AT the floor line is buried under the boards, which are
   painted after the dressing.
+- **EVERY GATE IS ON ONE EVEN LADDER** (2026-07-27, Louis: "isn't evenly spread...
+  right now it looks bad on the stat menu"). `BALL_GATES` ran 9/15/23/33/60/90/125/165/
+  175/183/191/200 - four gates crammed into the bottom fifth, a canyon, then four more
+  crammed into the top - which as a row of pips was unreadable and as a curve was three
+  different games. Twelve counts across 200 points is one step of 16.7, so every count
+  costs the same distance of work. Accuracy's skill walls moved onto its own 50-point
+  ladder (Columns 50, Half Shower 150) beside the two Focus stages (100, 200) and the
+  cap. **TRICKS ARE STAT-WALLED NOW**, one per stat, so they arrive spread out instead
+  of all at once on a fresh save: Behind the Back Acc 50, High Toss Str 50, Spin Spd 40,
+  Overthrow Str 100. `skill_req_met` / `skill_req_text` / `skill_gate_badge` learned
+  "end" and "spd", which they never checked. The venue-arrival gift survives on the
+  PATTERNS (Shower/Reverse Cascade/Tennis), so moving up a stage still always pays.
+  Prop `req` values are deliberately NOT drawn on the Strength track - four more pips in
+  the bottom quarter is the crowding this pass exists to remove, and every shop card
+  already prints its own "Str 12". The track sits at 32% across its column, not
+  centred, because centred left every pip label less than half the width and ellipsed
+  the useful half away.
+- **A STYLE LESSON ONLY COUNTS ITS OWN STYLE** (`tut_on_catch`). The guided passes
+  enforce the order by construction; the free pass is where a player falls back into
+  the rhythm they already know. The tell is not the keypress order - that is gone by
+  the time a catch resolves - it is HOW FULL THE AIR IS as the prop lands: an advanced
+  juggler caught from a sky holding everything, so `num_balls - 1` are still up; a
+  beginner threw first from a holding hand, so one fewer is. `--demo` drives lessons off
+  `tut_due_actions` for the same reason, so the harness always plays the taught style
+  (and must use `do_throw`, not `on_throw_press`, since outside a hold a press only
+  starts the charge and the autoplayer has no release).
 - **THE ACT (performances):** one continuous act at the chosen venue, three GOALS
   (first/second/final = VENUE_BASE x GOAL_STEP [1.0, 1.9, 3.2] x ante). From the
   first goal on you may CASH IN at any time: press Enter, or catch every ball and

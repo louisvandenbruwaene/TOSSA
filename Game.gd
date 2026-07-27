@@ -266,9 +266,9 @@ const TENNIS := 5
 const PATTERNS := [
 	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0, "room": 0.65,
 	 "desc": "The weave. Odd counts cross to the other hand; even counts keep each hand's own circle."},
-	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 8, "mult": 1.15, "room": 1.0,
+	{"id": "columns",    "name": "Columns",     "lvl": 4, "acc": 50, "mult": 1.15, "room": 1.0,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
-	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 12, "ven": 1, "mult": 1.25, "room": 0.05,
+	{"id": "halfshower", "name": "Half Shower", "lvl": 8, "acc": 150, "ven": 1, "mult": 1.25, "room": 0.05,
 	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
 	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4, "room": 0.7,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
@@ -449,13 +449,13 @@ const TR_BTB := 1
 const TR_SPIN := 2
 const TR_OVER := 3
 const TRICKS := [
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 3, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
-	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 1, "ven": 1, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 1, "ven": 2, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 4, "str": 50, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
+	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 6, "spd": 40, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
-	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 6, "str": 10, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
+	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 8, "str": 100, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
 	 "desc": "Power one throw up and OVER the top of the pattern."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
@@ -3698,6 +3698,16 @@ func tut_hold_update() -> void:
 	play_sfx("ui", -20.0)
 
 
+func tut_hold_rank_of(entries: Array) -> int:
+	# the lowest rank still outstanding in a list of beat actions - shared by the live
+	# hold and by --demo, which walks the same list without ever opening a hold
+	var r := 99
+	for e in entries:
+		if not bool(e.get("ok", false)):
+			r = mini(r, int(e["rank"]))
+	return r
+
+
 func tut_hold_rank() -> int:
 	# the rank the beat will hear right now: a press for a LATER part of the beat is
 	# not accepted early, so the lesson can never teach catch-then-throw
@@ -3840,6 +3850,28 @@ func tut_on_catch(juggled: bool) -> void:
 			play_sfx("whiff", -14.0)
 		tut_count = 0
 		return
+	# ...and a step that TEACHES A STYLE only accepts catches made in that style
+	# (2026-07-27, Louis: "when teaching the advanced cascade: make sure only that one
+	# scores, not the beginner cascade"). The guided passes enforce the order by
+	# construction, so this is really about the last pass, where the player is free -
+	# and free to fall back into the rhythm they already know without noticing.
+	#
+	# The tell is not the keypress order, which is gone by the time a catch resolves:
+	# it is HOW FULL THE AIR IS at the instant the prop lands. An advanced juggler has
+	# just caught from a sky holding everything, so num_balls - 1 are still up; a
+	# beginner threw first from a hand that was holding, so one fewer is. That single
+	# comparison is the whole difference between the two styles, measured rather than
+	# remembered. Two props and fewer have no styles to tell apart.
+	if step.has("style") and num_balls >= 3:
+		var want_adv := String(step["style"]) == TUT_ADVANCED
+		var is_adv := balls_airborne() >= num_balls - 1
+		if want_adv != is_adv:
+			if tut_count > 0:
+				play_sfx("whiff", -14.0)
+			set_trick_msg("that was the BEGINNER exchange  -  catch first, then throw" if want_adv
+				else "that was the ADVANCED exchange  -  throw first, then catch")
+			tut_count = 0
+			return
 	tut_count += 1
 	tut_check()
 
@@ -5409,7 +5441,14 @@ func ball_color(i: int) -> Color:
 # 2026-07-18 (Louis, after the throw-height clamp made room for more objects):
 # the last few rungs close in tight on STR_CAP, so 15 objects is earned at almost
 # exactly a maxed Strength stat, not before it.
-const BALL_GATES := {4: 9, 5: 15, 6: 23, 7: 33, 8: 60, 9: 90, 10: 125, 11: 165, 12: 175, 13: 183, 14: 191, 15: 200}
+# EVENLY SPACED (2026-07-27, Louis: "strength's nr of props that unlock isn't evenly
+# spread... right now it looks bad on the stat menu"). It ran 9, 15, 23, 33, 60, 90,
+# 125, 165, 175, 183, 191, 200 - four gates crammed into the bottom fifth, a canyon
+# through the middle, then four more crammed into the top - which as a row of pips was
+# unreadable and as a curve was three different games. Twelve counts across 200 points
+# is one step of 16.7, so every count is the same distance of work from the last, and
+# the track finally says what it means: this is how far another prop costs, always.
+const BALL_GATES := {4: 16, 5: 33, 6: 50, 7: 66, 8: 83, 9: 100, 10: 116, 11: 133, 12: 150, 13: 166, 14: 183, 15: 200}
 
 
 func max_balls() -> int:
@@ -6162,6 +6201,10 @@ func skill_req_met(d: Dictionary) -> bool:
 		return false
 	if accuracy < int(d.get("acc", 0)):
 		return false
+	if endurance < int(d.get("end", 0)):
+		return false
+	if speed < int(d.get("spd", 0)):
+		return false
 	if venue_index() < int(d.get("ven", 0)):
 		return false
 	return true
@@ -6176,6 +6219,10 @@ func skill_req_text(d: Dictionary) -> String:
 		parts.append("Strength %d" % int(d["str"]))
 	if int(d.get("acc", 0)) > 0:
 		parts.append("Accuracy %d" % int(d["acc"]))
+	if int(d.get("end", 0)) > 0:
+		parts.append("Endurance %d" % int(d["end"]))
+	if int(d.get("spd", 0)) > 0:
+		parts.append("Speed %d" % int(d["spd"]))
 	if int(d.get("ven", 0)) > 0:
 		# some venues carry their own article ("The Circus", "The Midnight Show"), so
 		# the sentence supplies one only when the name does not - it read "reach the
@@ -6200,6 +6247,10 @@ func skill_gate_badge(d: Dictionary) -> String:
 		unmet.append("Str %d" % int(d["str"]))
 	if accuracy < int(d.get("acc", 0)):
 		unmet.append("Acc %d" % int(d["acc"]))
+	if endurance < int(d.get("end", 0)):
+		unmet.append("End %d" % int(d["end"]))
+	if speed < int(d.get("spd", 0)):
+		unmet.append("Spd %d" % int(d["spd"]))
 	if venue_index() < int(d.get("ven", 0)):
 		unmet.append("Rep %d" % VENUE_REP[int(d["ven"])])
 	if unmet.is_empty():
@@ -10988,27 +11039,27 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 		if v <= 0 or v > cap:
 			return
 		by_val[v] = String(by_val.get(v, "")) + (", " if by_val.has(v) else "") + s
-	# the skills each stat gates, straight from their own tables
-	if which == "acc" or which == "str":
-		for p in PATTERNS:
-			if p.has(which):
-				add.call(int(p[which]), String(p["name"]))
-		for t in TRICKS:
-			if t.has(which):
-				add.call(int(t[which]), String(t["name"]))
+	# the skills each stat gates, straight from their own tables. EVERY stat is asked
+	# now, not just acc/str: the tricks carry Speed and Endurance walls since 2026-07-27
+	# and a wall nobody can see is a wall nobody plans around.
+	for p in PATTERNS:
+		if p.has(which):
+			add.call(int(p[which]), String(p["name"]))
+	for t in TRICKS:
+		if t.has(which):
+			add.call(int(t[which]), String(t["name"]))
 	match which:
 		"acc":
-			# the two Focus stages, in the words of what they DO at the counter
-			add.call(100, "Focus: cheaper stamina")
-			add.call(200, "Perfect window widens")
-			add.call(ACC_CAP, "Good becomes Perfect")
+			# the two Focus stages, in the words of what they DO at the counter. They sit
+			# on the same even 50-point ladder the pattern and trick walls moved onto.
+			add.call(100, "Focus: less stamina")
+			add.call(200, "wider Perfect window")
+			add.call(ACC_CAP, "Good scores Perfect")
 		"str":
-			# what raw muscle opens: the heavy props, then the higher counts
-			for k in PROPS.size():
-				var pd: Dictionary = PROPS[k]
-				var pr := int(pd["req"])
-				if pr > 0:
-					add.call(pr, String(pd["name"]))
+			# what raw muscle opens: the counts, one every 16.7 points (BALL_GATES).
+			# The heavy PROPS' own requirements are deliberately NOT listed here - four
+			# more pips crammed into the bottom quarter is the exact crowding this pass
+			# exists to remove, and every shop card already prints its own "Str 12".
 			for n in BALL_GATES:
 				add.call(int(BALL_GATES[n]), "%d props" % int(n))
 		"end":
@@ -11130,7 +11181,12 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		# the vertical GROWTH track: fills from the bottom up to val/cap, milestone pips
 		# at the real thresholds, the next one pulsing while a point is unspent
 		var trk_w := 15.0
-		var trk_x := cx + colw * 0.5 - trk_w * 0.5
+		# the track sits LEFT of centre, not on it (2026-07-27, Louis: "make sure their
+		# descriptions are readable also and not cut off"). Centred, every pip label had
+		# less than half the column to live in and the useful half of each one was
+		# ellipsed away - "Focus: cheaper stam...". At 32% across, the labels get roughly
+		# 60% of the width and the whole ladder reads.
+		var trk_x := cx + colw * 0.32 - trk_w * 0.5
 		var trk_top := coly + 122.0
 		var trk_bot := coly + colh - 76.0
 		var trk_h := maxf(20.0, trk_bot - trk_top)
@@ -14564,12 +14620,30 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 
 #region DEV: AUTOPLAYER & SCREENSHOT CAPTURE
 func _demo_step() -> void:
-	# a GUIDED lesson step is driven entirely by its beats (tut_hold_autoplay), so the
-	# autoplayer's own metronome and auto-catch must stand down for it. Left running,
-	# they threw props the beat had not asked for - a beginner drill meant to hold two
-	# in the hands ended up with all three in the air, which is the advanced style, and
-	# every beat degenerated to a lone catch. The beats ARE the autoplayer here.
-	if tut_active and tut_guided():
+	# INSIDE A LESSON the autoplayer plays off the beat logic and nothing else. On a
+	# GUIDED step the beats already drive it (tut_hold_autoplay); on the free pass its
+	# own metronome used to take over, and that metronome re-throws the instant it
+	# catches - which is the ADVANCED style. On a beginner step that now fails the style
+	# check outright (see tut_on_catch), so a --demo run could no longer finish the
+	# basics. Reading tut_due_actions here means the harness always plays in whatever
+	# style the step is teaching, which is also the only way it can verify one.
+	if tut_active:
+		var due := tut_due_actions()
+		for e in due:
+			if int(e["rank"]) != tut_hold_rank_of(due):
+				continue
+			match String(e["act"]):
+				"throw":
+					# do_throw, not on_throw_press: OUTSIDE a hold a press only starts
+					# the charge and the release does the throwing, and the autoplayer
+					# has no release. (Inside a hold on_throw_press throws directly,
+					# which is why the guided path could use it.)
+					var th := int(e["hand"])
+					if not stack(th).is_empty():
+						do_throw(th, 0)
+				"catch": on_catch(int(e["hand"]))
+				"trick": on_trick()
+			break
 		return
 	# in a --booking demo the autoplayer cashes in the moment the FINAL goal falls, so
 	# a whole act runs end to end (all three crossings, the resolve, the pay) and never
