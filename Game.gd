@@ -11478,8 +11478,17 @@ func draw_gear_icon(i: int, c: Vector2, cc: Color) -> void:
 			draw_colored_polygon(dome, cc)
 			# the key light across the crown, and the brim that makes it a CAP
 			draw_arc(cap, 14.0, PI * 1.12, PI * 1.62, 12, Color(1.0, 1.0, 1.0, 0.22), 7.0, true)
+			# THE BRIM WAS A BOWTIE (fixed 2026-07-27). Its four corners were listed
+			# out of perimeter order - the 2nd and 4th were swapped - so edge 0 crossed
+			# edge 2 and Godot's triangulator refused the whole polygon. That is the
+			# ENTIRE source of the shop's "Invalid polygon data, triangulation failed"
+			# spam: one failure every frame the shop was open (the count came back as
+			# exactly `shotat - 1` at three different frames, which is what pinned it to
+			# a static shape rather than anything animated). It also meant the brim
+			# never drew at all, so the hat had been missing the very part the comment
+			# says makes it a cap. Corners now run the perimeter in order.
 			draw_colored_polygon(PackedVector2Array([
-				cap + Vector2(-16.0, 1.0), cap + Vector2(-4.0, 8.5), cap + Vector2(10.0, 8.0), cap + Vector2(-15.0, 4.0)]),
+				cap + Vector2(-16.0, 1.0), cap + Vector2(-15.0, 4.0), cap + Vector2(-4.0, 8.5), cap + Vector2(10.0, 8.0)]),
 				Color(cc.r * 0.62, cc.g * 0.62, cc.b * 0.62))
 			fill_ellipse(cap + Vector2(0.0, 1.0), 22.0, 4.0, Color(cc.r * 0.7, cc.g * 0.7, cc.b * 0.7))
 			draw_circle(cap + Vector2(0.0, -19.0), 3.0, Color(cc.r * 0.55, cc.g * 0.55, cc.b * 0.55))
@@ -12763,20 +12772,28 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 	# 1232x706 (2x Steam's 616x353 Main Capsule - same aspect, so no distortion):
 	#   sips --cropToHeightWidth 706 1232 <path>
 	var cx := s.x * 0.5
+	# EVERY SIZE HERE SCALES (2026-07-27). The positions were already relative to `s`,
+	# but the logo, ornament, subtitle, frame and bulbs were absolute pixels - so
+	# rendering this at 2560x1440 for a crisp store asset produced a big backdrop with a
+	# postage-stamp wordmark on it, and the only way to get a usable capsule was to
+	# capture at 720p and upscale (soft, which is the one thing a storefront thumbnail
+	# cannot afford). `k` off the SMALLER of the two axis ratios, so a portrait render
+	# for the 600x900 library capsule cannot push the wordmark out through the sides.
+	var k := minf(s.x / 1280.0, s.y / 720.0)
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.12, 0.055, 0.075), Color(0.03, 0.02, 0.03), 22)
 	draw_spotlight_cone(s, cx, 0.16)
 	for i in 20:
 		var lx := s.x * (float(i) + 0.5) / 20.0
 		var fl := 0.6 + 0.4 * sin(float(cine_tick) * 0.06 + float(i))
-		draw_circle(Vector2(lx, s.y - 20.0), 12.0, Color(1.0, 0.7, 0.3, 0.09 * fl))
-		draw_circle(Vector2(lx, s.y - 20.0), 4.0, Color(1.0, 0.72, 0.32, 0.65 * fl))
+		draw_circle(Vector2(lx, s.y - 20.0 * k), 12.0 * k, Color(1.0, 0.7, 0.3, 0.09 * fl))
+		draw_circle(Vector2(lx, s.y - 20.0 * k), 4.0 * k, Color(1.0, 0.72, 0.32, 0.65 * fl))
 	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
-	draw_menu_cascade(Vector2(cx, s.y * 0.34), 1.6)
-	draw_iacto_logo(font, s.y * 0.58, 112, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(cx, s.y * 0.58 + 134.0, 270.0, Color(0.82, 0.62, 0.34, 0.85))
-	draw_string(font, Vector2(0, s.y * 0.58 + 182.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 27, Color(0.88, 0.76, 0.62))
+	draw_menu_cascade(Vector2(cx, s.y * 0.34), 1.6 * k)
+	draw_iacto_logo(font, s.y * 0.58, int(round(112.0 * k)), Color(1.0, 0.88, 0.5), s)
+	draw_ornament(cx, s.y * 0.58 + 134.0 * k, 270.0 * k, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, s.y * 0.58 + 182.0 * k), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, int(round(27.0 * k)), Color(0.88, 0.76, 0.62))
 	draw_vignette(s, 0.55)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
+	draw_frame(s, 22.0 * k, Color(0.82, 0.62, 0.34, 0.55))
 
 
 #endregion
@@ -13975,7 +13992,14 @@ func step_effects() -> void:
 				v.y = 0.0
 		d["pos"] = p
 		d["vel"] = v
-		d["ang"] = float(d["ang"]) + float(d["spin"])
+		# A SHELL CHIP THAT HAS SETTLED STOPS TURNING (2026-07-27). Exactly the bug the
+		# thrown flowers had, and faster: `spin` runs to 0.4 rad per tick, so a shard
+		# that had come to rest on the boards sat there revolving seven times a second
+		# for the rest of its 150-tick life. The falling props already get this right by
+		# skipping their whole update once at rest - this is the same question asked in
+		# the one place a shard can answer it.
+		if v.length_squared() > 0.01:
+			d["ang"] = float(d["ang"]) + float(d["spin"])
 		if tick - int(d["born"]) < 150:
 			keep_sh.append(d)
 	shards = keep_sh
