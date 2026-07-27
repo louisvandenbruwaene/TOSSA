@@ -599,7 +599,9 @@ const FLOWER_P := 0.30            # the per-thrower chance at a full green house
 const FLOWER_FAME_DIV := 2200.0   # Reputation's share of the rate: a name people have heard
 const FLOWER_FAME_CAP := 2.0      # of gets showered, an unknown gets a few stems
 const FLOWER_BEAT := 26           # ticks between the room's chances to throw
-const TOMATO_RED := 0.22          # ...and below THIS the room throws tomatoes instead
+const TOMATO_RED := 0.30          # ...and below THIS the room throws tomatoes instead.
+								   # Must stay under FLOWER_FLOOR (0.34) so the two bands
+								   # can never both be live on the same beat
 const FLOWER_TIERS := [
 	{"name": "flower",    "val": 1,  "col": Color(0.98, 0.55, 0.68), "mid": Color(1.0, 0.88, 0.45), "petals": 5, "r": 5.0},
 	{"name": "posy",      "val": 5,  "col": Color(0.74, 0.58, 0.98), "mid": Color(1.0, 0.94, 0.72), "petals": 6, "r": 6.2},
@@ -614,6 +616,9 @@ const FLOWER_STEM_AIR := 13.0     # stem length in flight: seen side-on, so its 
 const FLOWER_STEM_FLAT := 7.0     # ...and at rest, where it points at the audience and so
 								   # nearly at the camera. Drawing the airborne length on a
 								   # landed flower made it read as GROWING out of the stage
+const TOMATO_STAIN_MAX := 9       # stains worn at once; a tenth pushes the oldest off
+const TOMATO_STAIN_FADE := 900.0  # ticks one takes to wipe off (7.5s) - long enough that
+								   # a bad stretch visibly accumulates on the costume
 const FLOWER_PILE_MAX := 90       # props on the floor at once; older ones fade out under
 								  # the newer, so a long act never grows an endless heap
 const DROP_LIMIT := 3                 # three drops and the crowd turns (a challenge may lower it)
@@ -959,6 +964,7 @@ var collapsing := false
 # lands at the juggler's feet and stays there for the rest of the act, so the pile on
 # the floor is the running read on how the night is going.
 var thrown: Array[Dictionary] = []
+var tomato_stains: Array[Dictionary] = []   # what the room landed on him, worn until it fades
 # THE PILE IS ONE DRAW CALL (2026-07-27, Louis: "the game is lagging again with all the
 # flowers"). MEASURED with --fps at venue 6, 7 torches, pile full: draw calls ran
 # 331 -> 1140 as the boards filled and the frame went 2.1ms -> 6.3ms. The +810 is exactly
@@ -1100,6 +1106,7 @@ var _handlog := false       # dev: --handlog prints each hand's x every tick dur
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 var _shot := false
 var _shot_path := ""
+var _boo := false      # dev (--boo): hold the crowd in the red so tomatoes actually fly
 var _shot_tick := 170
 var _shot_frames := 0
 var _calib := false        # dev: --calib prints the autoplayer's score at _calib_ticks, then quits
@@ -1302,6 +1309,8 @@ func _ready() -> void:
 			set_collide = true
 		if ua.has("--glow"):        # dev: own the Glow Kit this session, for Blackout shots
 			has_glow_kit = true
+		if ua.has("--boo"):         # dev: pin the room in the red, so the tomato path
+			_boo = true             # can be seen at all - see the note in update_sim
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
 			sheet_open = true
@@ -5568,6 +5577,7 @@ func start_run(n: int) -> void:
 	freeze = 0
 	parts.clear()
 	thrown.clear()      # a fresh act starts on clean boards: nothing at the feet yet
+	tomato_stains.clear()   # ...and a clean costume, whatever last night did to it
 	_pile_pts.clear()   # ...and the baked pile goes with it, or last night's flowers
 	_pile_cols.clear()  # would still be drawn under this one's feet
 	_pile_idx.clear()
@@ -7859,6 +7869,13 @@ func update_sim() -> void:
 					play_sfx("whiff", -14.0, 1.6)   # a soft airy knock
 	for b in lost:
 		drop_ball(b, "DROP")
+	if _boo:
+		# dev (--boo): pin the room in the red. The tomato path was unreachable for a
+		# screenshot any other way - the auto-player performs too well to lose a crowd,
+		# and a human bad enough to earn tomatoes is usually collapsing, which suppresses
+		# them. Same reasoning as --wallcard and --legend: a state with no capture path
+		# is a state nobody has actually looked at.
+		applause = minf(applause, TOMATO_RED * 0.6)
 	peak_applause = maxf(peak_applause, applause)
 	if balls.is_empty():
 		running = false
@@ -8031,6 +8048,7 @@ func _draw_screen() -> void:
 	draw_egg_splats()      # yolk on the floor sits behind the performer
 	draw_balls_in_flight(true)   # Behind-the-Back balls still BEHIND the body
 	draw_juggler(s)
+	draw_tomato_stains()   # what the room landed on him, worn on top of the costume
 	draw_targets()
 	draw_balls_in_flight()
 	draw_thrown()          # what the crowd threw: flowers (or tomatoes) at the feet
@@ -10208,11 +10226,18 @@ const GAUGE_ZONES := [
 	# where the needle sits and what that MEANS, from empty to full: the same four
 	# bands a fuel or temperature gauge uses, so the reading is understood before it is
 	# read. The thresholds are the fraction each band ENDS at.
-	{"to": 0.25, "col": Color(0.90, 0.26, 0.20)},   # the room is leaving
-	{"to": 0.50, "col": Color(0.95, 0.55, 0.22)},   # restless
-	{"to": 0.78, "col": Color(0.96, 0.82, 0.30)},   # with you
-	{"to": 1.00, "col": Color(0.45, 0.85, 0.42)},   # won over
+	# VIBRANT (2026-07-27, Louis). These were mixed down toward the warm stage palette
+	# and came out dusty - a fuel gauge is signage, not scenery, and it is the one
+	# instrument that has to be read in a glance while both hands are busy. Each band is
+	# now near-saturated and the four are pushed apart in hue, so which one the needle is
+	# in registers peripherally instead of needing a look.
+	{"to": 0.25, "col": Color(1.00, 0.18, 0.16)},   # the room is leaving
+	{"to": 0.50, "col": Color(1.00, 0.52, 0.08)},   # restless
+	{"to": 0.78, "col": Color(1.00, 0.87, 0.12)},   # with you
+	{"to": 1.00, "col": Color(0.24, 0.94, 0.38)},   # won over
 ]
+const GAUGE_LIT := 1.0    # a band the needle has passed: full strength
+const GAUGE_DIM := 0.34   # ...and one it has not. Was 0.22, which read as switched off
 
 func gauge_color(frac: float) -> Color:
 	for z in GAUGE_ZONES:
@@ -10239,7 +10264,7 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 		var zc: Color = z["col"]
 		var lit := frac >= from - 0.001   # zones already passed burn bright, the rest are dim
 		draw_arc(c, r, lerpf(a0, a1, from), lerpf(a0, a1, to), 14,
-			Color(zc.r, zc.g, zc.b, 0.85 if lit else 0.22), 11.0, true)
+			Color(zc.r, zc.g, zc.b, GAUGE_LIT if lit else GAUGE_DIM), 11.0, true)
 		from = to
 	# ticks at every zone edge, so the bands read as a scale and not as decoration
 	for z2 in GAUGE_ZONES:
@@ -10642,11 +10667,18 @@ func draw_hud(font: Font, s: Vector2) -> void:
 
 		# --- the CROWD (patience clock) and the DROP limit ---
 		var ccard_y := 286.0
-		var ccard_h := 108.0
+		# THE DIAL CLEARS ITS OWN TITLE (2026-07-27, Louis: it must not overlap the word
+		# CROWD). The instrument is wider than the arc: the peak pin stands proud to
+		# r + 9, so at the old r 48 on a centre 74 down it reached y+65, while the
+		# 12pt label sits on a baseline of y+22 and hangs to about y+25. They were
+		# crossing by several pixels whenever the act had a peak worth marking. The
+		# dial is a little smaller and sits lower, and the card grew to keep the
+		# readout under the hub off its own bottom border.
+		var ccard_h := 116.0
 		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35))
 		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.72, 0.62))
 		# the DIAL on the left, the drops you have left on the right
-		draw_gauge(Vector2(LX + 80.0, ccard_y + 74.0), 48.0, applause, peak_applause,
+		draw_gauge(Vector2(LX + 80.0, ccard_y + 82.0), 44.0, applause, peak_applause,
 			"%d%%" % int(round(applause * 100.0)), font)
 		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.6, 0.55))
 		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
@@ -14015,7 +14047,8 @@ func draw_parts() -> void:
 
 func step_effects() -> void:
 	step_parts()
-	throw_step()   # what the room throws, on its own beat
+	throw_step()    # what the room throws, on its own beat
+	tomato_step()   # ...and what bursts on him when it gets there
 	# lit torches shed a lazy ember now and then, so fire reads as fire
 	if tick % 9 == 0:
 		for b in balls:
@@ -14167,6 +14200,21 @@ func throw_from_crowd(kind: String, tier: int) -> void:
 	var s := get_viewport_rect().size
 	var fy := stage_floor_y()
 	var from := Vector2(randf_range(s.x * 0.05, s.x * 0.95), fy + randf_range(16.0, 46.0))
+	# A TOMATO IS AIMED (2026-07-27, Louis: "make sure they are towards his body and
+	# visible stains"). Flowers are TRIBUTE and are tossed at the feet; a tomato is an
+	# ATTACK and goes at the man. It therefore takes the torso as its target - the same
+	# eight-head landmarks draw_juggler uses, so it lands between hip and shoulder - on a
+	# flatter, faster arc, because nobody lobs a tomato. It bursts on arrival rather than
+	# joining the pile (see tomato_step): the point of it is that the room hit him.
+	if kind == "tomato":
+		var H := s.y * 0.056
+		thrown.append({"kind": kind, "tier": tier, "from": from,
+			"to": Vector2(s.x * 0.5 + randf_range(-0.85, 0.85) * H, fy - randf_range(4.2, 6.7) * H),
+			"born": tick, "land": tick + FLOWER_FLIGHT - 12 + randi_range(-4, 4),
+			"arc": randf_range(30.0, 70.0), "rot": randf_range(0.0, TAU),
+			"settle": randf_range(0.0, TAU)})
+		_pile_dirty = true
+		return
 	var lx := s.x * 0.5 + randf_range(-165.0, 165.0)
 	# HOW A THROWN FLOWER COMES TO REST (2026-07-27, Louis: "blossom facing the player
 	# and the stem facing the public"). The crowd is drawn BELOW the floor line
@@ -14218,10 +14266,15 @@ func throw_step() -> void:
 				throw_from_crowd("flower", t)
 				run_flowers += int(FLOWER_TIERS[t]["val"])
 	elif applause <= TOMATO_RED and not collapsing:
-		# the room turning on you. Rarer than flowers by design: this is a warning you
-		# can still act on, not a punishment stacked on top of losing the crowd.
+		# the room turning on you. Still rarer than flowers by design - this is a warning
+		# you can still act on, not a punishment stacked on top of losing the crowd - but
+		# it has to actually HAPPEN to be a warning (2026-07-27, Louis: "i didn't see
+		# tomatoes thrown at the player when he does bad"). The old window was applause
+		# <= 0.22, which is a sliver of the red, usually crossed on the way to a collapse
+		# that suppresses them anyway; 0.30 is the whole red band and still cannot
+		# overlap the flowers, which need FLOWER_FLOOR (0.34).
 		for _i in rolls:
-			if randf() < 0.10:
+			if randf() < 0.15:
 				throw_from_crowd("tomato", 0)
 				run_tomatoes += 1
 	while thrown.size() > FLOWER_PILE_MAX:
@@ -14373,6 +14426,64 @@ func _soup_tomato(p: Vector2, sc: float, rot: float, a: float) -> void:
 		var ang := rot + TAU * float(i) / 4.0
 		var b := p + Vector2(0, -r * 0.7)
 		_soup_line(b, b + Vector2(cos(ang), sin(ang)) * r * 0.5, maxf(1.0, r * 0.22), Color(0.35, 0.60, 0.28, a))
+
+
+func tomato_step() -> void:
+	# A TOMATO BURSTS ON HIM. It never joins the pile at his feet - it was aimed at the
+	# man, so it leaves the array the moment it arrives and leaves a mark behind instead.
+	# Walked backwards so removing an entry cannot skip the next one.
+	var i := thrown.size() - 1
+	while i >= 0:
+		var d: Dictionary = thrown[i]
+		if String(d["kind"]) == "tomato" and tick >= int(d["land"]):
+			var at: Vector2 = d["to"]
+			var s := get_viewport_rect().size
+			tomato_stains.append({
+				"off": at - Vector2(s.x * 0.5, stage_floor_y()),   # kept relative to the
+				"born": tick,                                       # body's own origin
+				"seed": randf() * TAU, "r": randf_range(7.0, 11.5)})
+			while tomato_stains.size() > TOMATO_STAIN_MAX:
+				tomato_stains.remove_at(0)
+			spawn_parts(at, Color(0.86, 0.20, 0.16), 6, 2.4, "spark")
+			play_sfx("splat", -9.0)
+			thrown.remove_at(i)
+			_pile_dirty = true
+		i -= 1
+
+
+func draw_tomato_stains() -> void:
+	# worn on the costume, drawn straight after the body so it sits ON him. One draw call
+	# for the lot, through the same triangle soup the flower pile uses.
+	if tomato_stains.is_empty():
+		return
+	var s := get_viewport_rect().size
+	var origin := Vector2(s.x * 0.5, stage_floor_y())
+	_soup_clear()
+	for d in tomato_stains:
+		var age := float(tick - int(d["born"]))
+		var a := clampf(1.0 - age / TOMATO_STAIN_FADE, 0.0, 1.0)
+		if a <= 0.01:
+			continue
+		var p := origin + (d["off"] as Vector2)
+		var r: float = d["r"]
+		var sd: float = d["seed"]
+		# the burst: a dark body, a wetter highlight up-left, satellite specks around it,
+		# and a run of juice that creeps downward over the first second. Everything is
+		# derived from the stain's own stored seed - never randf, which in a draw
+		# function would reshape the splatter every single frame.
+		_soup_ellipse(p, r, r * 0.80, 0.0, 9, Color(0.62, 0.10, 0.09, 0.88 * a))
+		_soup_ellipse(p + Vector2(-r * 0.18, -r * 0.16), r * 0.58, r * 0.44, 0.0, 8, Color(0.86, 0.20, 0.17, 0.9 * a))
+		for k in 6:
+			var ang := sd + TAU * float(k) / 6.0 + fposmod(sd * float(k + 2), 0.7)
+			var rr := r * (1.05 + 0.75 * fposmod(sd * float(k + 3), 1.0))
+			var sr := r * (0.10 + 0.16 * fposmod(sd * float(k + 7), 1.0))
+			_soup_ellipse(p + Vector2(cos(ang), sin(ang)) * rr, sr, sr, 0.0, 6,
+				Color(0.74, 0.14, 0.12, 0.8 * a))
+		var run := r * (0.7 + 1.7 * fposmod(sd, 1.0)) * clampf(age / 55.0, 0.0, 1.0)
+		if run > 1.0:
+			_soup_line(p, p + Vector2(0.0, run), maxf(1.6, r * 0.26), Color(0.58, 0.09, 0.08, 0.7 * a))
+			_soup_ellipse(p + Vector2(0.0, run), r * 0.17, r * 0.20, 0.0, 6, Color(0.58, 0.09, 0.08, 0.7 * a))
+	_soup_emit()
 
 
 func _bake_pile() -> void:
