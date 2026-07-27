@@ -1210,6 +1210,12 @@ func _ready() -> void:
 	if ua.has("--gameover"):          # dev: the road's-end screen, for a screenshot
 		game_state = ST_GAMEOVER
 		cine_tick = 0
+	if ua.has("--wallcard"):          # dev: the scoped demo's wishlist card (2026-07-27:
+		game_state = ST_DEMO_WALL     # both of these end cards were reachable only by
+		cine_tick = 0                 # actually completing the run that triggers them,
+	if ua.has("--legend"):            # so neither had a capture path at all)
+		game_state = ST_PURIST_LEGEND
+		cine_tick = 0
 	if ua.has("--tutdone"):           # dev: the basics-lesson congrats card, for a screenshot
 		game_state = ST_TUTDONE
 		cine_tick = 0
@@ -2170,7 +2176,9 @@ func day_actions() -> Array[Dictionary]:
 	if pie_count > 0:
 		out.append({"id": "pie", "grp": "rest", "icon": "pie", "name": "EAT Uncle Dan's Pie",
 			"cost": "own %d" % pie_count, "ok": not pie_active, "why": "one is already working" if pie_active else "",
-			"sub": "a stimulant slice: the whole day runs a quarter slower, until you sleep."})
+			# the number comes from PIE_SLOW, never a written-out fraction: this line
+			# still said "a quarter slower" long after the slice was nerfed to 15%
+			"sub": "a stimulant slice: the whole day runs %d%% slower, until you sleep." % int(round(PIE_SLOW * 100.0))})
 	if have(PROP_EGGS) > 0:
 		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
 			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
@@ -9084,7 +9092,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		elif not running:
 			# training keeps the plain end-of-run line (a booking goes straight to results)
 			draw_text_shout(font, Vector2(0, s.y * 0.20), "ROUND OVER", HORIZONTAL_ALIGNMENT_CENTER, s.x, 40, Color(1.0, 0.5, 0.4))
-			draw_text_shout(font, Vector2(0, s.y * 0.20 + 40), "best streak %d   XP +%d   -   R goes again, Enter ends the session" % [best_streak, run_xp], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
+			draw_text_shout(font, Vector2(0, s.y * 0.20 + 40), "best streak %s   XP +%s   -   R goes again, Enter ends the session" % [commafy(best_streak), commafy(run_xp)], HORIZONTAL_ALIGNMENT_CENTER, s.x, 19, Color(0.9, 0.82, 0.7))
 
 
 #endregion
@@ -9182,14 +9190,16 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var pct := int(round(100.0 * run_clean()))
 	_result_row(font, lx, rx, y, "Caught  /  Dropped", "%d  /  %d    (%d%%)" % [caught, dropped, pct], Color(0.86, 0.9, 0.82), ra.call(1)); y += rowh
 	_result_row(font, lx, rx, y, "Best streak", str(best_streak), Color(0.9, 0.82, 0.6), ra.call(2)); y += rowh
-	var tval := "%d   (+%d)" % [tricks_landed, trick_score] if trick_score > 0 else str(tricks_landed)
+	# the trick total is a SCORE, so it gets the same thousands separators the booking
+	# score two rows above it has (it read "+42600" beside "951,875")
+	var tval := "%d   (+%s)" % [tricks_landed, commafy(trick_score)] if trick_score > 0 else str(tricks_landed)
 	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99), ra.call(3)); y += rowh
 	draw_line(Vector2(lx, y - 6.0), Vector2(rx, y - 6.0), Color(0.9, 0.6, 0.35, 0.2), 1.0)
-	_result_row(font, lx, rx, y + 20.0, "Pay", "+%d gold" % last_pay, Color(1.0, 0.86, 0.45), ra.call(4)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "Pay", "+%s gold" % commafy(last_pay), Color(1.0, 0.86, 0.45), ra.call(4)); y += rowh
 	var rsign := "+" if last_rep_delta >= 0 else ""
 	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
 	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
-	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%d" % run_xp, Color(0.82, 0.9, 0.7), ra.call(6)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%s" % commafy(run_xp), Color(0.82, 0.9, 0.7), ra.call(6)); y += rowh
 
 	# ...and the reason spelled out, in the clear space above the footer: the headline
 	# by the venue name says WHAT happened, this says what to do about it. Last to
@@ -11325,9 +11335,9 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.85, 0.78, 0.66, fin))
 	var lines := [
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
-		"%d performances,  %d catches" % [int(career["perfs"]), int(career["catches"])],
-		"best streak %d,  highest score %d" % [int(career["best_streak"]), int(career["best_score"])],
-		"%d gold earned, and all of it spent" % int(career["gold_earned"]),
+		"%s performances,  %s catches" % [commafy(int(career["perfs"])), commafy(int(career["catches"]))],
+		"best streak %s,  highest score %s" % [commafy(int(career["best_streak"])), commafy(int(career["best_score"]))],
+		"%s gold earned, and all of it spent" % commafy(int(career["gold_earned"])),
 	]
 	for i in lines.size():
 		var la := clampf(float(cine_tick - 80 - i * 30) / 40.0, 0.0, 1.0)
@@ -11355,7 +11365,7 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.88, 0.8, 0.68, fin))
 	var lines := [
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
-		"%d performances,  %d catches,  best streak %d" % [int(career["perfs"]), int(career["catches"]), int(career["best_streak"])],
+		"%s performances,  %s catches,  best streak %s" % [commafy(int(career["perfs"])), commafy(int(career["catches"])), commafy(int(career["best_streak"]))],
 		"highest score  %s" % commafy(int(career["best_score"])),
 	]
 	for i in lines.size():
@@ -12016,7 +12026,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
-	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %d" % int(career["best_score"]), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
+	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %s" % commafy(int(career["best_score"])), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
 	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
 	cur += 82.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "code", "b": "Louis Vandenbruwaene"})
@@ -12042,8 +12052,10 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		# soft edge fades so a line melts in near the bottom and out near the top,
 		# which also keeps text clear of the cascade riding above
 		var a := 1.0
-		if ry > s.y - 150.0:
-			a = clampf((s.y - ry) / 150.0, 0.0, 1.0)
+		if ry > s.y - 190.0:
+			# fully faded by 40px ABOVE the bottom edge, so a line entering the roll is
+			# never still visible where the gold frame crosses it
+			a = clampf((s.y - 40.0 - ry) / 150.0, 0.0, 1.0)
 		if ry < 150.0:
 			a = minf(a, clampf(ry / 150.0, 0.0, 1.0))
 		var kind := String(row["kind"])
