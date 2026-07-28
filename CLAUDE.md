@@ -1332,6 +1332,51 @@ architecture change, not content. Do not let it be scoped as "one more pattern".
   timing feedback beyond PERFECT/GOOD/late. A metronome or a beat trace in practice would
   teach the thing the game is actually asking for.
 
+## BUILT 2026-07-28 from Louis's own choices - and the ONE part still open
+
+The costume, the two-room shop and the glow split are all in and working. **What is NOT
+done: the five costume pieces are not yet DRAWN ON THE PERFORMER.** They are purchasable,
+persisted, they buff correctly and they have their own shop icons, but `draw_juggler` /
+`draw_performer_polish` does not yet put a top hat on his head, tails on the coat or
+sequins on the waistcoat. That is the next job, and the wardrobe pass's own rules apply to
+it: filled SHAPES not decorative strokes, every mark butting against something the base
+figure already draws or riding a solved joint, and every colour taken from the venue's own
+palette. Do not reshape the figure to fit a hat.
+
+## AGREED (2026-07-28, Louis chose these explicitly)
+
+Three decisions taken with him rather than guessed, so a later session builds what he
+picked and not what seemed reasonable at the time.
+
+- **FIVE COSTUME PIECES, one buff each.** Every one is drawn on the performer by
+  `draw_performer_polish` (which already paints lapels, cummerbund, buttons and cuffs in
+  the venue's own colours) and every buff sits on the COMFORT/REWARD axis - none of them
+  touches the catch timing, which is the guardrail that makes the stats safe.
+      SILK GLOVES       2,500   off-Perfect catches get the clubs' own `fgive`
+                                forgiveness, on every prop
+      STAGE BOOTS       3,500   every throw costs 1 less stamina, floored at 1
+      TOP HAT           4,000   the room throws a better TIER more often
+                                (lifts flower_tier_roll, posies where it was stems)
+      TAILCOAT          6,000   the crowd warms 15% faster (applause gain)
+      SEQUIN WAISTCOAT 12,000   +20% flower throw RATE - the late-game money piece
+- **THE BACK OF THE SHOP, behind a one-off 16+ fee** (500, and a day segment the first
+  time, like any errand). FRONT: balls, eggs, rings, clubs, and the safe gear. BACK:
+  knives, torches, the chainsaw, Uncle Dan's Pie and the glow gear. It is a joke and it
+  is also the fix for the thing that broke on 2026-07-28 - a single row of prop cards ran
+  out of screen width at seven props, and no arithmetic saves it at eleven.
+- **THE GLOW KIT SPLITS IN TWO** (Louis: "the glow in dark kit should be able to sell it's
+  individual props also - keep the kit in case someone wants to buy it all at once, but
+  also sell the individual parts"): GLOW TAPE (the props carry phosphor) and the GLOW SUIT
+  (the performer does), with the Kit kept as a discounted bundle that sets both.
+  `glow_kit_lit()` has to split into a props test and a suit test to match.
+- **RICH PROPS SHIP ON.** Louis's call, made against the numbers below - he wants to judge
+  it by feel and F9 it off if a heavy set drags. **The optimisation is the open follow-up:**
+  batch `cap_ball` into one draw call the way `_saw_bake` already does for the chainsaw,
+  then re-measure. Measured at 15 balls with a full flower pile, World Arena:
+      rich OFF   364 calls   2.32ms   49-64 fps
+      rich ON    650 calls   3.20ms   27-30 fps
+  The cost is ~10 extra shapes per ball, four of them wide translucent arcs.
+
 ## Still open (from ideas.rtf and the old docs, worth doing)
 
 - **Teaching lessons as income** (mastered skills earn gold/rep as a day action).
