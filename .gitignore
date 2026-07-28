@@ -13,6 +13,10 @@ export/linux/
 # dev screenshot captures
 shot*.png
 
-# generated reference docs (not source - a formulas/mechanics writeup, kept
-# local for Louis, not tracked)
+# the mechanics reference is GENERATED, and its source IS tracked: docs/mechanics.html.
+# Rebuild it with:
+#   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" --headless --disable-gpu \
+#     --no-pdf-header-footer --print-to-pdf="$PWD/TOSSA_mechanics_reference.pdf" \
+#     "file://$PWD/docs/mechanics.html"
+# (Brave is the only Chromium on this machine - no pandoc, wkhtmltopdf or weasyprint.)
 TOSSA_mechanics_reference.pdf
