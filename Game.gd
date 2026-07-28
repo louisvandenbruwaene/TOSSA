@@ -304,8 +304,8 @@ const PATTERNS := [
 # differently from the way it is written: the picture is the sentence "I act" with a
 # juggling ball finishing the word, so the mark needs the name minus its final letter,
 # spaced as the joke reads. TITLE_MARK's last character is the one the ball replaces.
-const GAME_TITLE := "IACTO"
-const TITLE_MARK := "I ACT"
+const GAME_TITLE := "TOSSA"
+const TITLE_MARK := "TOSS"
 # NAMES STILL ON THE TABLE (Louis, 2026-07-28) - kept here beside the switch so choosing
 # one is a two-line edit and never a hunt. The second column is what TITLE_MARK becomes:
 # the ball prop stands in for the name's LAST letter, so the mark is the name without it,
@@ -13555,116 +13555,120 @@ func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: C
 	fill_ellipse(wrist + d * w * 0.30 - n * w * 0.18, w * 0.20, w * 0.34, Color(0.95, 0.74, 0.55, 0.5))
 
 
+func capsule_letters(font: Font, s: Vector2, k: float, size: int, cy: float,
+		stem: int, bar: int, apex: int, textcol: Color, ringcol: Color) -> void:
+	# THE NAME, SPELLED PARTLY IN PROPS (2026-07-28, Louis: "replace that o with a ring
+	# (in the picture) and the T with a knive and club"). The O is a ring prop, the T is
+	# a prop standing as its stem with another laid across the top, and the rest of the
+	# word is set in the game's own face. Each glyph is measured and advanced one at a
+	# time, so a substituted letter takes exactly the space its prop needs and the word
+	# stays kerned however the name is later changed.
+	#
+	# A prop's local origin is its GRIP and it points UP at angle 0, which is what makes
+	# the T work at all: the stem is drawn straight onto the baseline (grip down, head
+	# up), and the bar is the same shape turned a quarter turn with its grip at the left
+	# end, so the crossbar reads as an object laid across rather than a rectangle.
+	var f := game_font()
+	var rr := float(size) * 0.40                 # the ring's own radius
+	var gap := float(size) * 0.06
+	# measure first, so the whole word can be centred before a single mark is drawn
+	var total := 0.0
+	var widths: Array[float] = []
+	for i in GAME_TITLE.length():
+		var ch := GAME_TITLE[i]
+		var w := 0.0
+		if ch == "O":
+			w = rr * 2.0
+		elif ch == "T":
+			w = float(size) * 0.92
+		else:
+			w = f.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		widths.append(w)
+		total += w + gap
+	total -= gap
+	var x := s.x * 0.5 - total * 0.5
+	var base := cy + float(size) * 0.36
+	for i in GAME_TITLE.length():
+		var ch := GAME_TITLE[i]
+		var w: float = widths[i]
+		if ch == "O":
+			var rc := Vector2(x + rr, base - float(size) * 0.34)
+			draw_glow(rc, rr * 1.35, Color(ringcol.r, ringcol.g, ringcol.b, 0.22))
+			draw_ring_prop(rc, ringcol, rr * 0.092)
+		elif ch == "T":
+			# BUILDING A LETTER OUT OF PROPS IS ALL ORIGINS. A prop's local origin sits at
+			# its GRIP with the business end at negative y, so: turned +PI/2 the blade
+			# sweeps RIGHT and the pommel hangs left (turned -PI/2 it points the other way,
+			# which is how the first attempt threw the crossbar clear of the letter), and
+			# the stem has to be anchored by its grip 14 units below the baseline or its
+			# head stops short of the bar it is supposed to meet.
+			var bsc := w / 35.0                       # knife/club length in local units
+			var ssc := float(size) * 0.86 / 34.0
+			var top := base - float(size) * 0.86
+			capsule_prop(bar, Vector2(x + 9.0 * bsc, top), bsc, PI * 0.5)
+			capsule_prop(stem, Vector2(x + w * 0.5, base - 14.0 * ssc), ssc, 0.0)
+		else:
+			draw_string(f, Vector2(x + 3.0 * k, base + 3.0 * k), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.5))
+			draw_string(f, Vector2(x, base), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size, textcol)
+			if ch == "A" and apex >= 0:
+				capsule_prop(apex, Vector2(x + w * 0.5, base - float(size) * 1.02), float(size) * 0.020, 0.0)
+		x += w + gap
+
+
 func capsule_one(font: Font, s: Vector2, k: float) -> void:
-	# 1. THE CROSS. Louis's own X, taken seriously: a knife and a club at a size where
-	# every part of them shows, with a torch burning behind the crossing so the steel
-	# actually catches firelight. Three shapes, readable at thumbnail size, and all the
-	# detail is real - the knife's fuller, guard and pommel, the club's 3:1 head.
-	var cx := s.x * 0.5
-	var cy := s.y * 0.39
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.045, 0.035), Color(0.02, 0.012, 0.016), 24)
-	draw_glow(Vector2(cx, cy), s.y * 0.62, Color(1.0, 0.52, 0.20, 0.30))
-	draw_glow(Vector2(cx, cy), s.y * 0.30, Color(1.0, 0.72, 0.34, 0.28))
-	var sc := s.y * 0.0160
-	# a prop's local origin is its GRIP, not its middle, so rotating about `pos` swings
-	# the two apart into a V. Each one is pushed back along its own axis by half its own
-	# length, which puts the two shafts across each other instead.
-	var xp := Vector2(cx, cy)
-	draw_knife(xp - Vector2(0, -9.0 * sc).rotated(-0.62), -0.62, sc)
-	draw_club(xp - Vector2(0, -5.0 * sc).rotated(0.62), 0.62, sc)
-	capsule_embers(Vector2(cx, cy - s.y * 0.02), s.y * 0.46, 22, Color(1.0, 0.68, 0.30, 0.55))
-	capsule_wordmark(font, s.y * 0.70, k * 1.25, s, Color(1.0, 0.88, 0.5), "")
-	draw_vignette(s, 0.58)
+	# 1. THE CLUB STANDS, THE KNIFE LIES ACROSS. The warm one: a stage-lit backdrop, the
+	# club as the T's stem because its banded neck reads as a column, the knife as the bar.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.05, 0.045), Color(0.02, 0.013, 0.017), 24)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.46), s.y * 0.70, Color(1.0, 0.62, 0.26, 0.24))
+	capsule_letters(font, s, k, int(round(s.y * 0.30)), s.y * 0.46,
+		PROP_CLUBS, PROP_KNIVES, -1, Color(1.0, 0.93, 0.74), Color(0.45, 0.75, 0.95))
+	draw_string(game_font(), Vector2(0, s.y * 0.86), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x,
+		int(round(28.0 * k)), Color(0.86, 0.78, 0.66))
+	draw_vignette(s, 0.56)
 
 
 func capsule_two(font: Font, s: Vector2, k: float) -> void:
-	# 2. THE FLAME. One object, one diagonal, and the fire doing all the work: the same
-	# three-layer flame the stage lights a torch with, at a scale where its shape reads.
-	# From across a store page this is a burning torch and nothing else, which is the job.
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.09, 0.035, 0.03), Color(0.015, 0.01, 0.014), 24)
-	var tip := Vector2(s.x * 0.60, s.y * 0.30)
-	draw_glow(tip, s.y * 0.78, Color(1.0, 0.46, 0.16, 0.26))
-	draw_glow(tip, s.y * 0.34, Color(1.0, 0.74, 0.34, 0.34))
-	draw_torch(Vector2(s.x * 0.44, s.y * 0.66), 0.62, s.y * 0.030, true)
-	capsule_embers(tip, s.y * 0.66, 30, Color(1.0, 0.72, 0.34, 0.6))
-	capsule_wordmark(font, s.y * 0.76, k, s, Color(1.0, 0.90, 0.56), "")
-	draw_vignette(s, 0.6)
-
-
-func capsule_three(font: Font, s: Vector2, k: float) -> void:
-	# 3. THE RING IS THE O. The wordmark already ends in a prop - the ball is its
-	# lowercase o - so here that joke is the whole picture: I ACT, and then a ring big
-	# enough to read from across the page finishes the word, with a flame seen through it.
-	var size := int(round(s.y * 0.30))
-	var f := game_font()
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.05, 0.055, 0.085), Color(0.012, 0.014, 0.024), 22)
-	var tw := f.get_string_size("I ACT", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	var rr := s.y * 0.27
-	var total := tw + rr * 2.4
-	var lx := s.x * 0.5 - total * 0.5
-	var by := s.y * 0.5 + float(size) * 0.36
-	var rc := Vector2(lx + tw + rr * 1.22, by - float(size) * 0.34)
-	draw_glow(rc, rr * 1.5, Color(0.45, 0.78, 1.0, 0.20))
-	draw_glow(rc, rr * 0.55, Color(1.0, 0.66, 0.28, 0.40))          # the flame through the hole
-	draw_torch(rc + Vector2(0, rr * 0.42), 0.0, rr * 0.020, true)
-	draw_string(f, Vector2(lx + 3.0 * k, by + 3.0 * k), "I ACT", HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.5))
-	draw_string(f, Vector2(lx, by), "I ACT", HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(1.0, 0.93, 0.72))
-	draw_ring_prop(rc, Color(0.45, 0.75, 0.95), rr * 0.092)
-	draw_string(f, Vector2(0, s.y * 0.88), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x,
-		int(round(26.0 * k)), Color(0.80, 0.86, 0.92))
+	# 2. THE KNIFE STANDS. Cold and steel-lit: the blade as the stem makes a much thinner,
+	# sharper T, and the club laid across gives the top bar its weight back.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.045, 0.055, 0.085), Color(0.012, 0.015, 0.026), 22)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.66, Color(0.45, 0.72, 1.0, 0.20))
+	capsule_letters(font, s, k, int(round(s.y * 0.30)), s.y * 0.46,
+		PROP_KNIVES, PROP_CLUBS, -1, Color(0.94, 0.96, 1.0), Color(0.55, 0.82, 1.0))
+	draw_string(game_font(), Vector2(0, s.y * 0.86), "strict catches, earned heights", HORIZONTAL_ALIGNMENT_CENTER, s.x,
+		int(round(28.0 * k)), Color(0.74, 0.82, 0.92))
 	draw_vignette(s, 0.5)
 
 
+func capsule_three(font: Font, s: Vector2, k: float) -> void:
+	# 3. THE T IS ON FIRE. The torch stands as the stem, so the word itself is burning at
+	# its first letter, with the knife across the top and embers climbing the whole mark.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.03), Color(0.016, 0.011, 0.014), 24)
+	draw_glow(Vector2(s.x * 0.34, s.y * 0.40), s.y * 0.62, Color(1.0, 0.52, 0.20, 0.30))
+	capsule_letters(font, s, k, int(round(s.y * 0.30)), s.y * 0.46,
+		PROP_TORCHES, PROP_KNIVES, -1, Color(1.0, 0.90, 0.68), Color(1.0, 0.72, 0.34))
+	capsule_embers(Vector2(s.x * 0.34, s.y * 0.34), s.y * 0.44, 26, Color(1.0, 0.70, 0.32, 0.55))
+	draw_vignette(s, 0.58)
+
+
 func capsule_four(font: Font, s: Vector2, k: float) -> void:
-	# 4. THE HANDS. Two forearms in evening dress and nothing else of the man: one has
-	# just let a club go, the other is opening for the knife coming down. It is the
-	# moment the whole game is about, at a size where the cuff buttons show.
-	var v := venue_data(2)                       # the Small Theatre's crimson and cream
-	var suit: Color = v["suit"]
-	var dk: Color = v["suit_dk"]
-	var cuff: Color = v["collar"]
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.085, 0.04, 0.05), Color(0.018, 0.012, 0.02), 22)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.40), s.y * 0.62, Color(1.0, 0.72, 0.36, 0.22))
-	var w := s.y * 0.088
-	var wl := Vector2(s.x * 0.31, s.y * 0.56)
-	var wr := Vector2(s.x * 0.69, s.y * 0.56)
-	var el := Vector2(s.x * 0.04, s.y * 1.04)
-	var er := Vector2(s.x * 0.96, s.y * 1.04)
-	capsule_sleeve(wl, el, w, suit, dk, cuff)
-	capsule_sleeve(wr, er, w, suit, dk, cuff)
-	# the grip IS a prop's local origin, so drawing at the hand's own centre puts it in
-	# the fist rather than floating beside it
-	var hl := wl + (wl - el).normalized() * w * 0.30
-	var hr := wr + (wr - er).normalized() * w * 0.30
-	draw_club(hl, -0.34, s.y * 0.0135)
-	draw_knife(hr, 0.30, s.y * 0.0135)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.20), s.y * 0.20, Color(1.0, 0.84, 0.45, 0.20))
-	draw_ball_shape(Vector2(s.x * 0.5, s.y * 0.17), Color(1.0, 0.82, 0.35), s.y * 0.0055)
-	capsule_wordmark(font, s.y * 0.60, k, s, Color(1.0, 0.90, 0.56), "")
-	draw_vignette(s, 0.6)
+	# 4. EVERY PROP IT CAN CARRY. Club stem, knife bar, ring O, and a torch standing on
+	# the A - the densest version, for when the mark has room to be looked at.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.09, 0.05, 0.06), Color(0.017, 0.012, 0.02), 22)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.72, Color(1.0, 0.66, 0.30, 0.22))
+	capsule_letters(font, s, k, int(round(s.y * 0.28)), s.y * 0.50,
+		PROP_CLUBS, PROP_KNIVES, PROP_TORCHES, Color(1.0, 0.92, 0.72), Color(0.50, 0.78, 0.96))
+	capsule_embers(Vector2(s.x * 0.72, s.y * 0.26), s.y * 0.30, 16, Color(1.0, 0.72, 0.34, 0.45))
+	draw_vignette(s, 0.56)
 
 
 func capsule_five(font: Font, s: Vector2, k: float) -> void:
-	# 5. THE FAN. The three props the game calls dangerous, spread from one point like a
-	# dealt hand, with the torch lit in the middle of them. A fan is one silhouette from
-	# across a page and three separate objects up close, which is the whole brief.
-	#
-	# (This slot has now eaten two concepts that could not take the scale: the money hat,
-	# whose gold fill is a heap of coins only at 138px, and the gold rose, whose petals
-	# are flat polygons. The lesson is the same both times - an asset earns a capsule by
-	# having INTERNAL STRUCTURE, not by being pretty in the HUD. The knife's fuller,
-	# guard and pommel, the club's banded neck and the torch's three-layer flame all do.)
-	var piv := Vector2(s.x * 0.5, s.y * 0.96)
-	var sc := s.y * 0.0155
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.035), Color(0.017, 0.012, 0.015), 22)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.34), s.y * 0.66, Color(1.0, 0.56, 0.22, 0.26))
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.26, Color(1.0, 0.76, 0.36, 0.30))
-	draw_club(piv, -0.46, sc)
-	draw_knife(piv, 0.46, sc)
-	draw_torch(piv, 0.0, sc, true)
-	capsule_embers(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.44, 24, Color(1.0, 0.70, 0.32, 0.55))
-	capsule_wordmark(font, s.y * 0.055, k * 1.15, s, Color(1.0, 0.88, 0.5), "")
-	draw_vignette(s, 0.56)
+	# 5. THE QUIET ONE. Near-black, one shaft of light, and only the two substitutions
+	# doing the talking - no glow behind the word, nothing else in the frame at all.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.04, 0.03, 0.035), Color(0.01, 0.008, 0.012), 20)
+	draw_spotlight_cone(s, s.x * 0.5, 0.30)
+	capsule_letters(font, s, k, int(round(s.y * 0.32)), s.y * 0.50,
+		PROP_CLUBS, PROP_KNIVES, -1, Color(0.97, 0.94, 0.88), Color(0.62, 0.86, 1.0))
+	draw_vignette(s, 0.68)
 
 
 func draw_capsule_art(font: Font, s: Vector2) -> void:
