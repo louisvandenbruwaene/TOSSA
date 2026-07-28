@@ -1051,10 +1051,12 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # What is here is what still has two real sides and wants Louis's eye on it. The
 # dictionary IS the shipped default for each - keep every reader's fallback equal to the
 # value here, or a missing key silently ships the other look.
-var experiments := {"face_v2": true}
+var experiments := {"face_v2": true, "rich_props": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
+	{"id": "rich_props", "name": "Rich props on the stage, not just in the shop",
+	 "desc": "The props are drawn on stage the way the shop card and the store art draw them: a ball with panel seams and a real specular, a shaded egg with a speckled shell, a club with a lacquered stripe and a wrapped grip, a knife that reflects the room instead of being filled with grey, and a torch whose flame is tall, asymmetric and blue at the wick. Dozens of shapes per object against the handful the stage normally uses, so this is the one experiment that can genuinely cost frames - turn it OFF if a heavy set feels less than smooth, and see the FPS note below. OFF restores the flat stage props, which is also what three earlier passes settled on deliberately: a painted highlight is a claim about where the light is, and this stage's light really moves."},
 	{"id": "face_v2", "name": "The juggler's face: real hair, a real mouth",
 	 "desc": "The performer read as a mannequin: hair was a brown circle behind a tan one, and the mouth was a bent polyline of even thickness with square ends. Now the hair has a real silhouette - a side parting, a swept fringe that comes to a point, temples down past the eyes, a crown sheen - and the mouth is a filled shape with lips, an opening that widens with the mood, and light on the lower lip. Eyes are slimmer, sit under proper tapered brows, and squeeze shut on a wince. A soft nose plane. Same head size, same stance, same proportions - nothing outside the face moves, and the Skills preview now draws this same head instead of its own. OFF restores the old face."},
 ]
@@ -10378,25 +10380,42 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
 		draw_arc(pos, (23.0 + 3.0 * pulse) * sc, 0.0, TAU, 26, Color(1.0, 0.86, 0.5, 0.5), 2.5, true)
 		draw_circle(pos, 15.0 * sc, Color(1.0, 0.85, 0.5, 0.14))
-	var ang := prop_spin_angle(b)
+	draw_prop_body(b, pos, prop_spin_angle(b), sc)
+
+
+func draw_prop_body(b: Ball, pos: Vector2, ang: float, sc: float) -> void:
+	# WHICH PICTURE OF A PROP THE STAGE DRAWS, behind the F9 `rich_props` switch so the
+	# cost can be turned off in one keypress if a heavy set ever feels less than smooth -
+	# those shapes were written for a still frame, not for fifteen objects at 120Hz.
+	#
+	# THE SQUASH LIVES HERE, ABOVE THE SWITCH, deliberately. It is MOTION, not artwork, so
+	# both sides of the toggle have to get it - otherwise flipping the experiment would
+	# change how the props FEEL as well as how they look, and an A/B that moves two things
+	# at once answers neither question.
+	if b.kind == PROP_EGGS or b.kind == PROP_BALLS:
+		# squash and stretch: a fast round prop elongates slightly along its motion,
+		# which makes the arc feel alive at zero cost to readability
+		var k := 0.0
+		var vang := 0.0
+		if b.state == STATE_FLIGHT:
+			# analytic, never differenced off the SPACED comet trail - see flight_vel
+			# for what that sampling did to this (it is the whole jitter bug)
+			var vel := flight_vel(b)
+			k = clampf(vel.length() * 0.055, 0.0, 0.22)
+			vang = vel.angle()
+		draw_set_transform(pos, vang, Vector2(1.0 + k, 1.0 - k))
+		if exp_on("rich_props"):
+			draw_prop_rich(b.kind, Vector2.ZERO, b.color, ang, sc, false)
+		elif b.kind == PROP_EGGS:
+			draw_egg(Vector2.ZERO, b.color, sc)
+		else:
+			draw_ball_shape(Vector2.ZERO, b.color, sc)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
+	if exp_on("rich_props"):
+		draw_prop_rich(b.kind, pos, b.color, ang, sc, false)   # shape, not light
+		return
 	match b.kind:
-		PROP_EGGS, PROP_BALLS:
-			# squash and stretch: a fast ball elongates slightly along its motion,
-			# which makes the arc feel alive at zero cost to readability
-			var k := 0.0
-			var vang := 0.0
-			if b.state == STATE_FLIGHT:
-				# analytic, never differenced off the SPACED comet trail - see flight_vel
-				# for what that sampling did to this (it is the whole jitter bug)
-				var vel := flight_vel(b)
-				k = clampf(vel.length() * 0.055, 0.0, 0.22)
-				vang = vel.angle()
-			draw_set_transform(pos, vang, Vector2(1.0 + k, 1.0 - k))
-			if b.kind == PROP_EGGS:
-				draw_egg(Vector2.ZERO, b.color, sc)
-			else:
-				draw_ball_shape(Vector2.ZERO, b.color, sc)
-			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		PROP_RINGS:
 			draw_ring_prop(pos, b.color, sc)
 		PROP_CLUBS:
@@ -10578,7 +10597,7 @@ func draw_chainsaw(pos: Vector2, ang: float, sc: float, rich: bool = false) -> v
 	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _saw_idx, _saw_pts, _saw_cols)
 	if rich:
 		# the shop card can afford the exhaust and a heat shimmer off the block
-		var ct := float(cine_tick)
+		var ct := atick()
 		for i in 5:
 			var ph := fposmod(ct * 0.012 + float(i) * 0.2, 1.0)
 			draw_circle(Vector2(CSAW_BODY_W * 0.9 + ph * 5.0, 2.0 - ph * 16.0),
@@ -10590,10 +10609,13 @@ func _saw_bake() -> void:
 	# the whole saw in local units: bar, running chain, engine block, vents, handle.
 	# Rebuilt only when the tick has moved, because the chain is the only part that
 	# changes and it changes with the clock, not with which saw is being drawn.
-	if _saw_tick == cine_tick:
+	# ...and the same trap the other way round. cine_tick only advances OUTSIDE ST_PLAY,
+	# so keying the bake on it froze the chain solid the moment an act started - the one
+	# state the prop exists for. atick() is the clock that runs in both.
+	if _saw_tick == int(atick()):
 		return
-	_saw_tick = cine_tick
-	var t := float(cine_tick)
+	_saw_tick = int(atick())
+	var t := atick()
 	_soup_clear()
 	var body := Color(0.94, 0.55, 0.12)
 	var body_dk := Color(0.62, 0.32, 0.06)
@@ -10649,7 +10671,7 @@ func _saw_bake() -> void:
 func draw_torch(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void:
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var handle := Color(0.24, 0.16, 0.12)
-	draw_line(Vector2(0, 14), Vector2(0, -2), handle, 4.0)
+	draw_line(Vector2(0, TORCH_BUTT), Vector2(0, TORCH_WICK + 1.0), handle, 4.0)
 	if rich:
 		# the shop's torch is a still object on a card, so it can afford the wick
 		# wrapping and the char line the flying one cannot
@@ -10663,6 +10685,18 @@ func draw_torch(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void
 # a flame's OUTLINE, half of it: wide at the base, pinched at the waist, curling to a
 # point. Written as fractions of (width, height) so one profile serves the 22px flame on
 # a flying torch and the big one on a shop card. The old flame was two triangles.
+# ONE TORCH, ONE SET OF DIMENSIONS (2026-07-28, Louis: "the flame is a bit too big with
+# the lush version, keep the size, just make a bigger part handle" and "make absolutely
+# sure that the prettier 'shop' version of an object is just more detailed and not
+# different than the basic version"). He is right on both counts and they were the same
+# bug: the capsule torch had been drawn freehand at its own proportions, so it stood 49
+# units tall against the stage torch's 39 with a flame that was 63% of the whole object.
+# A real juggling torch is mostly HANDLE. These are the numbers both versions build from
+# now, so the shop can only ever add detail inside the same silhouette.
+const TORCH_BUTT := 16.0    # the handle's far end
+const TORCH_WICK := -3.0    # where the fire starts
+const TORCH_FLAME_H := 22.0 # ...and how far it reaches above that
+const TORCH_FLAME_W := 4.4  # its peak half-width
 const FLAME_PROFILE := [Vector2(0.00, 0.00), Vector2(0.52, -0.07), Vector2(0.62, -0.26),
 	Vector2(0.47, -0.48), Vector2(0.27, -0.70), Vector2(0.11, -0.87), Vector2(0.00, -1.00)]
 
@@ -10693,13 +10727,14 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 	var t := float(tick)
 	var fl := 1.0 + 0.16 * sin(t * 0.5) + 0.07 * sin(t * 1.31)     # two-rate flicker
 	var sway := 2.2 * sin(t * 0.29) + 0.9 * sin(t * 0.71)          # the lean
-	var base := Vector2(0.0, -3.0)
+	var base := Vector2(0.0, TORCH_WICK)
+	var fw := TORCH_FLAME_W / 0.62      # flame_shape's profile peaks at 0.62 of `w`
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	if rich:
-		draw_colored_polygon(flame_shape(base, 27.0 * fl, 9.6, sway * 1.2), Color(1.0, 0.32, 0.06, 0.35))
-	draw_colored_polygon(flame_shape(base, 22.0 * fl, 7.4, sway), Color(1.0, 0.44, 0.10, 0.95))
-	draw_colored_polygon(flame_shape(base, 15.0 * fl, 5.0, sway * 0.7), Color(1.0, 0.72, 0.20, 0.95))
-	draw_colored_polygon(flame_shape(base + Vector2(0.0, -1.0), 8.5 * fl, 3.1, sway * 0.35),
+		draw_colored_polygon(flame_shape(base, TORCH_FLAME_H * 1.22 * fl, fw * 1.30, sway * 1.2), Color(1.0, 0.32, 0.06, 0.35))
+	draw_colored_polygon(flame_shape(base, TORCH_FLAME_H * fl, fw, sway), Color(1.0, 0.44, 0.10, 0.95))
+	draw_colored_polygon(flame_shape(base, TORCH_FLAME_H * 0.68 * fl, fw * 0.68, sway * 0.7), Color(1.0, 0.72, 0.20, 0.95))
+	draw_colored_polygon(flame_shape(base + Vector2(0.0, -1.0), TORCH_FLAME_H * 0.39 * fl, fw * 0.42, sway * 0.35),
 		Color(1.0, 0.96, 0.72, 0.95))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if rich:
@@ -10735,9 +10770,19 @@ func prop_spin_angle(b: Ball) -> float:
 		return 0.0
 	if b.flat:
 		return 0.0   # a horizontal pass crosses upright and does not turn at all
+	# ...AND IT LANDS ON A WHOLE NUMBER OF THEM (2026-07-28, Louis: "the clubs, torches
+	# and knives should not snap into place when catching: they should be pretty much
+	# vertical when they are caught and not pretty much horizontal"). The turn count was
+	# `1 + height` with height a CONTINUOUS 0..1.8, so a prop finished its flight at an
+	# arbitrary angle - very often side-on - and then the held prop is drawn upright, so
+	# the last frame of the catch was a visible snap. Rounding to a whole number costs
+	# nothing the feature was for: the throw's size still decides how many times it goes
+	# over (one at a tap, two at a full throw, three past that), and now every one of
+	# them ENDS where it started, handle down, which is how a club is actually caught.
 	var span := maxi(1, b.land_tick - b.launch_tick)
 	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
-	return b.spin_dir * p * TAU * (1.0 + clampf(b.height, 0.0, 1.8))
+	var turns := maxf(1.0, round(1.0 + clampf(b.height, 0.0, 1.8)))
+	return b.spin_dir * p * TAU * turns
 
 
 # the shop icon's two per-prop numbers (2026-07-27). The old icon simply blew the raw
@@ -10770,21 +10815,11 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 	if kind == PROP_TORCHES:
 		# fire lights its own corner of the shop
 		draw_glow(at + Vector2(0.0, -11.0 * sc), 44.0 * mag, Color(1.0, 0.62, 0.22, 0.30))
-	match kind:
-		PROP_EGGS:
-			draw_egg(at, col, sc)
-		PROP_RINGS:
-			draw_ring_prop(at, col, sc)
-		PROP_CLUBS:
-			draw_club(at, ang, sc)
-		PROP_KNIVES:
-			draw_knife(at, ang, sc)
-		PROP_TORCHES:
-			draw_torch(at, ang, sc, true)   # the shop card gets the full fire
-		PROP_CHAINSAW:
-			draw_chainsaw(at, ang, sc, true)   # ...and the saw gets its smoke
-		_:
-			draw_ball_shape(at, col, sc)
+	# THE GOODS GET THE GOOD VERSION. Nothing on this card is moving fast and there are
+	# never more than a handful on screen, so the shop can afford the picture the stage
+	# cannot - which is the right way round for a card whose whole job is to make you
+	# want the thing on it.
+	draw_prop_rich(kind, at, col, ang, sc)
 
 
 #endregion
@@ -13869,7 +13904,7 @@ const CAP_BALL_R := 0.119     # a ball's radius, in units of the mark's letter h
 # THE KNIFE'S OWN MEASUREMENTS, so the layout never has to guess them. Local units, the
 # same ones cap_knife draws in: the point is at -26 and the butt cap ends at +16.3.
 const CAP_KNIFE_TIP := -26.0
-const CAP_KNIFE_BUTT := 16.3
+const CAP_KNIFE_BUTT := 15.6   # the stage knife's own pommel edge (13.2 + its 2.4 radius)
 const CAP_KNIFE_LEN := CAP_KNIFE_BUTT - CAP_KNIFE_TIP          # 42.3, tip to butt
 const CAP_KNIFE_MID := (CAP_KNIFE_TIP + CAP_KNIFE_BUTT) * 0.5  # -4.85, the balance point
 # THE PICTURE HAS A LIGHT SOURCE IN IT, so everything obeys it (2026-07-28, Louis: "a
@@ -13946,6 +13981,87 @@ func cap_ring(c: Vector2, col_in: Color, R: float) -> void:
 		draw_line(c + d * (R - w * 0.96), c + d * (R - w * 0.04), ca(Color(1, 1, 1, 0.10)), maxf(1.0, R * 0.030))
 
 
+func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, halo: bool = true) -> void:
+	# THE LUSH VERSION OF ANY PROP, in one place (2026-07-28, Louis: "you should use the
+	# better looking visuals for those props in the shop also, and test them with F9 in
+	# juggle sessions"). These were written for a single still capsule frame and are
+	# deliberately extravagant - dozens of shapes per object where the stage draws a
+	# handful. One dispatcher so the shop card and the F9 stage toggle can never show
+	# different pictures of the same object.
+	match kind:
+		PROP_EGGS:     cap_egg(pos, col, sc)
+		PROP_RINGS:    cap_ring(pos, col, 12.0 * sc)
+		PROP_CLUBS:    cap_club(pos, ang, sc)
+		PROP_KNIVES:   cap_knife(pos, ang, sc)
+		# FIRE IS THE ONE PROP THAT CANNOT BE RICHER ON STAGE, and the measurements above
+		# are why: a flame is large translucent AREA, and seven of them cost 145 fps ->
+		# 15. Every other prop's detail is opaque shape, which is nearly free. So the
+		# stage keeps the three-layer flame it already had (which is good, and which the
+		# lush one is now proportioned to match) and the shop gets the full fire.
+		PROP_TORCHES:
+			if halo:
+				cap_torch(pos, ang, sc, true)
+			else:
+				draw_torch(pos, ang, sc)
+		PROP_CHAINSAW: draw_chainsaw(pos, ang, sc, true)
+		_:             cap_ball(pos, col, BALL_RADIUS_PX * sc)
+
+
+func cap_egg(p: Vector2, col_in: Color, sc: float) -> void:
+	# the egg with everything a still frame can afford: the ovoid silhouette is still the
+	# whole character of it, but here it gets the shading the stage refuses (see THE ROUND
+	# PROPS ARE FLAT) plus the speckling a real shell has and a bounce off the boards.
+	var col := ca(col_in)
+	var w := 9.0 * sc
+	var h := 12.0 * sc
+	ovoid(p, w, h, ca(Color(col.r * 0.58, col.g * 0.56, col.b * 0.54)))
+	ovoid(p + Vector2(-w * 0.10, -h * 0.09), w * 0.90, h * 0.90, col)
+	ovoid(p + Vector2(-w * 0.26, -h * 0.26), w * 0.52, h * 0.50, ca(col.lightened(0.22)))
+	# the speckle: a shell is never one flat tone, and at this size the flecks are the
+	# single mark that says "egg" rather than "white ball"
+	for i in 11:
+		var a := float(i) * 2.399
+		var rr := sqrt(float(i) / 11.0) * 0.72
+		var q := p + Vector2(cos(a) * w * rr, sin(a) * h * rr)
+		draw_circle(q, maxf(0.7, w * 0.055), ca(Color(0.66, 0.58, 0.48, 0.34)))
+	fill_ellipse(p + Vector2(-w * 0.30, -h * 0.38), w * 0.22, h * 0.13, ca(Color(1, 1, 1, 0.6)))
+	cap_warm_rim(p, w, 0.22)
+
+
+func cap_club(p: Vector2, ang: float, sc: float) -> void:
+	# the club with a real body: the taper shaded down one side, a lacquered highlight
+	# running the length of it, a wrapped grip and a knob that is a knob rather than a
+	# disc. Same silhouette and the same proportions as the stage club - roughly three
+	# times as long as it is wide above the grip, which is what stops it reading as a
+	# lollipop - so nothing here promises a shape the game does not have.
+	draw_set_transform(p, ang, Vector2.ONE * sc)
+	var body := ca(Color(0.90, 0.35, 0.38))
+	var body_dk := ca(Color(0.56, 0.18, 0.22))
+	var band := ca(Color(0.96, 0.92, 0.85))
+	var band_dk := ca(Color(0.70, 0.66, 0.60))
+	draw_colored_polygon(PackedVector2Array([                      # the handle, tapered
+		Vector2(-1.9, 14.0), Vector2(1.9, 14.0), Vector2(1.5, -3.0), Vector2(-1.5, -3.0)]), band)
+	draw_colored_polygon(PackedVector2Array([                      # ...shaded down one side
+		Vector2(0.5, 13.8), Vector2(1.9, 13.8), Vector2(1.5, -2.8), Vector2(0.6, -2.8)]), band_dk)
+	for gy in [4.0, 6.4, 8.8, 11.2]:                               # the grip wrap
+		draw_line(Vector2(-1.9, gy), Vector2(1.9, gy + 0.5), ca(Color(0.62, 0.58, 0.52, 0.55)), 0.7)
+	draw_circle(Vector2(0, 15.0), 2.9, band)                       # the knob...
+	draw_circle(Vector2(-0.7, 14.4), 1.5, ca(Color(1, 1, 1, 0.55)))   # ...and its highlight
+	draw_colored_polygon(PackedVector2Array([                      # the body
+		Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16)]), body)
+	draw_colored_polygon(PackedVector2Array([                      # its shaded side
+		Vector2(1.0, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(2.4, -16)]), body_dk)
+	draw_circle(Vector2(0, -16.5), 6.0, body)                      # the head
+	draw_circle(Vector2(1.9, -17.4), 4.6, body_dk)                 # ...shaded to match
+	draw_circle(Vector2(-1.6, -17.2), 3.4, ca(Color(1.0, 0.58, 0.58, 0.55)))
+	draw_colored_polygon(PackedVector2Array([                      # the lacquer stripe
+		Vector2(-1.9, -3.0), Vector2(-0.9, -3.0), Vector2(-2.6, -16.4), Vector2(-4.0, -16.0)]),
+		ca(Color(1, 1, 1, 0.28)))
+	draw_line(Vector2(-2.9, -2.4), Vector2(2.9, -2.4), band, 2.2)  # the collar
+	draw_line(Vector2(-2.9, -1.5), Vector2(2.9, -1.5), band_dk, 0.7)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 	# THE KNIFE, drawn from scratch rather than painted over the stage one (2026-07-28).
 	# Overlaying detail on `draw_knife` was the earlier approach and it is why the blade
@@ -13996,28 +14112,26 @@ func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 	# the surface is metal that has been used rather than a shape filled with grey
 	for gy in [-21.0, -14.5, -8.0, -2.5]:
 		draw_line(Vector2(-1.6, gy), Vector2(2.4, gy + 0.5), ca(Color(1, 1, 1, 0.10)), 0.28)
-	# BOLSTER: the block of brass between blade and grip. Real knives have one, and it is
-	# what stops the handle reading as a stick glued to a blade.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-4.3, 2.2), Vector2(4.3, 2.2), Vector2(3.9, 5.2), Vector2(-3.9, 5.2)]), brass)
-	draw_line(Vector2(-3.6, 3.0), Vector2(3.6, 3.0), ca(Color(1.0, 0.92, 0.70, 0.55)), 0.7)
-	draw_line(Vector2(-3.9, 5.0), Vector2(3.9, 5.0), ca(Color(0.20, 0.14, 0.06, 0.7)), 0.5)
-	# HANDLE: contoured scales, not a rectangle - narrow at the bolster, swelling to the
-	# butt, with the scale's own edge catching light along one side and a lanyard hole
-	# through the tail. A juggling knife is gripped and thrown all night; it has a shape.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-2.9, 5.2), Vector2(2.9, 5.2), Vector2(3.2, 9.0), Vector2(2.7, 13.4),
-		Vector2(-2.7, 13.4), Vector2(-3.2, 9.0)]), wood)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-2.9, 5.4), Vector2(-1.4, 5.4), Vector2(-1.2, 9.0), Vector2(-1.5, 13.2),
-		Vector2(-2.7, 13.2), Vector2(-3.1, 9.0)]), wood_hi)
-	for ry in [6.6, 11.2]:                                  # the pins the scales sit on
-		draw_circle(Vector2(0, ry), 0.72, brass)
-		draw_circle(Vector2(-0.20, ry - 0.20), 0.32, ca(Color(1.0, 0.94, 0.78, 0.9)))
-	draw_circle(Vector2(0, 15.0), 0.62, ca(Color(0.05, 0.04, 0.04)))            # lanyard hole
-	draw_colored_polygon(PackedVector2Array([                               # butt cap
-		Vector2(-2.7, 13.4), Vector2(2.7, 13.4), Vector2(2.3, 16.3), Vector2(-2.3, 16.3)]), brass)
-	draw_line(Vector2(-2.3, 14.2), Vector2(2.3, 14.2), ca(Color(1.0, 0.92, 0.70, 0.45)), 0.6)
+	# EVERYTHING BELOW THE BLADE STAYS INSIDE THE STAGE KNIFE'S OWN SILHOUETTE (2026-07-28,
+	# Louis: "make absolutely sure that the prettier 'shop' version of an object is just
+	# more detailed and not different than the basic version"). It was not: this version
+	# had grown a brass bolster block and a butt cap that pushed it to 42.3 units against
+	# the stage knife's 35, so the shop was advertising a longer knife than the game
+	# throws. The guard, the grip and the pommel are now exactly where draw_knife puts
+	# them - only what is drawn ON them is new.
+	draw_line(Vector2(-4.4, 3.0), Vector2(4.4, 3.0), brass, 3.0)                # the guard
+	draw_line(Vector2(-4.0, 2.3), Vector2(4.0, 2.3), ca(Color(1.0, 0.92, 0.70, 0.5)), 0.7)
+	draw_colored_polygon(PackedVector2Array([                                   # the grip
+		Vector2(-2.5, 4.0), Vector2(2.5, 4.0), Vector2(2.7, 8.0),
+		Vector2(2.3, 12.5), Vector2(-2.3, 12.5), Vector2(-2.7, 8.0)]), wood)
+	draw_colored_polygon(PackedVector2Array([                                   # its lit side
+		Vector2(-2.5, 4.2), Vector2(-1.2, 4.2), Vector2(-1.1, 8.0), Vector2(-1.3, 12.3),
+		Vector2(-2.3, 12.3), Vector2(-2.6, 8.0)]), wood_hi)
+	for ry in [5.6, 9.6]:                                   # the pins the scales sit on
+		draw_circle(Vector2(0, ry), 0.62, brass)
+		draw_circle(Vector2(-0.18, ry - 0.18), 0.28, ca(Color(1.0, 0.94, 0.78, 0.9)))
+	draw_circle(Vector2(0, 13.2), 2.4, brass)                                   # the pommel
+	draw_circle(Vector2(-0.8, 12.6), 1.1, ca(Color(1.0, 0.94, 0.78, 0.75)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -14058,7 +14172,7 @@ func cap_flame_shape(base: Vector2, h: float, w: float, sway: float, wob: float,
 	return pts
 
 
-func cap_torch(p: Vector2, ang: float, sc: float) -> void:
+func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true) -> void:
 	# THE TORCH, drawn from scratch: the fire is the brightest thing in the picture and
 	# it was the weakest object in it, so it is built here rather than dressed up.
 	#
@@ -14067,23 +14181,51 @@ func cap_torch(p: Vector2, ang: float, sc: float) -> void:
 	# says "this is burning" rather than "this is orange"), a smooth asymmetric
 	# silhouette, layers that each lean and wobble on their OWN phase so the shape
 	# writhes instead of pulsing, a white-hot heart, and embers that leave.
-	var t := float(tick)
+	#
+	# ON atick(), NEVER tick (2026-07-28, Louis: "the flames are not burning in the
+	# starting menu"). `tick` is the SIM clock and it does not advance outside ST_PLAY,
+	# so on the title screen - the one place this fire is the largest thing on screen -
+	# the flicker, the sway and the embers were all frozen at whatever value tick held.
+	# atick() is the cosmetic clock that runs in every state and exists for exactly this.
+	var t := atick()
 	var fl := 1.0 + 0.14 * sin(t * 0.5) + 0.06 * sin(t * 1.31)
 	var sway := 2.0 * sin(t * 0.29) + 0.8 * sin(t * 0.71)
-	# the pool of light the fire throws, first of all, so it sits BEHIND the object it
-	# comes off rather than as a haze laid over it
+	# THE POOL OF LIGHT IS THE EXPENSIVE PART, and `halo` is what turns it off.
+	#
+	# MEASURED (2026-07-28), seven torches at the World Arena, and the numbers are worth
+	# keeping because they contradict this file's own performance note:
+	#     stage props (flat)          423 calls   2.80ms   145 fps
+	#     rich props, 7 BALLS         478 calls   2.90ms   145 fps
+	#     rich props, 7 TORCHES       587 calls   4.91ms    15 fps   <-- and there it is
+	# The draw-call and CPU numbers barely move between the last two, so the usual rule
+	# ("cost is the NUMBER of calls times ~5us, vertex counts barely register") does not
+	# explain a tenfold drop in frame rate. This case is FILL RATE: two big translucent
+	# quads plus a wide low-alpha aura polygon, times seven props, is an enormous amount
+	# of blended overdraw, and none of that is visible to a CPU timer around _draw. The
+	# earlier finding that fill rate did not matter here was measured on props that had
+	# no glow on them - it was true, and it stopped being true the moment fire was drawn
+	# this way. **When frame rate falls and DRAW microseconds do not, stop counting calls
+	# and start looking at how much translucent area is being painted.**
+	#
+	# So the stage gets the fire's SHAPE - the smooth asymmetric silhouette, the writhing
+	# layers, the blue base, the white heart, which is all of what makes it look better -
+	# and not its pool of light, which the stage already provides its own version of when
+	# the house is dark (see draw_prop's halo and stage_darkness).
 	var glow_at := p + Vector2(0.0, -3.0).rotated(ang) * sc
-	draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, ca(Color(1.0, 0.46, 0.12, 0.30)))
-	draw_glow(glow_at + Vector2(0, -8.0 * sc), 23.0 * sc, ca(Color(1.0, 0.72, 0.30, 0.26)))
+	if halo:
+		draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, ca(Color(1.0, 0.46, 0.12, 0.30)))
+		draw_glow(glow_at + Vector2(0, -8.0 * sc), 23.0 * sc, ca(Color(1.0, 0.72, 0.30, 0.26)))
 	draw_set_transform(p, ang, Vector2.ONE * sc)
 	# --- the handle, first, so the fire sits over its top ---------------------------
+	# THE HANDLE RUNS THE FULL LENGTH the stage torch's does - TORCH_WICK to TORCH_BUTT -
+	# so this is the same object with more on it, never a differently-proportioned one.
 	draw_colored_polygon(PackedVector2Array([          # a turned haft: waisted, not a bar
 		Vector2(-2.1, 0.0), Vector2(2.1, 0.0), Vector2(2.4, 6.0), Vector2(1.9, 11.0),
-		Vector2(2.3, 15.5), Vector2(-2.3, 15.5), Vector2(-1.9, 11.0), Vector2(-2.4, 6.0)]),
+		Vector2(2.3, TORCH_BUTT), Vector2(-2.3, TORCH_BUTT), Vector2(-1.9, 11.0), Vector2(-2.4, 6.0)]),
 		ca(Color(0.26, 0.17, 0.12)))
 	draw_colored_polygon(PackedVector2Array([          # the lit side of the haft
-		Vector2(-2.1, 0.2), Vector2(-0.9, 0.2), Vector2(-0.8, 11.0), Vector2(-1.1, 15.3),
-		Vector2(-2.3, 15.3), Vector2(-1.9, 11.0)]), ca(Color(0.40, 0.27, 0.18)))
+		Vector2(-2.1, 0.2), Vector2(-0.9, 0.2), Vector2(-0.8, 11.0), Vector2(-1.1, TORCH_BUTT - 0.2),
+		Vector2(-2.3, TORCH_BUTT - 0.2), Vector2(-1.9, 11.0)]), ca(Color(0.40, 0.27, 0.18)))
 	for gy in [2.4, 4.4, 6.4, 8.4, 10.4, 12.4]:        # the cord it is bound with
 		draw_line(Vector2(-2.3, gy), Vector2(2.3, gy + 0.4), ca(Color(0.14, 0.09, 0.07, 0.75)), 0.55)
 		draw_line(Vector2(-2.3, gy + 0.7), Vector2(2.3, gy + 1.1), ca(Color(0.62, 0.45, 0.28, 0.30)), 0.35)
@@ -14113,18 +14255,28 @@ func cap_torch(p: Vector2, ang: float, sc: float) -> void:
 	# by 30 high, which is a bulb, not a fire. Roughly 1:4 is what a torch actually
 	# burns, and the layers have to differ in HEIGHT much more than in width or they
 	# stack into one mass with no visible heart.
-	for lay in [
-			{"h": 40.0, "w": 4.6, "sw": 1.3, "wob": 0.16, "ph": 0.0, "col": ca(Color(1.0, 0.30, 0.05, 0.26))},
-			{"h": 31.0, "w": 3.5, "sw": 1.0, "wob": 0.14, "ph": 1.1, "col": ca(Color(1.0, 0.42, 0.08, 0.92))},
-			{"h": 22.0, "w": 2.6, "sw": 0.7, "wob": 0.12, "ph": 2.3, "col": ca(Color(1.0, 0.66, 0.16, 0.94))},
-			{"h": 14.0, "w": 1.9, "sw": 0.45, "wob": 0.10, "ph": 3.4, "col": ca(Color(1.0, 0.88, 0.44, 0.95))},
-			{"h": 8.0, "w": 1.2, "sw": 0.25, "wob": 0.08, "ph": 4.6, "col": ca(Color(1.0, 0.99, 0.90, 0.95))},
+	# HEIGHTS AND WIDTHS ARE FRACTIONS OF THE SHARED FLAME, not free numbers. Written this
+	# way after Louis: "the flame is a bit too big with the lush version, keep the size,
+	# just make a bigger part handle" - the freehand version stood 49 units tall against
+	# the stage torch's 39, with the fire 63% of the whole object. A juggling torch is
+	# mostly handle, and now both versions agree on where the fire stops.
+	var FH := TORCH_FLAME_H
+	var FW := TORCH_FLAME_W
+	var layers := [
+			{"h": FH * 1.29, "w": FW * 1.31, "sw": 1.3, "wob": 0.16, "ph": 0.0, "col": ca(Color(1.0, 0.30, 0.05, 0.26))},
+			{"h": FH, "w": FW, "sw": 1.0, "wob": 0.14, "ph": 1.1, "col": ca(Color(1.0, 0.42, 0.08, 0.92))},
+			{"h": FH * 0.71, "w": FW * 0.74, "sw": 0.7, "wob": 0.12, "ph": 2.3, "col": ca(Color(1.0, 0.66, 0.16, 0.94))},
+			{"h": FH * 0.45, "w": FW * 0.54, "sw": 0.45, "wob": 0.10, "ph": 3.4, "col": ca(Color(1.0, 0.88, 0.44, 0.95))},
+			{"h": FH * 0.26, "w": FW * 0.34, "sw": 0.25, "wob": 0.08, "ph": 4.6, "col": ca(Color(1.0, 0.99, 0.90, 0.95))},
 			# THE BLUE BASE, last and small, sitting ON the wick and nowhere else: the
 			# richest and hottest part of a fuel flame, and the one detail that says
 			# "burning" rather than "orange". It has to stay SMALL - blown up it is just
 			# a blue blob at the bottom of the fire, which is what the first pass got.
-			{"h": 4.0, "w": 1.5, "sw": 0.10, "wob": 0.05, "ph": 5.5, "col": ca(Color(0.42, 0.68, 1.0, 0.50))},
-			{"h": 2.2, "w": 0.85, "sw": 0.0, "wob": 0.04, "ph": 6.1, "col": ca(Color(0.74, 0.90, 1.0, 0.50))}]:
+			{"h": FH * 0.13, "w": FW * 0.43, "sw": 0.10, "wob": 0.05, "ph": 5.5, "col": ca(Color(0.42, 0.68, 1.0, 0.50))},
+			{"h": FH * 0.07, "w": FW * 0.24, "sw": 0.0, "wob": 0.04, "ph": 6.1, "col": ca(Color(0.74, 0.90, 1.0, 0.50))}]
+	if not halo:
+		layers.remove_at(0)   # the wide faint aura is overdraw, not shape - see above
+	for lay in layers:
 		var lh: float = float(lay["h"]) * fl
 		var lsway: float = sway * float(lay["sw"]) - sin(ang) * lh * CAP_FLAME_UPRIGHT
 		draw_colored_polygon(cap_flame_shape(wick, lh, float(lay["w"]), lsway,
@@ -14132,7 +14284,7 @@ func cap_torch(p: Vector2, ang: float, sc: float) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# the embers leaving it, in WORLD space: smoke rises however the torch is held
 	var wpos := p + wick.rotated(ang) * sc
-	for i in 9:
+	for i in (9 if halo else 0):
 		var sd := float(i) * 12.9898
 		var rise := fposmod(t * 0.010 + fposmod(sin(sd) * 43758.5, 1.0), 1.0)
 		var ex := sin(sd * 2.1) * 8.0 * sc + sway * sc * 2.4 * rise
