@@ -297,6 +297,31 @@ const PATTERNS := [
 # always pays. The rest carry composite stat/level walls and fill the stretches
 # BETWEEN stages; when even those run dry for too long, the pity director in
 # enter_day gifts the nearest one (see pity_grant).
+# THE GAME'S NAME, IN ONE PLACE (2026-07-28, Louis: "replace IACTO with _TITLE_ (or
+# something) so that i can easily change it later"). Change these two and every readout,
+# the wordmark, the daily share line, the credits and the demo wall's call to action all
+# follow. They are two constants rather than one because the WORDMARK letters the name
+# differently from the way it is written: the picture is the sentence "I act" with a
+# juggling ball finishing the word, so the mark needs the name minus its final letter,
+# spaced as the joke reads. TITLE_MARK's last character is the one the ball replaces.
+const GAME_TITLE := "IACTO"
+const TITLE_MARK := "I ACT"
+# NAMES STILL ON THE TABLE (Louis, 2026-07-28) - kept here beside the switch so choosing
+# one is a two-line edit and never a hunt. The second column is what TITLE_MARK becomes:
+# the ball prop stands in for the name's LAST letter, so the mark is the name without it,
+# spaced however the joke wants to read.
+#     TOSSA      "TOSS"        the ball is the final a
+#     VOLO       "VOL"         (Latin, "I fly" - the same first-person as I ACT)
+#     CASCADA    "CASCAD"
+#     ORBITA     "ORBIT"       the ball as the thing in orbit is almost too neat
+#     CATCHUP    "CATCH U"     awkward: the ball would stand for a p, not a round letter
+#     AIRTIME    "AIRTIM"      same problem, ends on e
+#     LAST CATCH "LAST CATC"   same problem, ends on h
+#     JUGGLE RUN "JUGGLE RU"   same problem, ends on n
+#     CASCADE    "CASCAD"      ends on e, but "CASCAD" + a ball reads as CASCADA
+# The wordmark only really sings when the name ENDS IN A ROUND LETTER (o or a), which is
+# what IACTO, TOSSA, VOLO, CASCADA and ORBITA all do. For any of the others the ball
+# would have to sit beside the word rather than inside it, which is a different mark.
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
 const SHOWER_FEED_ARC := 0.2  # ...and how much of its arc it actually rises (Louis, -80%:
 							   # "the height should be almost zero for showers"). Height and
@@ -7282,7 +7307,7 @@ func resolve_act() -> void:
 		# the results card shows the same string, never a second, later computation
 		var enc_name := String(ENCORES[encore]["name"]) if encore >= 0 and encore < ENCORES.size() else "no Encore"
 		var outcome := "all 3 goals" if complete else "%d/%d goals" % [goals_hit, NUM_GOALS]
-		daily_share = "IACTO Daily %d-%02d-%02d  -  %s, %s  -  %s  -  %s pts  -  best streak %d" % [
+		daily_share = GAME_TITLE + " Daily %d-%02d-%02d  -  %s, %s  -  %s  -  %s pts  -  best streak %d" % [
 			int(daily_seed() / 10000), int(daily_seed() / 100) % 100, daily_seed() % 100,
 			String(venue_data(run_venue)["name"]), enc_name, outcome, commafy(score), best_streak]
 		DisplayServer.clipboard_set(daily_share)
@@ -11457,7 +11482,7 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 	var opts := [
 		{"name": "Resume", "note": "right where it froze", "col": Color(0.55, 0.88, 0.52), "icon": "play"},
 		{"name": "End the session", "note": "back to the day hub", "col": Color(0.96, 0.76, 0.4), "icon": "back"},
-		{"name": "Quit Game", "note": "close IACTO", "col": Color(0.92, 0.42, 0.36), "icon": "quit"},
+		{"name": "Quit Game", "note": "close " + GAME_TITLE, "col": Color(0.92, 0.42, 0.36), "icon": "quit"},
 	]
 	var cw := pw - 44.0
 	var cx := px + 22.0
@@ -13497,141 +13522,149 @@ func capsule_wordmark(font: Font, y: float, k: float, s: Vector2, col: Color, su
 			int(round(26.0 * k)), Color(col.r * 0.92, col.g * 0.86, col.b * 0.78))
 
 
+func capsule_embers(c: Vector2, r: float, n: int, col: Color) -> void:
+	# the fire's own litter: sparks climbing off a flame, sized down as they rise. Cheap,
+	# and it is the thing that stops a big flame reading as a flat orange shape.
+	for i in n:
+		var t := fposmod(float(i) * 0.618, 1.0)
+		var up := 0.15 + 1.05 * t
+		var px := c.x + sin(float(i) * 2.3) * r * 0.42 * up
+		var py := c.y - r * up
+		var a := (1.0 - t) * col.a
+		draw_circle(Vector2(px, py), maxf(1.0, r * 0.035 * (1.0 - t * 0.7)), Color(col.r, col.g, col.b, a))
+		if i % 3 == 0:
+			draw_star4(Vector2(px, py), r * 0.06 * (1.0 - t), Color(1.0, 0.95, 0.8, a * 0.8))
+
+
+func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: Color, cuff: Color) -> void:
+	# a forearm in the costume, and nothing above the elbow: satin sleeve, a turned cuff
+	# with two buttons, and the hand. Louis: the performer himself is not one of the
+	# things worth blowing up, "perhaps just some detailed arms with the costume arms".
+	var d := (wrist - elbow).normalized()
+	var n := Vector2(-d.y, d.x)
+	var cuff_a := wrist - d * w * 1.15
+	draw_capsule(elbow, cuff_a, w * 1.20, w, dk)                    # the sleeve's shadow side
+	draw_capsule(elbow - n * w * 0.10, cuff_a - n * w * 0.10, w * 1.02, w * 0.84, suit)
+	draw_capsule(elbow - n * w * 0.26, cuff_a - n * w * 0.24, w * 0.36, w * 0.30,
+		Color(suit.r * 1.25 + 0.06, suit.g * 1.25 + 0.06, suit.b * 1.25 + 0.06, 0.55))   # satin sheen
+	draw_capsule(cuff_a, wrist - d * w * 0.35, w * 1.06, w * 0.98, cuff)   # the turned cuff
+	draw_circle(cuff_a + n * w * 0.30 + d * w * 0.30, w * 0.085, Color(0.25, 0.20, 0.16))
+	draw_circle(cuff_a + n * w * 0.30 + d * w * 0.62, w * 0.085, Color(0.25, 0.20, 0.16))
+	var skin := Color(0.87, 0.64, 0.45)
+	fill_ellipse(wrist + d * w * 0.30, w * 0.52, w * 0.62, skin)           # the hand
+	fill_ellipse(wrist + d * w * 0.30 - n * w * 0.18, w * 0.20, w * 0.34, Color(0.95, 0.74, 0.55, 0.5))
+
+
 func capsule_one(font: Font, s: Vector2, k: float) -> void:
-	# 1. IN THE LIGHT. One hard shaft, the performer as a black cut-out inside it, and the
-	# props the only colour in the frame. The whole picture is a value study: three tones.
+	# 1. THE CROSS. Louis's own X, taken seriously: a knife and a club at a size where
+	# every part of them shows, with a torch burning behind the crossing so the steel
+	# actually catches firelight. Three shapes, readable at thumbnail size, and all the
+	# detail is real - the knife's fuller, guard and pommel, the club's 3:1 head.
 	var cx := s.x * 0.5
-	var floor_y := s.y * 0.92
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.06), Color(0.02, 0.012, 0.02), 24)
-	draw_spotlight_cone(s, cx, 0.62)
-	draw_glow(Vector2(cx, floor_y), s.x * 0.30, Color(1.0, 0.72, 0.34, 0.30))
-	fill_ellipse(Vector2(cx, floor_y), s.x * 0.20, s.y * 0.035, Color(1.0, 0.66, 0.30, 0.16))
-	var H := s.y * 0.066
-	# five props on a slow arc over his head. Kept INSIDE the cone and below the wordmark:
-	# a prop drifting out into the dark reads as a stray light, not as juggling.
-	for i in 5:
-		var t := float(i) / 4.0
-		var px := cx + lerpf(-3.0, 3.0, t) * H
-		var py := floor_y - 8.9 * H - sin(t * PI) * 1.9 * H
-		draw_glow(Vector2(px, py), 2.4 * H, Color(1.0, 0.78, 0.38, 0.26))
-		capsule_prop([PROP_BALLS, PROP_CLUBS, PROP_TORCHES, PROP_CLUBS, PROP_BALLS][i],
-			Vector2(px, py), 1.5 * k, lerpf(-0.9, 0.9, t))
-	capsule_silhouette(cx, floor_y, H, Color(0.03, 0.015, 0.02), 0.85)
-	capsule_wordmark(font, s.y * 0.035, k, s, Color(1.0, 0.88, 0.5), "")
-	draw_vignette(s, 0.62)
+	var cy := s.y * 0.39
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.045, 0.035), Color(0.02, 0.012, 0.016), 24)
+	draw_glow(Vector2(cx, cy), s.y * 0.62, Color(1.0, 0.52, 0.20, 0.30))
+	draw_glow(Vector2(cx, cy), s.y * 0.30, Color(1.0, 0.72, 0.34, 0.28))
+	var sc := s.y * 0.0160
+	# a prop's local origin is its GRIP, not its middle, so rotating about `pos` swings
+	# the two apart into a V. Each one is pushed back along its own axis by half its own
+	# length, which puts the two shafts across each other instead.
+	var xp := Vector2(cx, cy)
+	draw_knife(xp - Vector2(0, -9.0 * sc).rotated(-0.62), -0.62, sc)
+	draw_club(xp - Vector2(0, -5.0 * sc).rotated(0.62), 0.62, sc)
+	capsule_embers(Vector2(cx, cy - s.y * 0.02), s.y * 0.46, 22, Color(1.0, 0.68, 0.30, 0.55))
+	capsule_wordmark(font, s.y * 0.70, k * 1.25, s, Color(1.0, 0.88, 0.5), "")
+	draw_vignette(s, 0.58)
 
 
 func capsule_two(font: Font, s: Vector2, k: float) -> void:
-	# 2. THE PATTERN IS THE PICTURE. No stage and no frame: the ROADS a cascade actually
-	# flies, drawn as long luminous ribbons that cross the way the real weave crosses,
-	# with the name sitting inside them. Six roads, alternating direction, each one a
-	# real parabola between the two hand points - the same geometry do_throw throws.
-	var cx := s.x * 0.5
-	var span := s.x * 0.21
-	var hy := s.y * 0.86
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.045, 0.025, 0.06), Color(0.012, 0.008, 0.018), 20)
-	var hl := Vector2(cx - span, hy)
-	var hr := Vector2(cx + span, hy)
-	for i in 6:
-		var t := float(i) / 5.0
-		var a := hl if i % 2 == 0 else hr
-		var b := hr if i % 2 == 0 else hl
-		var peak := s.y * lerpf(0.34, 0.66, absf(t - 0.5) * 2.0)
-		var col := ball_color(i)
-		var prev := a
-		for st in range(1, 41):
-			var u := float(st) / 40.0
-			var q := a.lerp(b, u) - Vector2(0, 4.0 * peak * u * (1.0 - u))
-			var w := lerpf(9.0, 2.0, absf(u - 0.5) * 2.0) * k
-			draw_line(prev, q, Color(col.r, col.g, col.b, 0.16 + 0.10 * sin(u * PI)), w)
-			prev = q
-		# the prop itself, riding its own road
-		var up := 0.30 + 0.09 * float(i)
-		var pp := a.lerp(b, up) - Vector2(0, 4.0 * peak * up * (1.0 - up))
-		draw_glow(pp, 40.0 * k, Color(col.r, col.g, col.b, 0.30))
-		draw_ball_shape(pp, col, 1.7 * k)
-	capsule_silhouette(cx, hy + s.y * 0.30, s.y * 0.050, Color(0.02, 0.012, 0.024), 0.9)
-	capsule_wordmark(font, s.y * 0.40, k, s, Color(1.0, 0.94, 0.76), "a juggler's climb")
-	draw_vignette(s, 0.5)
+	# 2. THE FLAME. One object, one diagonal, and the fire doing all the work: the same
+	# three-layer flame the stage lights a torch with, at a scale where its shape reads.
+	# From across a store page this is a burning torch and nothing else, which is the job.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.09, 0.035, 0.03), Color(0.015, 0.01, 0.014), 24)
+	var tip := Vector2(s.x * 0.60, s.y * 0.30)
+	draw_glow(tip, s.y * 0.78, Color(1.0, 0.46, 0.16, 0.26))
+	draw_glow(tip, s.y * 0.34, Color(1.0, 0.74, 0.34, 0.34))
+	draw_torch(Vector2(s.x * 0.44, s.y * 0.66), 0.62, s.y * 0.030, true)
+	capsule_embers(tip, s.y * 0.66, 30, Color(1.0, 0.72, 0.34, 0.6))
+	capsule_wordmark(font, s.y * 0.76, k, s, Color(1.0, 0.90, 0.56), "")
+	draw_vignette(s, 0.6)
 
 
 func capsule_three(font: Font, s: Vector2, k: float) -> void:
-	# 3. THE SIX. A collection plate: every prop the game gives you, laid out on a dark
-	# ground and lit by the only one of them that burns.
-	var cy := s.y * 0.40
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.09, 0.05, 0.045), Color(0.02, 0.014, 0.018), 22)
-	draw_rect(Rect2(0, cy + s.y * 0.20, s.x, s.y), Color(0.05, 0.028, 0.03))
-	draw_line(Vector2(0, cy + s.y * 0.20), Vector2(s.x, cy + s.y * 0.20), Color(0.9, 0.65, 0.35, 0.30), 2.0 * k)
-	var order := [PROP_BALLS, PROP_EGGS, PROP_RINGS, PROP_CLUBS, PROP_KNIVES, PROP_TORCHES]
-	for i in order.size():
-		var t := (float(i) + 0.5) / float(order.size())
-		var px := s.x * (0.09 + 0.82 * t)
-		var py := cy - sin(t * PI) * s.y * 0.10
-		var kind: int = order[i]
-		fill_ellipse(Vector2(px, cy + s.y * 0.20), s.x * 0.045, s.y * 0.012, Color(0, 0, 0, 0.35))
-		if kind == PROP_TORCHES:
-			draw_glow(Vector2(px, py - s.y * 0.06), s.x * 0.20, Color(1.0, 0.62, 0.26, 0.32))
-		capsule_prop(kind, Vector2(px, py), 3.9 * k, -0.16 + 0.05 * float(i))
-	capsule_wordmark(font, s.y * 0.66, k, s, Color(1.0, 0.88, 0.5), "six props, one pair of hands")
-	draw_vignette(s, 0.55)
-	draw_frame(s, 20.0 * k, Color(0.82, 0.62, 0.34, 0.5))
+	# 3. THE RING IS THE O. The wordmark already ends in a prop - the ball is its
+	# lowercase o - so here that joke is the whole picture: I ACT, and then a ring big
+	# enough to read from across the page finishes the word, with a flame seen through it.
+	var size := int(round(s.y * 0.30))
+	var f := game_font()
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.05, 0.055, 0.085), Color(0.012, 0.014, 0.024), 22)
+	var tw := f.get_string_size("I ACT", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var rr := s.y * 0.27
+	var total := tw + rr * 2.4
+	var lx := s.x * 0.5 - total * 0.5
+	var by := s.y * 0.5 + float(size) * 0.36
+	var rc := Vector2(lx + tw + rr * 1.22, by - float(size) * 0.34)
+	draw_glow(rc, rr * 1.5, Color(0.45, 0.78, 1.0, 0.20))
+	draw_glow(rc, rr * 0.55, Color(1.0, 0.66, 0.28, 0.40))          # the flame through the hole
+	draw_torch(rc + Vector2(0, rr * 0.42), 0.0, rr * 0.020, true)
+	draw_string(f, Vector2(lx + 3.0 * k, by + 3.0 * k), "I ACT", HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.5))
+	draw_string(f, Vector2(lx, by), "I ACT", HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(1.0, 0.93, 0.72))
+	draw_ring_prop(rc, Color(0.45, 0.75, 0.95), rr * 0.092)
+	draw_string(f, Vector2(0, s.y * 0.88), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x,
+		int(round(26.0 * k)), Color(0.80, 0.86, 0.92))
+	draw_vignette(s, 0.5)
 
 
 func capsule_four(font: Font, s: Vector2, k: float) -> void:
-	# 4. FROM THE BACK OF THE HOUSE. The theatre itself is the picture: arch, drapes,
-	# footlights, a small lit figure a long way off, and the audience in the dark.
-	var fy := s.y * 0.80
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.055), Color(0.03, 0.015, 0.025), 20)
-	draw_curtain_wall(s, fy, s.y * 0.06, Color(0.30, 0.07, 0.10), 26)
-	draw_theatre_boxes(s, fy)
-	draw_spotlight_cone(s, s.x * 0.5, 0.34)
-	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.10, 0.06, 0.05))
-	draw_footlights(s, fy)
-	var H := s.y * 0.030
-	capsule_silhouette(s.x * 0.5, fy - s.y * 0.02, H, Color(0.06, 0.03, 0.04), 0.95)
-	for i in 3:
-		var t := float(i) / 2.0
-		var px := s.x * 0.5 + lerpf(-3.4, 3.4, t) * H
-		var py := fy - s.y * 0.02 - 8.6 * H - sin(t * PI) * 3.0 * H
-		draw_glow(Vector2(px, py), 26.0 * k, Color(1.0, 0.82, 0.42, 0.34))
-		draw_ball_shape(Vector2(px, py), ball_color(i), 1.15 * k)
-	# the audience, near and out of focus
-	for i in 13:
-		var hx := s.x * (float(i) + 0.5) / 13.0 + sin(float(i) * 2.1) * s.x * 0.02
-		var hy := s.y * (1.02 + 0.02 * sin(float(i) * 1.7))
-		draw_circle(Vector2(hx, hy - s.y * 0.115), s.y * 0.045, Color(0.02, 0.01, 0.015))
-		fill_ellipse(Vector2(hx, hy), s.y * 0.085, s.y * 0.10, Color(0.02, 0.01, 0.015))
-	capsule_wordmark(font, s.y * 0.10, k, s, Color(1.0, 0.90, 0.56), "")
-	draw_vignette(s, 0.66)
+	# 4. THE HANDS. Two forearms in evening dress and nothing else of the man: one has
+	# just let a club go, the other is opening for the knife coming down. It is the
+	# moment the whole game is about, at a size where the cuff buttons show.
+	var v := venue_data(2)                       # the Small Theatre's crimson and cream
+	var suit: Color = v["suit"]
+	var dk: Color = v["suit_dk"]
+	var cuff: Color = v["collar"]
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.085, 0.04, 0.05), Color(0.018, 0.012, 0.02), 22)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.40), s.y * 0.62, Color(1.0, 0.72, 0.36, 0.22))
+	var w := s.y * 0.088
+	var wl := Vector2(s.x * 0.31, s.y * 0.56)
+	var wr := Vector2(s.x * 0.69, s.y * 0.56)
+	var el := Vector2(s.x * 0.04, s.y * 1.04)
+	var er := Vector2(s.x * 0.96, s.y * 1.04)
+	capsule_sleeve(wl, el, w, suit, dk, cuff)
+	capsule_sleeve(wr, er, w, suit, dk, cuff)
+	# the grip IS a prop's local origin, so drawing at the hand's own centre puts it in
+	# the fist rather than floating beside it
+	var hl := wl + (wl - el).normalized() * w * 0.30
+	var hr := wr + (wr - er).normalized() * w * 0.30
+	draw_club(hl, -0.34, s.y * 0.0135)
+	draw_knife(hr, 0.30, s.y * 0.0135)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.20), s.y * 0.20, Color(1.0, 0.84, 0.45, 0.20))
+	draw_ball_shape(Vector2(s.x * 0.5, s.y * 0.17), Color(1.0, 0.82, 0.35), s.y * 0.0055)
+	capsule_wordmark(font, s.y * 0.60, k, s, Color(1.0, 0.90, 0.56), "")
+	draw_vignette(s, 0.6)
 
 
 func capsule_five(font: Font, s: Vector2, k: float) -> void:
-	# 5. THE MIDNIGHT SHOW. The one cold picture in the set: the last room, down an alley,
-	# after everyone has gone home. Green and blue against the other four's gold.
-	var gy := s.y * 0.86
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.02, 0.035, 0.055), Color(0.01, 0.015, 0.025), 22)
-	draw_stars(s, 40, 0.55)
-	# the alley walls FIRST, then the moon in the gap between them - painted the other way
-	# round the near wall simply covered the moon up
-	draw_rect(Rect2(0, 0, s.x * 0.17, gy), Color(0.035, 0.045, 0.06))
-	draw_rect(Rect2(s.x * 0.83, 0, s.x * 0.17, gy), Color(0.03, 0.04, 0.055))
-	draw_moon(Vector2(s.x * 0.74, s.y * 0.17), s.y * 0.07)
-	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.045, 0.05, 0.06))
-	draw_marquee(Vector2(s.x * 0.5, s.y * 0.17), s.x * 0.40)
-	draw_streetlamp(Vector2(s.x * 0.22, gy), gy)
-	# a wash of phosphor BEHIND the performer, so the glow-kit costume reads as the thing
-	# lighting the alley rather than as a hole in it
-	draw_glow(Vector2(s.x * 0.5, gy - s.y * 0.16), s.x * 0.30, Color(0.35, 1.0, 0.55, 0.16))
-	var H := s.y * 0.062
-	capsule_silhouette(s.x * 0.5, gy, H, Color(0.07, 0.16, 0.11), 0.85)
-	for i in 4:
-		var t := float(i) / 3.0
-		var px := s.x * 0.5 + lerpf(-2.6, 2.6, t) * H
-		var py := gy - 9.0 * H - sin(t * PI) * 1.7 * H
-		draw_glow(Vector2(px, py), 3.4 * H, Color(0.55, 1.0, 0.62, 0.34))
-		draw_circle(Vector2(px, py), 0.36 * H, Color(0.84, 1.0, 0.84))
-	capsule_wordmark(font, s.y * 0.66, k, s, Color(0.72, 1.0, 0.78), "the last room, after everyone has gone")
-	draw_vignette(s, 0.72)
+	# 5. THE FAN. The three props the game calls dangerous, spread from one point like a
+	# dealt hand, with the torch lit in the middle of them. A fan is one silhouette from
+	# across a page and three separate objects up close, which is the whole brief.
+	#
+	# (This slot has now eaten two concepts that could not take the scale: the money hat,
+	# whose gold fill is a heap of coins only at 138px, and the gold rose, whose petals
+	# are flat polygons. The lesson is the same both times - an asset earns a capsule by
+	# having INTERNAL STRUCTURE, not by being pretty in the HUD. The knife's fuller,
+	# guard and pommel, the club's banded neck and the torch's three-layer flame all do.)
+	var piv := Vector2(s.x * 0.5, s.y * 0.96)
+	var sc := s.y * 0.0155
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.035), Color(0.017, 0.012, 0.015), 22)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.34), s.y * 0.66, Color(1.0, 0.56, 0.22, 0.26))
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.26, Color(1.0, 0.76, 0.36, 0.30))
+	draw_club(piv, -0.46, sc)
+	draw_knife(piv, 0.46, sc)
+	draw_torch(piv, 0.0, sc, true)
+	capsule_embers(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.44, 24, Color(1.0, 0.70, 0.32, 0.55))
+	capsule_wordmark(font, s.y * 0.055, k * 1.15, s, Color(1.0, 0.88, 0.5), "")
+	draw_vignette(s, 0.56)
 
 
 func draw_capsule_art(font: Font, s: Vector2) -> void:
@@ -13932,7 +13965,7 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(0, s.y * 0.48 + float(i) * 28.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.85, 0.8, 0.7, la))
 	if cine_tick > 90:
 		var wa := 0.6 + 0.4 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.68), "WISHLIST IACTO ON STEAM", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(1.0, 0.9, 0.55, wa))
+		draw_string(font, Vector2(0, s.y * 0.68), "WISHLIST %s ON STEAM" % GAME_TITLE, HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(1.0, 0.9, 0.55, wa))
 		draw_string(font, Vector2(0, s.y * 0.68 + 30.0), "to keep climbing when it ships",
 			HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(0.8, 0.76, 0.68, 0.85))
 	if cine_tick > 120:
@@ -14581,7 +14614,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	var gold := Color(1.0, 0.88, 0.5)
 	var rows: Array[Dictionary] = []
 	var cur := 0.0
-	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": "IACTO", "b": ""})
+	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": GAME_TITLE, "b": ""})
 	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
@@ -14731,7 +14764,7 @@ func draw_iacto_logo(font: Font, y: float, size: int, col: Color, s: Vector2) ->
 	# is the sentence "I act", and the ball finishes it. The o is a REAL drawn ball
 	# (glossy highlight and all), never a letterform, and it bobs very slightly, a
 	# prop at the top of a tiny toss.
-	var text := "I ACT "
+	var text := TITLE_MARK + " "
 	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	var br := float(size) * 0.30           # ball radius, sized like a lowercase o
 	var total := tw + br * 2.0
