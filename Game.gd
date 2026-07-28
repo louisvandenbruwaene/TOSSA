@@ -1,15 +1,19 @@
 extends Node2D
-## IACTO ("I ACT o", the o a juggling ball - formerly JUGGLE). Core mechanic, Prototype 1.1.
+## TOSSA - a skill-based juggling game with a performer's career around it.
+## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
+## one place now, GAME_TITLE, so it can move again without a hunt.)
 ##
-## This rebuilds the throwaway spike into the real v0.2 catch-and-throw model
-## (GDD Sections 2 and 9). The question it must answer: with catch and throw
-## split across four inputs, strict catches, hold-for-height throws, the
-## throw-under-traffic rule, and inward-hand no-crossing choreography, is the
-## deeper input still fun and readable? No meta layer yet (that is Prototype 2+).
+## The whole game is here: the catch-and-throw sim, the day loop, the shop, the
+## tutorials, the stages, the art and the audio. CLAUDE.md is the working document -
+## design decisions, the verification workflow, and what is still open.
 ##
-## Inputs (all remappable later): left catch D, left throw F, right catch K,
-## right throw J, trick Space. Both inputs of a hand must be good: a bad catch
-## loses the ball, a throw is only punished when traffic is incoming to that hand.
+## The core question the input model answers: with catch and throw split across four
+## inputs, strict catches, hold-for-height throws, the throw-under-traffic rule and
+## inward-hand no-crossing choreography, is the deeper input still fun and readable?
+##
+## Inputs (all remappable, see Settings > Controls): left catch D, left throw F,
+## right catch K, right throw J, trick Space. Both inputs of a hand must be good: a
+## bad catch loses the prop, a throw is only punished when traffic is incoming there.
 ##
 ## The sim runs entirely on the fixed 120 Hz physics tick so it stays
 ## deterministic, which the production build needs for replays and fair boards.
@@ -186,9 +190,9 @@ const BROKE_GOLD := 20     # the busking floor applies below this purse
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
-const SAVE_PATH_DEBUG := "user://iacto_debug.cfg"  # debug build: separate progress
-const SAVE_PATH_DEMO := "user://iacto_demo.cfg"     # --demo/--shot autoplay: never a real career save
-const SETTINGS_PATH := "user://iacto_settings.cfg" # global options, shared by slots
+const SAVE_PATH_DEBUG := "user://tossa_debug.cfg"  # debug build: separate progress
+const SAVE_PATH_DEMO := "user://tossa_demo.cfg"     # --demo/--shot autoplay: never a real career save
+const SETTINGS_PATH := "user://tossa_settings.cfg" # global options, shared by slots
 const POINTS_PER_LEVEL := 3   # base stat points per level-up; level_up() adds +level/12
 							  # on top (CLAUDE.md's "3 + level/12"), so this is only the floor
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
@@ -301,9 +305,10 @@ const PATTERNS := [
 # something) so that i can easily change it later"). Change these two and every readout,
 # the wordmark, the daily share line, the credits and the demo wall's call to action all
 # follow. They are two constants rather than one because the WORDMARK letters the name
-# differently from the way it is written: the picture is the sentence "I act" with a
-# juggling ball finishing the word, so the mark needs the name minus its final letter,
-# spaced as the joke reads. TITLE_MARK's last character is the one the ball replaces.
+# differently from the way it is written: a real juggling ball stands in for the name's
+# LAST letter, so the mark needs the name without it. TOSSA is drawn "TOSS" plus a ball
+# for the a; under the old name IACTO it was "I ACT" plus a ball for the o, which is
+# where the two-constant shape came from.
 # MOVING THE CAPSULE MARK AROUND (2026-07-28, Louis: "is it possible for me to move
 # around the objects? and how"). Yes: everything the picture places is one of the numbers
 # below, and nothing else needs touching. Re-render with
@@ -983,25 +988,28 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # same as set_shake/set_collide) so a chosen experiment survives a relaunch, but the
 # panel that can ever FLIP one is gated behind OS.is_debug_build() same as every
 # other dev surface - a release export always sees every experiment at its default.
-# AN EXPERIMENT THAT WINS LEAVES THE PANEL. The growth-column sheet, the card settings,
-# the icon pause and the portrait save slots were all toggles here once; when Louis
-# picked them they became the only version and their entries came out of
-# EXPERIMENT_DEFS, because a switch with nothing on its other side is just a way to
-# break the game from a debug key. What remains below is what still has two real sides.
-# The dictionary IS the shipped default for each - keep every reader's fallback equal to
-# the value here, or a missing key silently ships the other look.
-var experiments := {"prop_art": true, "flowers": true, "round_v3": true, "soft_light": true}
+#
+# AN EXPERIMENT THAT WINS LEAVES THE PANEL, and takes the loser with it. The growth-
+# column sheet, the card settings, the icon pause, the portrait save slots and the
+# performer's wardrobe were all toggles here once. On 2026-07-28 the last four went the
+# same way (Louis: "you may remove the F9 options - not the idea itself, that i will
+# reuse. they should all be ON and that is the way i like it"): the relit round props,
+# the flat-and-steady round props, the softened spotlight and the flower economy are now
+# simply how the game looks, and their OFF branches were DELETED rather than left
+# stranded - along with the money hat and the struck coin, which were what the flower
+# economy replaced. A switch with nothing on its other side is just a way to break the
+# game from a debug key, and a dead branch's comment goes on describing a mechanic that
+# no longer exists. The old versions are in git; that is what git is for.
+#
+# What is here is what still has two real sides and wants Louis's eye on it. The
+# dictionary IS the shipped default for each - keep every reader's fallback equal to the
+# value here, or a missing key silently ships the other look.
+var experiments := {"face_v2": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
-	{"id": "prop_art", "name": "Balls, eggs and rings (relit)",
-	 "desc": "The three round props shaded rather than flat: a shadow crescent left between two smooth outlines, a panel seam on the balls, a true ovoid for the eggs, and a concentric dark-body-bright cross-section on the rings. OFF restores the old flat fill with one paler blob on it. Visual only - same sizes, same hitboxes, same physics."},
-	{"id": "round_v3", "name": "Balls and eggs: flat, and steady in the air",
-	 "desc": "No fake light on the round props: one flat disc of the prop's own colour inside a darker rim that runs the whole way round, so the shape is stated without a light direction. Also fixes the real cause of the jitter - the squash/stretch read its velocity off the SPACED comet trail, which sawtoothed and spun the prop. It is analytic now. OFF restores the previous relit balls and eggs (and prop_art below still picks relit-vs-flat there)."},
-	{"id": "soft_light", "name": "The spotlight has edges",
-	 "desc": "The title and key-art beam fades out sideways and down the length instead of stopping dead along two straight lines, and its width is now a fraction of the stage rather than a fixed 300px that changed proportion with the window. One draw call either way - the softness is per-vertex alpha, not a stack of shapes. OFF restores the flat wedge."},
-	{"id": "flowers", "name": "FLOWERS instead of gold",
-	 "desc": "The crowd pays you in front of you. Play deep in the green and the room throws flowers at your feet - a plain one worth 1, a posy 5, a gold rose 25, and the rare tiers only come when the room is won over with nothing dropped. Lose the room and they throw tomatoes, worth nothing at the counter but eatable later, so a disastrous night still leaves you something. The pile on the boards replaces the score hat as the read on how the night is going, and everything reduces to the basic flower for spending. OFF restores gold and the hat."},
+	{"id": "face_v2", "name": "The juggler's face: real hair, a real mouth",
+	 "desc": "The performer read as a mannequin: hair was a brown circle behind a tan one, and the mouth was a bent polyline of even thickness with square ends. Now the hair has a real silhouette - a side parting, a swept fringe that comes to a point, temples down past the eyes, a crown sheen - and the mouth is a filled shape with lips, an opening that widens with the mood, teeth on a streak and light on the lower lip. Eyes are slimmer, sit under proper tapered brows, and squeeze shut on a wince. A soft nose plane. Same head size, same stance, same proportions - nothing outside the face moves, and the Skills preview now draws this same head instead of its own. OFF restores the old face."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -1344,6 +1352,15 @@ func _ready() -> void:
 	#   --demo         run the headless auto-player (for verifying choreography)
 	#   --shot <path>  capture one frame to <path> then quit
 	var ua := OS.get_cmdline_user_args()
+	# THE WINDOW SAYS WHICH BUILD IT IS (2026-07-28, Louis: "rename the app to tossa and
+	# tossa debug"). project.godot's config/name is the shipped name and cannot vary, so
+	# the debug marker goes on at runtime. Worth having: a debug run keeps its own save
+	# file, its own experiment toggles and every dev flag, so telling the two apart at a
+	# glance in the Dock and the window list is the difference between editing a career
+	# and editing a test one.
+	DisplayServer.window_set_title(GAME_TITLE if not OS.is_debug_build() else GAME_TITLE + " (debug)")
+	migrate_old_saves()   # the game was called IACTO until 2026-07-28: carry those
+						  # careers across before anything reads a save (see below)
 	load_settings()
 	setup_font()
 	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
@@ -2209,7 +2226,7 @@ func debug_panel_input(kc: int) -> void:
 			play_sfx("ui", -16.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			var eid := String(EXPERIMENT_DEFS[debug_panel_sel]["id"])
-			experiments[eid] = not bool(experiments.get(eid, false))
+			experiments[eid] = not exp_on(eid)
 			save_settings()
 			play_sfx("ui2", -13.0)
 		KEY_ESCAPE:
@@ -5018,13 +5035,59 @@ func reset_new_game() -> void:
 	save_progress()
 
 
+const OLD_NAMES := ["IACTO", "JUGGLE"]   # every name this game has shipped under, newest
+										  # first - see migrate_old_saves
+
+func migrate_old_saves() -> void:
+	# THE RENAME MUST NOT COST ANYONE THEIR CAREER (2026-07-28), and it very nearly did,
+	# in TWO separate ways that both had to be handled.
+	#
+	# (1) THE FILENAME. Every save is keyed by one, so IACTO -> TOSSA left three slots, a
+	# settings file and the debug save sitting under names nothing reads any more.
+	#
+	# (2) THE FOLDER, which is the one that is easy to miss. `user://` on desktop is
+	# `.../Godot/app_userdata/<config/name>/`, so renaming the PROJECT silently points
+	# user:// at a brand new empty directory - a migration that only looks inside
+	# user:// finds nothing and reports success. Verified on Louis's own machine: three
+	# real careers sat in `app_userdata/IACTO/` while `app_userdata/TOSSA/` was empty.
+	# The old folder is a SIBLING of the current one, which is true on every desktop
+	# platform Godot uses this layout for, so it is reachable without hardcoding a path:
+	# take the parent of OS.get_user_data_dir() and append the old name.
+	#
+	# It COPIES rather than moves, deliberately: an old build still installed keeps
+	# working and the two simply diverge, which is the safe direction to fail in. It only
+	# ever writes a file that is not already there, so it is idempotent - a second launch
+	# does nothing, and a real TOSSA save is never overwritten by a stale IACTO one.
+	# Delete this once no build under an old name is left anywhere, and not before:
+	# "nobody could still have one" is a guess, not a fact.
+	var here := DirAccess.open("user://")
+	if here == null:
+		return
+	var parent := OS.get_user_data_dir().get_base_dir()
+	for old_name in OLD_NAMES:
+		var stem := String(old_name).to_lower()
+		var names := [stem + "_settings.cfg", stem + "_debug.cfg", stem + "_demo.cfg"]
+		for i in NUM_SLOTS:
+			names.append(stem + "_slot%d.cfg" % i)
+		for fn in names:
+			var to := String(fn).replace(stem + "_", "tossa_")
+			if here.file_exists(to):
+				continue                                  # a real TOSSA file wins
+			if here.file_exists(fn):                      # (1) same folder, old name
+				here.copy("user://" + fn, "user://" + to)
+			else:                                         # (2) the old project's folder
+				var src := parent.path_join(old_name).path_join(fn)
+				if FileAccess.file_exists(src):
+					DirAccess.copy_absolute(src, OS.get_user_data_dir().path_join(to))
+
+
 func slot_path(i: int) -> String:
-	return "user://iacto_slot%d.cfg" % i
+	return "user://tossa_slot%d.cfg" % i
 
 
 func delete_slot(i: int) -> void:
 	var dir := DirAccess.open("user://")
-	var fn := "iacto_slot%d.cfg" % i
+	var fn := "tossa_slot%d.cfg" % i
 	if dir != null and dir.file_exists(fn):
 		dir.remove(fn)
 
@@ -7260,15 +7323,12 @@ func resolve_act() -> void:
 	# PAY scales with the score that survived (the score already scales with the
 	# venue), lifted by Reputation and a Purist premium, with the busking floor so a
 	# broke juggler always leaves with something.
-	if flowers_on():
-		# THE FLOWER ECONOMY: the night's pay is simply what the room threw, already
-		# earned in front of the player one flower at a time and lying at their feet.
-		# No formula, no multiplier, nothing to compute at the end - the pile IS the
-		# purse, which is the whole point of it (Louis). A Purist night still earns its
-		# premium, since that is a promise about the whole board, not about the crowd.
-		last_pay = int(round(float(run_flowers) * purist_mult))
-	else:
-		last_pay = int(round(float(score) * BOOK_PAY_PER_SCORE * pay_mult() * purist_mult))
+	# THE FLOWER ECONOMY: the night's pay is simply what the room threw, already earned
+	# in front of the player one flower at a time and lying at their feet. No formula,
+	# no multiplier, nothing to compute at the end - the pile IS the purse, which is the
+	# whole point of it (Louis). A Purist night still earns its premium, since that is a
+	# promise about the whole board, not about the crowd.
+	last_pay = int(round(float(run_flowers) * purist_mult))
 	if money < BROKE_GOLD and score > 0:
 		last_pay = maxi(last_pay, BUSK_FLOOR)
 	money += last_pay
@@ -9275,40 +9335,22 @@ func draw_juggler(s: Vector2) -> void:
 			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H),
 			Vector2(cx + 0.24 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.24 * H, shoulder_y + 0.1 * H)]), collar)
 
-	# F9 experiment: the established juggler IS the base drawing. The wardrobe is a
-	# purely additive pass over the finished torso - it cannot touch the IK, the hand
-	# targets, prop layering or any sim value. It goes on HERE, above the jacket but
-	# BELOW the head and the arms, so the arms still pass in front of the coat and a
-	# held Columns middle ball (which rests at stage_center, i.e. over the hip) is
-	# never painted over.
-	var polished := true   # the wardrobe pass is the costume now, not a variant
-	if polished:
-		draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, floor_y,
-			suit, suit_dk, collar, accent, facing_back)
+	# THE WARDROBE is a purely additive pass over the finished torso - it cannot touch
+	# the IK, the hand targets, prop layering or any sim value. It goes on HERE, above
+	# the jacket but BELOW the head and the arms, so the arms still pass in front of the
+	# coat and a held Columns middle ball (which rests at stage_center, i.e. over the
+	# hip) is never painted over.
+	draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, floor_y,
+		suit, suit_dk, collar, accent, facing_back)
 
 	# head: a full head of hair framing the crown and temples. Facing the crowd, the skin
-	# face sits over it; facing away mid-spin, the back of the head is all hair with a
-	# little skin at the nape, which is what sells the turn. The head keeps its full ROUND
-	# size all through a turn (a head reads round from every angle), so it is drawn OUTSIDE
-	# the body's width-scale, otherwise it would squash to a thin oval at the profile.
+	# face sits over it; facing away mid-spin, the back of the head is all hair, which is
+	# what sells the turn. The head keeps its full ROUND size all through a turn (a head
+	# reads round from every angle), so it is drawn OUTSIDE the body's width-scale,
+	# otherwise it would squash to a thin oval at the profile.
 	if spin_on:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)   # hair mass, up and a touch larger
-	if facing_back:
-		# ALL HAIR, no nape (2026-07-27, Louis: "during spin, the back of the players
-		# head should be entirely hair: brown"). A skin patch used to sit at the bottom
-		# of the skull to suggest a neck, but the neck is already drawn below the head
-		# as its own column - so what the patch actually read as, mid-turn, was the face
-		# still half showing from behind.
-		draw_circle(head, head_r, hair)
-	else:
-		draw_circle(head, head_r, skin)                                   # face over the hair
-		draw_circle(head + Vector2(-head_r * 0.26, -head_r * 0.08), head_r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
-		if polished:
-			draw_face_polish(head, head_r, hair)   # fringe UNDER the features, brows over
-		draw_face(head, head_r)
-		if polished:
-			draw_brows(head, head_r, hair)
+	draw_head(head, head_r, hair, skin, facing_back)
 	if spin_on:                                                            # back to the body width-scale for the arms
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
@@ -9319,7 +9361,7 @@ func draw_juggler(s: Vector2) -> void:
 	# the cuff is the venue's OWN collar colour, never a fixed white: the Midnight
 	# Show's whole point is a costume that nearly vanishes, and a hard white cuff
 	# would light the performer straight back up
-	var cuff := collar if polished else Color(0, 0, 0, 0)
+	var cuff := collar
 	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit, cuff)
 	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit, cuff)
 
@@ -9433,10 +9475,217 @@ func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: floa
 	]), linen)
 
 
+# THE HEAD, second version (2026-07-28, Louis: "another improved face for the juggler:
+# a nicer mouth and hair. right now they just look too artificial"). Behind the F9
+# `face_v2` switch, ON, so the two can be held against each other live.
+#
+# WHAT WAS ACTUALLY ARTIFICIAL, because it was not the amount of detail. Three things,
+# and each is one mark:
+#   - the HAIR was `draw_circle(head + up, r * 1.12)`: a brown disc behind a tan disc.
+#     A haircut is a SILHOUETTE - a crown that is not perfectly round, temples that come
+#     down past the eye line, a hairline that parts on one side - and none of those is a
+#     strand. Strands would be the wrong answer anyway: at 21px they land in the
+#     sub-pixel band the round props were flattened to get out of, and they shimmer.
+#   - the MOUTH was a three-point polyline of even thickness. Godot has no round caps,
+#     so it had square ends: a drawn line lying on a face rather than a pair of lips.
+#     Every mouth here is a filled SHAPE built from the same four numbers.
+#   - the EYES were two dots and a white speck, which reads as printed on. What makes an
+#     eye look like an eye at this size is the LID above it - and the lid is also what
+#     closes on a wince, so one mark carries the expression too.
+#
+# DETAIL IS A FUNCTION OF RADIUS, the same rule draw_coin learned the hard way: the
+# stage head is r ~= 21px but the Skills preview's is 11.5, so brows, lids and the nose
+# appear at r >= 10 and teeth only at r >= 14, where there is room for them to be teeth
+# rather than a white band filling the mouth. Nothing here moves the head, the stance or
+# any proportion - the figure is settled and a face pass must never reshape it.
+func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: bool) -> void:
+	# THE ONE HEAD, at whatever radius the caller has. The stage figure and the Skills
+	# preview's little performer each used to draw their own - same intent, different
+	# code, and the preview's had already drifted to a bare arc for a mouth and no
+	# fringe at all. A face is exactly the kind of thing two copies of go quietly out of
+	# step, so there is one now and the preview simply passes a smaller r.
+	if exp_on("face_v2"):
+		draw_hair_back(head, r, hair)
+	else:
+		draw_circle(head + Vector2(0, -r * 0.32), r * 1.12, hair)
+	if facing_back:
+		# ALL HAIR, no nape (2026-07-27, Louis: "during spin, the back of the players
+		# head should be entirely hair: brown"). A skin patch used to sit at the bottom
+		# of the skull to suggest a neck, but the neck is already drawn below the head as
+		# its own column - so what the patch actually read as, mid-turn, was the face
+		# still half showing from behind.
+		draw_circle(head, r, hair)
+		return
+	draw_circle(head, r, skin)                                        # face over the hair
+	draw_circle(head + Vector2(-r * 0.26, -r * 0.08), r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
+	if exp_on("face_v2"):
+		draw_hair_front(head, r, hair)   # the hairline goes UNDER the features...
+		draw_face_v2(head, r, hair)      # ...and the brows come with the face
+	else:
+		draw_face_polish(head, r, hair)
+		draw_face(head, r)
+		draw_brows(head, r, hair)
+
+
+func draw_hair_back(head: Vector2, r: float, hair: Color) -> void:
+	# the outer silhouette, drawn behind the face disc: a shell over the skull that comes
+	# down PAST the temples on both sides, swelling unevenly so the crown is not a
+	# circle. The unevenness is the whole difference between hair and a helmet.
+	var pts := PackedVector2Array()
+	for i in 25:
+		var a := -0.30 + (PI + 0.60) * (float(i) / 24.0)   # right temple, over the crown, left temple
+		var swell := 1.05 + 0.06 * sin(a) + 0.045 * sin(a * 2.0 + 0.6)
+		pts.append(head + Vector2(cos(a) * r * swell, -sin(a) * r * swell))
+	# ...and closed across the nape, bowed rather than straight: three points on one line
+	# is the degenerate case Godot's triangulator is fussy about (see the helmet brim).
+	pts.append(head + Vector2(-r * 0.92, r * 0.34))
+	pts.append(head + Vector2(0.0, r * 0.44))
+	pts.append(head + Vector2(r * 0.92, r * 0.34))
+	draw_colored_polygon(pts, hair)
+
+
+func draw_hair_front(head: Vector2, r: float, hair: Color) -> void:
+	# THE HAIRLINE, the single mark that turns a brown shell into a haircut. A side
+	# parting: a short sweep up from the left temple to the part, then one long sweep
+	# across the brow that comes to a POINT on the right. The point matters - a fringe
+	# ending on a flat edge reads as a wig, one ending level reads as a bowl cut.
+	var pts := PackedVector2Array()
+	for i in 17:
+		var a := 0.08 + (PI - 0.16) * (float(i) / 16.0)   # over the top of the face disc
+		pts.append(head + Vector2(cos(a) * r * 1.03, -sin(a) * r * 1.03))
+	pts.append(head + Vector2(-r * 0.99, r * 0.08))    # left temple, down past the eye line
+	pts.append(head + Vector2(-r * 0.62, -r * 0.32))   # up the short side...
+	pts.append(head + Vector2(-r * 0.20, -r * 0.64))   # ...to the part, high on the crown
+	pts.append(head + Vector2(r * 0.22, -r * 0.48))    # the long sweep starts down
+	pts.append(head + Vector2(r * 0.72, -r * 0.24))    # ...and comes to its point
+	pts.append(head + Vector2(r * 0.99, r * 0.04))     # right temple
+	draw_colored_polygon(pts, hair)
+	if r >= 13.0:
+		# ONE sheen band over the crown, up and to the left - the same direction the
+		# cheek highlight already claims, and the direction the spotlight actually is.
+		# (The round props refuse a highlight because their light genuinely changes as
+		# they fly; a head under a follow spot is the case where the claim holds.)
+		var sh := PackedVector2Array()
+		for i in 9:
+			var a := PI * 0.40 + PI * 0.32 * (float(i) / 8.0)
+			sh.append(head + Vector2(cos(a), -sin(a)) * r * 1.00)
+		for i in 9:
+			var a := PI * 0.40 + PI * 0.32 * (1.0 - float(i) / 8.0)
+			sh.append(head + Vector2(cos(a), -sin(a)) * r * 0.84)
+		var g := hair.lightened(0.30)
+		draw_colored_polygon(sh, Color(g.r, g.g, g.b, 0.5))
+
+
+func mouth_shape(c: Vector2, hw: float, lift: float, top_bow: float, bot_bow: float) -> PackedVector2Array:
+	# A MOUTH AS A CLOSED LENS between two bowed edges. Corners sit at (+/-hw, lift) and
+	# each edge sags from there by its own bow (positive is DOWNWARD, so a smile is two
+	# downward bows and a grimace two upward ones). Four numbers describe every
+	# expression, which is the point: they are read from one place, so the lips, the
+	# opening, the teeth and the lower-lip highlight are all the same curve at different
+	# offsets and can never come apart from each other.
+	# The two corners are emitted ONCE, by the top edge - both bows vanish there, so
+	# sampling the bottom edge corner-to-corner as well would stack duplicate vertices.
+	var pts := PackedVector2Array()
+	for i in 11:
+		var t := float(i) / 10.0
+		pts.append(c + Vector2(-hw + 2.0 * hw * t, lift + top_bow * (1.0 - pow(2.0 * t - 1.0, 2.0))))
+	for i in range(9, 0, -1):
+		var t := float(i) / 10.0
+		pts.append(c + Vector2(-hw + 2.0 * hw * t, lift + bot_bow * (1.0 - pow(2.0 * t - 1.0, 2.0))))
+	return pts
+
+
+func draw_face_v2(head: Vector2, r: float, hair_tone: Color) -> void:
+	var mood := face_mood()
+	# EYES. THREE MARKS AND NO MORE, because that is all a 21px head has room for: one
+	# dark almond, one catchlight, one brow above it. The first attempt also drew an
+	# upper LID, and it was the wrong instinct at this scale - a near-black cap sitting
+	# on a near-black eye does not read as a fold, it just makes the eye taller, and
+	# together with a brow that was too low the two merged into a single dark block. The
+	# eye SQUEEZES on a wince instead, which is what a real squint is and costs nothing.
+	var ex := r * 0.34
+	var ey := 0.0
+	var ew := r * 0.15
+	var eh := r * 0.12
+	if mood == -1:
+		eh = r * 0.05
+	elif mood == 1:
+		eh = r * 0.10
+	# TYPED, not bare: an untyped array literal makes every element a Variant, and
+	# arithmetic on one infers nothing - which is the "cannot infer the type" parse error
+	# --check-only does not report and only a real run surfaces.
+	for sgn: float in [-1.0, 1.0]:
+		var c := head + Vector2(sgn * ex, ey)
+		fill_ellipse(c, ew, eh, Color(0.16, 0.10, 0.08))
+		if eh > r * 0.07:
+			# the catchlight goes up and LEFT, with the cheek highlight and the hair
+			# sheen: three marks claiming three different lights is what makes a face
+			# look assembled rather than lit
+			draw_circle(c + Vector2(-ew * 0.32, -eh * 0.30), maxf(0.8, r * 0.045), Color(1, 1, 1, 0.85))
+	if r >= 10.0:
+		# BROWS as filled tapers - heavier at the inner end, thinning outward, which is
+		# what a brow does. Their height is set by the gap they have to leave: the eye's
+		# top edge is at -eh, the fringe's hairline comes down to about -0.35r over the
+		# outer end, and the brow has to sit clearly between the two at every mood.
+		var by := -r * 0.30
+		var inner_dy := (r * 0.09 if mood == -1 else (-r * 0.04 if mood == 1 else 0.0))
+		var outer_dy := (-r * 0.03 if mood == -1 else (-r * 0.08 if mood == 1 else 0.0))
+		var th := r * 0.070
+		# hair's own colour, not the eye's: a brow as dark as a pupil is the other half
+		# of what made the two read as one mark
+		var brow := hair_tone.darkened(0.12)
+		for sgn: float in [-1.0, 1.0]:
+			var ix := sgn * (ex - r * 0.15)
+			var ox := sgn * (ex + r * 0.20)
+			draw_colored_polygon(PackedVector2Array([
+				head + Vector2(ix, by + inner_dy - th),
+				head + Vector2(ox, by + outer_dy - th * 0.45),
+				head + Vector2(ox, by + outer_dy + th * 0.35),
+				head + Vector2(ix, by + inner_dy + th)]), brow)
+		# A NOSE IS A SHADOW, not an outline: one narrow plane down the shaded side, in
+		# the skin's own family and half transparent, so it stays a soft plane on a
+		# bright stage instead of becoming a black mark on a dark one. Narrow matters -
+		# a wide one is a snout.
+		draw_colored_polygon(PackedVector2Array([
+			head + Vector2(-r * 0.01, r * 0.04),
+			head + Vector2(r * 0.09, r * 0.23),
+			head + Vector2(-r * 0.08, r * 0.23)]), Color(0.60, 0.39, 0.28, 0.42))
+	# THE MOUTH: lips first as one shape, then the opening inside them, then the light
+	# on the lower lip. Nothing here is a stroke.
+	var mc := Vector2(head.x, head.y + r * 0.44)
+	var hw := r * 0.31
+	var lift := 0.0
+	var top_bow := r * 0.05
+	var bot_bow := r * 0.12
+	var open := false
+	if mood == 1:
+		hw = r * 0.36
+		lift = -r * 0.05          # corners up
+		top_bow = r * 0.14
+		bot_bow = r * 0.40        # ...and the middle well down: an open smile
+		open = true
+	elif mood == -1:
+		hw = r * 0.26
+		lift = r * 0.06           # corners down
+		top_bow = -r * 0.10       # ...and the middle up: a grimace, and a narrow one
+		bot_bow = -r * 0.02
+	var lip_lift := lift - r * 0.03
+	draw_colored_polygon(mouth_shape(mc, hw * 1.06, lip_lift, top_bow - r * 0.03, bot_bow + r * 0.05),
+		Color(0.58, 0.28, 0.25))
+	if open:
+		draw_colored_polygon(mouth_shape(mc, hw, lift, top_bow, bot_bow), Color(0.28, 0.10, 0.10))
+		if r >= 14.0:
+			draw_colored_polygon(mouth_shape(mc, hw * 0.90, lift, top_bow, top_bow + r * 0.11),
+				Color(0.96, 0.93, 0.87))
+	if r >= 10.0:
+		draw_colored_polygon(mouth_shape(mc, hw * 0.86, lip_lift, bot_bow + r * 0.05, bot_bow + r * 0.12),
+			Color(0.98, 0.74, 0.60, 0.45))
+
+
 func draw_face_polish(head: Vector2, r: float, hair: Color) -> void:
-	# a side-parted fringe laid over the top of the face disc, so the head reads as
-	# hair-over-a-face instead of a bare oval with a hair halo behind it. Drawn as one
-	# filled crescent (outer edge = the face's own circle) rather than strands.
+	# THE OLD FRINGE (the `face_v2` OFF side): a side-parted crescent laid over the top
+	# of the face disc, so the head reads as hair-over-a-face instead of a bare oval
+	# with a hair halo behind it. One filled crescent, outer edge = the face's circle.
 	var pts := PackedVector2Array()
 	for i in 11:
 		var a := -PI + PI * float(i) / 10.0            # left -> over the crown -> right
@@ -9449,8 +9698,8 @@ func draw_face_polish(head: Vector2, r: float, hair: Color) -> void:
 
 
 func draw_brows(head: Vector2, r: float, hair: Color) -> void:
-	# brows carry the same mood the mouth already does, which is most of what a face
-	# this small can express: lifted on a streak, pinched in after a drop
+	# the OLD brows (the `face_v2` OFF side): two even strokes carrying the same mood the
+	# mouth does - lifted on a streak, pinched in after a drop
 	var mood := face_mood()
 	var bx := r * 0.34
 	var by := -r * 0.20                     # low enough to clear the fringe's hairline
@@ -10024,90 +10273,34 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		_:
 			draw_ball_shape(pos, b.color, sc)
 
-
-# THE LIT PROPS, second attempt (2026-07-27, Louis: the first one "looks horrible").
+# THE ROUND PROPS ARE FLAT, and that is a decision, not a shortcut (2026-07-27, Louis:
+# "get rid of the 'light' and 'shadows' of both", and "i don't like the dark border on
+# the balls: i prefer their original solid colors ... also when held in hands").
 #
-# WHAT WENT WRONG, because it is the whole lesson: shading was drawn with draw_arc at a
-# large width. A thick arc is an annulus SEGMENT with square ends, so instead of light
-# falling off it produced a hard-edged grey wedge stuck to the ball - a pac-man bite -
-# and on the ring a row of segments that read as a loading spinner. Godot has no round
-# line caps, so a partial thick arc can never be soft, at any colour or alpha.
+# THREE ATTEMPTS WERE REJECTED before this, and the reason is worth keeping because it
+# applies to any prop added later. A painted highlight and a shadow crescent are a CLAIM
+# ABOUT WHERE THE LIGHT IS. On a stage whose lighting genuinely changes - venue palettes,
+# Blackout, the Glow Kit, the spotlight pool - that claim is wrong most of the time, and
+# a wrong specular is exactly what makes flat art look cheap. Worse, all three attempts
+# built the claim out of 1-2px features (a crescent that is the GAP between two
+# near-equal circles, a 1px panel seam, a 1.3px hot point), and a sub-pixel feature on a
+# moving object shimmers frame to frame however well it is drawn.
 #
-# THE RULE NOW: shade only with shapes that HAVE NO ENDS.
-#   - a round prop is the SHADED tone at full size, with the LIT tone overdrawn as a
-#     slightly smaller shape nudged toward the light. The crescent left behind is the
-#     shadow, and being the gap between two smooth outlines it cannot look blunt.
-#   - a ring is CONCENTRIC only - dark outer tube, body, bright inner edge - because a
-#     full circle has no ends either. No fake directional light on it at all.
-#   - the specular is a small filled shape, never a stroke.
-# This is also the language the clubs and knives already speak (crisp filled regions,
-# not gradients), which is why they read and these did not.
+# SO: state the SHAPE, never the lighting. A ball is one flat disc of its own colour. An
+# egg is one ovoid - pinched at the top only, because a symmetric ellipse is a pill and
+# the asymmetry is the entire character of the shape. Both hold in the hand as well as
+# in the air, so one branch covers both.
 #
-# The whole thing sits behind the F9 `prop_art` switch so it can be held against the
-# old flat look live.
-func prop_art_new() -> bool:
-	return bool(experiments.get("prop_art", true))
-
-
-# THE ROUND PROPS, third attempt (2026-07-27, Louis: the relit balls and eggs are not
-# wanted - "get rid of the 'light' and 'shadows' of both").
+# ONE EARLIER LESSON STILL BINDS, for anything that ever does want shading: never shade
+# with draw_arc at a large width. A thick arc is an annulus SEGMENT with square ends, so
+# instead of light falling off it produces a hard-edged wedge stuck to the ball - a
+# pac-man bite - and Godot has no round line caps, so a partial thick arc cannot be soft
+# at any colour or alpha. Shade only with shapes that have NO ENDS.
 #
-# WHAT THIS VERSION REFUSES TO DO, and why it is the right call rather than a retreat:
-# a painted highlight and a shadow crescent are a claim about where the light is. On a
-# stage whose lighting actually CHANGES (venue palettes, Blackout, the Glow Kit, the
-# spotlight pool) that claim is wrong most of the time, and a wrong specular is exactly
-# what makes flat art look cheap. Worse, both were built out of 1-2px features - a
-# crescent that is the GAP between two near-equal circles, a 1px seam, a 1.3px hot
-# point - and a sub-pixel feature on a moving object shimmers frame to frame however
-# well it is drawn.
-#
-# SO: state the shape, not the lighting. One flat disc of the prop's own colour, inside
-# a rim that is darker THE WHOLE WAY ROUND. A concentric rim has no direction, so it
-# says "this is a solid round object with an edge" without ever claiming a light source,
-# it survives any stage palette, and being a full ring it has no ends to read as a cut
-# (the same rule the ring prop already follows). It is floored at ~1.6px so it never
-# falls into the shimmering sub-pixel band at small scales.
-#
-# The other half of "looks good in the air" was never an art problem at all - see
+# The other half of "looks bad in the air" was never an art problem at all - see
 # flight_vel for the trail-sampling bug that was actually causing the jitter.
-func round_props_v3() -> bool:
-	return bool(experiments.get("round_v3", true))
-
-
-func soft_light_on() -> bool:
-	return bool(experiments.get("soft_light", true))
-
-
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
-	var r := BALL_RADIUS_PX * sc
-	if round_props_v3():
-		# ONE SOLID DISC, and nothing else on it (2026-07-27, Louis: "i don't like the
-		# dark border on the balls: i prefer their original solid colors ... also when
-		# held in hands"). The rim was the last survivor of three attempts to give these
-		# some modelling - a highlight, then a shadow crescent, now an outline - and the
-		# answer each time has been the same: the round props want to be flat colour.
-		# It holds in the hand as well as in the air, so this one branch covers both;
-		# every held prop routes through here too.
-		draw_circle(pos, r, col)
-		return
-	if not prop_art_new():
-		draw_circle(pos, r, col)
-		var oh := col.lightened(0.4)
-		oh.a = 0.9
-		draw_circle(pos + Vector2(-3, -3) * sc, 3.5 * sc, oh)
-		return
-	# the shaded body, then the lit face over it, offset toward the light. The offset
-	# and the lit radius are chosen so the lit circle can never poke out past the
-	# silhouette (0.84 + |(-0.10, -0.11)| = 0.98 of the radius).
-	draw_circle(pos, r, Color(col.r * 0.60, col.g * 0.58, col.b * 0.62))
-	draw_circle(pos + Vector2(-0.10, -0.11) * r, r * 0.84, col)
-	# the panel seam: a flat ellipse, which is a great circle seen almost edge-on, so it
-	# has to run the FULL width of the ball. Inset it and it stops being a seam and
-	# becomes a floating oval - it read as a smile.
-	ellipse_outline(pos, r * 0.97, r * 0.34, Color(col.r * 0.72, col.g * 0.70, col.b * 0.74, 0.5), maxf(1.0, r * 0.08))
-	# the specular: a soft cap with a hot point inside it
-	draw_circle(pos + Vector2(-0.34, -0.38) * r, r * 0.24, col.lightened(0.5))
-	draw_circle(pos + Vector2(-0.38, -0.42) * r, maxf(1.0, r * 0.11), Color(1.0, 1.0, 0.98, 0.9))
+	draw_circle(pos, BALL_RADIUS_PX * sc, col)
 
 
 func ovoid(c: Vector2, w: float, h: float, col: Color) -> void:
@@ -10122,38 +10315,17 @@ func ovoid(c: Vector2, w: float, h: float, col: Color) -> void:
 
 
 func draw_egg(pos: Vector2, col: Color, sc: float) -> void:
-	var w := 9.0 * sc
-	var h := 12.0 * sc
-	if round_props_v3():
-		# same rule as the ball: one solid shape. The egg's whole character is its
-		# asymmetric silhouette, so the ovoid does all the work and nothing is drawn
-		# on top of it.
-		ovoid(pos, w, h, col)
-		return
-	if not prop_art_new():
-		fill_ellipse(pos, w, h, col)
-		var oh := col.lightened(0.25)
-		oh.a = 0.9
-		draw_circle(pos + Vector2(-3, -4) * sc, 2.6 * sc, oh)
-		return
-	ovoid(pos, w, h, Color(col.r * 0.64, col.g * 0.61, col.b * 0.60))
-	ovoid(pos + Vector2(-0.10 * w, -0.10 * h), w * 0.84, h * 0.84, col)
-	draw_circle(pos + Vector2(-0.30 * w, -0.36 * h), w * 0.20, col.lightened(0.42))
-	draw_circle(pos + Vector2(-0.34 * w, -0.40 * h), maxf(1.0, w * 0.10), Color(1.0, 1.0, 0.97, 0.9))
+	ovoid(pos, 9.0 * sc, 12.0 * sc, col)
 
 
 func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
+	# CONCENTRIC ONLY - the one round prop that keeps its modelling, and the exception
+	# proves the rule above. A ring must stay an annulus (the hole has to read as a
+	# hole), so every band here is a FULL circle - dark tube, body, bright inner edge -
+	# and none of them has an end that could read as a cut, nor a direction that could
+	# be wrong under a different stage light. It is cross-section, not illumination.
 	var r := 12.0 * sc
 	var w := 5.0 * sc
-	if not prop_art_new():
-		draw_arc(pos, r, 0.0, TAU, 28, col, w, true)
-		var oh := col.lightened(0.3)
-		oh.a = 0.7
-		draw_arc(pos, r, -2.4, -1.0, 8, oh, 3.0 * sc, true)
-		return
-	# CONCENTRIC ONLY. A ring is the one prop that must stay an annulus (the hole has to
-	# stay transparent), so every band here is a FULL circle - dark tube, body, bright
-	# inner edge - and none of them has an end that could read as a cut.
 	draw_arc(pos, r, 0.0, TAU, 32, Color(col.r * 0.46, col.g * 0.45, col.b * 0.50), w, true)
 	draw_arc(pos, r - w * 0.14, 0.0, TAU, 32, col, w * 0.60, true)
 	draw_arc(pos, r - w * 0.30, 0.0, TAU, 32, col.lightened(0.38), w * 0.22, true)
@@ -10422,7 +10594,7 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 
 
 func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
-	# THE GOAL, quietly, for when the flowers are doing the loud work (see flowers_on).
+	# THE GOAL, quietly, because the flowers on the boards are doing the loud work.
 	# A growing STEM with a bud at its tip and a notch at each goal line: the same
 	# concave curve and the same information as the money hat, in a fifth of the space
 	# and in the flowers' own language, so the rail does not compete with the stage.
@@ -10478,176 +10650,15 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		fill_ellipse(bud + Vector2(-1.4, -1.6) * swell, 2.0 * swell, 3.0 * swell, Color(0.72, 0.86, 0.58, 0.8))
 
 
-func draw_money_hat(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
-	# THE HAT: the act's score requirement as an object that FILLS, not a bar with a
-	# percentage (Louis, 2026-07-27: "a sort of hat of money being filled (and special
-	# effects for overfilled)", with Balatro as the stated bar).
-	#
-	# It is a busker's top hat lying the way a busker leaves it: turned over, brim ring
-	# up in the air, crown hanging down to the ground, the night's take piling up inside
-	# from the closed end toward the brim. The crown is drawn as a SOLID object with a
-	# cutaway interior - walls you can see the thickness of, and the take visible inside
-	# them - because the first version drew it as a thin outline with a transparent
-	# middle and read as a glass jar with a lid, not a hat.
-	#
-	# `frac` is 0..1 to the final goal, `over` is 0..1 past it (what drives the
-	# overflow), `marks` are the earlier goals' fractions, `accent` is the venue's colour
-	# for the hat band. All of it is derived per frame from `score`; nothing is stored.
-	var cx := box.position.x + box.size.x * 0.5
-	var brim_y := box.position.y + box.size.y * 0.30
-	var ground := box.position.y + box.size.y * 0.95
-	var half := box.size.x * 0.32          # the crown's outer half-width
-	var wall := 6.0                        # felt thickness, so the crown has substance
-	var brim_rx := box.size.x * 0.48
-	var brim_ry := box.size.x * 0.085
-	var felt := Color(0.17, 0.12, 0.14)
-	var felt_dk := Color(0.10, 0.07, 0.085)
-	# the interior is deliberately LIGHTER than the card behind it: at near-black it read
-	# as a hole cut in the rail rather than the inside of a hat
-	var cavity := Color(0.13, 0.095, 0.105)
-	var gold := Color(1.0, 0.84, 0.40)
-	var pulse := 0.5 + 0.5 * sin(float(tick) * 0.09)
-
-	# a warm glow behind the whole hat once it is overflowing, so the moment carries
-	# past the hat's own outline
-	if over > 0.0:
-		for gi in 4:
-			draw_circle(Vector2(cx, (brim_y + ground) * 0.5), box.size.x * (0.36 + 0.11 * float(gi)) * (1.0 + 0.04 * pulse),
-				Color(1.0, 0.78, 0.35, 0.055 * over * (1.0 - float(gi) / 4.0)))
-	draw_shadow(Vector2(cx, ground + 3.0), brim_rx * 1.6)
-
-	# the crown, outer then hollow: a tapered body with a rounded foot
-	_hat_vessel(Rect2(cx - half, brim_y, half * 2.0, ground - brim_y), felt, Color(0.30, 0.21, 0.20, 0.9), 1.0, half * 0.28)
-	_hat_vessel(Rect2(cx - half + wall, brim_y, (half - wall) * 2.0, ground - brim_y - wall), cavity, Color(0, 0, 0, 0), 0.0, (half - wall) * 0.28)
-	# a silk sheen down the left wall, so the felt reads as cloth rather than plastic
-	draw_rect(Rect2(cx - half + 1.5, brim_y + 6.0, 2.0, ground - brim_y - 22.0), Color(1.0, 0.92, 0.8, 0.07))
-
-	# THE TAKE. Rises from the foot to the brim inside the cavity, in the same rounded
-	# shape, so a nearly-empty hat still looks like coins sitting in the bottom of a hat.
-	var in_half := half - wall
-	var fill_top := lerpf(ground - wall, brim_y, clampf(frac, 0.0, 1.0))
-	if frac > 0.004:
-		_hat_vessel(Rect2(cx - in_half, fill_top, in_half * 2.0, ground - wall - fill_top), gold, Color(0, 0, 0, 0), 0.0, in_half * 0.28)
-		# the surface of the pile, and coins sitting on it - what makes it money and not
-		# a liquid. Their x is fixed so the pile never jitters; only the level moves.
-		fill_ellipse(Vector2(cx, fill_top + 1.0), in_half - 1.0, 5.0, Color(1.0, 0.93, 0.62))
-		# (typed arrays: an array-indexed numeric literal infers Variant, see Gotchas)
-		var coin_x := PackedFloat32Array([-0.52, 0.06, 0.55])
-		var coin_y := PackedFloat32Array([1.5, -2.0, 2.5])
-		for ci in 3:
-			var cp := Vector2(cx + coin_x[ci] * (in_half - 4.0), fill_top + coin_y[ci])
-			draw_circle(cp, 4.2, Color(1.0, 0.90, 0.52))
-			draw_circle(cp - Vector2(1.2, 1.2), 1.5, Color(1.0, 1.0, 0.9, 0.8))
-		# one slow glint travelling across the gold, so a filling hat is never static
-		var gx := cx - in_half + fmod(float(tick) * 0.55, in_half * 2.0)
-		draw_line(Vector2(gx, fill_top + 5.0), Vector2(gx - 5.0, minf(ground - wall - 4.0, fill_top + 24.0)),
-			Color(1.0, 1.0, 0.85, 0.20), 2.0)
-
-	# the earlier goals, marked on the crown's own walls, lit once passed
-	for m in marks:
-		var my := lerpf(ground - wall, brim_y, clampf(m, 0.0, 1.0))
-		var mc := Color(1.0, 0.95, 0.8, 0.95) if frac >= m else Color(0.72, 0.60, 0.50, 0.6)
-		draw_rect(Rect2(cx - in_half, my - 0.5, in_half * 2.0, 1.0), Color(mc.r, mc.g, mc.b, mc.a * 0.28))
-		draw_rect(Rect2(cx - half - 5.0, my - 1.5, 7.0, 3.0), mc)
-		draw_rect(Rect2(cx + half - 2.0, my - 1.5, 7.0, 3.0), mc)
-
-	# the hat BAND in the venue's colour, on the two walls only - it must not cross the
-	# cutaway, or it reads as a lid across the opening rather than a band round the crown
-	# (the band itself is drawn with the brim below, as a ribbon trim round its edge: two
-	# marks on the cut-away walls read as rivets, not as a band going round a crown)
-
-	# the BRIM, over the crown's top so the pile reads as being INSIDE the hat. Two
-	# stacked ellipses give it a lit upper face, and the mouth is the cavity's own colour
-	# so the opening and the interior are plainly the same hole. NOT draw_arc, whose
-	# radius is circular - "a highlight along the brim" ballooned into a 66px dome out
-	# through the top of the card.
-	fill_ellipse(Vector2(cx, brim_y + 1.0), brim_rx, brim_ry, felt_dk)
-	fill_ellipse(Vector2(cx, brim_y - 1.0), brim_rx * 0.99, brim_ry * 0.92, Color(0.21, 0.15, 0.17))
-	ellipse_outline(Vector2(cx, brim_y - 1.0), brim_rx * 0.99, brim_ry * 0.92, Color(1.0, 0.86, 0.55, 0.30), 1.2)
-	ellipse_outline(Vector2(cx, brim_y - 1.0), brim_rx * 0.84, brim_ry * 0.78, Color(accent.r, accent.g, accent.b, 0.85), 2.2)
-	fill_ellipse(Vector2(cx, brim_y - 1.0), in_half * 0.94, brim_ry * 0.58, cavity)
-	if frac >= 0.995:
-		fill_ellipse(Vector2(cx, brim_y - 1.0), in_half * 0.90, brim_ry * 0.50, Color(1.0, 0.90, 0.55))
-
-	# OVERFLOWING: the take mounds up out of the opening, coins tumble over both sides of
-	# the brim, and the whole thing throws sparks. This is the payoff for pushing past the
-	# final goal instead of cashing in, so it is deliberately the loudest thing in the rail.
-	if over > 0.0:
-		# a HEAP, not a pancake: three stacked ellipses of shrinking width, with loose
-		# coins riding the top so the pile reads as coins all the way up
-		var mound := 6.0 + 26.0 * over
-		fill_ellipse(Vector2(cx, brim_y - 1.0 - mound * 0.22), in_half * 1.02, mound * 0.46, gold)
-		fill_ellipse(Vector2(cx, brim_y - 2.0 - mound * 0.52), in_half * 0.78, mound * 0.40, gold.lerp(Color(1.0, 0.92, 0.62), 0.5))
-		fill_ellipse(Vector2(cx, brim_y - 3.0 - mound * 0.80), in_half * 0.46, mound * 0.30, Color(1.0, 0.94, 0.68))
-		for ci in 5:
-			var a := float(ci) * 1.7
-			draw_circle(Vector2(cx + cos(a) * in_half * 0.62, brim_y - 3.0 - mound * (0.30 + 0.42 * absf(sin(a)))), 3.8, Color(1.0, 0.90, 0.52))
-		# coins spilling down both sides, on a loop: each one falls, fades, and restarts
-		for ci in 6:
-			var side := -1.0 if ci % 2 == 0 else 1.0
-			var ph := fmod(float(tick) * 0.028 + float(ci) * 0.37, 1.0)
-			var sp := Vector2(cx + side * (brim_rx * 0.60 + ph * brim_rx * 0.28), brim_y + ph * ph * (ground - brim_y + 10.0))
-			draw_circle(sp, 3.6 * (1.0 - ph * 0.35), Color(1.0, 0.88, 0.48, (1.0 - ph) * 0.95))
-			draw_circle(sp - Vector2(1.0, 1.0), 1.2 * (1.0 - ph * 0.35), Color(1.0, 1.0, 0.92, (1.0 - ph) * 0.7))
-		# sparks: a slow ring of four-point STARS (two crossed lines read as plus signs),
-		# offset so they never blink in lockstep, and kept inside the hat's own box so the
-		# celebration cannot spill out of the card it lives in
-		for ci in 5:
-			var sa := float(tick) * 0.035 + float(ci) * (TAU / 5.0)
-			var sr := brim_rx * (0.72 + 0.20 * sin(float(tick) * 0.06 + float(ci)))
-			var sp2 := Vector2(clampf(cx + cos(sa) * sr, box.position.x + 6.0, box.position.x + box.size.x - 6.0),
-				clampf(brim_y - 13.0 + sin(sa) * brim_ry * 2.6, box.position.y + 6.0, ground))
-			var sz := 3.2 + 2.6 * (0.5 + 0.5 * sin(float(tick) * 0.13 + float(ci) * 2.1))
-			draw_star4(sp2, sz, Color(1.0, 0.95, 0.7, 0.32 + 0.5 * over))
-
-
 func draw_star4(c: Vector2, r: float, col: Color) -> void:
 	# a four-point sparkle: a filled star, because two crossed LINES of equal length and
-	# width read as a plus sign, which is what the hat's overflow sparks looked like
+	# width read as a plus sign, not a glint - which is exactly how the first attempt at
+	# a sparkling gold rose came out
 	var i := r * 0.26
 	draw_colored_polygon(PackedVector2Array([
 		c + Vector2(0.0, -r), c + Vector2(i, -i), c + Vector2(r, 0.0), c + Vector2(i, i),
 		c + Vector2(0.0, r), c + Vector2(-i, i), c + Vector2(-r, 0.0), c + Vector2(-i, -i),
 	]), col)
-
-
-func draw_coin(c: Vector2, r: float, col: Color) -> void:
-	# THE money mark, in one place: the hub's PURSE card and every spending screen's
-	# gold readout both call it, so gold looks like one currency everywhere. It was a
-	# flat yellow dot with a white blob on it, which is the oldest-looking thing left
-	# on a screen next to the money hat - so it is drawn as a STRUCK COIN instead,
-	# on the hat's own rule (draw the object, let it glint, never a shape standing in
-	# for a thing): a dark milled rim, a raised face inside it, a four-point star
-	# pressed into the middle, a specular crescent up its top-left and the shadow
-	# opposite. Everything scales off r, so the same call serves a 7px card icon and
-	# a 12px shop readout.
-	# DETAIL IS A FUNCTION OF SIZE here, and getting that wrong is what makes small icons
-	# muddy: at the hub card's 7px radius a milled rim and a struck emblem crowd into a
-	# gear, so the small coin is only body, rim, shadow and glint - four marks - and the
-	# minting appears once there is room for it.
-	var big := r >= 9.0
-	var rim := Color(col.r * 0.58, col.g * 0.44, col.b * 0.16, col.a)
-	var face := Color(minf(1.0, col.r * 1.04), minf(1.0, col.g * 0.99), minf(1.0, col.b * 0.80), col.a)
-	if big:
-		# the milling: MANY SHORT teeth, barely proud of the rim, drawn under it so only
-		# their tips show. Fewer and longer (14 teeth reaching to 1.1r) turned the coin
-		# into a little sun - milling is a texture on an edge, not a set of rays.
-		for i in 20:
-			var a := TAU * float(i) / 20.0
-			draw_line(c + Vector2(cos(a), sin(a)) * (r * 0.94), c + Vector2(cos(a), sin(a)) * (r * 1.05), rim, maxf(1.0, r * 0.12))
-	draw_circle(c, r, rim)
-	draw_circle(c, r * 0.86, face)
-	# THE ROUNDNESS: a thin shadow crescent low-right and a thin light crescent up-left,
-	# both hugging the face's own edge. Thick central arcs read as a ring with a hole
-	# in it; hugging the edge reads as a disc catching the stage lights.
-	draw_arc(c, r * 0.70, PI * 0.05, PI * 0.85, 18, Color(0.32, 0.18, 0.03, 0.40 * col.a), maxf(1.0, r * 0.15), true)
-	draw_arc(c, r * 0.70, PI * 1.15, PI * 1.9, 18, Color(1.0, 0.99, 0.88, 0.5 * col.a), maxf(1.0, r * 0.15), true)
-	if big:
-		# the die STRIKE, a pressed impression rather than a bright emblem: a mark
-		# LIGHTER than its face reads as something stuck on the coin, not struck into it
-		draw_star4(c, r * 0.34, Color(col.r * 0.66, col.g * 0.50, col.b * 0.20, 0.8 * col.a))
-	# and the specular: a small bright cap up the top-left, where the lights are
-	draw_circle(c + Vector2(-r * 0.30, -r * 0.34), maxf(1.2, r * 0.20), Color(1.0, 1.0, 0.94, 0.9 * col.a))
 
 
 func ellipse_outline(c: Vector2, rx: float, ry: float, col: Color, w: float) -> void:
@@ -10658,25 +10669,6 @@ func ellipse_outline(c: Vector2, rx: float, ry: float, col: Color, w: float) -> 
 		var a := TAU * float(i) / 24.0
 		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
 	draw_polyline(pts, col, w, true)
-
-
-func _hat_vessel(r: Rect2, fill: Color, border: Color, bw: float, rad: float) -> void:
-	# a rounded-FOOT box: square at the top (an opening), rounded at the bottom (a hat's
-	# crown, and the shape the take settles into). StyleBoxFlat can round two corners
-	# only, which is exactly this shape, and it anti-aliases for free.
-	if r.size.y <= 0.5:
-		return
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = fill
-	sb.corner_radius_top_left = 0
-	sb.corner_radius_top_right = 0
-	sb.corner_radius_bottom_left = int(minf(rad, r.size.y))
-	sb.corner_radius_bottom_right = int(minf(rad, r.size.y))
-	sb.border_color = border
-	sb.set_border_width_all(int(ceil(bw)))
-	sb.border_width_top = 0
-	sb.anti_aliasing = true
-	draw_style_box(sb, r)
 
 
 func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color, label := "") -> void:
@@ -11116,62 +11108,58 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		for gi in NUM_GOALS - 1:
 			marks.append(goal_bar_pos(float(goal_for(run_venue, gi)), float(g_final)))
 		var over := 0.0 if score <= g_final else clampf(float(score - g_final) / float(maxi(g_final, 1)), 0.0, 1.0)
-		if flowers_on():
-			# THE HAT COMES OFF when the crowd is throwing (Louis). Its whole job was to
-			# make the goal legible as a thing that fills, and the pile of flowers at the
-			# juggler's feet now does that far better - on the stage itself, where the
-			# player is already looking. The rail keeps only what the stage cannot say:
-			# the climb toward the goal, as a slim stem, and TONIGHT'S TAKINGS, which the
-			# hat never showed at all.
-			# ...stopping clear of the cash-in line along the card's bottom edge
-			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
-				Color(venue_data(run_venue)["glow"]))
-			# THE TAKINGS COLUMN STARTS CLEAR OF THE BLOOM (2026-07-27, Louis: the flower
-			# overlapped the word TONIGHT). The stem's bud sits on the centre line of the
-			# box above (its x + half its 34px width), and past the final goal it opens
-			# into a flower whose petals reach STEM_BLOOM_REACH - deliberately out past
-			# that box - so anything drawn nearer than that is inside the celebration
-			# rather than beside it. The column is anchored off the reach itself, not a
-			# hand-picked x, so growing the bloom later moves the text out of its way.
-			var col_x := LX + 152.0 + 17.0 + STEM_BLOOM_REACH + 7.0
-			var col_w := LW - 8.0 - (col_x - LX)     # to the card's own right margin
-			var fc := Color(0.98, 0.60, 0.72)
-			draw_string(font, Vector2(col_x, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, 11, Color(0.85, 0.72, 0.66))
-			draw_flower(Vector2(col_x + 9.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
-			# the night's take SHRINKS to fit, never trims: fit_text would render a good
-			# night's 12,400 as "12,4...", and a truncated number is not a number
-			var take := commafy(run_flowers)
-			var take_x := col_x + 23.0
-			draw_string(title_font(), Vector2(take_x, tcard_y + 66.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
-				fit_size(title_font(), take, LX + LW - 8.0 - take_x, 24, 14), fc)
-			# and how the room is FEELING, in the one word the pile is saying
-			# ...in the SAME bands the crowd dial is coloured in, so the word and the
-			# needle can never disagree about whether flowers are coming
-			var mood := "waiting"
-			var mc := Color(0.70, 0.66, 0.62)
-			if applause <= TOMATO_RED:
-				mood = "turning on you"
-				mc = Color(1.0, 0.45, 0.38)
-			elif applause >= 0.92:
-				mood = "on their feet"
-				mc = Color(0.75, 0.95, 0.72)
-			elif applause >= FLOWER_GREEN:
-				mood = "throwing flowers"
-				mc = Color(0.65, 0.92, 0.62)
-			elif applause >= 0.50:
-				mood = "with you"
-				mc = Color(0.96, 0.86, 0.42)
-			elif applause >= FLOWER_FLOOR:
-				mood = "restless"
-				mc = Color(0.96, 0.62, 0.30)
-			# the mood is a phrase, and the longest of them ("throwing flowers") is wider
-			# than the column the bloom leaves - so it steps down a size or two rather
-			# than losing the word that carries the meaning
-			draw_string(font, Vector2(col_x, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
-				fit_size(font, mood, col_w, 12, 10), mc)
-		else:
-			draw_money_hat(Rect2(LX + 148.0, tcard_y + 8.0, 138.0, 162.0), tfrac, over, marks,
-				Color(venue_data(run_venue)["glow"]))
+		# THE CROWD SHOWS THE GOAL, so the rail does not have to (Louis). A money hat
+		# that filled up used to live here; the pile of flowers at the juggler's feet
+		# says the same thing far better, on the stage itself, where the player is
+		# already looking. The rail keeps only what the stage cannot say: the climb
+		# toward the goal as a slim stem, and TONIGHT'S TAKINGS, which the hat never
+		# showed at all.
+		# ...stopping clear of the cash-in line along the card's bottom edge
+		draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
+			Color(venue_data(run_venue)["glow"]))
+		# THE TAKINGS COLUMN STARTS CLEAR OF THE BLOOM (2026-07-27, Louis: the flower
+		# overlapped the word TONIGHT). The stem's bud sits on the centre line of the
+		# box above (its x + half its 34px width), and past the final goal it opens
+		# into a flower whose petals reach STEM_BLOOM_REACH - deliberately out past
+		# that box - so anything drawn nearer than that is inside the celebration
+		# rather than beside it. The column is anchored off the reach itself, not a
+		# hand-picked x, so growing the bloom later moves the text out of its way.
+		var col_x := LX + 152.0 + 17.0 + STEM_BLOOM_REACH + 7.0
+		var col_w := LW - 8.0 - (col_x - LX)     # to the card's own right margin
+		var fc := Color(0.98, 0.60, 0.72)
+		draw_string(font, Vector2(col_x, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, 11, Color(0.85, 0.72, 0.66))
+		draw_flower(Vector2(col_x + 9.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
+		# the night's take SHRINKS to fit, never trims: fit_text would render a good
+		# night's 12,400 as "12,4...", and a truncated number is not a number
+		var take := commafy(run_flowers)
+		var take_x := col_x + 23.0
+		draw_string(title_font(), Vector2(take_x, tcard_y + 66.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			fit_size(title_font(), take, LX + LW - 8.0 - take_x, 24, 14), fc)
+		# and how the room is FEELING, in the one word the pile is saying
+		# ...in the SAME bands the crowd dial is coloured in, so the word and the
+		# needle can never disagree about whether flowers are coming
+		var mood := "waiting"
+		var mc := Color(0.70, 0.66, 0.62)
+		if applause <= TOMATO_RED:
+			mood = "turning on you"
+			mc = Color(1.0, 0.45, 0.38)
+		elif applause >= 0.92:
+			mood = "on their feet"
+			mc = Color(0.75, 0.95, 0.72)
+		elif applause >= FLOWER_GREEN:
+			mood = "throwing flowers"
+			mc = Color(0.65, 0.92, 0.62)
+		elif applause >= 0.50:
+			mood = "with you"
+			mc = Color(0.96, 0.86, 0.42)
+		elif applause >= FLOWER_FLOOR:
+			mood = "restless"
+			mc = Color(0.96, 0.62, 0.30)
+		# the mood is a phrase, and the longest of them ("throwing flowers") is wider
+		# than the column the bloom leaves - so it steps down a size or two rather
+		# than losing the word that carries the meaning
+		draw_string(font, Vector2(col_x, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
+			fit_size(font, mood, col_w, 12, 10), mc)
 		# the ask, and the gamble, in the card's left column beside the hat
 		var goal_head := "FIRST GOAL"
 		if goals_hit >= NUM_GOALS:
@@ -11475,8 +11463,6 @@ func draw_results(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
 
 
-
-
 func draw_pause_screen(font: Font, s: Vector2) -> void:
 	# the one call site every screen uses to open the pause menu, same seam as
 	# draw_sheet_screen/draw_settings_screen (see there). pause_input/pause_activate
@@ -11535,6 +11521,16 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(px, py + ph - 22.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
 
 
+func exp_on(id: String) -> bool:
+	# THE ONE PLACE AN EXPERIMENT IS READ. Every reader used to call experiments.get()
+	# with its own hand-written fallback, and one of them (flowers_on) said `false` while
+	# the declaration said `true` - harmless only for exactly as long as the key is never
+	# missing, which is not a property anything guarantees. One accessor with one default
+	# cannot disagree with itself. Every experiment in EXPERIMENT_DEFS is a candidate for
+	# shipping, so the default here is ON, matching the `experiments` declaration.
+	return bool(experiments.get(id, true))
+
+
 func draw_debug_panel() -> void:
 	# EXPERIMENTS (F9): a small, always-on-top list of alternate screens/behaviours
 	# that can be flipped on without ever touching the code - see debug_panel_input
@@ -11544,8 +11540,11 @@ func draw_debug_panel() -> void:
 	var font := game_font()
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.55))
 	var pw := 560.0
-	var row_h := 80.0   # tall enough for a three-line description at 10pt: the two
-						# longest entries were being trimmed by draw_wrap_fit at 68
+	# A ROW GROWS INTO THE SPACE THE LIST IS NOT USING. A flat 80 was tuned for four
+	# entries and trimmed the two longest descriptions at that; with one entry left it
+	# would waste most of the card and still trim. Dividing a fixed budget by the count
+	# means a short list explains itself properly and a long one still fits on screen.
+	var row_h := clampf(380.0 / float(maxi(EXPERIMENT_DEFS.size(), 1)), 80.0, 190.0)
 	var ph := 100.0 + row_h * float(EXPERIMENT_DEFS.size())
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
@@ -11556,7 +11555,7 @@ func draw_debug_panel() -> void:
 	for i in EXPERIMENT_DEFS.size():
 		var edef: Dictionary = EXPERIMENT_DEFS[i]
 		var eid := String(edef["id"])
-		var on := bool(experiments.get(eid, false))
+		var on := exp_on(eid)
 		var sel := i == debug_panel_sel
 		var ry := oy + float(i) * row_h
 		if sel:
@@ -12634,14 +12633,12 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 			Vector2(o.x - 0.36 * H, hip_y - 0.1 * H), Vector2(o.x - 0.28 * H, waist_y)]), vest)
 	if turn > 0.0:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # the head keeps its round size through a turn
-	draw_circle(head + Vector2(0, -head_r * 0.32), head_r * 1.12, hair)
-	if facing_back:
-		draw_circle(head, head_r, hair)   # all hair, same as the stage figure
-	else:
-		draw_circle(head, head_r, skin)
-		draw_circle(head + Vector2(-head_r * 0.34, -head_r * 0.06), head_r * 0.17, Color(0.16, 0.10, 0.08))
-		draw_circle(head + Vector2(head_r * 0.34, -head_r * 0.06), head_r * 0.17, Color(0.16, 0.10, 0.08))
-		draw_arc(head + Vector2(0.0, head_r * 0.06), head_r * 0.44, 0.7, PI - 0.7, 8, Color(0.42, 0.20, 0.16), 1.5, true)
+	# the SAME head the stage figure draws, at this figure's own radius (11.5px against
+	# the stage's 21). It used to be a second, hand-written face here - two dots and an
+	# arc - which is how it came to have no fringe and a mouth that never changed with
+	# the mood. draw_head scales everything off r and drops the finest marks below their
+	# own thresholds, so one call covers both sizes.
+	draw_head(head, head_r, hair, skin, facing_back)
 	if turn > 0.0:
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit)
@@ -12974,14 +12971,20 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# background darkening (seg_dark, just above); the ornament here is only the
 	# plain divider used under every screen title, not a segment counter
 	draw_title_glow(font, s.y * 0.055, "DAY %d" % day, 40, Color(1.0, 0.88, 0.5), s)
-	draw_string(font, Vector2(0, s.y * 0.055 + 66.0), seg_name(), HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.8, 0.62))
+	# THESE TWO RIDE OVER THE VENUE PICTURE, so they are outlined, not plain (2026-07-28).
+	# The header sits on the live exterior - a lit skyline, a marquee, a floodlit bowl -
+	# and a lit window landing behind a word swallows it whole: caught on a Street Corner
+	# hub, where a window sat exactly between "stamina" and "lasts". The DAY number was
+	# already safe (draw_title_glow carries its own), and the same rule the stage's
+	# popups follow applies to anything else drawn over paint that moves.
+	draw_text_shout(font, Vector2(0, s.y * 0.055 + 66.0), seg_name(), HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.8, 0.62))
 	draw_ornament(s.x * 0.5, s.y * 0.055 + 86.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
 	# under the clock: what actually limits the day, said plainly (Louis: it was
 	# unclear when and why the day was spent)
 	var limit_line := "you can work while stamina lasts"
 	if too_tired():
 		limit_line = "stamina is spent  -  sleep to start tomorrow"
-	draw_string(font, Vector2(0, s.y * 0.055 + 112.0), limit_line, HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.7, 0.5, 0.95) if too_tired() else Color(0.72, 0.68, 0.6, 0.9))
+	draw_text_shout(font, Vector2(0, s.y * 0.055 + 112.0), limit_line, HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.7, 0.5, 0.95) if too_tired() else Color(0.78, 0.74, 0.66, 0.95))
 
 	# the ledger card: purse, reputation, stamina, and the road to the next meal
 	# bonus. It sits high on the left so the stage picture keeps the middle.
@@ -12998,7 +13001,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 	var to_str := MEALS_PER_STR - (meals % MEALS_PER_STR)
 	var ledger := [
-		{"icon": "coin", "col": Color(1.0, 0.84, 0.42) if not flowers_on() else Color(0.98, 0.60, 0.72), "label": "PURSE",
+		{"icon": "coin", "col": Color(0.98, 0.60, 0.72), "label": "PURSE",
 		 "big": "%s %s" % [commafy(money), coin_word()], "note": "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"]},
 		{"icon": "star", "col": Color(0.84, 0.72, 0.92), "label": "REPUTATION",
 		 "big": commafy(reputation), "note": rep_tier()},
@@ -13193,6 +13196,63 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 				HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, Color(0.84, 0.74, 0.90, 0.92))
 
 
+func crescent_points(c: Vector2, r: float, off: Vector2, ir: float) -> PackedVector2Array:
+	# A TRUE CRESCENT: one disc's rim, then back along the rim of the disc that BITES
+	# into it. That difference is the whole shape - two HORNS where the rims cross, and
+	# a limb that swells at the belly and tapers to a point at each end.
+	#
+	# WHY NOT A THICK ARC, which is what the moon used to be (2026-07-28, Louis: "improve
+	# the rest icon, it's just a C right now" - and he is describing the geometry exactly).
+	# draw_arc's width is CONSTANT, so an arc is a ring with a gap cut in it: the same
+	# thickness at the horns as at the belly, finished with two square caps. That is the
+	# letter C, at any size, however it is coloured. A crescent has no constant width
+	# anywhere, so no arc can be one.
+	#
+	# The other obvious answer - draw the disc, then overdraw the bite in the background
+	# colour - is wrong here for a different reason: these icons sit on cards that do not
+	# all share one background (and some are half transparent), so the bite has to be
+	# honestly ABSENT rather than painted over.
+	var b := c + off
+	var d := off.length()
+	var pts := PackedVector2Array()
+	if d < 0.001 or d >= r + ir or d <= absf(r - ir):
+		# the rims never cross: there are no horns, so there is no crescent to build.
+		# Fall back to the plain disc rather than emitting a broken polygon (which Godot
+		# would silently refuse to triangulate, drawing nothing at all).
+		for i in 24:
+			var a := TAU * float(i) / 24.0
+			pts.append(c + Vector2(cos(a), sin(a)) * r)
+		return pts
+	# where the two rims cross, by the standard circle-circle intersection
+	var m := (r * r - ir * ir + d * d) / (2.0 * d)
+	var h := sqrt(maxf(0.0, r * r - m * m))
+	var u := off / d
+	var n := Vector2(-u.y, u.x)
+	var p1 := c + u * m + n * h
+	var p2 := c + u * m - n * h
+	# the outer rim from horn to horn, taking the way round that stays OUTSIDE the bite
+	var a1 := (p1 - c).angle()
+	var sweep := (p2 - c).angle() - a1
+	while sweep <= 0.0:
+		sweep += TAU
+	if b.distance_to(c + Vector2(cos(a1 + sweep * 0.5), sin(a1 + sweep * 0.5)) * r) < ir:
+		sweep -= TAU
+	for i in 21:
+		var a := a1 + sweep * (float(i) / 20.0)
+		pts.append(c + Vector2(cos(a), sin(a)) * r)
+	# ...and back along the biting rim, taking the part of it that lies INSIDE the disc
+	var b0 := (p2 - b).angle()
+	var bsweep := (p1 - b).angle() - b0
+	while bsweep <= 0.0:
+		bsweep += TAU
+	if c.distance_to(b + Vector2(cos(b0 + bsweep * 0.5), sin(b0 + bsweep * 0.5)) * ir) > r:
+		bsweep -= TAU
+	for i in 21:
+		var a := b0 + bsweep * (float(i) / 20.0)
+		pts.append(b + Vector2(cos(a), sin(a)) * ir)
+	return pts
+
+
 func day_icon(kind: String, c: Vector2, col: Color) -> void:
 	# small vector marks for the hub's cards, drawn from primitives like the rest of
 	# the art. Each one says what its row DOES at a glance, which is what lets the
@@ -13246,15 +13306,11 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 			#
 			# So it is not a bed any more. It is a MOON with three z's, which is the
 			# universal mark for sleep, survives being 16px wide, and needs exactly two
-			# recognisable shapes. (The hub's REST DRAWER already uses a plain moon;
-			# this is the same idea with the z's that say "sleep" rather than "night".)
-			# the crescent is a THICK ARC, not a circle with a bite cut out of it: cutting
-			# the bite means overdrawing in the background colour, and the hub's cards do
-			# not all share one. An arc keeps the hole honestly transparent, and its two
-			# blunt ends land exactly where a crescent moon has its horns anyway - the
-			# one place in this whole art pass where a square cap is the right answer.
-			var mc := c + Vector2(-2.5, 1.0)
-			draw_arc(mc, 7.0, 0.62, TAU - 0.62, 22, col, 4.6, true)
+			# recognisable shapes. (The hub's REST DRAWER uses the same moon without the
+			# z's, since a drawer is a place rather than an action.)
+			var mc := c + Vector2(-2.0, 1.5)
+			draw_glow(mc, 12.0, Color(col.r, col.g, col.b, 0.13))
+			draw_colored_polygon(crescent_points(mc, 7.0, Vector2(4.4, -0.9), 6.2), col)
 			for zi in 3:
 				var zs := 5.0 - float(zi) * 1.4
 				var zp := c + Vector2(4.5 + float(zi) * 3.4, -3.0 - float(zi) * 3.6)
@@ -13297,7 +13353,11 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 						Color(0.10, 0.08, 0.10, 0.35), 0.9)
 			draw_line(spine, spine + Vector2(0.0, 9.5), Color(col.r * 0.6, col.g * 0.6, col.b * 0.6), 1.6)
 		"moon":
-			draw_arc(c + Vector2(2.0, 0.0), 7.5, 0.6, TAU - 0.6, 20, col, 3.2, true)
+			# REST: a real crescent (see crescent_points), with the faint halo a moon has.
+			# The halo is what stops a small pale shape reading as a clipping of
+			# something else - a moon is a LIGHT, and a light spills.
+			draw_glow(c + Vector2(1.0, 0.0), 15.0, Color(col.r, col.g, col.b, 0.15))
+			draw_colored_polygon(crescent_points(c + Vector2(1.4, 0.0), 8.2, Vector2(5.2, -1.1), 7.2), col)
 		"bag":
 			draw_rect(Rect2(c.x - 7.5, c.y - 3.0, 15.0, 10.0), col)
 			draw_arc(c + Vector2(0.0, -3.0), 4.5, PI, TAU, 12, col, 1.8, true)
@@ -13436,7 +13496,7 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# a slow, graceful cascade above the title, with soft motion trails
 	draw_menu_cascade(Vector2(cx, s.y * 0.17), 1.0)
 
-	draw_iacto_logo(font, s.y * 0.32, 92, Color(1.0, 0.88, 0.5), s)
+	draw_wordmark(font, s.y * 0.32, 92, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.32 + 160.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
 
@@ -13535,7 +13595,7 @@ func capsule_prop(kind: int, p: Vector2, sc: float, ang: float) -> void:
 
 
 func capsule_wordmark(font: Font, y: float, k: float, s: Vector2, col: Color, sub: String) -> void:
-	draw_iacto_logo(font, y, int(round(104.0 * k)), col, s)
+	draw_wordmark(font, y, int(round(104.0 * k)), col, s)
 	if sub != "":
 		draw_ornament(s.x * 0.5, y + 126.0 * k, 250.0 * k, Color(col.r, col.g, col.b, 0.7))
 		draw_string(font, Vector2(0, y + 172.0 * k), sub, HORIZONTAL_ALIGNMENT_CENTER, s.x,
@@ -13587,6 +13647,26 @@ func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: C
 # 6.9th and a 9.6th - a pea beside them - and BOTH references independently said the ball
 # should be about 1.44x bigger, which is CAP_BALL_R below. Louis spotted it by eye first.
 const CAP_BALL_R := 0.119     # a ball's radius, in units of the mark's letter height
+# THE KNIFE'S OWN MEASUREMENTS, so the layout never has to guess them. Local units, the
+# same ones cap_knife draws in: the point is at -26 and the butt cap ends at +16.3.
+const CAP_KNIFE_TIP := -26.0
+const CAP_KNIFE_BUTT := 16.3
+const CAP_KNIFE_LEN := CAP_KNIFE_BUTT - CAP_KNIFE_TIP          # 42.3, tip to butt
+const CAP_KNIFE_MID := (CAP_KNIFE_TIP + CAP_KNIFE_BUTT) * 0.5  # -4.85, the balance point
+# THE PICTURE HAS A LIGHT SOURCE IN IT, so everything obeys it (2026-07-28, Louis: "a
+# sharper image with everything on it that would be in real life"). Two torches burn at
+# the right-hand end of the word. In a dark room that is the brightest thing in frame by
+# far, so every prop to their left picks up a warm rim on its RIGHT side, and the steel -
+# which is a mirror, and the one material here that shows its surroundings - picks up a
+# whole warm band. Adding detail without adding this is what makes a still frame read as
+# a row of stickers: the objects were beautifully drawn and lit by nothing.
+const CAP_FIRE := Color(1.0, 0.58, 0.20)   # what the torches throw onto everything else
+
+func cap_warm_rim(p: Vector2, r: float, amt: float) -> void:
+	# the torch-side rim on a round prop: an arc down its right edge, warm, faint.
+	draw_arc(p, r * 0.90, -PI * 0.42, PI * 0.42, 20, Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, amt),
+		maxf(1.0, r * 0.15), true)
+
 
 func cap_ball(p: Vector2, col: Color, r: float) -> void:
 	# a juggling ball with a body: the shaded side is a second disc nudged away from the
@@ -13603,6 +13683,7 @@ func cap_ball(p: Vector2, col: Color, r: float) -> void:
 	# two panel seams, curved with the surface
 	draw_arc(p + Vector2(r * 0.42, 0), r * 0.92, PI * 0.62, PI * 1.38, 22, Color(0, 0, 0, 0.20), maxf(1.0, r * 0.055), true)
 	draw_arc(p - Vector2(r * 0.42, 0), r * 0.92, -PI * 0.38, PI * 0.38, 22, Color(0, 0, 0, 0.16), maxf(1.0, r * 0.055), true)
+	cap_warm_rim(p, r, 0.28)                                                # the torches, off to the right
 	fill_ellipse(p - Vector2(r * 0.36, r * 0.42), r * 0.30, r * 0.22, Color(1, 1, 1, 0.55))
 	draw_circle(p - Vector2(r * 0.40, r * 0.47), r * 0.11, Color(1, 1, 1, 0.85))
 	draw_arc(p, r, 0.0, TAU, 40, Color(0, 0, 0, 0.28), maxf(1.0, r * 0.05), true)
@@ -13611,6 +13692,9 @@ func cap_ball(p: Vector2, col: Color, r: float) -> void:
 func cap_ring(c: Vector2, col: Color, R: float) -> void:
 	# the ring as a real tube: a dark underside, the body, a bright top edge, a specular
 	# sweep that follows the curve, and the grip tape a practice ring is wrapped with.
+	# EVERY BAND IS A FULL CIRCLE and the hole is never filled, so you look straight
+	# through it at the backdrop - which is the one thing a ring does that no other prop
+	# here does, and the first thing a viewer checks without knowing they are checking.
 	var w := R * 0.30                          # the tube's thickness
 	var dark := Color(col.r * 0.42, col.g * 0.46, col.b * 0.58)
 	var lit := Color(minf(col.r * 1.30 + 0.10, 1.0), minf(col.g * 1.26 + 0.10, 1.0), 1.0)
@@ -13620,6 +13704,9 @@ func cap_ring(c: Vector2, col: Color, R: float) -> void:
 	draw_arc(c, R - w * 0.86, 0.0, TAU, 72, lit, w * 0.20, true)                    # lit inner edge
 	draw_arc(c, R - w * 0.5, PI * 1.05, PI * 1.75, 40, Color(1, 1, 1, 0.42), w * 0.34, true)   # specular sweep
 	draw_arc(c, R - w * 0.5, PI * 0.15, PI * 0.70, 34, Color(0, 0, 0, 0.20), w * 0.30, true)   # underside
+	# the torches again: a cool blue ring is where warm bounce shows most, so this is the
+	# mark that ties the O to the A four letters away
+	draw_arc(c, R - w * 0.5, -PI * 0.34, PI * 0.30, 26, Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, 0.30), w * 0.52, true)
 	for i in 8:                                  # tape wraps around the tube
 		var a := TAU * float(i) / 8.0 + 0.22
 		var d := Vector2(cos(a), sin(a))
@@ -13627,41 +13714,199 @@ func cap_ring(c: Vector2, col: Color, R: float) -> void:
 
 
 func cap_knife(p: Vector2, ang: float, sc: float) -> void:
-	# the stage knife, then the things a still frame can afford: a ground bevel down the
-	# edge, a darkened spine, a reflection band across the flat, rivets through the scales
-	# and a lit guard. Local units are the stage knife's own - blade -26 to 0, grip to +9.
-	draw_knife(p, ang, sc)
+	# THE KNIFE, drawn from scratch rather than painted over the stage one (2026-07-28).
+	# Overlaying detail on `draw_knife` was the earlier approach and it is why the blade
+	# read as PAPER: the base shape is one flat fill of pale grey, and no amount of
+	# detail on top changes the fact that the largest area in the object is a single
+	# uniform tone. Steel is never uniform, and the reason is the whole point here -
+	# **a polished blade is a MIRROR**, so what you see on it is not shading at all, it
+	# is the room. In this room that means three bands running the length of the blade:
+	# the dark ceiling, a bright band where the key light is, and a warm one low down
+	# where two torches are burning four letters to the right.
+	#
+	# Local units are the stage knife's own so the layout maths is unchanged: blade -26
+	# to +2, guard at 3, grip to 13.
 	draw_set_transform(p, ang, Vector2.ONE * sc)
-	draw_colored_polygon(PackedVector2Array([Vector2(-0.4, -25.0), Vector2(1.5, -19.0),
-		Vector2(1.5, -1.5), Vector2(-0.4, -1.5)]), Color(1, 1, 1, 0.30))          # bevel
-	draw_colored_polygon(PackedVector2Array([Vector2(-2.5, -22.0), Vector2(-1.2, -22.0),
-		Vector2(-1.2, -2.0), Vector2(-2.5, -2.0)]), Color(0.10, 0.12, 0.16, 0.35))  # spine
-	draw_colored_polygon(PackedVector2Array([Vector2(-2.2, -14.5), Vector2(1.4, -12.0),
-		Vector2(1.4, -10.4), Vector2(-2.2, -12.9)]), Color(1, 1, 1, 0.45))         # reflection band
-	draw_line(Vector2(-2.6, 0.6), Vector2(2.6, 0.6), Color(1, 1, 1, 0.35), 0.5)    # lit guard
-	for ry in [3.0, 6.0]:
-		draw_circle(Vector2(0, ry), 0.62, Color(0.72, 0.66, 0.58))
-		draw_circle(Vector2(-0.18, ry - 0.18), 0.30, Color(1, 0.96, 0.88, 0.8))
+	var steel := Color(0.66, 0.71, 0.80)
+	var steel_lo := Color(0.28, 0.32, 0.40)          # the dark room, reflected
+	var steel_hi := Color(0.94, 0.97, 1.0)           # the key light, reflected
+	var brass := Color(0.72, 0.58, 0.32)
+	var wood := Color(0.34, 0.21, 0.13)
+	var wood_hi := Color(0.50, 0.33, 0.20)
+	var blade := PackedVector2Array([
+		Vector2(0, -26), Vector2(2.6, -18), Vector2(3.4, 2), Vector2(-3.4, 2), Vector2(-2.6, -18)])
+	draw_colored_polygon(blade, steel)
+	# THE THREE REFLECTION BANDS, each a sliver running the blade's length and tapering
+	# with it. They are what a mirror finish looks like; a gradient would look airbrushed.
+	draw_colored_polygon(PackedVector2Array([                                  # dark, near the spine
+		Vector2(0.35, -24.0), Vector2(2.2, -17.6), Vector2(2.9, 1.4),
+		Vector2(1.5, 1.4), Vector2(1.0, -17.6)]), steel_lo)
+	draw_colored_polygon(PackedVector2Array([                                  # the key light
+		Vector2(-0.15, -23.0), Vector2(0.9, -17.4), Vector2(1.2, 1.2),
+		Vector2(0.15, 1.2), Vector2(-0.5, -17.4)]), steel_hi)
+	draw_colored_polygon(PackedVector2Array([                                  # the torches
+		Vector2(2.25, -17.4), Vector2(3.1, 1.6), Vector2(2.35, 1.6), Vector2(1.8, -17.4)]),
+		Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, 0.42))
+	# the fuller: a groove is a dark line with a LIT line under it, never one line alone
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0, -20.5), Vector2(0.85, -16), Vector2(0.85, 0), Vector2(-0.85, 0), Vector2(-0.85, -16)]),
+		Color(0.20, 0.23, 0.29, 0.75))
+	draw_line(Vector2(-0.85, -15.0), Vector2(-0.85, -0.5), Color(1, 1, 1, 0.30), 0.35)
+	# THE GROUND EDGE as a sliver that converges on the blade's own point, so it can
+	# never overhang it at any scale and the tip stays exactly as sharp as the polygon
+	# says (2026-07-27, Louis: "the point is a bit too thick ... it sticks out a tiny
+	# amount" - a stroked line ending ON the tip straddles the centreline there).
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0, -26), Vector2(-2.6, -18), Vector2(-3.4, 2),
+		Vector2(-2.0, 2), Vector2(-1.3, -17.6)]), Color(1, 1, 1, 0.92))
+	# a satin grain across the flat: a few faint scratches, which is what tells the eye
+	# the surface is metal that has been used rather than a shape filled with grey
+	for gy in [-21.0, -14.5, -8.0, -2.5]:
+		draw_line(Vector2(-1.6, gy), Vector2(2.4, gy + 0.5), Color(1, 1, 1, 0.10), 0.28)
+	# BOLSTER: the block of brass between blade and grip. Real knives have one, and it is
+	# what stops the handle reading as a stick glued to a blade.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-4.3, 2.2), Vector2(4.3, 2.2), Vector2(3.9, 5.2), Vector2(-3.9, 5.2)]), brass)
+	draw_line(Vector2(-3.6, 3.0), Vector2(3.6, 3.0), Color(1.0, 0.92, 0.70, 0.55), 0.7)
+	draw_line(Vector2(-3.9, 5.0), Vector2(3.9, 5.0), Color(0.20, 0.14, 0.06, 0.7), 0.5)
+	# HANDLE: contoured scales, not a rectangle - narrow at the bolster, swelling to the
+	# butt, with the scale's own edge catching light along one side and a lanyard hole
+	# through the tail. A juggling knife is gripped and thrown all night; it has a shape.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2.9, 5.2), Vector2(2.9, 5.2), Vector2(3.2, 9.0), Vector2(2.7, 13.4),
+		Vector2(-2.7, 13.4), Vector2(-3.2, 9.0)]), wood)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-2.9, 5.4), Vector2(-1.4, 5.4), Vector2(-1.2, 9.0), Vector2(-1.5, 13.2),
+		Vector2(-2.7, 13.2), Vector2(-3.1, 9.0)]), wood_hi)
+	for ry in [6.6, 11.2]:                                  # the pins the scales sit on
+		draw_circle(Vector2(0, ry), 0.72, brass)
+		draw_circle(Vector2(-0.20, ry - 0.20), 0.32, Color(1.0, 0.94, 0.78, 0.9))
+	draw_circle(Vector2(0, 15.0), 0.62, Color(0.05, 0.04, 0.04))            # lanyard hole
+	draw_colored_polygon(PackedVector2Array([                               # butt cap
+		Vector2(-2.7, 13.4), Vector2(2.7, 13.4), Vector2(2.3, 16.3), Vector2(-2.3, 16.3)]), brass)
+	draw_line(Vector2(-2.3, 14.2), Vector2(2.3, 14.2), Color(1.0, 0.92, 0.70, 0.45), 0.6)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+const CAP_FLAME_STEPS := 26      # a still frame can afford a smooth silhouette; the stage
+								 # flame's 7-point profile is what makes it look faceted
+const CAP_FLAME_UPRIGHT := 0.25  # HOW FAR A LEANING TORCH'S FLAME COMES BACK TO VERTICAL.
+								 # 0 burns straight out of the torch, 1 is dead upright.
+								 # 0.62 was tried and it broke the letter: the A is two
+								 # leaning torches whose FLAMES make its apex, and nearly
+								 # upright flames splay apart at the top instead of
+								 # converging, leaving two parallel candles on slanted
+								 # sticks. At 0.25 the fire follows the torch, bends a
+								 # little upright on the way (which is what tells the eye
+								 # it is burning rather than painted on), and the two tips
+								 # still meet. The wordmark wins ties against physics.
+
+func cap_flame_shape(base: Vector2, h: float, w: float, sway: float, wob: float, ph: float) -> PackedVector2Array:
+	# A FLAME SILHOUETTE THAT IS NOT A TRIANGLE (2026-07-28). The old capsule fire was
+	# the stage's own 7-point profile blown up, and at capsule size those seven points
+	# read as facets: an origami flame. Three things fix it and all three are shape, not
+	# colour.
+	#   (1) SMOOTH, and pinched at BOTH ends - a flame is narrow at the wick where the
+	#       fuel is, widest about a third up, and drawn to a wisp at the tip. That is
+	#       v^0.30 * (1-v)^0.55, normalised so the widest point is exactly w.
+	#   (2) LEANING more the higher it goes (v^1.6), because the tip has had longer to be
+	#       pushed by the air it is dragging up with it.
+	#   (3) ASYMMETRIC, with the two sides wobbling on DIFFERENT phases. This is the one
+	#       that matters most and the one the old profile could not do at all: a shape
+	#       that is a mirror image of itself is a leaf, whatever its outline.
+	var pts := PackedVector2Array()
+	for side in [1.0, -1.0]:
+		for i in CAP_FLAME_STEPS:
+			var k := float(i) / float(CAP_FLAME_STEPS - 1)
+			var v: float = k if side > 0.0 else 1.0 - k
+			var hw := w * pow(maxf(v, 0.0001), 0.30) * pow(maxf(1.0 - v, 0.0001), 0.55) / 0.576
+			hw *= 1.0 + wob * sin(v * 9.0 + ph + (0.0 if side > 0.0 else 2.4))
+			pts.append(base + Vector2(side * hw + sway * pow(v, 1.6), -v * h))
+	return pts
 
 
 func cap_torch(p: Vector2, ang: float, sc: float) -> void:
-	# the stage torch in its rich mode, plus the metalwork a close look wants: two ferrule
-	# bands with a highlight on each, the soaked wick wrap above them, and a white-hot
-	# core inside the flame the stage cannot afford to draw.
-	draw_torch(p, ang, sc, true)
+	# THE TORCH, drawn from scratch: the fire is the brightest thing in the picture and
+	# it was the weakest object in it, so it is built here rather than dressed up.
+	#
+	# WHAT A REAL FLAME HAS that the old one did not: a BLUE base (fuel burns blue where
+	# it is richest and hottest, right at the wick - it is the single detail that most
+	# says "this is burning" rather than "this is orange"), a smooth asymmetric
+	# silhouette, layers that each lean and wobble on their OWN phase so the shape
+	# writhes instead of pulsing, a white-hot heart, and embers that leave.
+	var t := float(tick)
+	var fl := 1.0 + 0.14 * sin(t * 0.5) + 0.06 * sin(t * 1.31)
+	var sway := 2.0 * sin(t * 0.29) + 0.8 * sin(t * 0.71)
+	# the pool of light the fire throws, first of all, so it sits BEHIND the object it
+	# comes off rather than as a haze laid over it
+	var glow_at := p + Vector2(0.0, -3.0).rotated(ang) * sc
+	draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, Color(1.0, 0.46, 0.12, 0.30))
+	draw_glow(glow_at + Vector2(0, -8.0 * sc), 23.0 * sc, Color(1.0, 0.72, 0.30, 0.26))
 	draw_set_transform(p, ang, Vector2.ONE * sc)
-	for by in [2.0, 5.2, 8.4]:
-		draw_colored_polygon(PackedVector2Array([Vector2(-2.3, by), Vector2(2.3, by),
-			Vector2(2.3, by + 1.5), Vector2(-2.3, by + 1.5)]), Color(0.42, 0.33, 0.24))
-		draw_line(Vector2(-1.9, by + 0.4), Vector2(1.9, by + 0.4), Color(1.0, 0.86, 0.62, 0.45), 0.4)
-	draw_colored_polygon(PackedVector2Array([Vector2(-2.0, -1.6), Vector2(2.0, -1.6),
-		Vector2(1.6, 0.8), Vector2(-1.6, 0.8)]), Color(0.30, 0.24, 0.20))          # the wick wrap
-	for wy in [-1.2, -0.4, 0.4]:
-		draw_line(Vector2(-1.8, wy), Vector2(1.8, wy + 0.3), Color(0.16, 0.13, 0.11, 0.7), 0.28)
-	fill_ellipse(Vector2(0, -6.0), 1.05, 3.3, Color(1.0, 0.98, 0.86, 0.85))        # white-hot core
-	fill_ellipse(Vector2(0, -5.2), 0.55, 1.9, Color(1, 1, 1, 0.9))
+	# --- the handle, first, so the fire sits over its top ---------------------------
+	draw_colored_polygon(PackedVector2Array([          # a turned haft: waisted, not a bar
+		Vector2(-2.1, 0.0), Vector2(2.1, 0.0), Vector2(2.4, 6.0), Vector2(1.9, 11.0),
+		Vector2(2.3, 15.5), Vector2(-2.3, 15.5), Vector2(-1.9, 11.0), Vector2(-2.4, 6.0)]),
+		Color(0.26, 0.17, 0.12))
+	draw_colored_polygon(PackedVector2Array([          # the lit side of the haft
+		Vector2(-2.1, 0.2), Vector2(-0.9, 0.2), Vector2(-0.8, 11.0), Vector2(-1.1, 15.3),
+		Vector2(-2.3, 15.3), Vector2(-1.9, 11.0)]), Color(0.40, 0.27, 0.18))
+	for gy in [2.4, 4.4, 6.4, 8.4, 10.4, 12.4]:        # the cord it is bound with
+		draw_line(Vector2(-2.3, gy), Vector2(2.3, gy + 0.4), Color(0.14, 0.09, 0.07, 0.75), 0.55)
+		draw_line(Vector2(-2.3, gy + 0.7), Vector2(2.3, gy + 1.1), Color(0.62, 0.45, 0.28, 0.30), 0.35)
+	for by in [-0.4, 1.4]:                             # the brass ferrule under the head
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.6, by), Vector2(2.6, by),
+			Vector2(2.6, by + 1.3), Vector2(-2.6, by + 1.3)]), Color(0.60, 0.47, 0.26))
+		draw_line(Vector2(-2.2, by + 0.35), Vector2(2.2, by + 0.35), Color(1.0, 0.90, 0.66, 0.55), 0.35)
+	draw_colored_polygon(PackedVector2Array([          # the soaked wick, charred at the top
+		Vector2(-2.2, -3.4), Vector2(2.2, -3.4), Vector2(1.8, -0.2), Vector2(-1.8, -0.2)]),
+		Color(0.24, 0.19, 0.16))
+	for wy in [-2.9, -2.1, -1.3, -0.5]:
+		draw_line(Vector2(-2.0, wy), Vector2(2.0, wy + 0.25), Color(0.10, 0.08, 0.07, 0.75), 0.3)
+	# --- the fire ---------------------------------------------------------------------
+	# A FLAME'S BASE FOLLOWS THE TORCH; ITS TIP GOES UP. Both halves of that matter here.
+	# Drawing the fire in world space is physically the tidier idea and it wrecks the
+	# letter: the A is two LEANING torches whose flames make its apex, and two vertical
+	# flames on slanted handles read as "||" balanced on "/\". Drawing it fully in the
+	# prop's frame is the other extreme - a torch held at 17 degrees burning at 17
+	# degrees, which no fire does. So each layer gets a straightening term proportional
+	# to its own HEIGHT and to the lean: the wick end sits square on the torch, the tip
+	# comes back most of the way to true vertical, and the flame bends between them the
+	# way a real one dragged upright by its own draught does.
+	var wick := Vector2(0.0, -3.0)
+	# A FLAME IS TALL AND NARROW, and getting that ratio wrong is what turned the first
+	# rebuild into two orange balloons. The width formula peaks at `w`, so `w` is a HALF
+	# width and the shape is 2w across against h tall: at w 10.4 and h 30 that is 21 wide
+	# by 30 high, which is a bulb, not a fire. Roughly 1:4 is what a torch actually
+	# burns, and the layers have to differ in HEIGHT much more than in width or they
+	# stack into one mass with no visible heart.
+	for lay in [
+			{"h": 40.0, "w": 4.6, "sw": 1.3, "wob": 0.16, "ph": 0.0, "col": Color(1.0, 0.30, 0.05, 0.26)},
+			{"h": 31.0, "w": 3.5, "sw": 1.0, "wob": 0.14, "ph": 1.1, "col": Color(1.0, 0.42, 0.08, 0.92)},
+			{"h": 22.0, "w": 2.6, "sw": 0.7, "wob": 0.12, "ph": 2.3, "col": Color(1.0, 0.66, 0.16, 0.94)},
+			{"h": 14.0, "w": 1.9, "sw": 0.45, "wob": 0.10, "ph": 3.4, "col": Color(1.0, 0.88, 0.44, 0.95)},
+			{"h": 8.0, "w": 1.2, "sw": 0.25, "wob": 0.08, "ph": 4.6, "col": Color(1.0, 0.99, 0.90, 0.95)},
+			# THE BLUE BASE, last and small, sitting ON the wick and nowhere else: the
+			# richest and hottest part of a fuel flame, and the one detail that says
+			# "burning" rather than "orange". It has to stay SMALL - blown up it is just
+			# a blue blob at the bottom of the fire, which is what the first pass got.
+			{"h": 4.0, "w": 1.5, "sw": 0.10, "wob": 0.05, "ph": 5.5, "col": Color(0.42, 0.68, 1.0, 0.50)},
+			{"h": 2.2, "w": 0.85, "sw": 0.0, "wob": 0.04, "ph": 6.1, "col": Color(0.74, 0.90, 1.0, 0.50)}]:
+		var lh: float = float(lay["h"]) * fl
+		var lsway: float = sway * float(lay["sw"]) - sin(ang) * lh * CAP_FLAME_UPRIGHT
+		draw_colored_polygon(cap_flame_shape(wick, lh, float(lay["w"]), lsway,
+			float(lay["wob"]), float(lay["ph"])), Color(lay["col"]))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# the embers leaving it, in WORLD space: smoke rises however the torch is held
+	var wpos := p + wick.rotated(ang) * sc
+	for i in 9:
+		var sd := float(i) * 12.9898
+		var rise := fposmod(t * 0.010 + fposmod(sin(sd) * 43758.5, 1.0), 1.0)
+		var ex := sin(sd * 2.1) * 8.0 * sc + sway * sc * 2.4 * rise
+		var ey := -27.0 * sc - rise * 42.0 * sc
+		var er := (0.85 + 0.9 * fposmod(cos(sd) * 12.9, 1.0)) * sc * (1.0 - 0.45 * rise)
+		var ea := (1.0 - rise) * (1.0 - rise) * 0.95
+		draw_circle(wpos + Vector2(ex, ey), er, Color(1.0, 0.62 + 0.25 * rise, 0.22, ea))
 
 
 func cap_nudge(i: int) -> Vector3:
@@ -13717,15 +13962,23 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 			"T":
 				# the crossbar first, then the stem ON TOP of it - Louis: "the vertical
 				# above the horizontal". Turned +PI/2 a knife's blade sweeps right and its
-				# pommel hangs left, so the bar is anchored a pommel's length in.
-				var bsc := w * 1.06 / 35.0
-				var ssc := size_l * 0.92 / 35.0
+				# butt hangs left, so the bar reads point-outward like a thrown knife.
+				#
+				# EVERY NUMBER HERE COMES OFF CAP_KNIFE_LEN / CAP_KNIFE_MID, never a
+				# literal. The knife grew a bolster and a butt cap in the 2026-07-28 pass
+				# and got longer at the grip end; when its extent was written into this
+				# layout as a bare 35 and an 8.5, that change silently made the crossbar
+				# 28% too wide and hung it off-centre. A prop's own measurements belong
+				# beside the prop.
+				var bsc := w * 1.02 / CAP_KNIFE_LEN
+				var ssc := size_l * 0.92 / CAP_KNIFE_LEN
 				var top := base - size_l * 0.92
-				# CENTRE THE BAR ON ITS OWN MIDDLE, not on its grip. A knife runs -26 to
-				# +9 in local units, so its middle sits 8.5 units from the origin, and
-				# anchoring by the origin hung the whole crossbar to one side of the stem.
-				cap_knife(Vector2(x + w * 0.5 - 8.5 * bsc, top), PI * 0.5, bsc)
-				cap_knife(Vector2(x + w * 0.5, base - 9.0 * ssc), 0.0, ssc)
+				# CENTRE THE BAR ON ITS OWN MIDDLE, not on its grip: anchoring by the
+				# origin (which is the guard, not the balance point) hung the whole
+				# crossbar to one side of the stem.
+				cap_knife(Vector2(x + w * 0.5 + CAP_KNIFE_MID * bsc, top), PI * 0.5, bsc)
+				# ...and the stem stands ON the baseline: its butt is its lowest point.
+				cap_knife(Vector2(x + w * 0.5, base - CAP_KNIFE_BUTT * ssc), 0.0, ssc)
 			"O":
 				var rc := Vector2(x + ring_r, base - size_l * 0.46)
 				draw_glow(rc, ring_r * 1.30, Color(0.45, 0.78, 1.0, 0.20))
@@ -13840,7 +14093,7 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 		draw_circle(Vector2(lx, s.y - 20.0 * k), 4.0 * k, Color(1.0, 0.72, 0.32, 0.65 * fl))
 	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
 	draw_menu_cascade(Vector2(cx, s.y * 0.34), 1.6 * k)
-	draw_iacto_logo(font, s.y * 0.58, int(round(112.0 * k)), Color(1.0, 0.88, 0.5), s)
+	draw_wordmark(font, s.y * 0.58, int(round(112.0 * k)), Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, s.y * 0.58 + 134.0 * k, 270.0 * k, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.58 + 182.0 * k), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, int(round(27.0 * k)), Color(0.88, 0.76, 0.62))
 	draw_vignette(s, 0.55)
@@ -13870,8 +14123,6 @@ func slot_info(i: int) -> Dictionary:
 
 func draw_slots_screen(font: Font, s: Vector2) -> void:
 	draw_slots_cards(font, s)
-
-
 
 
 func draw_slots_cards(font: Font, s: Vector2) -> void:
@@ -13932,8 +14183,6 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
-
-
 
 
 func draw_settings_screen(font: Font, s: Vector2) -> void:
@@ -14789,7 +15038,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		var btxt := String(row["b"])
 		match kind:
 			"title":
-				draw_iacto_logo(font, ry - 49.0, 76, Color(gold.r, gold.g, gold.b, a), s)
+				draw_wordmark(font, ry - 49.0, 76, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
 			"orn":
@@ -14807,13 +15056,13 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
 
 	# once the last line has climbed past centre the roll settles into a held final
-	# IACTO card, which waits, unmoving, for any key. The scrolling text is above it
+	# title card, which waits, unmoving, for any key. The scrolling text is above it
 	# by then, so the two never overlap.
 	var last_sy := base + last_y - scroll
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.42
-		draw_iacto_logo(font, fy - 55.0, 84, Color(1.0, 0.9, 0.55, fa), s)
+		draw_wordmark(font, fy - 55.0, 84, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.72, 0.6, 0.65 * fa))
 
@@ -14893,11 +15142,10 @@ func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, 
 	draw_string(font, Vector2(0, y + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, col)
 
 
-func draw_iacto_logo(font: Font, y: float, size: int, col: Color, s: Vector2) -> void:
-	# the wordmark: I ACT followed by a juggling ball as the lowercase o - the name
-	# is the sentence "I act", and the ball finishes it. The o is a REAL drawn ball
-	# (glossy highlight and all), never a letterform, and it bobs very slightly, a
-	# prop at the top of a tiny toss.
+func draw_wordmark(font: Font, y: float, size: int, col: Color, s: Vector2) -> void:
+	# the wordmark: TITLE_MARK followed by a juggling ball standing in for the name's
+	# final letter - TOSS, then a ball for the a. The ball is a REAL drawn prop, never
+	# a letterform, and it bobs very slightly, a prop at the top of a tiny toss.
 	var text := TITLE_MARK + " "
 	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	var br := float(size) * 0.30           # ball radius, sized like a lowercase o
@@ -15090,37 +15338,29 @@ func step_effects() -> void:
 
 
 #region WHAT THE ROOM THROWS (flowers and tomatoes)
-func flowers_on() -> bool:
-	# the whole feature behind its F9 switch, asked in one place. The fallback matches
-	# the `experiments` declaration on purpose: it read false here while the dictionary
-	# said true, which is harmless only for as long as the key is never missing.
-	return bool(experiments.get("flowers", true))
-
-
 func coin_word() -> String:
-	# what the currency is CALLED, everywhere it is written. `money` is the same number
-	# either way - only what the crowd hands over changes - so every readout asks here
-	# rather than hard-coding "gold" and going stale the moment the switch is flipped.
-	return "flowers" if flowers_on() else "gold"
+	# WHAT THE CURRENCY IS CALLED, everywhere it is written. It is one function and not
+	# a literal because the name has changed once already (it was "gold" until the crowd
+	# started paying in flowers) and six player-facing strings were found still saying
+	# the old word next to a purse reading the new one. `money` is one variable; only
+	# its name is content. Never type the word - ask here.
+	return "flowers"
 
 
 func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> void:
 	# the currency's own MARK, used by the purse readouts and the hub's ledger card:
 	# a coin in the gold economy, a flower in the flower one, so the two never disagree
 	# about what the number in front of them means
-	if flowers_on():
-		# `turning` is opt-in, and deliberately so (2026-07-27, Louis: "the flowers
-		# shouldn't turn when on stage, perhaps the icon could tho: in the store").
-		# A flower lying on the boards is an OBJECT at rest and must be still; the same
-		# mark used as a UI icon is a symbol, and a slow drift there just keeps the
-		# screen alive. Phased off its own x so a shelf of price plates drifts
-		# organically instead of turning in lockstep like a row of gears.
-		var rot := -PI * 0.5
-		if turning:
-			rot += atick() * 0.006 + c.x * 0.02
-		draw_flower(c, 0, r / 5.0, rot, col.a)
-	else:
-		draw_coin(c, r, col)   # a struck coin has a fixed strike: turning it reads as a wobble
+	# `turning` is opt-in, and deliberately so (2026-07-27, Louis: "the flowers
+	# shouldn't turn when on stage, perhaps the icon could tho: in the store").
+	# A flower lying on the boards is an OBJECT at rest and must be still; the same
+	# mark used as a UI icon is a symbol, and a slow drift there just keeps the
+	# screen alive. Phased off its own x so a shelf of price plates drifts
+	# organically instead of turning in lockstep like a row of gears.
+	var rot := -PI * 0.5
+	if turning:
+		rot += atick() * 0.006 + c.x * 0.02
+	draw_flower(c, 0, r / 5.0, rot, col.a)
 
 
 func stage_floor_y() -> float:
@@ -15221,7 +15461,7 @@ func throw_step() -> void:
 	# each get one chance to throw something, and what they throw is decided entirely by
 	# how the act is going: deep in the green it is flowers, down in the red it is
 	# tomatoes, and in the wide middle the room just watches.
-	if not flowers_on() or mode != MODE_PERFORM or not running or tut_active:
+	if mode != MODE_PERFORM or not running or tut_active:
 		return
 	if tick % FLOWER_BEAT != 0:
 		return
@@ -16067,10 +16307,6 @@ func draw_spotlight_cone(s: Vector2, cx: float, strength: float) -> void:
 	# The base is bowed rather than flat because four collinear points on one edge is
 	# exactly the degenerate case Godot's triangulator is fussy about (see the helmet
 	# brim), and a beam's far end genuinely is an ellipse on the floor, not a straight cut.
-	if not soft_light_on():
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx, -30.0), Vector2(cx - 300.0, s.y * 0.86), Vector2(cx + 300.0, s.y * 0.86)]), Color(1.0, 0.85, 0.55, strength))
-		return
 	var hw := s.x * 0.234           # the old 300px at the 1280 the number was picked for
 	var ay := -0.04 * s.y
 	var yb := s.y * 0.86

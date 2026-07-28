@@ -1,10 +1,24 @@
-# IACTO
+# TOSSA
 
 A skill-based juggling game with a light performer-career sim around it. Godot 4.7, 2D,
 GDScript, one self-contained file (`Game.gd`), code-only art and mostly code-rendered
 audio, aimed at a polished $10 Steam release. This file is THE working document: the
 old GDD/STORY/ROADMAP/PLAN/ART docs and ideas.rtf were distilled into it (2026-07-17)
 and deleted. History lives in git.
+
+**THE NAME** (2026-07-28): the game is **TOSSA**. It was IACTO before that and JUGGLE
+before that, and it lives in exactly two constants - `GAME_TITLE` ("TOSSA") and
+`TITLE_MARK` ("TOSS", the name minus the letter a real juggling ball stands in for in
+the wordmark). Everything downstream - every readout, the wordmark, the credits, the
+daily share line, the demo wall's call to action, the capsule lettering - reads those,
+so a fourth name is a two-line edit. The repo folder, the Godot project name, the
+bundle id (`eu.vandenbruwaene.tossa`), the export paths and the icons all moved with it.
+**Save files moved too, and that is the part with teeth**: `user://iacto_*.cfg` became
+`user://tossa_*.cfg`, so `migrate_old_saves()` runs before anything reads a save and
+COPIES (never moves) each old file to its new name if the new one is absent. Copying
+means an IACTO build still on the machine keeps working and the two diverge, which is
+the safe direction to fail in. Delete that function only once no IACTO build exists
+anywhere - "nobody could still have one" is a guess, not a fact.
 
 ## The three pillars (never trade these away)
 
@@ -1231,7 +1245,7 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   - only the venue tier it can spend - so the moment it would have bought a venue past
   the cap, `resolve_act()` sets `pending_demo_wall` once (mirrors `pending_win`'s own
   shape) and the results card rolls into `ST_DEMO_WALL` (`draw_demo_wall`) instead of
-  the day: a stat recap, "WISHLIST IACTO ON STEAM", then back into the SAME career -
+  the day: a stat recap, "WISHLIST TOSSA ON STEAM", then back into the SAME career -
   never a lockout, since this is the last impression a demo player gets before
   deciding whether to buy (the calm-first-impression pillar applies here too).
   `demo_wall_seen` persists so it never shows twice. **`in_demo_build()` is the one
@@ -1272,5 +1286,5 @@ the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-
   live `AudioStreamPlayer`s at the moment `get_tree().quit()` runs, which is exactly what
   a player that is still playing looks like. Nothing is accumulating and nothing is
   unfreed per act. Only worry if the COUNT grows with the length of a run.
-- The IACTO juggler figure (stance, proportions) is settled: never reshape it as a
+- The TOSSA juggler figure (stance, proportions) is settled: never reshape it as a
   side effect of a mechanics fix.
