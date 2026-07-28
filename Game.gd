@@ -356,14 +356,28 @@ const TITLE_MARK := "TOSS"
 # The wordmark only really sings when the name ENDS IN A ROUND LETTER (o or a), which is
 # what IACTO, TOSSA, VOLO, CASCADA and ORBITA all do. For any of the others the ball
 # would have to sit beside the word rather than inside it, which is a different mark.
-const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
-const SHOWER_FEED_ARC := 0.2  # ...and how much of its arc it actually rises (Louis, -80%:
-							   # "the height should be almost zero for showers"). Height and
+# THE PASS IS A SNAP, NOT A LOB (2026-07-28 evening, Louis: "the bottom arc of the shower
+# pattern goes way too slow, the time in the air is more than triple what it should be").
+# It was 0.5 of a tap - measured, 55 ticks at five objects and 67 at seven, i.e. almost half
+# a second for a prop to travel sideways between two hands that are 154px apart. That is not
+# a pass, it is a second throw, and it is why the low road looked like it was crawling while
+# the high road ran at speed.
+#
+# 0.16 is his "more than triple" taken at its word: 17 ticks at five objects, 21 at seven.
+# Fast, and correct - the return in a real shower is the quick half of the cycle, which is
+# what makes the high hand the busy one.
+#
+# **THE HEIGHT IS HELD WHERE HE ALREADY APPROVED IT.** arc = ARC_PER_AIR x air, so cutting
+# the airtime to a third would have taken the arc down with it, from 23px to 7 - a pass so
+# flat it reads as the prop sliding sideways rather than being thrown. He asked about TIME;
+# the look of the pass was settled earlier the same day and must not move as a side effect.
+# SHOWER_FEED_ARC is raised to compensate exactly, so the measured peak stays ~23px.
+const SHOWER_FEED := 0.16     # the feed pass's airtime as a fraction of a tap
+const SHOWER_FEED_ARC := 0.63 # ...and how much of its arc it actually rises. Height and
 							   # airtime are otherwise ONE number here (arc = ARC_PER_AIR x
-							   # air), so flattening the pass by shortening it would have
-							   # sped the whole pattern up. The arc is the only half that
-							   # can move alone, which is exactly what a horizontal pass is:
-							   # same time to cross, almost no rise
+							   # air), so the arc is the only half that can move alone -
+							   # which is exactly what a horizontal pass is: quick across,
+							   # almost no rise.
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
 const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction (0.35
 							   # left its arc only ~34px above the weave where they
@@ -380,9 +394,16 @@ const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction 
 # cannot. A MULTIPLE of base_air holds its proportion at every count, which is what the
 # Shower's feed always did - hence his "you have made shower do a perfect half shower".
 # So this is the Shower's feed value plus the 30% he asked for on top.
-const HALFSHOWER_LOW := SHOWER_FEED * 1.3   # the weave side's airtime as a fraction of a
-							   # tap: ~0.65, which keeps its arc near half the high road's
-							   # from three objects to fifteen (measured 0.43 to 0.55)
+# **AND IT IS ITS OWN NUMBER NOW, not a multiple of the Shower's.** It was
+# `SHOWER_FEED * 1.3`, which was true and tidy right up until the Shower's feed was cut to a
+# third: that one edit would have silently dragged the Half Shower's low road down with it,
+# from 0.65 to 0.21, wrecking a pattern Louis had measured and approved and had said nothing
+# about. **A constant derived from another constant is a coupling, and a coupling between two
+# patterns that are tuned separately is a bug waiting for one of them to be retuned.** The
+# value is unchanged; only its independence is new.
+const HALFSHOWER_LOW := 0.65   # the weave side's airtime as a fraction of a tap, which keeps
+							   # its arc near half the high road's from three objects to
+							   # fifteen (measured 0.43 to 0.55)
 const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
 							   # Reverse Cascade, Tennis's marked ball)
 const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher than a
@@ -1092,6 +1113,29 @@ var shop_sel := 0         # the prop cards, then the gear row - see shop_gear0()
 var shop_room := 0        # which half of the shop is showing - see SHOP_ROOM_FRONT/BACK
 var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
 var skills_sel := 0        # which entry the Skills reference has expanded
+# THE TAILOR (2026-07-28 evening, Louis: "where is my tailer room where i can dress my
+# juggler with the equipment i have gathered (also include standard equipment, which unlocks
+# for each stage)"). Two halves, which is exactly the two halves of his sentence: the SUIT
+# (the standard costume, one per stage, unlocked by reaching it) and the PIECES (the five
+# bought garments, each on or off).
+#
+# **WEARING IS COSMETIC. THE BONUSES FOLLOW OWNERSHIP.** This is a real decision and worth
+# stating: a top hat you own goes on lifting the room's generosity whether or not it is on
+# your head. The alternative - buffs follow what is worn - makes the screen a loadout, and
+# a loadout screen that looks like a dressing-up screen is a trap: a player would come here
+# to change how he LOOKS, take the hat off, and quietly lose money for the rest of the
+# career without ever connecting the two. The screen says so plainly.
+var tailor_open := false
+var tailor_sel := 0        # cursor within the current column
+var tailor_col := 0        # 0 = the suit list, 1 = the pieces
+var outfit_suit := -1      # persisted: which stage's costume to wear, or -1 to follow the
+						    # stage you are standing on (the behaviour before this existed)
+var wear_hat := true       # persisted: each bought piece, on or off. All default TRUE so an
+var wear_coat := true      # existing career opens the tailor already dressed in everything
+var wear_vest := true      # it owns, rather than stripped by an update it did not ask for.
+var wear_gloves := true
+var wear_boots := true
+var wear_glow := true
 var debug_mode := false   # debug build: free stat editing in the character sheet
 # EXPERIMENTS (2026-07-25): a small, debug-only toggle panel (F9) for trying an
 # alternate version of a screen without touching code each time - see
@@ -1126,7 +1170,13 @@ const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it 
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
 const SHEET_REPEAT_RAMP := 0.55    # debug: ...and double the step size every this long held
 const SHEET_REPEAT_MAX := 16       # debug: the fastest it ever runs, points per step
-const MONEY_TAP := 50              # debug: one TAP of M/N - fine control at a shop counter
+# ONE TAP IS A THOUSAND (2026-07-28 evening, Louis: "implement my add 1000 gold at a time
+# with m in the debug instead of increments of 100, which is way too slow"). The fine-control
+# argument for a 50 tap was mine, not his, and it was wrong about what this key is FOR: it is
+# a debug key, and what a debug key exists to do is put the purse where the test needs it. The
+# things worth testing cost 2,500 to 60,000, so a tap that moves 50 is fifty presses to reach
+# the cheapest of them.
+const MONEY_TAP := 1000            # debug: one TAP of M/N
 const MONEY_HOLD_STEP := 1000      # debug: ...and one repeat while HELD, by the thousand
 const MONEY_HOLD_MAX := 64         # debug: the purse's own ramp ceiling. Higher than a
                                    # stat's 16 because the numbers are: 200 points of
@@ -1772,6 +1822,9 @@ func _ready() -> void:
 		enter_day()
 		skills_open = true
 		skills_sel = int(ua[ssi + 1]) if ssi + 1 < ua.size() and not ua[ssi + 1].begins_with("--") else 0
+	if ua.has("--tailor"):            # dev: open the dressing room for a screenshot
+		enter_day()
+		tailor_open = true
 	if ua.has("--eggbreak"):          # dev: exercise the egg-break effect on the stage
 		_eggdemo = true
 		prop_type = PROP_EGGS
@@ -1900,7 +1953,7 @@ func _physics_process(delta: float) -> void:
 		cine_tick += 1
 		update_hands()
 		return
-	if sheet_open or shop_open or paused or debug_panel_open:
+	if sheet_open or shop_open or skills_open or tailor_open or paused or debug_panel_open:
 		if sheet_open and debug_mode:
 			# debug build only: holding a stat key keeps stepping it, faster the longer
 			# it is held. Runs in BOTH sheet pictures now - the talent tree reads the
@@ -2913,6 +2966,9 @@ func day_actions() -> Array[Dictionary]:
 	out.append({"id": "skills", "grp": "prep", "icon": "book", "name": "SKILLS",
 		"cost": "", "ok": true, "why": "",
 		"sub": "every trick and pattern you know, and the keys that pull it off."})
+	out.append({"id": "tailor", "grp": "prep", "icon": "hanger", "name": "TAILOR",
+		"cost": "", "ok": true, "why": "",
+		"sub": "dress for the stage: a suit from any house you have played, and every piece you own."})
 	return out
 
 
@@ -2990,6 +3046,9 @@ func day_input(kc: int) -> void:
 		return
 	if skills_open:
 		skills_input(kc)
+		return
+	if tailor_open:
+		tailor_input(kc)
 		return
 	if day_anim != "":
 		return   # a little vignette is playing; the hub listens again when it ends
@@ -3122,6 +3181,14 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 		"skills":
 			skills_open = true          # a reference card, no cost, no vignette
 			skills_sel = 0
+			play_sfx("ui2", -13.0)
+		"tailor":
+			# same shape as SKILLS: a room you look at, not an errand you spend the day on.
+			# Dressing costs nothing and takes no segment - it would be a strange game that
+			# charged an evening for putting a hat on.
+			tailor_open = true
+			tailor_sel = 0
+			tailor_col = 0
 			play_sfx("ui2", -13.0)
 		"learn":
 			# drain one queued lesson and teach it now. Marked seen BEFORE teaching, and
@@ -3273,6 +3340,9 @@ func sheet_input(kc: int) -> void:
 # gives the dangerous half a door to be behind.
 const SHOP_ROOM_FRONT := 0
 const SHOP_ROOM_BACK := 1
+const SHOP_DOOR_W := 44.0     # the doorway bar itself...
+const SHOP_DOOR_GUT := 62.0   # ...and the gutter reserved for it at BOTH edges of the panel,
+							   # in every room, so the goods never shift when you walk through
 const SHOP_FRONT_PROPS: Array[int] = [PROP_BALLS, PROP_EGGS, PROP_RINGS, PROP_CLUBS]
 const SHOP_BACK_PROPS: Array[int] = [PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW]
 
@@ -3308,26 +3378,21 @@ func shop_gear() -> Array[Dictionary]:
 				"owned": false, "count": energy_drinks, "col": Color(0.92, 0.42, 0.30),
 				"desc": "%d for %s, and each one is +%d%% stamina, auto-sipped the instant you run low" % [
 					ENERGY_DRINK_BATCH, commafy(ENERGY_DRINK_BATCH_COST), int(ENERGY_DRINK_STAMINA_PCT * 100.0)]})
-		# THE DOOR IS A CARD (2026-07-28, Louis: "i find the button c hard to intuitively
-		# use to unlock the backroom of the shop. I'd like you to create a button for that
-		# (in the shop itself, where you need to press enter, like buying something)").
+		# THE DOOR IS NOT A CARD - IT IS A DOOR, and it is at the EDGE (2026-07-28 evening,
+		# Louis: "the buttons for front room and back room of the shop, should be placed not
+		# as an item, but on the right and left side of the screen respectively (going to the
+		# back feels like stepping to the right on the screen), and it should be the form of a
+		# triangle / arrow pointing to the back").
 		#
-		# He is right, and the reason is worth stating: the back room is a PURCHASE - it has
-		# a price, it takes a day segment, it asks for a confirmation - and every other
-		# purchase in this game is a card you walk the cursor onto and press Enter. A
-		# hotkey with no object behind it was the only thing in the shop you had to be told
-		# about, which is exactly the definition of unintuitive. As a card it explains
-		# itself: it has a name, a price plate, a description in the detail strip and the
-		# same Enter that buys everything else.
+		# The first pass made it a gear card, which fixed the real problem (a hotkey with no
+		# object behind it) and introduced a smaller one: a door sitting in a row of goods
+		# reads as something you BUY, and it ate a slot in a row that had already run out of
+		# width once. He is describing the right answer - **a door is a place, not a purchase,
+		# and its position on the screen should be the direction you are going.** Right edge
+		# to step into the back, left edge to come out.
 		#
-		# Once paid, the same card becomes the DOOR - `cost` 0, so the price plate reads
-		# free and try_buy_gear just walks through. One row rather than two, because it is
-		# one thing: the way to the back of the shop.
-		g.append({"id": "backroom", "name": "The Back Room",
-			"cost": 0 if has_backroom else BACKROOM_COST, "owned": false,
-			"col": Color(0.62, 0.26, 0.30),
-			"desc": "the sharp things are through here - knives, torches, the saw, and Uncle Dan's pie" if has_backroom \
-				else "16 and over. A one-off fee at the curtain, and an errand's worth of the day"})
+		# It lives in `shop_door()` now, drawn and hit-tested outside both rows, so the gear
+		# row is goods only. See draw_shop_door.
 		return g
 	g.append({"id": "pie", "name": "Uncle Dan's Pie", "cost": PIE_COST, "owned": false,
 		"count": pie_count, "col": Color(0.9, 0.62, 0.3), "desc": "a whole day of slow, clear time"})
@@ -3344,9 +3409,6 @@ func shop_gear() -> Array[Dictionary]:
 	g.append({"id": "glow_kit", "name": "Glow-in-the-Dark Kit", "cost": GLOW_KIT_COST,
 		"owned": has_glow_tape and has_glow_suit, "col": Color(0.72, 1.0, 0.62),
 		"desc": "both halves at once, and cheaper than buying them apart"})
-	# ...and the way back out, as a card for the same reason the way in is one
-	g.append({"id": "frontroom", "name": "The Front Room", "cost": 0, "owned": false,
-		"col": Color(0.55, 0.62, 0.70), "desc": "back through the curtain, to the safe goods"})
 	return g
 
 
@@ -3355,7 +3417,23 @@ func shop_gear0() -> int:
 
 
 func shop_cards() -> int:
+	# ...and the DOOR is the last stop on the cursor's walk, past the goods (see shop_door).
+	# It is one more index rather than a special case in every key handler: Left/Right wrap
+	# through it, Enter acts on it, and the number keys simply never reach it, which is right
+	# - a door has no price and so no buy key.
+	return shop_props().size() + shop_gear().size() + 1
+
+
+func shop_door_idx() -> int:
 	return shop_props().size() + shop_gear().size()
+
+
+func shop_on_door() -> bool:
+	return shop_sel == shop_door_idx()
+
+
+func shop_door_id() -> String:
+	return "frontroom" if shop_room == SHOP_ROOM_BACK else "backroom"
 
 # THE KEYBOARD SHORTCUT PRINTED ON EACH CARD, in card order across both rows. One table,
 # read by the drawing AND by shop_input, because the two disagreeing is exactly what
@@ -3368,7 +3446,14 @@ func shop_key_label(i: int) -> String:
 	return SHOP_KEYS[i] if i >= 0 and i < SHOP_KEYS.size() else ""
 
 func shop_buy_sel() -> void:
-	# Enter (pad A) acts on whichever card the cursor lights, prop or gear
+	# Enter (pad A) acts on whichever card the cursor lights, prop or gear - or walks
+	# through the door, which is the one slot that is not a purchase
+	if shop_on_door():
+		if shop_room == SHOP_ROOM_BACK:
+			shop_leave_back_room()
+		else:
+			shop_through_curtain()
+		return
 	var props := shop_props()
 	if shop_sel < props.size():
 		try_buy(props[shop_sel])
@@ -3493,17 +3578,21 @@ func shop_input(kc: int) -> void:
 		KEY_DOWN, KEY_UP:
 			var g0 := shop_gear0()
 			var gn := maxi(1, shop_gear().size())
-			if shop_sel < g0:
+			# the DOOR is not on either row, so up/down leaves it for the nearest gear card
+			# rather than trying to map it into a column that does not contain it
+			if shop_on_door():
+				shop_sel = shop_cards() - 2
+			elif shop_sel < g0:
 				shop_sel = g0 + shop_sel * gn / maxi(g0, 1)   # prop column -> nearest gear card
 			else:
 				shop_sel = (shop_sel - g0) * maxi(g0, 1) / gn   # ...and back again
 			shop_sel = clampi(shop_sel, 0, shop_cards() - 1)
 			play_sfx("ui", -15.0)
 		KEY_C:
-			# C is KEPT as a shortcut, and only as a shortcut. The door is a CARD now (see
-			# shop_gear), which is the way it is meant to be found; this is the same
-			# function under a key, for whoever has already learned it. Both routes going
-			# through one function is what stops the two ever charging different fees.
+			# C is KEPT as a shortcut, and only as a shortcut. The door is a place on the
+			# screen now (see draw_shop_door), which is the way it is meant to be found; this
+			# is the same function under a key, for whoever has already learned it. Both
+			# routes going through one function is what stops them ever charging different fees.
 			if shop_room == SHOP_ROOM_BACK:
 				shop_leave_back_room()
 			else:
@@ -3726,6 +3815,7 @@ func cycle_pattern_live(dir: int) -> void:
 	col_air_ref = -1.0
 	col_mid_ball = null
 	tennis_ball = null   # Tennis re-marks its ball on the first throw under it
+	redeal_for_pattern()
 	set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
 	play_sfx("ui2", -13.0)
 
@@ -5960,6 +6050,41 @@ func deal_side(i: int) -> int:
 	return dominant_hand if i % 2 == 0 else other(dominant_hand)
 
 
+func redeal_for_pattern() -> void:
+	# SWITCHING TO A SHOWER RE-DEALS THE LOAD (2026-07-28 evening, Louis: "when i switch
+	# from one pattern to shower, the objects should switch hands, right now it starts with
+	# almost equal amounts in both hands, which is wrong").
+	#
+	# `deal_side` already knows a shower is dealt one-handed, but it only ever ran at
+	# `start_run` - so the rule applied to an act BOOKED as a shower and not to one switched
+	# into with P, which is how a player actually reaches it mid-practice. The opening
+	# position is not decoration: under a shower the dominant hand makes every high throw and
+	# the other only passes back, so starting with the load split evenly means the weak hand
+	# spends the first half of the pattern feeding props it should never have been holding.
+	#
+	# Only props IN HANDS move. Anything already in the air keeps its own path and lands
+	# where it was always going to - the same contract every other part of a live pattern
+	# switch honours, and the reason this is safe to do mid-run at all.
+	if pattern != SHOWER:
+		return
+	var d := dominant_hand
+	var o := other(d)
+	var held: Array[Ball] = []
+	for b in stack(o):
+		held.append(b)
+	stack(o).clear()
+	# ONE stays in the weak hand, and it must be one that was ALREADY there if possible:
+	# a prop physically passes across, it does not teleport back. If the weak hand was
+	# empty, the dominant hand gives one up instead.
+	if held.is_empty():
+		if stack(d).size() > 1:
+			stack(o).append(stack(d).pop_back())
+	else:
+		stack(o).append(held.pop_back())
+		for b2 in held:
+			stack(d).append(b2)
+
+
 func top_up_side(choices: Array = []) -> int:
 	# where the NEXT prop joins hands that are ALREADY holding (a count change, a lesson
 	# topping up after a drop). Same rule stated the other way round: the dominant hand
@@ -6797,9 +6922,29 @@ func do_throw(h: int, hold: int) -> void:
 	# be trained continuously). A trick's forced height is built off the SAME lowered
 	# base and Strength penalty, so an under-strength High Toss sags too and cannot
 	# cheat the sagging rule.
+	# AN ARMED ONE-SHOT AND A RUNNING TOGGLE ARE NOT THE SAME THING, and three guards below
+	# had been treating them as one (2026-07-28 evening, found by auditing every
+	# pattern x trick combination Louis asked about). They all read `this_trick`, which was
+	# fine while the only way to set it WITHOUT a toggle was Overthrow: the guards exist so
+	# that an armed one-shot - a throw the player spent a press on, which pays a flat bonus
+	# when caught - can never be flattened by a pattern into a low pass that collects the
+	# full bonus anyway. That is a real exploit and the guards are right about it.
+	#
+	# But a TOGGLE is on for EVERY throw, so the same guard turns "do not flatten this one
+	# special throw" into "this pattern's low road does not exist while the toggle runs".
+	# Measured at five clubs: High Toss under a Shower went from +18.6px of clearance to
+	# **-5.7**, and under a Half Shower from +28.3 to +4.2, because both roads were being
+	# sent high and the pattern is *defined* by having two roads at different heights.
+	# Columns lost its lane-height sync entirely for the same reason.
+	#
+	# So `armed_trick` is the one an exploit could ride, and `this_trick` stays what shapes
+	# the throw. Nothing about the exploit protection changes; it just stops firing for a
+	# case that cannot exploit anything.
 	var this_trick := -1
+	var armed_trick := -1
 	if trick_primed and trick_sel >= 0 and String(TRICKS[trick_sel]["kind"]) == "arm":
 		this_trick = trick_sel
+		armed_trick = trick_sel
 		trick_primed = false
 	elif toggle_on == TR_HIGH or toggle_on == TR_BTB:
 		this_trick = toggle_on
@@ -6826,7 +6971,7 @@ func do_throw(h: int, hold: int) -> void:
 	# almost zero"). Its AIRTIME is untouched, because that is the rhythm of the pattern
 	# and he has already played it and called it fine - only the arc is flattened, which
 	# is the one thing in flight that can be moved without moving the timing with it.
-	if pattern == SHOWER and h == other(dominant_hand) and this_trick < 0:
+	if pattern == SHOWER and h == other(dominant_hand) and armed_trick < 0:
 		air = int(round(base_air * SHOWER_FEED))
 		b.flat = true
 	# the PATTERN shapes every throw (there is exactly one pattern at a time now -
@@ -6847,7 +6992,7 @@ func do_throw(h: int, hold: int) -> void:
 			tennis_ball = b   # the marked ball: the first one thrown under the pattern
 		if b == tennis_ball:
 			over_top = true
-	if pattern == HALFSHOWER and h == other(dominant_hand) and this_trick < 0:
+	if pattern == HALFSHOWER and h == other(dominant_hand) and armed_trick < 0:
 		# the weave side is capped LOW (a ceiling, not a floor), so it visibly stays clear
 		# of the over-the-top road instead of drifting up to meet it. The cap is a
 		# FRACTION OF THE TAP, not the tap plus a bit - see HALFSHOWER_LOW for why that
@@ -6871,7 +7016,7 @@ func do_throw(h: int, hold: int) -> void:
 	# an armed one-shot (High Toss, Behind the Back) are meant to stand out, not blend
 	# in - and neither may drag the lanes' reference height up after itself.
 	var col_lanes := pattern == COLUMNS
-	if col_lanes and not over_top and this_trick != TR_HIGH and this_trick != TR_BTB:
+	if col_lanes and not over_top and armed_trick < 0:
 		if col_air_ref < 0.0:
 			col_air_ref = float(air)
 		else:
@@ -7108,6 +7253,18 @@ func dev_meet_req(d: Dictionary) -> void:
 	accuracy = maxi(accuracy, int(d.get("acc", 0)))
 	if int(d.get("ven", 0)) > 0:
 		reputation = maxi(reputation, VENUE_REP[int(d["ven"])])
+	# ...AND IT GRANTS THE SKILL, which it did not have to before and absolutely does now
+	# (2026-07-28 evening). Clearing the walls used to BE the unlock; since the deck
+	# change, ownership is an explicit list and a wall only earns you a card. So every
+	# `--pattern tennis` run was floring the stats, failing `pattern_unlocked`, and being
+	# silently snapped back to Cascade by start_run - which is exactly what a whole
+	# combination audit measured before the identical numbers gave it away (Tennis's three
+	# rows came back byte-for-byte equal to Cascade's). **A dev flag that quietly does
+	# something else is worse than one that errors**, and any tool that reads a gate needs
+	# re-checking whenever the meaning of "unlocked" moves.
+	var did := String(d.get("id", ""))
+	if did != "" and not gifted.has(did):
+		gifted.append(did)
 
 
 # WHAT YOU HAVE, AND WHAT YOU HAVE EARNED, ARE TWO DIFFERENT QUESTIONS (2026-07-28).
@@ -7493,6 +7650,38 @@ func set_trick_msg(m: String) -> void:
 	trick_msg_tick = tick
 
 
+func trick_pattern_warning(tr: int, pat: int) -> String:
+	# WHICH COMBINATIONS FIGHT, measured rather than guessed (2026-07-28 evening, Louis:
+	# "i want you to dissect the possibilities of patterns and tricks, since multiple can be
+	# active at the same time. are all of these valid states?"). Every one of the eighteen
+	# pattern x toggle states was run through --collcheck at five clubs with realistic
+	# timing; fifteen are clean and these three are not, each for a reason that is about
+	# GEOMETRY and not about tuning:
+	#
+	#   Behind the Back x COLUMNS      -13.6px. A column is DEFINED by going straight up and
+	#                                  coming down where it left; Behind the Back is DEFINED
+	#                                  by releasing from across the body. The two rules
+	#                                  cannot both hold, and no constant reconciles them.
+	#   Behind the Back x REV CASCADE  -9.8px. Every throw already goes over the top; adding
+	#                                  a release from behind the far hip compounds two
+	#                                  crossings on one road.
+	#   High Toss x SHOWER             -4.4px. The shower's high hand throws every prop; at
+	#                                  1.35-1.8 height they crowd a single road that already
+	#                                  carries count-1 objects.
+	#
+	# (Two more were broken and are now FIXED rather than warned about - see the armed_trick
+	# note in do_throw. Half Shower x High Toss went 4.2 -> 38.1px, Shower x Behind the Back
+	# -7.5 -> +2.5. Those were a guard misfiring, which is a bug; these three are the shapes
+	# genuinely disagreeing, which is not.)
+	if tr == TR_BTB and pat == COLUMNS:
+		return "columns want to come straight back down. Expect clashes."
+	if tr == TR_BTB and pat == RCASC:
+		return "both go over the top at once. Expect clashes."
+	if tr == TR_HIGH and pat == SHOWER:
+		return "the shower's high road is already full. Expect clashes."
+	return ""
+
+
 func on_trick() -> void:
 	# The TRICK key (Space) is the one-shot powerup. With an arm trick selected it
 	# primes exactly the next throw (pressing again waves it off); with Spin selected
@@ -7552,7 +7741,19 @@ func on_trick() -> void:
 			else:
 				toggle_on = trick_sel
 				toggle_scored = false
-				set_trick_msg("%s ON" % String(t["name"]).to_upper())
+				# ...AND IT SAYS SO WHEN THE COMBINATION FIGHTS ITSELF. Three of the
+				# eighteen pattern x toggle states are geometrically contradictory rather
+				# than merely hard - see trick_pattern_warning - and the player is TOLD
+				# rather than blocked. Blocking would be the wrong call twice over: it is
+				# their press, and "Behind the Back during Columns" is a perfectly
+				# reasonable thing to want to try. But props visibly passing through each
+				# other with no explanation reads as a broken game, and the one thing that
+				# turns that into a deliberate stunt is a line of text.
+				var warn := trick_pattern_warning(trick_sel, pattern)
+				if warn == "":
+					set_trick_msg("%s ON" % String(t["name"]).to_upper())
+				else:
+					set_trick_msg("%s ON  -  %s" % [String(t["name"]).to_upper(), warn])
 				play_sfx("ui2", -13.0)
 		_:
 			if trick_primed:
@@ -8506,11 +8707,10 @@ func sheet_repeat(dt: float) -> void:
 	# thousand)"). Two presses were needed for every 100 gold, and the things worth testing
 	# cost 60,000 - which is twelve hundred presses of M to reach the Glow Kit.
 	#
-	# THE STEP CHANGES WITH THE GESTURE, which is the whole design: a TAP is still
-	# MONEY_TAP, because fine control is what a tap is for and "give me exactly 50 more"
-	# is a real thing to want at a shop counter. A HOLD switches to MONEY_HOLD_STEP - by
-	# the thousand - and then doubles on the same SHEET_REPEAT_RAMP curve the stats use, so
-	# a second of holding is a few thousand and three seconds crosses the whole economy.
+	# A TAP AND A HELD REPEAT ARE THE SAME THOUSAND, and the hold then ACCELERATES on the
+	# same SHEET_REPEAT_RAMP curve the stats use - so a tap is a thousand, a second of
+	# holding is several, and three seconds crosses the whole economy.
+
 	elif Input.is_physical_key_pressed(KEY_M):
 		key = KEY_M; which = "money"; delta = MONEY_HOLD_STEP
 	elif Input.is_physical_key_pressed(KEY_N):
@@ -8714,6 +8914,15 @@ func load_progress() -> void:
 	# So: seed `gifted` with everything whose wall this save has ALREADY cleared, which is
 	# exactly the set that was unlocked a moment before the update. `skill_ver` marks it
 	# done, once, per save. Nothing is taken away and nothing new is granted.
+	# every wear flag defaults TRUE, so a career from before the tailor existed opens
+	# dressed in everything it owns rather than stripped by an update it never asked for
+	outfit_suit = int(cf.get_value("wear", "suit", -1))
+	wear_hat = bool(cf.get_value("wear", "hat", true))
+	wear_coat = bool(cf.get_value("wear", "coat", true))
+	wear_vest = bool(cf.get_value("wear", "vest", true))
+	wear_gloves = bool(cf.get_value("wear", "gloves", true))
+	wear_boots = bool(cf.get_value("wear", "boots", true))
+	wear_glow = bool(cf.get_value("wear", "glow", true))
 	var skill_ver := int(cf.get_value("prog", "skill_ver", 0))
 	if skill_ver < 1:
 		for tab: Array in [TRICKS, PATTERNS]:
@@ -8774,6 +8983,16 @@ func save_progress() -> void:
 	cf.set_value("prog", "pattern_sel", pattern_sel)
 	cf.set_value("prog", "pattern_ver", pattern_ver)
 	cf.set_value("prog", "skill_ver", 1)   # this save's skills are written down, not inferred
+	# THE TAILOR's choices. Cosmetic, but persisted like anything else the player decided:
+	# opening the game to find yourself re-dressed by the machine is exactly the small
+	# betrayal that makes a wardrobe feel fake.
+	cf.set_value("wear", "suit", outfit_suit)
+	cf.set_value("wear", "hat", wear_hat)
+	cf.set_value("wear", "coat", wear_coat)
+	cf.set_value("wear", "vest", wear_vest)
+	cf.set_value("wear", "gloves", wear_gloves)
+	cf.set_value("wear", "boots", wear_boots)
+	cf.set_value("wear", "glow", wear_glow)
 	cf.set_value("prog", "career", career)
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
@@ -9239,6 +9458,8 @@ func _draw_screen() -> void:
 				draw_shop(font, s)
 			if skills_open:
 				draw_skills(font, s)
+			if tailor_open:
+				draw_tailor(font, s)
 			return
 	draw_backdrop(s)
 	draw_egg_splats()      # yolk on the floor sits behind the performer
@@ -9907,7 +10128,9 @@ func draw_circus_canopy(s: Vector2) -> void:
 #region JUGGLER FIGURE DRAWING
 func draw_juggler(s: Vector2) -> void:
 	var cx := s.x * 0.5
-	var v := venue_data(cur_venue())
+	# THE COSTUME IS CHOSEN, NOT ASSUMED (the tailor). Defaults to the stage he is standing
+	# on, which is what this always did.
+	var v := costume_palette()
 	var skin := Color(0.87, 0.64, 0.45)
 	var hair := Color(0.28, 0.16, 0.11)
 	var suit: Color = v["suit"]         # costume changes with the venue
@@ -10007,7 +10230,7 @@ func draw_juggler(s: Vector2) -> void:
 	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
 	draw_capsule(Vector2(cx + 0.4 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
 	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
-	if has_boots:
+	if wearing("boots"):
 		# WARDROBE: STAGE BOOTS replace the two flat shoe ellipses - see draw_stage_boot
 		draw_stage_boot(Vector2(cx - 0.34 * H, floor_y), H, -1.0, shoe, collar, accent)
 		draw_stage_boot(Vector2(cx + 0.34 * H, floor_y), H, 1.0, shoe, collar, accent)
@@ -10070,7 +10293,7 @@ func draw_juggler(s: Vector2) -> void:
 	# to the profile's 0.14 it would be a vertical bar balanced on his skull. It is the
 	# last thing drawn on the figure's upper half, so it sits over the hair rather than
 	# under the fringe.
-	if has_hat:
+	if wearing("hat"):
 		draw_top_hat(head, head_r, suit_dk, vest, accent)
 	if spin_on:                                                            # back to the body width-scale for the arms
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
@@ -10132,7 +10355,7 @@ func draw_juggler(s: Vector2) -> void:
 		# ...and the turn-up sits at whatever the trouser's real hem is: at the ankle bare,
 		# or at the top of a boot shaft when the wardrobe has put one there. A band drawn
 		# across the middle of a boot is a band drawn on the wrong garment.
-		var hem_y := floor_y - (0.54 if has_boots else 0.21) * H
+		var hem_y := floor_y - (0.54 if wearing("boots") else 0.21) * H
 		for hemx in [-0.34 * H, 0.34 * H]:
 			draw_glow_seam(PackedVector2Array([
 				Vector2(cx + hemx - 0.15 * H, hem_y),
@@ -10202,7 +10425,7 @@ func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: floa
 	# them AND is what tails actually do on a man who is moving. They end at the back of the
 	# knee, which is where a tailcoat's do. Nothing here widens the figure: 0.86h is inside
 	# the jacket's own 0.92h shoulder, let alone the arms' 2.5h reach.
-	if has_coat:
+	if wearing("coat"):
 		for side in [-1.0, 1.0]:
 			draw_colored_polygon(PackedVector2Array([
 				Vector2(cx + side * 0.32 * h, hip_y - 0.18 * h),   # under the waist, inboard
@@ -10258,7 +10481,7 @@ func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: floa
 	# already share, so it is still the venue's own light) and the field they sit on is
 	# pulled a quarter of the way DOWN toward the jacket's shade to give them something to
 	# be bright against.
-	if has_vest:
+	if wearing("vest"):
 		var seq_field := Color(vest.r * 0.80, vest.g * 0.78, vest.b * 0.76)
 		draw_colored_polygon(vest_shape(cx, h, shoulder_y, waist_y, hip_y), seq_field)
 		var top := shoulder_y + 0.62 * h
@@ -10769,7 +10992,104 @@ func solve_elbow(a: Vector2, b: Vector2, l1: float, l2: float, bend: float) -> V
 	return a + dir * x + perp * hgt
 
 
+func wearing(id: String) -> bool:
+	# IS IT ON HIM. Every drawing asks this and never `has_*` directly, because owning a
+	# garment and wearing it are two different facts now (see the tailor's own note). The
+	# BUFFS still read `has_*`, deliberately.
+	match id:
+		"hat":    return has_hat and wear_hat
+		"coat":   return has_coat and wear_coat
+		"vest":   return has_vest and wear_vest
+		"gloves": return has_gloves and wear_gloves
+		"boots":  return has_boots and wear_boots
+		"glow":   return has_glow_suit and wear_glow
+	return false
+
+
+func costume_palette() -> Dictionary:
+	# WHICH STAGE'S COSTUME HE IS IN. -1 means the one he is standing on, which is what the
+	# game did before the tailor existed and is still the default. A chosen suit is clamped
+	# to what this career has actually reached, so a save that loses reputation (or a demo
+	# build's venue cap) can never leave him in a costume he has no right to.
+	if outfit_suit >= 0:
+		return venue_data(clampi(outfit_suit, 0, venue_index()))
+	return venue_data(cur_venue())
+
+
+func suit_name(i: int) -> String:
+	return String(venue_data(i)["name"])
+
+
+func tailor_pieces() -> Array[Dictionary]:
+	# every bought garment, with what it does and whether it is currently on. Built fresh so
+	# drawing and input can never disagree about which rows exist - the same contract
+	# day_actions() and shop_gear() are built on.
+	var out: Array[Dictionary] = []
+	if has_hat:
+		out.append({"id": "hat", "name": "Top Hat", "on": wear_hat, "gear": "hat",
+			"note": "better tributes, more often"})
+	if has_coat:
+		out.append({"id": "coat", "name": "Tailcoat", "on": wear_coat, "gear": "coat",
+			"note": "the crowd warms %d%% faster" % int(round((COAT_WARM - 1.0) * 100.0))})
+	if has_vest:
+		out.append({"id": "vest", "name": "Sequin Waistcoat", "on": wear_vest, "gear": "vest",
+			"note": "+%d%% flowers thrown" % int(round((VEST_RATE - 1.0) * 100.0))})
+	if has_gloves:
+		out.append({"id": "gloves", "name": "Silk Gloves", "on": wear_gloves, "gear": "gloves",
+			"note": "a club's forgiveness on every prop"})
+	if has_boots:
+		out.append({"id": "boots", "name": "Stage Boots", "on": wear_boots, "gear": "boots",
+			"note": "every throw costs one less stamina"})
+	if has_glow_suit:
+		out.append({"id": "glow", "name": "Glow Suit", "on": wear_glow, "gear": "glow_suit",
+			"note": "phosphor, on any dark stage"})
+	return out
+
+
+func tailor_toggle(id: String) -> void:
+	match id:
+		"hat":    wear_hat = not wear_hat
+		"coat":   wear_coat = not wear_coat
+		"vest":   wear_vest = not wear_vest
+		"gloves": wear_gloves = not wear_gloves
+		"boots":  wear_boots = not wear_boots
+		"glow":   wear_glow = not wear_glow
+	save_progress()
+	play_sfx("ui2", -13.0)
+
+
+func tailor_input(kc: int) -> void:
+	var suits := venue_index() + 2        # "follow the stage", then one per stage reached
+	var pieces := tailor_pieces().size()
+	var n := suits if tailor_col == 0 else maxi(pieces, 1)
+	match kc:
+		KEY_TAB, KEY_ESCAPE:
+			tailor_open = false
+			play_sfx("ui", -13.0)
+		KEY_UP, KEY_W:
+			tailor_sel = (tailor_sel + n - 1) % n
+			play_sfx("ui", -15.0)
+		KEY_DOWN, KEY_S:
+			tailor_sel = (tailor_sel + 1) % n
+			play_sfx("ui", -15.0)
+		KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D:
+			if pieces > 0:
+				tailor_col = 1 - tailor_col
+				tailor_sel = 0
+				play_sfx("ui", -15.0)
+		KEY_ENTER, KEY_KP_ENTER:
+			if tailor_col == 0:
+				# row 0 is "follow the stage"; the rest are stages in order
+				outfit_suit = -1 if tailor_sel == 0 else tailor_sel - 1
+				save_progress()
+				play_sfx("ui2", -13.0)
+			elif pieces > 0:
+				tailor_toggle(String(tailor_pieces()[tailor_sel]["id"]))
+
+
 func glove_cloth() -> Color:
+
+
 	# the silk gloves' cloth, resolved the same way every other wardrobe colour is: the
 	# venue's shirt/collar tone, swapped for phosphor when the Glow Suit is lit. It lives
 	# in its own function because draw_hand is reached without the palette in hand, and
@@ -10805,7 +11125,7 @@ func draw_hand(h: int) -> void:
 	# The cloth is the venue's own collar/shirt colour, for the reason the cuff already
 	# uses it - a hard white glove would light the Midnight Show's vanishing costume
 	# straight back up, and these are dress gloves, not surgical ones.
-	var gloved := has_gloves
+	var gloved := wearing("gloves")
 	if gloved:
 		sk = glove_cloth()
 	var openf := 1.0 - close
@@ -11081,7 +11401,10 @@ func glow_props_lit() -> bool:
 
 
 func glow_suit_lit() -> bool:
-	return has_glow_suit and is_dark_context()
+	# ...and it has to be ON HIM, not merely owned. This is the ONE piece where "wearing"
+	# genuinely changes what the player sees on a dark stage, which is why the tailor lists
+	# it beside the others rather than treating the Kit as scenery.
+	return wearing("glow") and is_dark_context()
 
 
 func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0,
@@ -14261,6 +14584,196 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 #endregion
 
 #region SHOP SCREEN
+func draw_tailor(font: Font, s: Vector2) -> void:
+	# THE TAILOR: a mirror on the left, the choices on the right. The mirror is the whole
+	# point of the screen - every other way of presenting a wardrobe (a grid of icons, a
+	# list of names) makes the player imagine the result, and the one thing this screen can
+	# do that the shop cannot is SHOW it.
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.88))
+	var pw := minf(1120.0, s.x - 60.0)
+	var ph := minf(684.0, s.y - 24.0)
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.5 - ph * 0.5
+	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
+	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "THE TAILOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(px + 40.0, py + 82.0),
+		"how you go on stage. Every bonus you own keeps paying whether you wear it or not - this is looks, not loadout.",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
+	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
+
+	# ---------------- THE MIRROR ----------------
+	var mw := 360.0
+	var mirror := Rect2(px + 40.0, py + 124.0, mw, ph - 200.0)
+	soft_card(mirror, Color(0.075, 0.05, 0.055, 0.97), Color(0.9, 0.6, 0.35, 0.34), 1.0, 12.0, 14.0)
+	var pal := costume_palette()
+	var mglow: Color = pal["glow"]
+	var mcx := mirror.position.x + mirror.size.x * 0.5
+	var mfy := mirror.position.y + mirror.size.y - 54.0
+	# a spotlight and a lit floor, the same three marks the skill preview's little stage
+	# makes - so the figure is standing somewhere rather than floating on a panel
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(mcx, mirror.position.y + 6.0),
+		Vector2(mcx - mw * 0.34, mfy), Vector2(mcx + mw * 0.34, mfy)]),
+		Color(mglow.r, mglow.g, mglow.b, 0.06))
+	draw_glow(Vector2(mcx, mfy), mw * 0.38, Color(mglow.r, mglow.g, mglow.b, 0.18))
+	draw_rect(Rect2(mirror.position.x + 1.0, mfy, mirror.size.x - 2.0,
+		mirror.position.y + mirror.size.y - mfy - 1.0), Color(0.09, 0.06, 0.07, 0.94))
+	draw_line(Vector2(mirror.position.x + 1.0, mfy), Vector2(mirror.position.x + mirror.size.x - 1.0, mfy),
+		Color(mglow.r, mglow.g, mglow.b, 0.30), 1.4)
+	# HE BREATHES AND HIS HANDS DRIFT, because a costume is worn by a person: a figure
+	# frozen in a T-pose is a mannequin, and the wardrobe was drawn to sit on a body that
+	# moves. Cheap - two sines - and it uses the mirror's own idle hand positions rather
+	# than the live sim's, so nothing here can touch a run in progress.
+	# HE FILLS THE MIRROR. The preview scale exists to fit a figure into a 356px box beside
+	# a diagram; here the figure IS the screen, and at PV_HEAD he stood about 180px tall in
+	# a 480px panel - a doll in a wardrobe, with the sequins and the spat straps this room
+	# exists to show off both under two pixels. `k` is solved from the panel rather than
+	# picked: the canon is eight heads plus the hat's own reach above it.
+	var t := float(atick())
+	var k := clampf((mirror.size.y - 96.0) / (PV_FLOOR + PV_HEAD * 4.2), 1.0, 2.6)
+	# `o` IS THE HAND LINE, not the head - that is the preview's own convention (the floor
+	# sits PV_FLOOR below it), and reading it as the head is what put his arms up over his
+	# shoulders in a V on the first try. Hands rest AT the line, out at the catch point,
+	# with a little drift so he is a person standing rather than a mannequin on a pole.
+	var o := Vector2(mcx, mfy - PV_FLOOR * k + 3.0 * sin(t * 0.018))
+	var hl := o + Vector2(-PV_OUTER * k, 4.0 * sin(t * 0.021 + 1.2) * k)
+	var hr := o + Vector2(PV_OUTER * k, 4.0 * sin(t * 0.021) * k)
+	draw_mini_juggler(o, hl, hr, 0.0, k)
+	var wornname := "the %s" % suit_name(outfit_suit) if outfit_suit >= 0 else "whatever stage you play"
+	draw_fit_string(font, Vector2(mirror.position.x, mirror.position.y + mirror.size.y - 18.0),
+		wornname, HORIZONTAL_ALIGNMENT_CENTER, mirror.size.x, 13, Color(0.82, 0.76, 0.68))
+
+	# ---------------- THE SUIT ----------------
+	var cx1 := px + 40.0 + mw + 40.0
+	var cx2 := cx1 + 300.0
+	var colw := 280.0
+	var hy := py + 146.0
+	draw_string(font, Vector2(cx1, hy), "THE SUIT", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
+		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 0 else Color(0.72, 0.62, 0.5, 0.8))
+	draw_string(font, Vector2(cx2, hy), "WHAT YOU WEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
+		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 1 else Color(0.72, 0.62, 0.5, 0.8))
+	var row_h := 40.0
+	var y0 := hy + 34.0
+	# row 0 is FOLLOW THE STAGE - the behaviour that existed before this screen did, kept
+	# as an explicit choice rather than buried as "none selected"
+	for i in venue_index() + 2:
+		var ry := y0 + float(i) * row_h
+		var chosen := (outfit_suit < 0 and i == 0) or (outfit_suit >= 0 and outfit_suit == i - 1)
+		var sel := tailor_col == 0 and tailor_sel == i
+		if sel:
+			soft_card(Rect2(cx1 - 12.0, ry - 22.0, colw, 34.0), Color(1.0, 0.85, 0.45, 0.09),
+				Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
+		var nm := "Follow the stage" if i == 0 else suit_name(i - 1)
+		var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.88, 0.82, 0.70) if chosen else Color(0.66, 0.60, 0.54))
+		# a SWATCH, because a costume is a colour before it is a name and "Small Theatre"
+		# tells a player nothing about what they are about to look like
+		if i > 0:
+			var sv := venue_data(i - 1)
+			draw_rect(Rect2(cx1, ry - 12.0, 13.0, 13.0), Color(sv["suit"]))
+			draw_rect(Rect2(cx1 + 14.0, ry - 12.0, 13.0, 13.0), Color(sv["vest"]))
+		draw_fit_string(font, Vector2(cx1 + 34.0, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, colw - 80.0, 16, nc)
+		if chosen:
+			draw_string(font, Vector2(cx1 + colw - 86.0, ry), "worn", HORIZONTAL_ALIGNMENT_RIGHT, 60.0, 12, Color(0.6, 0.9, 0.62))
+
+	# ---------------- THE PIECES ----------------
+	var pieces := tailor_pieces()
+	if pieces.is_empty():
+		draw_wrap_fit(font, "Nothing bought yet. The shop's gear row sells a top hat, a tailcoat, a sequin waistcoat, silk gloves and stage boots - each one shows up here the moment it is yours.",
+			Rect2(cx2, y0 - 14.0, colw, 160.0), 13, Color(0.70, 0.64, 0.58))
+	for j in pieces.size():
+		var pd: Dictionary = pieces[j]
+		var ry2 := y0 + float(j) * row_h
+		var sel2 := tailor_col == 1 and tailor_sel == j
+		if sel2:
+			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, colw, 34.0), Color(1.0, 0.85, 0.45, 0.09),
+				Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
+		var on: bool = bool(pd["on"])
+		var nc2 := Color(1.0, 0.9, 0.6) if sel2 else (Color(0.88, 0.82, 0.70) if on else Color(0.60, 0.55, 0.50))
+		draw_fit_string(font, Vector2(cx2, ry2), String(pd["name"]), HORIZONTAL_ALIGNMENT_LEFT, colw - 110.0, 16, nc2)
+		# the same sliding pill the settings screen uses, so ON/OFF looks the same
+		# everywhere in the game
+		draw_pill_toggle(cx2 + colw - 66.0, ry2 - 13.0, 44.0, 18.0, on)
+	# the selected piece's own line, under the column: what it does, and the standing
+	# reminder that taking it off costs nothing but the look
+	if tailor_col == 1 and not pieces.is_empty():
+		var pnote := String(pieces[clampi(tailor_sel, 0, pieces.size() - 1)]["note"])
+		draw_string(font, Vector2(cx2, y0 + float(pieces.size()) * row_h + 16.0),
+			"%s  -  yours whether or not you wear it" % pnote, HORIZONTAL_ALIGNMENT_LEFT, colw, 12,
+			Color(0.72, 0.86, 0.68))
+
+	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
+		[[["Up", "Down"], "choose"], [["Left", "Right"], "column"], [["Enter"], "wear it"], [["Tab"], "leave"]])
+
+
+func draw_shop_door(font: Font, panel: Rect2) -> void:
+	# THE DOOR IS A DIRECTION (2026-07-28 evening, Louis: "going to the back feels like
+	# stepping to the right on the screen"). That sentence is the whole design and it is a
+	# better one than the card it replaces: a card in the gear row asks "will you buy this?",
+	# and the honest question here is "will you go through?". So the way in stands against the
+	# RIGHT edge of the panel and the way out against the LEFT, and each is a big arrow
+	# pointing the way it takes you - the position IS the information, before any lettering.
+	#
+	# Drawn as a tall bar with a chevron cut into its inner face rather than a plain triangle:
+	# a triangle alone at this height reads as a play button, and the bar is what makes it a
+	# doorway with something beyond it. The curtain fold behind the chevron is the one mark
+	# that ties it to the room it opens onto.
+	var back := shop_room == SHOP_ROOM_FRONT      # true = this door leads INTO the back room
+	var dir := 1.0 if back else -1.0              # +1 points right, -1 left
+	var sel := shop_on_door()
+	var w := SHOP_DOOR_W
+	var h := 300.0
+	var x := panel.position.x + panel.size.x - SHOP_DOOR_GUT + (SHOP_DOOR_GUT - w) * 0.5 if back \
+		else panel.position.x + (SHOP_DOOR_GUT - w) * 0.5
+	var r := Rect2(x, panel.position.y + panel.size.y * 0.5 - h * 0.5 - 20.0, w, h)
+	# LOCKED reads differently from open: a fee still to pay is amber and carries its price,
+	# an open door is the room's own colour.
+	var locked := back and not has_backroom
+	var kc := Color(0.95, 0.62, 0.30) if locked else (Color(0.86, 0.42, 0.40) if back else Color(0.62, 0.74, 0.88))
+	if sel:
+		soft_card(r, Color(kc.r * 0.26, kc.g * 0.26, kc.b * 0.26, 0.97), Color(1.0, 0.88, 0.5, 0.95),
+			2.5, 11.0, 18.0, 0.07)
+	else:
+		soft_card(r, Color(kc.r * 0.13, kc.g * 0.13, kc.b * 0.13, 0.92), Color(kc.r, kc.g, kc.b, 0.45),
+			1.5, 11.0, 12.0)
+	var cy := r.position.y + r.size.y * 0.5
+	var cx := r.position.x + r.size.x * 0.5
+	# the curtain beyond it: two folds pulled back from the middle, so the arrow is standing
+	# in a doorway rather than floating on a panel
+	for sgn: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx + sgn * 15.0, cy - 96.0), Vector2(cx + sgn * 5.0, cy - 88.0),
+			Vector2(cx + sgn * 7.0, cy + 88.0), Vector2(cx + sgn * 15.0, cy + 96.0)]),
+			Color(kc.r, kc.g, kc.b, 0.18))
+	# THE ARROW. It breathes toward the way it goes when selected, which is the cheapest
+	# possible way to say "this one moves you" without a word of explanation.
+	var nudge := (6.0 * (0.5 + 0.5 * sin(atick() * 0.07))) if sel else 0.0
+	var ax := cx + dir * nudge
+	var a := 1.0 if sel else 0.72
+	for lay in [[26.0, 46.0, 0.30], [18.0, 32.0, 1.0]]:
+		var aw: float = float(lay[0])
+		var ah: float = float(lay[1])
+		var al: float = float(lay[2])
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(ax + dir * aw, cy), Vector2(ax - dir * aw * 0.55, cy - ah),
+			Vector2(ax - dir * aw * 0.10, cy - ah), Vector2(ax + dir * aw * 1.45, cy),
+			Vector2(ax - dir * aw * 0.10, cy + ah), Vector2(ax - dir * aw * 0.55, cy + ah)]),
+			Color(kc.r, kc.g, kc.b, al * a))
+	# the label, turned to run UP the bar - a door this narrow has no room for a horizontal
+	# word, and a rotated one also reads as signage on a doorframe, which is what it is
+	draw_set_transform(Vector2(cx, cy + (86.0 if back else -86.0)), (-PI * 0.5 if back else PI * 0.5), Vector2.ONE)
+	var word := ("BACK ROOM" if back else "FRONT ROOM")
+	draw_string(font, Vector2(-70.0, 5.0), word, HORIZONTAL_ALIGNMENT_CENTER, 140.0, 13,
+		Color(kc.r, kc.g, kc.b, 0.95 * a))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# ...and the fee, only while there is one to pay. A number on an open door would read
+	# as a toll that is charged every time.
+	if locked:
+		draw_string(font, Vector2(r.position.x, r.position.y - 10.0), commafy(BACKROOM_COST),
+			HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 13, Color(0.95, 0.72, 0.42))
+		draw_string(font, Vector2(r.position.x, r.position.y + r.size.y + 18.0), "16+",
+			HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 12, Color(0.85, 0.60, 0.36))
+
+
 func draw_shop(font: Font, s: Vector2) -> void:
 	# the SHOP, dealt as CARDS (Louis: Balatro look - big cards, clean zones, the buy
 	# key printed on every card). One zone of five prop cards, one zone of gear, the
@@ -14272,8 +14785,13 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.99), Color(0.9, 0.6, 0.35, 0.55), 2.0, 16.0, 22.0)
 
-	var tx := px + 40.0
-	var innerw := pw - 80.0
+	# THE ROWS LEAVE A GUTTER ON BOTH SIDES, always, whichever room is showing. Reserving it
+	# only where a door actually is would make the whole shop jump sideways every time you
+	# walked through one - and reserving nothing is what put the first door bar straight
+	# through the last gear card. One constant, read here and by draw_shop_door, so the two
+	# cannot disagree about where the goods stop and the doorway starts.
+	var tx := px + 40.0 + SHOP_DOOR_GUT
+	var innerw := pw - 80.0 - SHOP_DOOR_GUT * 2.0
 	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
 	# WHICH ROOM, said in the header rather than left to be inferred from the goods
 	# ...and it no longer has to teach a hotkey. The C hint lived here because C was the
@@ -14284,7 +14802,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		sub = "the back room  -  mind the sharp things"
 	draw_string(font, Vector2(tx + 118.0, py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
 		Color(0.95, 0.72, 0.55) if shop_room == SHOP_ROOM_BACK else Color(0.75, 0.68, 0.6))
-	draw_purse(font, px + pw - 40.0, py + 52.0)
+	draw_purse(font, px + pw - 40.0 - SHOP_DOOR_GUT, py + 52.0)
 
 	# ---------------- PROPS: one card per prop, in one row ----------------
 	# THE ROW FITS WHATEVER PROPS HOLDS. It was `(innerw - gap * 5) / 6`, so the seventh
@@ -14403,6 +14921,9 @@ func draw_shop(font: Font, s: Vector2) -> void:
 				shop_key_label(shop_gear0() + i), commafy(gcost), money >= gcost,
 				"walk through" if gcost == 0 else "")
 
+	# ---------------- THE DOOR, at the edge it leads to ----------------
+	draw_shop_door(font, Rect2(px, py, pw, ph))
+
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
 	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
 	# uncluttered and the player still learns why they would pick one prop over another. A
@@ -14424,6 +14945,14 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			var pk: int = shop_props()[shop_sel]
 			detail_head = String(PROPS[pk]["name"])
 			detail = String(PROPS[pk]["trait"])
+		elif shop_on_door():
+			detail_head = "The Front Room" if shop_room == SHOP_ROOM_BACK else "The Back Room"
+			if shop_room == SHOP_ROOM_BACK:
+				detail = "back out through the curtain, to the safe goods"
+			elif has_backroom:
+				detail = "the sharp things are through here - knives, torches, the saw, and Uncle Dan's pie"
+			else:
+				detail = "16 and over. A one-off fee of %s at the curtain, and an errand's worth of the day" % commafy(BACKROOM_COST)
 		else:
 			var gi := shop_sel - shop_gear0()
 			var gl := shop_gear()
@@ -14474,10 +15003,17 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 		draw_rect(Rect2(x, y - 12.0, 11.0, 15.0), Color(kc.r, kc.g, kc.b, 0.55), false, 1.0)
 		for di in 4:
 			draw_circle(Vector2(x + 24.0 + float(di) * 13.0, y - 5.0), 2.6, Color(0.55, 0.50, 0.46, 0.9))
-		draw_string(font, Vector2(x + w - 76.0, y), "locked", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.66, 0.58, 0.52))
+		# right edge pulled 12px inside the row, or it sits exactly ON the selection
+		# highlight's border - which the narrower columns made visible
+		draw_string(font, Vector2(x + w - 88.0, y), "locked", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.66, 0.58, 0.52))
 		return
-	draw_fit_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, w - 100.0, 17, nc)
-	draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
+	# NO "ready" BADGE ANY MORE, and dropping it is what let the columns narrow enough for the
+	# card to have a home. It was there to distinguish an owned skill from a locked one back
+	# when both printed their real name; now a locked row is visibly a face-down card and the
+	# word "locked", so "ready" was being printed on every other row to say the one thing the
+	# absence of a card back already said. The 76px it occupied goes to the name, which is why
+	# "Reverse Cascade" fits at 196 where it was ellipsising at 268.
+	draw_fit_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, w - 14.0, 17, nc)
 
 
 # --- SKILL PREVIEWS (Skills screen) -------------------------------------------
@@ -14666,32 +15202,47 @@ func pv_state(legs: Array, tsec: float) -> Dictionary:
 	return {"pos": Vector2.ZERO, "behind": false}
 
 
-func draw_mini_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color) -> void:
+func draw_mini_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color,
+		k: float = 1.0) -> void:
 	# draw_arm at preview scale: same two-bone solve, same outward elbow bow, widths
-	# scaled by PV_K so the little figure keeps the real one's proportions
+	# scaled by PV_K so the little figure keeps the real one's proportions. `k` scales the
+	# whole thing again for callers that want the same figure bigger - see draw_mini_juggler.
 	var bend := 1.0 if h == LEFT else -1.0
 	var reach := (hand - shoulder).length()
-	var bone := maxf(46.0 * PV_K, reach * 0.56)
+	var bone := maxf(46.0 * PV_K * k, reach * 0.56)
 	var elbow := solve_elbow(shoulder, hand, bone, bone, bend)
-	var wrist := hand + (elbow - hand).normalized() * 3.2
-	draw_capsule(shoulder, elbow, 19.0 * PV_K, 14.0 * PV_K, sleeve)
-	draw_capsule(elbow, wrist, 13.0 * PV_K, 10.0 * PV_K, skin)
-	draw_circle(elbow, 7.0 * PV_K, sleeve)
+	var wrist := hand + (elbow - hand).normalized() * 3.2 * k
+	draw_capsule(shoulder, elbow, 19.0 * PV_K * k, 14.0 * PV_K * k, sleeve)
+	draw_capsule(elbow, wrist, 13.0 * PV_K * k, 10.0 * PV_K * k, skin)
+	draw_circle(elbow, 7.0 * PV_K * k, sleeve)
 
 
-func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> void:
+func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: float = 1.0) -> void:
 	# the same performer, small: draw_juggler's eight-head canon at PV_HEAD, in the
 	# CURRENT venue's costume colours, and turning through a Spin the same way the real
 	# figure does (body width scaled by cos, the head kept round outside that scale).
-	var v := venue_data(cur_venue())
+	# ONE WARDROBE, TWO SIZES (2026-07-28 evening). The little figure used to be the base
+	# costume only - jacket, waistcoat, collar - so the Skills preview and, more to the
+	# point, the TAILOR's own mirror would have shown a man who owned a top hat standing
+	# there bare-headed. Everything below now goes through the same `wearing()` test and the
+	# same `draw_performer_polish` / `draw_top_hat` / `draw_stage_boot` the stage figure
+	# uses; only `h` differs. Two copies of a costume is the thing the original wardrobe
+	# pass refused to do, and it would have been just as wrong here.
+	var v := costume_palette()
 	var suit: Color = v["suit"]
 	var suit_dk: Color = v["suit_dk"]
 	var vest: Color = v["vest"]
 	var collar: Color = v["collar"]
+	var accent: Color = v["glow"]
 	var skin := Color(0.87, 0.64, 0.45)
 	var hair := Color(0.28, 0.16, 0.11)
-	var H := PV_HEAD
-	var floor_y := o.y + PV_FLOOR
+	# `k` SCALES THE WHOLE FIGURE, and it is a parameter rather than an outer transform for
+	# a specific reason: draw_stage_boot and the spin branch both call draw_set_transform
+	# themselves, and Godot REPLACES rather than composes - so a caller wrapping this in a
+	# scale would have it silently thrown away by the first boot drawn. Every length below
+	# is a multiple of H or of PV_K, so one factor threaded through is exact.
+	var H := PV_HEAD * k
+	var floor_y := o.y + PV_FLOOR * k
 	var hip_y := floor_y - 4.0 * H
 	var knee_y := floor_y - 2.0 * H
 	var waist_y := floor_y - 5.0 * H
@@ -14699,7 +15250,7 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 	var sh_y := floor_y - 6.72 * H
 	var head := Vector2(o.x, floor_y - 7.5 * H)
 	var head_r := 0.52 * H
-	fill_ellipse(Vector2(o.x, floor_y + 1.0), 30.0, 5.0, Color(0, 0, 0, 0.28))   # ground shadow
+	fill_ellipse(Vector2(o.x, floor_y + 1.0), 30.0 * k, 5.0 * k, Color(0, 0, 0, 0.28))   # ground shadow
 
 	var sx := 1.0
 	var facing_back := false
@@ -14715,8 +15266,12 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 	draw_capsule(Vector2(o.x - 0.34 * H, knee_y), Vector2(o.x - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
 	draw_capsule(Vector2(o.x + 0.4 * H, hip_y), Vector2(o.x + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
 	draw_capsule(Vector2(o.x + 0.34 * H, knee_y), Vector2(o.x + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
-	fill_ellipse(Vector2(o.x - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
-	fill_ellipse(Vector2(o.x + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+	if wearing("boots"):
+		draw_stage_boot(Vector2(o.x - 0.34 * H, floor_y), H, -1.0, shoe, collar, accent)
+		draw_stage_boot(Vector2(o.x + 0.34 * H, floor_y), H, 1.0, shoe, collar, accent)
+	else:
+		fill_ellipse(Vector2(o.x - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+		fill_ellipse(Vector2(o.x + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
 	draw_colored_polygon(PackedVector2Array([   # neck
 		Vector2(o.x - 0.18 * H, head.y + head_r - 0.05 * H), Vector2(o.x + 0.18 * H, head.y + head_r - 0.05 * H),
 		Vector2(o.x + 0.23 * H, sh_y + 0.14 * H), Vector2(o.x - 0.23 * H, sh_y + 0.14 * H)]), skin)
@@ -14734,11 +15289,9 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 			Vector2(o.x - 0.28 * H, sh_y - 0.02 * H), Vector2(o.x, chest_y + 0.22 * H), Vector2(o.x - 0.05 * H, sh_y - 0.02 * H)]), collar)
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(o.x + 0.28 * H, sh_y - 0.02 * H), Vector2(o.x, chest_y + 0.22 * H), Vector2(o.x + 0.05 * H, sh_y - 0.02 * H)]), collar)
-		var vest_top := sh_y + 0.52 * H
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(o.x - 0.3 * H, vest_top), Vector2(o.x + 0.3 * H, vest_top),
-			Vector2(o.x + 0.28 * H, waist_y), Vector2(o.x + 0.36 * H, hip_y - 0.1 * H),
-			Vector2(o.x - 0.36 * H, hip_y - 0.1 * H), Vector2(o.x - 0.28 * H, waist_y)]), vest)
+		draw_colored_polygon(vest_shape(o.x, H, sh_y, waist_y, hip_y), vest)
+	draw_performer_polish(o.x, H, sh_y, chest_y, waist_y, hip_y, knee_y, floor_y,
+		suit, suit_dk, vest, collar, accent, facing_back)
 	if turn > 0.0:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # the head keeps its round size through a turn
 	# the SAME head the stage figure draws, at this figure's own radius (11.5px against
@@ -14747,20 +15300,23 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float) -> voi
 	# the mood. draw_head scales everything off r and drops the finest marks below their
 	# own thresholds, so one call covers both sizes.
 	draw_head(head, head_r, hair, skin, facing_back)
+	if wearing("hat"):
+		draw_top_hat(head, head_r, suit_dk, vest, accent)
 	if turn > 0.0:
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
-	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit)
-	draw_mini_arm(Vector2(o.x + 0.9 * H, sh_y + 0.14 * H), hr, RIGHT, skin, suit)
-	draw_circle(hl, 5.4, skin)
-	draw_circle(hr, 5.4, skin)
+	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit, k)
+	draw_mini_arm(Vector2(o.x + 0.9 * H, sh_y + 0.14 * H), hr, RIGHT, skin, suit, k)
+	var mitt := glove_cloth() if wearing("gloves") else skin
+	draw_circle(hl, 5.4 * k, mitt)
+	draw_circle(hr, 5.4 * k, mitt)
 	if turn > 0.0:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# the same sweeping streaks the real Spin lays over the turn, so the little
 		# figure reads as MOVING rather than as a squashed one
 		var mid := Vector2(o.x, (sh_y + hip_y) * 0.5)
-		for k in 3:
-			var rr := 16.0 + float(k) * 7.0
-			var a0 := turn * TAU + float(k) * 0.6
+		for si in 3:
+			var rr := (16.0 + float(si) * 7.0) * k
+			var a0 := turn * TAU + float(si) * 0.6
 			draw_arc(mid, rr, a0, a0 + 1.5, 10, Color(1.0, 0.9, 0.65, 0.16), 1.6, true)
 
 
@@ -14955,10 +15511,16 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# the same paragraph the title started
 	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
+	# THE LISTS GIVE UP WIDTH THEY WERE NOT USING, so the card has somewhere to be
+	# (2026-07-28 evening, Louis: "you should show the trick and pattern cards in the trick
+	# and pattern menu"). The two columns were 268px each to hold names like "Reverse
+	# Cascade" - which measures 132 - so nearly half of each was empty air. At 196 they still
+	# fit the longest name with room for its badge, and the 176px they release is what turns
+	# the preview zone into a zone that can hold a CARD and the choreography side by side.
 	var nt := TRICKS.size()
 	var col_l := px + 40.0
-	var col_r := px + 330.0
-	var colw := 268.0
+	var col_r := px + 258.0
+	var colw := 196.0
 	var row_h := 46.0
 	var header_y := py + 136.0
 	var y0 := header_y + 42.0
@@ -15010,26 +15572,42 @@ func draw_skills(font: Font, s: Vector2) -> void:
 
 	# THE PREVIEW, third zone: whatever is selected, trick or pattern, running its own
 	# choreography on a little stage of its own (see draw_skill_preview). Never empty.
-	var prev_x := px + 644.0
+	# THE CARD SITS BESIDE THE CHOREOGRAPHY, and the two are doing different jobs on purpose.
+	# The card is the OBJECT you were dealt - the pun, the frame, the thing you would
+	# recognise across a room - and until now it was only ever seen for the few seconds of
+	# its own unlock, which is a lot of drawing for a moment that passes. The preview is the
+	# DIAGRAM: the skill's real roads, off the sim's own numbers. Showing them together is
+	# what makes this screen a hand of cards you can also read.
+	var prev_x := px + 476.0
+	var zone_w := px + pw - 40.0 - prev_x
 	draw_string(font, Vector2(prev_x, header_y),
-		"PREVIEW" if is_unlocked else "NOT YET YOURS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
-	var prev_box := Rect2(prev_x, py + 152.0, px + pw - 40.0 - prev_x, 356.0)
+		"YOUR CARD" if is_unlocked else "NOT YET YOURS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	var card_w := 232.0
+	var card_h := 330.0
+	var card_r := Rect2(prev_x, py + 152.0, card_w, card_h)
+	var prev_box := Rect2(prev_x + card_w + 22.0, py + 152.0, zone_w - card_w - 22.0, 356.0)
 	if is_unlocked:
-		draw_skill_preview(font, prev_box, skills_sel < nt,
-			skills_sel if skills_sel < nt else int(pattern_order()[skills_sel - nt]), ename)
+		var is_tr := skills_sel < nt
+		var sidx := skills_sel if is_tr else int(pattern_order()[skills_sel - nt])
+		draw_card_frame(card_r, is_tr, 1.0)
+		draw_skill_card_art(Rect2(card_r.position.x + 12.0, card_r.position.y + 26.0,
+			card_w - 24.0, card_h - 74.0), is_tr, sidx, 1.0)
+		var cnm := ename.to_upper()
+		draw_string(title_font(), Vector2(card_r.position.x + 10.0, card_r.position.y + card_h - 20.0),
+			cnm, HORIZONTAL_ALIGNMENT_CENTER, card_w - 20.0,
+			fit_size(title_font(), cnm, card_w - 26.0, 20, 10), Color(1.0, 0.96, 0.86))
+		draw_string(font, Vector2(prev_box.position.x, header_y), "HOW IT MOVES",
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+		draw_skill_preview(font, prev_box, is_tr, sidx, ename)
 	else:
-		# THE CARD, FACE DOWN, at the size the zone allows. The preview is the one place on
+		# THE CARD, FACE DOWN, IN THE SAME SLOT THE FACE USES. The preview is the one place on
 		# this screen that could still have shown a locked pattern's whole road - it draws
-		# the real choreography off the sim - so it shows the back of the card instead.
-		# Same object the unlock deals, so browsing the list and being dealt a card are
-		# plainly the same deck.
-		var bw := minf(prev_box.size.x * 0.62, prev_box.size.y * 0.66)
-		var bh := bw * 1.42
-		var bk := Rect2(prev_box.get_center().x - bw * 0.5, prev_box.get_center().y - bh * 0.5 - 10.0, bw, bh)
-		draw_skill_card_back(bk, skills_sel < nt, 1.0)
-		draw_string(font, Vector2(prev_box.position.x, bk.position.y + bh + 30.0),
-			"a %s you have not been dealt yet" % ("trick" if skills_sel < nt else "pattern"),
-			HORIZONTAL_ALIGNMENT_CENTER, prev_box.size.x, 13, Color(0.78, 0.72, 0.64))
+		# the real choreography off the sim - so it shows the back of the card instead. Same
+		# rect as the owned card so nothing moves when a skill is finally dealt: the picture
+		# on the card changes and everything around it stays exactly where it was.
+		draw_skill_card_back(card_r, skills_sel < nt, 1.0)
+		draw_string(font, Vector2(card_r.position.x, card_r.position.y + card_h + 30.0),
+			"not dealt yet", HORIZONTAL_ALIGNMENT_CENTER, card_w, 13, Color(0.78, 0.72, 0.64))
 
 	# ...AND THE PROSE GOES TOO. Hiding the name while leaving its "how" and "desc" in the
 	# box below would be the same spoiler with the label filed off: "In practice, press P to
@@ -15503,6 +16081,15 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 		"bag":
 			draw_rect(Rect2(c.x - 7.5, c.y - 3.0, 15.0, 10.0), col)
 			draw_arc(c + Vector2(0.0, -3.0), 4.5, PI, TAU, 12, col, 1.8, true)
+		"hanger":
+			# THE TAILOR: a coat hanger. The hook is what makes it one - a bare triangle is
+			# a roof, and the whole read depends on that little question-mark of wire above
+			# the shoulders.
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(c.x - 9.0, c.y + 6.0), Vector2(c.x, c.y - 2.0), Vector2(c.x + 9.0, c.y + 6.0),
+				Vector2(c.x + 9.0, c.y + 8.5), Vector2(c.x, c.y + 0.5), Vector2(c.x - 9.0, c.y + 8.5)]), col)
+			draw_arc(Vector2(c.x, c.y - 5.0), 3.4, PI * 0.15, PI * 1.6, 12, col, 1.7, true)
+			draw_line(Vector2(c.x, c.y - 2.0), Vector2(c.x, c.y - 5.0), col, 1.7)
 		"drink":
 			# ENERGY DRINKS in the rest drawer: a can, and the pull ring is what makes it
 			# a can rather than a tin. Deliberately NOT the helmet's picture - the hat and

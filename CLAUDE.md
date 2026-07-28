@@ -1562,6 +1562,116 @@ Do not reshape the figure to fit a hat.
   (`_repeat_dirty`). The legend names the hold, and says `coin_word()` - it read "M/N gold"
   beside a purse reading "flowers".
 
+## THE 2026-07-29 PASS - the second half of Louis's list
+
+- **THE SHOWER'S RETURN PASS WAS A SECOND THROW** (Louis: "the bottom arc of the shower
+  pattern goes way too slow, the time in the air is more than triple what it should be").
+  `SHOWER_FEED` was 0.5 of a tap - 55 ticks at five objects, 67 at seven, i.e. most of half a
+  second for a prop to cross 154px between two hands. 0.16 is his "more than triple" taken at
+  its word. **The height is held where he already approved it**: arc = ARC_PER_AIR x air, so
+  cutting the airtime to a third would have dragged the arc from 23px to 7 and made the pass
+  read as the prop sliding sideways, so `SHOWER_FEED_ARC` is raised to compensate exactly.
+  **It improves the geometry as well as the feel** - measured before/after at five and seven
+  clubs with `--latecatch 4`: clearance -10.2 -> -6.2 and +7.5 -> +18.6, drawn gap -21.5 ->
+  -6.4. A prop that crosses back quickly spends less time in the zone the high road uses.
+  **And `HALFSHOWER_LOW` stopped being `SHOWER_FEED * 1.3`**: that expression was true and
+  tidy right up until the moment the Shower was retuned, when it would have silently dragged
+  a separately-tuned pattern down with it. **A constant derived from another constant is a
+  coupling; between two things that are tuned independently it is a bug waiting for a retune.**
+- **SWITCHING TO A SHOWER RE-DEALS THE LOAD** (Louis: "when i switch from one pattern to
+  shower, the objects should switch hands, right now it starts with almost equal amounts in
+  both hands"). `deal_side` already knew a shower is dealt one-handed and only ever ran at
+  `start_run`, so the rule applied to an act BOOKED as a shower and not to one switched into
+  with P - which is how a player actually reaches it. `redeal_for_pattern` moves everything
+  but one into the dominant hand, and only props IN HANDS: anything already in the air keeps
+  its own path, the same contract every other part of a live pattern switch honours. Verified
+  in a scratch copy by constructing the exact state he describes - **3 left / 2 right becomes
+  1 left / 4 right** the instant the pattern changes.
+- **THE SHOP'S DOORS ARE PLACES, NOT GOODS** (Louis: "the buttons for front room and back room
+  of the shop, should be placed not as an item, but on the right and left side of the screen
+  respectively (going to the back feels like stepping to the right on the screen), and it
+  should be the form of a triangle / arrow"). That sentence is a better design than the gear
+  card it replaces, and the reason generalises: **a card in a row of goods asks "will you buy
+  this?" when the honest question is "will you go through?"** So the way in stands against the
+  right edge and the way out against the left, each a big arrow pointing the way it takes you -
+  the POSITION is the information, before any lettering. `SHOP_DOOR_GUT` is reserved at BOTH
+  edges in BOTH rooms: reserving it only where a door actually is would make the whole shop
+  jump sideways every time you walked through one, and reserving nothing is what put the first
+  bar straight through the last gear card.
+- **THE CARDS ARE IN THE MENU** (Louis: "you should show the trick and pattern cards in the
+  trick and pattern menu"). The Skills screen shows the dealt card beside the choreography
+  preview, and the two are doing different jobs on purpose: the card is the OBJECT (the pun,
+  the frame, the thing you would know across a room) and the preview is the DIAGRAM (the real
+  roads, off the sim's own numbers). The card had only ever been seen for the few seconds of
+  its own unlock, which is a lot of drawing for a moment that passes. **What paid for the
+  space was deleting the "ready" badge**: it existed to tell an owned row from a locked one
+  back when both printed a real name, and a locked row is now visibly a face-down card, so it
+  was printing on every other row to say what the absence of a card back already said. The
+  76px it occupied is why "Reverse Cascade" fits in a 196px column where it ellipsised at 268.
+- **THE TAILOR** (Louis: "where is my tailer room where i can dress my juggler with the
+  equipment i have gathered (also include standard equipment, which unlocks for each stage)").
+  A PREPARE-drawer room, free and segment-less, with a mirror on the left and two columns on
+  the right: THE SUIT (one standard costume per stage reached, plus "follow the stage", which
+  is what the game did before this existed) and WHAT YOU WEAR (every bought piece, on or off).
+  **Wearing is COSMETIC; the bonuses follow OWNERSHIP** - a top hat you own goes on lifting the
+  room's generosity whether or not it is on your head, and the screen says so. The alternative
+  makes it a loadout, and a loadout that looks like a dressing-up screen is a trap: a player
+  would come to change how he LOOKS, take the hat off, and quietly lose money for the rest of
+  the career without ever connecting the two. The Glow Suit is the one exception, because its
+  whole effect IS being seen.
+  **ONE WARDROBE, TWO SIZES.** `draw_mini_juggler` now runs the same `wearing()` tests and the
+  same `draw_performer_polish` / `draw_top_hat` / `draw_stage_boot` the stage figure does - so
+  the tailor's own mirror cannot show a man who owns a top hat standing there bare-headed. It
+  takes a `k` SCALE PARAMETER rather than being wrapped in a transform, and that is not a
+  style choice: `draw_stage_boot` and the spin branch call `draw_set_transform` themselves and
+  Godot REPLACES rather than composes, so an outer scale is thrown away by the first boot drawn.
+- **EVERY PATTERN x TRICK STATE, MEASURED** (Louis: "i want you to dissect the possibilities of
+  patterns and tricks, since multiple can be active at the same time. are all of these valid
+  states?"). The live state is one PATTERN (6, exactly one at a time by construction), at most
+  one TOGGLE (Behind the Back / High Toss - `on_trick` replaces rather than adds), and a Spin,
+  which can overlap either. Spin touches no throw geometry at all (it is a score multiplier, a
+  catch penalty and a turning body), so the interesting space is 6 x 3 = 18. All eighteen were
+  run through `--collcheck --latecatch 4` at five clubs.
+  **THREE WERE BROKEN BY ONE ROOT CAUSE, AND IT WAS MINE FROM THE DAY BEFORE.** Three guards
+  read `this_trick` to mean "an armed one-shot is riding this throw, so no pattern may flatten
+  it into a low pass that would collect the full bonus anyway" - a real exploit, correctly
+  guarded, back when Overthrow was the only thing that could set `this_trick` without a toggle.
+  Removing Overthrow left those guards firing for TOGGLES, which are on for EVERY throw - so
+  "do not flatten this one special throw" quietly became "this pattern's low road does not
+  exist". Half Shower + High Toss measured +4.2px where the pattern alone measures +28.3.
+  `armed_trick` is now the one an exploit could ride and `this_trick` stays what shapes the
+  throw. **Measured after: Half Shower + High Toss 4.2 -> 38.1, Shower + Behind the Back
+  -7.5 -> +2.5.** The general lesson: **when a feature is deleted, the guards written around it
+  do not become dead code - they start guarding the wrong thing.**
+  **THREE STATES REMAIN CONTRADICTORY AND ARE NOT BUGS.** Behind the Back x Columns (-13.6),
+  Behind the Back x Reverse Cascade (-9.8), High Toss x Shower (-4.4). The first is the purest:
+  a column is DEFINED by coming down where it left and Behind the Back by releasing from across
+  the body, and no constant reconciles two definitions. The game WARNS as the toggle goes on
+  (`trick_pattern_warning`) rather than refusing - it is the player's press, and "Behind the
+  Back during Columns" is a reasonable thing to want to try - but props passing through each
+  other with no explanation reads as a broken game, and one line of text turns it into a stunt.
+  Tennis's own -0.4 baseline is the long-standing residual this file already documents.
+- **A DEV FLAG THAT QUIETLY DOES SOMETHING ELSE IS WORSE THAN ONE THAT ERRORS**, and the audit
+  above is what caught it. `dev_meet_req` floors the stats to satisfy a skill's wall - which
+  USED to be the unlock. Since the deck change, clearing a wall only earns a card, so every
+  `--pattern tennis` run was flooring stats, failing `pattern_unlocked`, and being silently
+  snapped back to Cascade by `start_run`. The tell was Tennis's three audit rows coming back
+  byte-for-byte identical to Cascade's. It grants ownership now. **Any tool that reads a gate
+  needs re-checking whenever the meaning of "unlocked" moves.**
+- **THE MECHANICS PDF IS REGENERATED FROM A COMMITTED SOURCE** (`docs/mechanics.html` ->
+  `TOSSA_mechanics_reference.pdf`). The old PDF was built from something that was never
+  committed, so updating it was archaeology; it is one file edit and one command now:
+  `"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" --headless --disable-gpu
+  --no-pdf-header-footer --print-to-pdf="$PWD/TOSSA_mechanics_reference.pdf"
+  "file://$PWD/docs/mechanics.html"` (Brave is the only Chromium on this machine - there is no
+  pandoc, wkhtmltopdf or weasyprint). It documents RULES only, never implementation: the throw
+  and catch models, all four stats and exactly what each point buys, every prop's four levers
+  and its signature edge, the six patterns, the three tricks, the combination table above, the
+  score formula, the act, the crowd, the day, the shop, reputation and pay, all eleven Encores,
+  and how the deck deals skills. **Forced page breaks were removed after the first render left
+  three pages half empty** - a reference document that wastes a third of its paper reads as
+  unfinished.
+
 ## MINIMUM REQUIREMENTS (2026-07-28) - derived from measurement, not guessed
 
 Louis asked for a guess at the minimum spec. It is better than a guess, because the numbers
