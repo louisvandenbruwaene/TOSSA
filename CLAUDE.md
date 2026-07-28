@@ -681,6 +681,101 @@ and deleted. History lives in git.
   the venue actually is - the last room, the one that opens after everyone has gone
   home - drawn as a narrow door down an alley: one green lamp, a marquee with blinking
   bulbs, a clock striking twelve, the moon, and three silhouettes who waited.
+- **COLUMNS: EVERY OBJECT GOES STRAIGHT UP AND COMES DOWN WHERE IT LEFT** (2026-07-28,
+  Louis, and the whole pattern's geometry now follows from that one sentence plus "for
+  many objects you should figure out a solution that doesnt collide nor does it widen the
+  arms positioning (wider looks bad)"). Three things were breaking it and all three had
+  the same root, which is that a column's x was being decided by something other than the
+  column.
+  **(1) `drift`.** The inaccuracy term moved the LANDING sideways, so a prop came down a
+  few px off its own line and was then thrown from the line again. It is dropped for lane
+  throws, and it cost nothing to drop: `on_catch` judges a catch on TIMING, so a crooked
+  column never bought a grain of difficulty. Accuracy still lands on the throw through
+  `jitter`, which is timing.
+  **(2) The centre column was a diagonal.** On an odd count the middle prop launched from
+  the HAND and landed at centre, and `--collcheck` at 3 torches measured that as a real
+  overlap of **-29.8px** with the prop in the neighbouring column. Every odd count carried
+  the same signature (n=5 +1.6px, n=7 +8.6px) while every even count was comfortable
+  (+24 to +37): the middle prop's diagonal WAS the collision. It is a column now, thrown
+  from the centre line it lands on. **After: n=3 is +33.5px, n=5 +29.1px**, and no count
+  from 3 to 15 is under +7.6px with the biggest-hitbox prop.
+  **(3) The lane band grew with the count instead of fitting the stance.** Lanes were a
+  flat 40px apart, so seven objects already reached 120px past centre and fifteen reached
+  280, and since the hand stands under the column it is about to throw, the arms had to
+  follow it out there. The band is now fixed by what the stance already reaches:
+  `COL_LANE_IN` (44, outside the torso) out to `HAND_OUT_DX` (100, the outer catch x), and
+  one side's lanes spread evenly inside it (`columns_step`, capped at `COL_LANE_STEP`).
+  Measured lane sets: 3 objects sits at ±72 and the middle, 6 at ±44/±72/±100, 15 at ±44
+  through ±100 in steps of 9.3 plus the middle. **Nothing ever passes ±100.**
+  **The reason the tight end still clears:** a fixed band with N lanes crowds like
+  `1/count`, which is the same curve `prop_hit_scale` already shrinks the hitbox on, so
+  the clearance stays roughly flat (16.5px at 6 objects, 11.4 at 8, 7.9 at 15) instead of
+  running out. That was luck the first time and is written down now so it stays true.
+  **Two invariants that come with this.** The hand-to-centre floor (`COL_HAND_MIN`) is
+  GONE, because no lane can sit inside the torso any more, and it was the thing making a
+  prop leap sideways out of the hand on release. If a lane is ever allowed inside
+  `COL_LANE_IN` again, that guard has to come back with it. And the centre column is
+  DEALT (to the dominant hand, in `start_run`) rather than claimed by whoever threw
+  first: on an odd count that hand holds one prop more than its side of the stage has
+  columns, so the count only works out if its extra one is the centre. When the other
+  hand claimed it, the dominant hand ran out of lanes and `assign_lane`'s fallback put
+  two props in ONE column, which is a head-on collision by construction. That fallback is
+  now the centre line, never an occupied lane.
+- **THE LOW ROAD IS A MULTIPLE OF THE TAP, NEVER THE TAP PLUS SOMETHING** (2026-07-28,
+  Louis on Half Shower: "for many objects, you throw the lower throw so high, that it
+  collides with the upper throw, although the fysics don't measure the collisioin"). Both
+  halves of that sentence were exactly right. The cap was `base_air + 0.2 * a full hold`,
+  and `base_air` scales with the count (`count_air_scale`, 1.0 at four objects up to 2.8
+  at fifteen), so the constant part stopped mattering: the "low" road peaked 379px against
+  the high road's 433px at nine objects, 88% of the height of the throw it exists to duck
+  under. Measured in the audit's own words, the low prop at the closest pass was being
+  thrown at height fraction **0.83 at seven objects, 1.12 at nine and 1.40 - the ceiling -
+  at eleven**. A MULTIPLE of `base_air` holds its proportion at every count, which is what
+  the Shower's feed always did, and is why Louis could see that "shower does a perfect
+  half shower". `HALFSHOWER_LOW` is `SHOWER_FEED * 1.3` now (his +30%), so the low road
+  sits near half the high road's arc from three objects to fifteen. **After: the low prop
+  is thrown at 0.24 and 0.43, hitbox clearance goes 1.8 to 11.9px at seven objects and
+  0.9 to 6.8px at nine, and the closest pass is no longer a low-versus-high pair at all**
+  (it is either two props nose to tail on the SAME high road, or the hand corner where one
+  prop lands as the next leaves). The general rule, worth applying to any future pattern
+  with two roads: **express one road's height as a fraction of the other, or of the tap
+  both are built on, never as an offset from a base that itself moves with the count.**
+- **A SHOWER IS DEALT ONE-HANDED** (2026-07-28, Louis: "you should make the shower have
+  all objects in the dominant hand except one"). `deal_side` is pattern-aware now: under
+  SHOWER the whole load starts in the dominant hand and exactly one in the other, which
+  is both how a shower is picked up and what the pattern IS (one hand makes every high
+  throw, the other only passes back), so an even split was always the wrong opening
+  position for it.
+  **It immediately exposed a real geometry bug, and the codebase had already written down
+  the rule it broke.** "A landing never sits on a launch" is stated for over-the-top
+  throws (`over_top_land_slot` picks the complement of the receiving hand's own launch
+  slot), and the Shower's FEED was the one throw in the game breaking it: the feed landed
+  OUTER, which is exactly where that same hand's high throw leaves from, so an arriving
+  prop and a departing one sat on one point. It measured as the tightest pass in the
+  pattern (-10.5px at five objects), and the one-handed deal made it far worse rather than
+  causing it, because a throwing hand that owns the whole load catches and throws on
+  nearly every beat instead of every other one. The feed lands INNER now and the hand
+  carries it out to throw, which is the scoop a shower's hand actually makes.
+  **Measured: -10.5 to +21.7px at five objects and -6.3 to +21.8 at seven, with the drawn
+  gap going -38.5 to -6.3** - better than the even-deal original (+17.4) ever was. The
+  closest pass is now two props crossing at the top of the same high road, which is what
+  a shower IS. **The bug underneath it is worth remembering on its own:** `land_slot` sets
+  `hand_catch_rest` (where the empty hand waits) while the plain-throw branch hard-coded
+  `outer_pos` for the ball, so the two could disagree and a change to one silently did not
+  move the other. The plain throw reads `slot_pos(b.to_hand, land_slot)` now, which is the
+  same outer_pos for every other pattern. **STILL OPEN, and it needs Louis's call rather than a guess:** he also
+  asked for the shower's throws to be "almost vertical for all balls, so way less height
+  ... -80% height". The height is what buys the AIRTIME that lets count-1 objects be up at
+  once, and the two do not both fit: at five objects the high road's arc is 334px over 155
+  ticks of flight, so -80% leaves 67px and 31 ticks, which would need the throwing hand to
+  release about fifteen times a second to keep four props up. A literal -80% therefore
+  only works if the shower stops holding its load in the AIR and instead feeds it from a
+  stack in the dominant hand (one or two flying, the rest waiting in the hand), which is a
+  real reading of "all objects in the dominant hand except one" but makes the pattern much
+  easier and would want its score multiplier revisited. The alternative is a shower whose
+  height is only as much as the count genuinely needs, which is far lower than today at
+  low counts (today's `SHOWER_MIN` forces a 280px arc on a three-object shower) but cannot
+  reach -80% at high ones.
 - **Arms reach exactly two points, `inner_pos` and `outer_pos`** - the same two the
   3-ball Cascade always used, and now with NO exceptions at all (2026-07-27). Every
   plain throw leaves inner and lands outer, INCLUDING the even-count Cascade's
@@ -941,6 +1036,19 @@ and deleted. History lives in git.
   enough Focus) - and immediately re-throws that hand on the very same tick,
   so the audit can answer "does a real, not-frame-0 Perfect catch followed by
   an immediate throw still clear?" It found real overlaps the frame-perfect
+  **IT REPORTS TWO NUMBERS NOW (2026-07-28), and the second one exists because of a real
+  gap Louis named:** "the fysics don't measure the collisioin". `min clearance` is the
+  hitbox (`prop_hit_scale`, which shrinks as the count climbs), and `min drawn gap` is the
+  same closest pair judged at DRAWN size (`prop_scale`), which is what the player is
+  actually watching. The two diverge hugely at high counts, so a change can look clean to
+  the hitbox audit while the props visibly pass through each other. The drawn number is
+  NOT a pass/fail gate the way the hitbox one is - at high counts every pattern's drawn
+  props brush, which is the accepted cost of a stance that never widens - but it is the
+  honest before/after for any change claiming to separate two roads. Both lines name the
+  pair with `ot=` (which road each prop was on), `h=` (the height fraction it was thrown
+  at) and `p=` (how far through its flight it was), and reading `h=` off the LOW prop is
+  what proved the Half Shower diagnosis above.
+  It found real overlaps the frame-perfect
   bot never could: Cascade's even-count same-hand face, its own high-count
   faces of both parities, and Half Shower/Shower/Tennis's crossing weave as
   early as four balls (see the arms-mostly-two-points entry above for the

@@ -302,16 +302,43 @@ const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a sho
 const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction (0.35
 							   # left its arc only ~34px above the weave where they
 							   # cross; 0.5 keeps clear air between the two roads)
-const HALFSHOWER_LOW := 0.2   # the weave side's MAXIMUM height fraction (2026-07-19,
-							   # Louis: it still crossed the over-the-top road too often
-							   # with HALFSHOWER_MIN alone raising only the high side's
-							   # floor) - a real ceiling on the low side now, the same
-							   # role WATERFALL_LOW played before that pattern was cut
+# THE LOW ROAD IS A MULTIPLE OF THE TAP, NEVER THE TAP PLUS SOMETHING (2026-07-28,
+# Louis: "for many objects, you throw the lower throw so high, that it collides with the
+# upper throw, although the fysics don't measure the collision"). He is right, and the
+# reason is arithmetic. The cap used to be `base_air + 0.2 * a full hold`, and base_air
+# scales with the count (count_air_scale, 1.0 at four objects up to 2.8 at fifteen), so
+# the constant part stopped mattering: measured at nine objects the "low" road peaked
+# 379px against the high road's 433px, i.e. 88% of the height of the throw it exists to
+# duck under. The hitbox audit never saw it because hitboxes shrink with the count while
+# the DRAWN props do not, which is exactly the collision Louis can see and --collcheck
+# cannot. A MULTIPLE of base_air holds its proportion at every count, which is what the
+# Shower's feed always did - hence his "you have made shower do a perfect half shower".
+# So this is the Shower's feed value plus the 30% he asked for on top.
+const HALFSHOWER_LOW := SHOWER_FEED * 1.3   # the weave side's airtime as a fraction of a
+							   # tap: ~0.65, which keeps its arc near half the high road's
+							   # from three objects to fifteen (measured 0.43 to 0.55)
 const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
 							   # Reverse Cascade, Tennis's marked ball)
-const COL_HAND_MIN := 40.0    # a Columns hand never comes closer to the centre line than
-							   # this: the torso is about 25px of half-width, so a hand sent
-							   # to a centre column vanished into the chest
+# WHERE A COLUMN MAY STAND (2026-07-28, Louis: every object goes straight up and comes
+# down exactly where it was thrown, and "for many objects ... nor does it widen the arms
+# positioning (wider looks bad)"). Both rules are geometry, so the lane band is defined
+# by what the STANCE can already reach and never by the count:
+#   - the innermost lane sits outside the torso (~25px of half-width), so the hand that
+#     throws it is never drawn inside the chest and never has to be clamped away from
+#     its own lane - the clamp is what used to make a ball leap sideways out of the hand
+#   - the outermost lane sits exactly on the outer catch x (HAND_OUT_DX), the widest the
+#     arms EVER reach in any pattern, so Columns can never be the thing that splays them
+# The lanes on one side then spread evenly inside that band, so the gap between two
+# lanes falls like 1/count - which is the same curve prop_hit_scale's hitbox already
+# falls on, and why the clearance stays roughly constant from 3 objects to 15.
+# THE STANCE, as two numbers instead of two loose literals inside inner_pos/outer_pos:
+# everything that has to stay INSIDE the arms' reach (the Columns lane band below) reads
+# them, so the stance and the things measured against it can never drift apart.
+const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
+const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
+const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line
+const COL_LANE_STEP := 44.0   # ...and the widest two lanes on one side ever sit apart,
+							   # so a low count keeps the tidy spread it always had
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
 							   # lanes' running height (0 = pure hold-timing, 1 = locked)
 # --- object load (ideas.rtf comments): more balls in the air and heavier props
@@ -1161,6 +1188,18 @@ var _collcheck := false   # dev: --collcheck measures the tightest mid-air clear
 						  # IDEAL pattern geometry), printed on the --shot capture
 var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
 var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
+# ...AND THE SAME MEASUREMENT AT DRAWN SIZE (2026-07-28, Louis, of the Half Shower's two
+# roads: "you throw the lower throw so high, that it collides with the upper throw,
+# although the fysics don't measure the collisioin"). He is describing exactly the gap
+# between these two numbers: prop_hit_scale shrinks the hitbox as the count climbs, so
+# the audit above can report clear air while the props the player is watching visibly
+# pass through each other. This one uses prop_scale, the true drawn size, so the ROAD
+# geometry can be judged on its own terms. It is not a pass/fail gate the way the hitbox
+# number is - at high counts every pattern's drawn props brush, which is the accepted
+# cost of a stance that never widens - but it is the honest before/after for any change
+# that claims to separate two roads.
+var _coll_min_drawn := 1000000.0
+var _coll_at_drawn := ""
 var _late_catch_n := -1     # dev: --latecatch N makes the auto-player catch N ticks LATE
 							 # of a ball's ideal land_tick (still Perfect as long as N is
 							 # within perfect_window()) and re-throw that hand on the very
@@ -5335,6 +5374,14 @@ func other(h: int) -> int:
 func deal_side(i: int) -> int:
 	# which hand prop i of a FRESH deal starts in. Alternating outward from the dominant
 	# hand gives it ceil(n/2) - which is the extra one on any odd count, at any count.
+	#
+	# A SHOWER IS DEALT ONE-HANDED (2026-07-28, Louis: "make the shower have all objects
+	# in the dominant hand except one"), and that is how a shower is actually picked up:
+	# the whole load in the throwing hand, one in the other to start the rhythm off. It is
+	# also what the pattern IS - one hand does every high throw and the other only passes
+	# back - so an even split was always the wrong opening position for it.
+	if pattern == SHOWER:
+		return other(dominant_hand) if i == 0 else dominant_hand
 	return dominant_hand if i % 2 == 0 else other(dominant_hand)
 
 
@@ -5390,8 +5437,7 @@ func outer_pos(h: int) -> Vector2:
 	# horrible) - big loads keep their clearance by shrinking the prop HITBOX
 	# instead, the drawn prop staying its true size. See prop_hit_scale.
 	var c := stage_center()
-	var dx := 100.0
-	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
+	return Vector2(c.x - HAND_OUT_DX, c.y) if h == LEFT else Vector2(c.x + HAND_OUT_DX, c.y)
 
 
 func inner_pos(h: int) -> Vector2:
@@ -5401,8 +5447,7 @@ func inner_pos(h: int) -> Vector2:
 	# ~(outer - inner) apart), so shrinking both by the same amount narrows the whole
 	# stance without pulling the crossing weave into an overlap.
 	var c := stage_center()
-	var dx := 54.0
-	return Vector2(c.x - dx, c.y) if h == LEFT else Vector2(c.x + dx, c.y)
+	return Vector2(c.x - HAND_IN_DX, c.y) if h == LEFT else Vector2(c.x + HAND_IN_DX, c.y)
 
 
 func slot_pos(h: int, slot: int) -> Vector2:
@@ -5426,37 +5471,90 @@ func shoulder_pos(h: int) -> Vector2:
 	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
 
 
+func columns_side_lanes() -> int:
+	# how many columns ONE hand owns. On an odd count the centre column is the odd one
+	# out and belongs to neither side, which is why this is a plain halving either way.
+	return maxi(1, num_balls / 2)
+
+
+func columns_step() -> float:
+	# the gap between two of one hand's columns. The band it has to fit into is fixed
+	# (COL_LANE_IN out to HAND_OUT_DX), so this falls like 1/count - deliberately the
+	# same curve prop_hit_scale's hitbox falls on, which is what keeps the clearance
+	# roughly constant instead of running out at the top of the count range. Capped at
+	# COL_LANE_STEP so three or four objects keep the airy spread they always had.
+	var m := columns_side_lanes()
+	if m <= 1:
+		return 0.0
+	return minf(COL_LANE_STEP, (HAND_OUT_DX - COL_LANE_IN) / float(m - 1))
+
+
+func columns_mid_slot() -> int:
+	# the centre column's slot, or -1 at an even count where there is no centre column
+	return (num_balls / 2) if num_balls % 2 == 1 else -1
+
+
 func columns_x(slot: int) -> float:
-	# the x of vertical column `slot` (0..num_balls-1) in a Columns pattern, spread
-	# symmetric about centre so every ball owns its own line and no two share air
-	var sp := 44.0 if num_balls <= 5 else 40.0
-	return stage_center().x + (float(slot) - float(num_balls - 1) * 0.5) * sp
+	# the x of vertical column `slot` (0..num_balls-1). Every column is a line a HAND CAN
+	# STAND ON: the set is centred in the band each hand can reach without splaying, so
+	# it never grows past the stance however many objects are up (it used to be a fixed
+	# 40px per column, which at seven objects already reached 120px past centre and at
+	# fifteen reached 280 - the arms had to follow it out there).
+	var c := stage_center().x
+	var mid := columns_mid_slot()
+	if slot == mid:
+		return c   # the centre column: straight up the middle line, thrown from it too
+	var m := columns_side_lanes()
+	var step := columns_step()
+	# centre the side's lanes in the band, so a hand that owns only two of them uses the
+	# middle of its reach rather than being pinned to the inside edge
+	var first := COL_LANE_IN + ((HAND_OUT_DX - COL_LANE_IN) - float(m - 1) * step) * 0.5
+	var last_left := num_balls / 2 - 1
+	var first_right := (mid + 1) if mid >= 0 else num_balls / 2
+	if slot >= first_right:
+		return c + first + float(slot - first_right) * step
+	return c - (first + float(last_left - slot) * step)
 
 
 func assign_lane(b: Ball, h: int) -> void:
-	# give a lane ball its own column: the nearest free slot on its hand's side.
-	# Left hand owns the left columns, right the right, the centre column (odd
-	# counts) is the middle ball and is never assigned here. Persists on the ball.
+	# give a lane ball its own column: the nearest free slot on its hand's side, filled
+	# from the INSIDE out so both hands load their columns the same way round (the left
+	# hand used to fill outside-in simply because it walked its slots in index order,
+	# which left the two sides holding mirror-image halves of the pattern). Left hand
+	# owns the left columns, right the right, the centre column (odd counts) belongs to
+	# neither and is handed out by do_throw. Persists on the ball for the whole run.
 	if b.lane_x >= 0.0:
 		return
-	var mid_slot := (num_balls / 2) if num_balls % 2 == 1 else -1
-	var lo := 0
-	var hi := num_balls / 2 - 1
+	var mid_slot := columns_mid_slot()
+	var inner := num_balls / 2 - 1                                  # left, nearest centre
+	var outer := 0                                                  # left, widest
 	if h == RIGHT:
-		lo = (mid_slot + 1) if mid_slot >= 0 else num_balls / 2
-		hi = num_balls - 1
-	elif mid_slot >= 0:
-		hi = mid_slot - 1
+		inner = (mid_slot + 1) if mid_slot >= 0 else num_balls / 2
+		outer = num_balls - 1
 	var taken := {}
 	for o in balls:
 		if o != b and o.lane_x >= 0.0:
 			taken[int(round(o.lane_x))] = true
-	for slot in range(lo, hi + 1):
+	var stepdir := 1 if outer > inner else -1
+	for i in num_balls:
+		var slot := inner + i * stepdir
+		if (stepdir > 0 and slot > outer) or (stepdir < 0 and slot < outer):
+			break
 		var x := columns_x(slot)
 		if not taken.has(int(round(x))):
 			b.lane_x = x
 			return
-	b.lane_x = columns_x(clampi(lo, 0, num_balls - 1))   # fallback: never leave it unset
+	# NO TWO PROPS MAY SHARE A COLUMN - that is a head-on collision, not a near miss, so
+	# the fallback is the CENTRE line rather than a lane that is already occupied (which
+	# is what it used to be). Reachable when a mid-run pattern change lands more props in
+	# one hand than that side has columns; the centre is the odd count's spare line, so
+	# taking it also makes this ball the centre one, catchable by either hand.
+	var cx := stage_center().x
+	if not taken.has(int(round(cx))):
+		b.lane_x = cx
+		col_mid_ball = b
+		return
+	b.lane_x = columns_x(clampi(inner, 0, num_balls - 1))   # never leave it unset
 
 
 func next_throw_over_top(h: int) -> bool:
@@ -5585,19 +5683,17 @@ func hand_target(h: int) -> Vector2:
 			p.x = stack(h)[0].lane_x
 	else:
 		p = inc.to_pos if inc != null else slot_pos(h, hand_catch_rest[h])
-	# ...AND A HAND NEVER GOES INSIDE THE TORSO. On an odd count the middle column sits
-	# on the centre line, and both the throwing and the catching hand were being sent
-	# straight to it - which is inside the body (the trunk is about 25px of half-width,
-	# the normal inner slot 54). That is the other half of "the hands are wrongly
-	# placed": one hand disappearing into the chest every time the middle ball came
-	# round. The hand now waits just outside the body on its OWN side and the ball
-	# covers the last stretch itself, which is what a real toss to the centre line looks
-	# like anyway. Applies to both branches above, so holding and catching agree.
-	if pattern == COLUMNS:
-		var ccx := stage_center().x
-		var side := -1.0 if h == LEFT else 1.0
-		if (p.x - ccx) * side < COL_HAND_MIN:
-			p.x = ccx + side * COL_HAND_MIN
+	# THE HAND GOES TO THE COLUMN, ALL THE WAY (2026-07-28). There used to be a floor
+	# here (COL_HAND_MIN, 40px) keeping a Columns hand out of the torso, because the lane
+	# layout could put a column inside the body - at four objects the inner lanes sat 22px
+	# off centre - and a hand sent there vanished into the chest. The lane band starts
+	# outside the torso by construction now (COL_LANE_IN), so the floor had nothing left
+	# to protect and was doing active harm: it was the reason a ball leapt sideways out of
+	# the hand on release. **If a column is ever allowed inside COL_LANE_IN again, this is
+	# the guard that has to come back with it.** The one hand that does now come to the
+	# centre line is the one throwing or catching the CENTRE column, which is a hand in
+	# front of the shirt rather than in the chest, and where a real juggler's hand goes
+	# for a centre toss - the arms are drawn over the coat, so it reads correctly.
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -5782,6 +5878,17 @@ func start_run(n: int) -> void:
 		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
 		balls.append(b)
 		stack(deal_side(i)).append(b)
+	# THE CENTRE COLUMN IS DEALT, not claimed by whoever threw first (2026-07-28). Two
+	# reasons. It has to be the DOMINANT hand's, because on an odd count that hand holds
+	# one more prop than its side of the stage has columns - the count only works out if
+	# its extra one is the centre - and when the other hand claimed it instead, the
+	# dominant hand ran out of lanes and assign_lane's fallback put TWO props in one
+	# column, which is a head-on collision by construction. And knowing it up front means
+	# its very first throw already leaves the centre line, instead of the one-off sideways
+	# hop it used to make from the hand's resting slot.
+	if pattern == COLUMNS and num_balls % 2 == 1 and not stack(dominant_hand).is_empty():
+		col_mid_ball = stack(dominant_hand)[0]
+		col_mid_ball.lane_x = stage_center().x
 	_demo_next = dominant_hand
 
 
@@ -6157,11 +6264,11 @@ func do_throw(h: int, hold: int) -> void:
 		if b == tennis_ball:
 			over_top = true
 	if pattern == HALFSHOWER and h == LEFT and this_trick < 0:
-		# the weave side is capped LOW (a ceiling, not a floor - 2026-07-19, Louis:
-		# it still crossed the over-the-top road too often with only HALFSHOWER_MIN
-		# raising the high side's floor), so it visibly stays clear of the over-the-
-		# top road instead of drifting up to meet it when both hands are held similarly
-		air = mini(air, int(round(base_air + HALFSHOWER_LOW * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
+		# the weave side is capped LOW (a ceiling, not a floor), so it visibly stays clear
+		# of the over-the-top road instead of drifting up to meet it. The cap is a
+		# FRACTION OF THE TAP, not the tap plus a bit - see HALFSHOWER_LOW for why that
+		# distinction is the whole fix at high counts.
+		air = mini(air, int(round(base_air * HALFSHOWER_LOW)))
 	if over_top:
 		var high_min := OVER_TOP_MIN
 		if h == RIGHT and pattern == SHOWER:
@@ -6279,6 +6386,19 @@ func do_throw(h: int, hold: int) -> void:
 		land_slot = over_top_land_slot(b.to_hand)
 	elif lanes or mid_ball:
 		land_slot = HAND_INNER
+	elif pattern == SHOWER:
+		# A SHOWER'S FEED MUST NOT LAND ON THE HAND'S OWN LAUNCH POINT (2026-07-28). The
+		# rule is already stated for over-the-top throws just above - "a landing never
+		# sits on a launch" - and the feed was the one throw in the game breaking it: it
+		# landed OUTER, which is exactly where the same hand's high throw leaves from, so
+		# an arriving prop and a departing one occupied one point. Measured at 5 objects
+		# that was the tightest pass in the whole pattern, -10.5px, and it got worse the
+		# more one-handed the deal became: with every prop in the throwing hand (which is
+		# what a shower now deals, see deal_side) the hand catches and throws on nearly
+		# every beat, so the two coincide constantly rather than occasionally. The feed
+		# lands INNER now and the hand carries it out to throw, which is the scoop a
+		# shower's throwing hand actually makes.
+		land_slot = HAND_INNER
 	hand_catch_rest[b.to_hand] = land_slot
 	# always launch from wherever the ball is actually sitting: a lane or normal
 	# ball rests pulled in at inner_pos while held, the middle ball rests at
@@ -6290,23 +6410,27 @@ func do_throw(h: int, hold: int) -> void:
 	# high road starts wide and never shares air with the low weave.
 	b.over_top = over_top
 	var cy := stage_center().y
-	if lanes:
-		# each column owns its own x (assign_lane), so two balls in one hand's
-		# lane never stack on the same vertical line - that was the same-hand
-		# overlap Louis flagged. Straight up and down within the column.
-		assign_lane(b, h)
+	if lanes or mid_ball:
+		# A COLUMN IS A VERTICAL LINE, and there are no exceptions to that any more
+		# (2026-07-28, Louis: "the objects are thrown straight up and exactly from where
+		# they landed"). Two things used to break it:
+		#   - `drift`, the inaccuracy term, moved the LANDING sideways, so a ball came
+		#     down a few px off its own column and was then thrown from the column again.
+		#     It is dropped here (and only here): drift is purely cosmetic anyway, since
+		#     on_catch judges a catch on TIMING, so a crooked column bought no difficulty.
+		#     Accuracy still lands on this throw through `jitter`, which is timing.
+		#   - the centre column, on an odd count, was a diagonal: it launched from the
+		#     HAND and landed at centre. Measured with --collcheck at 3 torches, that
+		#     diagonal was a real overlap (-29.8px) with the ball in the neighbouring
+		#     column, and every odd count showed the same signature while every even one
+		#     was clear. It is a column now, thrown from the centre line it lands on, so
+		#     the hand comes to the line to throw and catch it (see hand_target).
+		if mid_ball:
+			b.lane_x = stage_center().x
+		else:
+			assign_lane(b, h)
 		b.from_pos = Vector2(b.lane_x, cy)
-		b.to_pos = Vector2(b.lane_x + drift, cy)
-	elif mid_ball:
-		# the middle ball LAUNCHES FROM THE HAND, wherever that hand is standing - which
-		# for Columns is just outside the torso on its own side (COL_HAND_MIN). It used
-		# to launch from stage centre regardless, to match a held position that was also
-		# forced to centre; both of those were compensating for a hand that did not
-		# follow its column, and with that fixed they only pulled the ball off the hand.
-		# It still RISES up the centre line, so the middle column still reads as middle.
-		var mhx := stage_center().x + (-COL_HAND_MIN if h == LEFT else COL_HAND_MIN)
-		b.from_pos = Vector2(mhx, cy)
-		b.to_pos = stage_center() + Vector2(drift, 0.0)   # flat pass through the middle
+		b.to_pos = Vector2(b.lane_x, cy)
 	elif over_top:
 		# the over-the-top lob leaves from the OUTER catch corner and rides a tall
 		# parabola down onto land_slot (over_top_land_slot: the complement of the
@@ -6332,8 +6456,13 @@ func do_throw(h: int, hold: int) -> void:
 		# without closing the gap with the opposite-direction road it crosses
 		# (measurably worse, per the --latecatch audit). A crossing road's own
 		# concurrency is carried entirely by prop_hit_scale.
+		# ...and it lands on `land_slot`, which IS outer_pos for every pattern except the
+		# Shower's feed (see the land_slot block above). This used to read outer_pos
+		# outright, so the ball and the hand waiting for it could disagree: land_slot is
+		# what sets hand_catch_rest, so hard-coding the landing here meant a change to one
+		# silently did not move the other.
 		b.from_pos = inner_pos(h)
-		b.to_pos = outer_pos(b.to_hand) + Vector2(drift, 0.0)
+		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
 	if this_trick == TR_BTB:
 		# BEHIND THE BACK actually goes behind now (Louis: it never read as
 		# behind): the arm wraps and the ball RELEASES from behind the opposite
@@ -7539,6 +7668,18 @@ const RING_HIT_FACTOR := 0.65  # rings are mostly hole - the true catchable rim 
 								# their hitbox is always shrunk by this factor, on TOP of
 								# the many-object squeeze below. Tune here if it feels off.
 
+func _coll_pair(pa: Vector2, pb: Vector2, a: Ball, b: Ball) -> String:
+	# one line naming WHERE the closest pass happened and what each prop was doing:
+	# `ot` is the over-the-top road (so a Shower/Half Shower report says which of the two
+	# roads each prop was on), `h` the height fraction it was thrown at, `p` how far
+	# through its flight it was. Shared by both the hitbox and the drawn-size minimum.
+	var prog := func(x: Ball) -> float:
+		return clampf(float(tick - x.launch_tick) / float(maxi(1, x.land_tick - x.launch_tick)), 0.0, 1.0)
+	return "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
+		tick, pa.x, pa.y, str(a.over_top), a.height, prog.call(a),
+		pb.x, pb.y, str(b.over_top), b.height, prog.call(b)]
+
+
 func prop_hit_scale(kind: int) -> float:
 	# the prop's HITBOX, and ONLY its hitbox (Louis: the clubs, torches and knives keep
 	# their true drawn size - it was never their look that needed fixing). From six
@@ -8045,11 +8186,14 @@ func update_sim() -> void:
 				var rr := BALL_RADIUS_PX * (prop_hit_scale(fly[i].kind) + prop_hit_scale(fly[j].kind))
 				if _collcheck and d - rr < _coll_min:
 					_coll_min = d - rr
-					_coll_at = "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
-						tick, fpos[i].x, fpos[i].y, str(fly[i].over_top), fly[i].height,
-						clampf(float(tick - fly[i].launch_tick) / float(maxi(1, fly[i].land_tick - fly[i].launch_tick)), 0.0, 1.0),
-						fpos[j].x, fpos[j].y, str(fly[j].over_top), fly[j].height,
-						clampf(float(tick - fly[j].launch_tick) / float(maxi(1, fly[j].land_tick - fly[j].launch_tick)), 0.0, 1.0)]
+					_coll_at = _coll_pair(fpos[i], fpos[j], fly[i], fly[j])
+				if _collcheck:
+					# the same pair judged at DRAWN size - what the player actually sees
+					# passing through what (see _coll_min_drawn)
+					var dr := BALL_RADIUS_PX * (prop_scale(fly[i].kind) + prop_scale(fly[j].kind))
+					if d - dr < _coll_min_drawn:
+						_coll_min_drawn = d - dr
+						_coll_at_drawn = _coll_pair(fpos[i], fpos[j], fly[i], fly[j])
 				if clacks and d < rr and not (fly[i].bumped and fly[j].bumped):
 					fly[i].bumped = true
 					fly[j].bumped = true
@@ -12170,7 +12314,12 @@ const PV_ARC := 99.3          # peak px of a height-1.0 throw: BASE_AIR * ARC_PE
 const PV_TIME := 1.15         # seconds a height-1.0 throw hangs. Real time is 0.7s; the
                               # preview runs ~1.6x slow so the shape is readable (Louis)
 const PV_CARRY := 0.30        # seconds a hand carries a caught prop to its launch point
-const PV_LANE := 24.2         # Columns' lane spacing (columns_x's 44px) at preview scale
+const PV_LANE := 39.6         # Columns' OUTER lane at preview scale. The preview runs the
+							   # pattern at three objects, where columns_x puts the two side
+							   # lanes 72px off centre and the third up the middle line, so
+							   # this is that 72 x PV_K. It is a lane POSITION now, not the
+							   # old fixed 44px spacing, because the spacing is a function of
+							   # the count (columns_step) and 44 is only its widest value
 const PV_HIGH := 1.5          # an over-the-top lob (OVER_TOP_MIN) as a multiple of a tap
 const PV_SHOWER_HIGH := 1.6   # SHOWER_MIN's taller high road
 const PV_FEED := 0.34         # the Shower's flat, fast feed pass (SHOWER_FEED)
@@ -12257,9 +12406,13 @@ func skill_preview(is_trick: bool, idx: int) -> Dictionary:
 							  "phase": 0.5 if k == 1 else 0.0})
 			return {"tracks": lanes, "note": "3 objects - one lane each"}
 		HALFSHOWER:
+			# the low leg is HALFSHOWER_LOW itself, so the picture cannot drift from the
+			# cap the sim throws at: it drew 0.95 of a tap while the sim now caps that
+			# road at 0.65, which is the preview drawing the very overlap the cap exists
+			# to prevent
 			return {"tracks": [{"legs": [pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_HIGH),
 									pv_carry(pv_o(LEFT), pv_i(LEFT)),
-									pv_throw(pv_i(LEFT), pv_o(RIGHT), 0.95)], "n": 3}],
+									pv_throw(pv_i(LEFT), pv_o(RIGHT), HALFSHOWER_LOW)], "n": 3}],
 					"note": "right over the top, left low"}
 		SHOWER:
 			return {"tracks": [{"legs": [pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_SHOWER_HIGH),
@@ -15577,6 +15730,8 @@ func _demo_step() -> void:
 	if _late_catch_n >= 0 and tick == settle_tick:
 		_coll_min = 1000000.0
 		_coll_at = ""
+		_coll_min_drawn = 1000000.0
+		_coll_at_drawn = ""
 	# auto-catch: secure any ball arriving at an empty hand (the odd-columns middle
 	# ball counts for either hand, matching the either-hand rule in on_catch).
 	# --latecatch N (see _late_catch_n) instead waits until exactly N ticks AFTER
@@ -15656,6 +15811,10 @@ func _capture_and_quit() -> void:
 			print("collcheck WARNING: nothing measured - no two props were ever airborne together")
 		print("collcheck min clearance: %.1f px" % _coll_min)
 		print("collcheck at: %s" % _coll_at)
+		# ...and at drawn size, which is the one that answers "do the two roads LOOK
+		# like they pass through each other" (see _coll_min_drawn)
+		print("collcheck min drawn gap: %.1f px" % _coll_min_drawn)
+		print("collcheck drawn at: %s" % _coll_at_drawn)
 	# the audit needs no picture, and a picture is the only thing --headless cannot
 	# give us (the viewport has no texture there). Asking for one anyway is what used
 	# to force the whole pattern sweep through slow, wall-clock-bound windowed runs.
