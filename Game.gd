@@ -432,6 +432,7 @@ const PROP_RINGS := 2
 const PROP_CLUBS := 3
 const PROP_KNIVES := 4
 const PROP_TORCHES := 5
+const PROP_CHAINSAW := 6
 const PROPS := [
 	# balls are REAL STOCK too (Louis: they don't appear out of thin air): a fresh
 	# juggler starts with three, and the fourth ball onward is bought like any prop.
@@ -453,6 +454,13 @@ const PROPS := [
 	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "stam": 4, "spins": true,  "pwin": -1, "smult": 1.32, "fgive": 0.12, "trait": "forgiving - a wider catch than their weight asks (still shy of balls and rings)"},
 	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "stam": 5, "spins": true,  "pwin": -2, "smult": 1.55, "fgive": 0.0,  "trait": "high score, high danger - a demanding crowd pays extra for the risk"},
 	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "stam": 6, "spins": true,  "pwin": -3, "smult": 1.70, "fgive": 0.0,  "trait": "self-lit - they shine when the stage goes dark, where any other prop is a guess"},
+	# THE CHAINSAW (2026-07-28, Louis: "a new object: the chainsaw. make it actually move
+	# around and work"). The top of the ladder and deliberately the end of it: heaviest,
+	# dearest, tightest window, and the only prop that is RUNNING while it flies - the
+	# chain really travels round the bar, on its own clock, and the engine note rides
+	# with it. It is the prop a career builds toward, so its Strength wall sits above
+	# every other and its multiplier is the largest in the game.
+	{"name": "Chainsaw", "weight": 6, "req": 70, "cost": 9000, "stam": 8, "spins": true, "pwin": -4, "smult": 2.10, "fgive": 0.0, "trait": "running the whole time - the hardest catch and the biggest payday, and the room knows it"},
 ]
 # "stam" is a throw's FLAT stamina price (Louis): every throw costs at least 1,
 # heavier props cost their own rate (balls 1, eggs 2, rings 2, clubs 4, knives 5,
@@ -716,7 +724,33 @@ const FLOWER_TIERS := [
 	{"name": "flower",    "val": 1,  "col": Color(0.98, 0.55, 0.68), "mid": Color(1.0, 0.88, 0.45), "petals": 5, "r": 5.0},
 	{"name": "posy",      "val": 5,  "col": Color(0.74, 0.58, 0.98), "mid": Color(1.0, 0.94, 0.72), "petals": 6, "r": 6.2},
 	{"name": "gold rose", "val": 25, "col": Color(1.0, 0.82, 0.34), "mid": Color(1.0, 0.97, 0.82), "petals": 8, "r": 7.0},
+	# THE BOUQUET (2026-07-28, Louis: "bigger stages should throw bouquets instead of
+	# just a couple of special flowers - mix the concepts"). It is drawn as THREE blooms
+	# on one bound stem rather than as a bigger single flower, because that is the whole
+	# difference between a tribute somebody picked on the way over and one they went to a
+	# florist for - and it is the read the pile needs from across the stage.
+	{"name": "bouquet",   "val": 60, "col": Color(1.0, 0.46, 0.52), "mid": Color(1.0, 0.93, 0.66), "petals": 6, "r": 6.6},
 ]
+const FLOWER_BOUQUET := 3         # ...its index, since three places have to name it
+# HOW GENEROUS A ROOM IS, 0 at the Backyard and 1 at the top. This is the "mix" - the
+# tier a flower lands on is now the PLAYER's night (how deep in the green, how many
+# drops) TIMES the ROOM's size, instead of the night alone. A backyard crowd throws
+# single stems however well you play; an arena throws bouquets because an arena has a
+# florist in the foyer. Neither factor can carry the roll on its own, which is what
+# keeps a big stage from paying out for a bad act.
+const FLOWER_ROOM_LIFT := 0.30    # ...and how much of the plain-stem floor it lifts
+# THE STANDING OVATION (2026-07-28, Louis: "ending a perfect performance (no drops)
+# should get a standing ovation and a rain of flowers (bonus)"). A night with NOT ONE
+# prop dropped is the rarest thing a player can do and it used to pay exactly what an
+# almost-clean night paid. Now the room stands, flowers come down from everywhere for a
+# beat, and only then does the results card appear.
+const OVATION_TICKS := 260        # how long the room stays on its feet (~2.2s at 120Hz)
+const OVATION_RAIN_BEAT := 3      # ticks between handfuls coming down
+const OVATION_BONUS_PCT := 0.35   # the bonus, as a SHARE of what the night already paid,
+const OVATION_BONUS_MIN := 25     # ...floored, so a short clean act is still worth it.
+								   # A share rather than a flat number means it scales
+								   # with the venue and the length of the act for free,
+								   # with no second pay formula to keep in step
 # how much of the room can actually reach the stage on a given beat. NOT the seat count
 # (a thousand-seat arena raining a thousand flowers would bury the juggler and the
 # economy with him) - the ladder is deliberately gentle, one more thrower per rung.
@@ -905,7 +939,12 @@ var prop_type := PROP_BALLS  # the object being juggled this run
 # how many of each prop you own (balls are free and unlimited, see have()). You buy
 # props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
 # consumed permanently when dropped; durable props are not.
-var prop_count: Array[int] = [0, 0, 0, 0, 0, 0]
+# ONE SLOT PER PROP, and the length is checked against PROPS rather than trusted: adding
+# the chainsaw as a seventh prop hit "Out of bounds get index '6'" here, because this
+# literal was written when there were six and nothing tied the two together. sync_props()
+# is called before anything reads it, so a future eighth prop is one PROPS row and no
+# other edit at all.
+var prop_count: Array[int] = [0, 0, 0, 0, 0, 0, 0]
 var has_glasses := false  # bought gear: raises the catch chance
 var has_glow_kit := false # bought gear: props keep a faint glow through Blackout
 var has_helmet := false   # bought gear: unlocks buying and auto-drinking Energy Drinks
@@ -932,6 +971,14 @@ var career := {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
 	"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0,
 	"mastery": 0}   # level-up points turned to gold after every stat capped
 var results_open := false # the end-of-performance results panel is showing
+var ovation_left := 0     # ticks of standing ovation still to play BEFORE that panel is
+						   # drawn. results_open is deliberately already true throughout,
+						   # so every guard that stops play during the results also stops
+						   # it during the ovation - only the card's drawing and its keys
+						   # wait on this counter
+var ovation_bonus := 0    # what the ovation itself paid, so the card can name it
+var _demo_quit_after_ovation := false   # dev: a --demo act that earned an ovation lets it
+										 # finish before the harness quits
 var results_record := false  # this performance beat the venue's record
 var paused := false       # the in-play pause menu is up (freezes the sim)
 var pause_sel := 0        # cursor in the pause menu
@@ -978,7 +1025,7 @@ var shop_open := false
 # so a pad player can spend points and buy props). The number keys remain the fast path
 # on a keyboard; arrows move the gold highlight and Enter (pad A) acts on it.
 var sheet_sel := 0        # 0..3 across the four stat cards
-var shop_sel := 0         # 0..5 the prop cards, 6 glasses, 7 the pie, 8 the Glow Kit
+var shop_sel := 0         # the prop cards, then the gear row - see shop_gear0()
 var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
 var skills_sel := 0        # which entry the Skills reference has expanded
 var debug_mode := false   # debug build: free stat editing in the character sheet
@@ -1152,6 +1199,15 @@ var _pile_dirty := true
 var _soup_pts := PackedVector2Array()
 var _soup_cols := PackedColorArray()
 var _soup_idx := PackedInt32Array()
+# THE CHAINSAW'S OWN BAKE. Every saw on stage is the SAME local geometry at the same
+# tick - the transform is what makes one differ from another - so the triangles are
+# built once a frame and re-emitted per prop, instead of once per prop. That is the
+# difference between one GDScript build a frame and fifteen of them, and it is why the
+# saw ends up costing about what a torch does despite having a moving chain on it.
+var _saw_pts := PackedVector2Array()
+var _saw_cols := PackedColorArray()
+var _saw_idx := PackedInt32Array()
+var _saw_tick := -99999
 var run_flowers := 0        # basic-flower value earned this act (the night's whole pay)
 var run_tomatoes := 0       # ...and what they threw instead when it went badly
 var tomatoes := 0           # tomatoes in the pack, eaten in the day hub for stamina
@@ -1359,6 +1415,7 @@ func _ready() -> void:
 	# glance in the Dock and the window list is the difference between editing a career
 	# and editing a test one.
 	DisplayServer.window_set_title(GAME_TITLE if not OS.is_debug_build() else GAME_TITLE + " (debug)")
+	sync_props()          # every per-prop array as long as PROPS, before anything reads one
 	migrate_old_saves()   # the game was called IACTO until 2026-07-28: carry those
 						  # careers across before anything reads a save (see below)
 	load_settings()
@@ -1764,7 +1821,7 @@ func _physics_process(delta: float) -> void:
 		get_tree().quit()
 		return
 	step_effects()   # age the egg-break shards, yolk splats, and particles
-	if results_open:
+	if results_open and ovation_left <= 0:
 		results_anim_sfx()   # the card's count-up ticks, stamp, and record fanfare
 	if _eggdemo and tick % 42 == 0:
 		var vp := get_viewport_rect().size
@@ -1991,7 +2048,7 @@ func _input(event: InputEvent) -> void:
 	# the end-of-performance results panel: go again with R (another booking, so
 	# it costs a fresh day segment), spend/shop, or Enter/Esc back into the day.
 	# It stays open behind the sheet and shop, so you can invest then continue.
-	if results_open and not sheet_open and not shop_open:
+	if results_open and ovation_left <= 0 and not sheet_open and not shop_open:
 		match kc:
 			KEY_R, KEY_SPACE:
 				if not too_tired():
@@ -3020,17 +3077,42 @@ func sheet_input(kc: int) -> void:
 				save_progress()
 
 
+# THE SHOP'S CURSOR IS TWO ROWS, and where one ends and the other begins is PROPS.size(),
+# never a literal (2026-07-28). Adding the chainsaw as a seventh prop broke this in a
+# dozen places at once: `shop_sel <= 5` sent the cursor's seventh card to try_buy_glasses,
+# the up/down hop divided by a hard 6, and the row wrapped at a hard 10. Everything below
+# is now derived, so an eighth prop is a PROPS row and nothing else.
+const SHOP_GEAR := 4   # glasses, pie, Glow Kit, helmet/drinks - the second row
+# THE KEYBOARD SHORTCUT PRINTED ON EACH CARD, in card order across both rows. One table,
+# read by the drawing AND by shop_input, because the two disagreeing is exactly what
+# happened when a seventh prop took the 7 key and every gear card went on advertising the
+# one above it. Past the end of this list a card simply prints no shortcut rather than a
+# wrong one - the arrows and Enter already reach every card.
+const SHOP_KEYS: Array[String] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-"]
+
+func shop_key_label(i: int) -> String:
+	return SHOP_KEYS[i] if i >= 0 and i < SHOP_KEYS.size() else ""
+
+func shop_gear0() -> int:
+	return PROPS.size()          # the index the gear row starts at
+
+
+func shop_cards() -> int:
+	return PROPS.size() + SHOP_GEAR
+
+
 func shop_buy_sel() -> void:
 	# Enter (pad A) acts on whichever card the cursor lights: a prop, the glasses,
 	# the pie, the Glow Kit, or the helmet/drinks - the same purchases the number
 	# keys reach directly
-	if shop_sel <= 5:
+	var g := shop_sel - shop_gear0()
+	if g < 0:
 		try_buy(shop_sel)
-	elif shop_sel == 6:
+	elif g == 0:
 		try_buy_glasses()
-	elif shop_sel == 7:
+	elif g == 1:
 		try_buy_pie()
-	elif shop_sel == 8:
+	elif g == 2:
 		try_buy_glow_kit()
 	elif not has_helmet:
 		try_buy_helmet()
@@ -3040,26 +3122,27 @@ func shop_buy_sel() -> void:
 
 func shop_input(kc: int) -> void:
 	# the shop's keys, shared by the play overlay and the day hub. The number on
-	# each card is its buy key: 1-6 the props (balls included), 7 glasses, 8 pie,
-	# 9 the Glow Kit, 0 the helmet (then Energy Drinks once it's owned). Arrows
+	# each card is its buy key: 1-7 the props (balls included), 8 glasses, 9 pie,
+	# 0 the Glow Kit, - the helmet (then Energy Drinks once it's owned). Arrows
 	# (dpad, stick) walk the cards - left/right along a row, up/down between the
-	# six-card prop row and the four-card gear row (each prop column hops to its
-	# nearest gear card) - and Enter buys the lit one, so a pad shops as freely
-	# as the keyboard. A number key also pulls the cursor onto its card.
+	# prop row and the four-card gear row (each prop column hops to its nearest
+	# gear card) - and Enter buys the lit one, so a pad shops as freely as the
+	# keyboard. A number key also pulls the cursor onto its card.
 	match kc:
 		KEY_TAB, KEY_ESCAPE, KEY_S:
 			shop_open = false
 		KEY_LEFT:
-			shop_sel = (shop_sel + 9) % 10
+			shop_sel = (shop_sel + shop_cards() - 1) % shop_cards()
 			play_sfx("ui", -15.0)
 		KEY_RIGHT:
-			shop_sel = (shop_sel + 1) % 10
+			shop_sel = (shop_sel + 1) % shop_cards()
 			play_sfx("ui", -15.0)
 		KEY_DOWN, KEY_UP:
-			if shop_sel <= 5:
-				shop_sel = 6 + shop_sel * 4 / 6   # 6 props -> 4 gear cards, nearest fit
+			var g0 := shop_gear0()
+			if shop_sel < g0:
+				shop_sel = g0 + shop_sel * SHOP_GEAR / g0   # prop column -> nearest gear card
 			else:
-				shop_sel = (shop_sel - 6) * 6 / 4   # gear -> nearest prop column
+				shop_sel = (shop_sel - g0) * g0 / SHOP_GEAR   # ...and back again
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
@@ -3092,15 +3175,21 @@ func shop_input(kc: int) -> void:
 			try_buy(PROP_TORCHES)
 		KEY_7:
 			shop_sel = 6
-			try_buy_glasses()
+			try_buy(PROP_CHAINSAW)
+		# ...and the gear row moved along one with it. There are more props than digits
+		# now if another is ever added, which is the point at which the number-key shortcut
+		# stops being the right idea - the arrows and Enter already reach every card.
 		KEY_8:
-			shop_sel = 7
-			try_buy_pie()
+			shop_sel = shop_gear0()
+			try_buy_glasses()
 		KEY_9:
-			shop_sel = 8
-			try_buy_glow_kit()
+			shop_sel = shop_gear0() + 1
+			try_buy_pie()
 		KEY_0:
-			shop_sel = 9
+			shop_sel = shop_gear0() + 2
+			try_buy_glow_kit()
+		KEY_MINUS:
+			shop_sel = shop_gear0() + 3
 			if not has_helmet:
 				try_buy_helmet()
 			else:
@@ -3449,9 +3538,10 @@ func tut_lesson(id: String) -> Array:
 			PROP_CLUBS: "These tumble in the air. Catch the handle, not the spin, so read the rotation.",
 			PROP_KNIVES: "Fast and sharp, with less room for error. Endurance keeps your hands honest.",
 			PROP_TORCHES: "The heaviest, lit and roaring. They ask for real Strength and a steady nerve.",
+			PROP_CHAINSAW: "It never stops running. Catch it by the handle, high, and never reach for the bar - the chain is moving whether you are ready or not.",
 		}
 		var quirk := String(quirks.get(k, "A new prop. Feel out its weight and timing."))
-		var need := 6 if k == PROP_TORCHES else 5
+		var need := 6 if k >= PROP_TORCHES else 5
 		var pout: Array = [tut_intro("%s" % String(PROPS[k]["name"]).to_upper(),
 			"%s\n\n%s swaps which object you juggle, any time you are practising. The pattern and the keys do not change - only what is in the air." % [quirk, String(k_object()[0])],
 			String(k_object()[0]))]
@@ -4998,7 +5088,8 @@ func reset_new_game() -> void:
 	pie_active = false
 	money = START_GOLD
 	reputation = 0
-	prop_count = [3, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
+	prop_count = [3, 0, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
+	sync_props()
 	prop_type = PROP_BALLS
 	has_glasses = false
 	has_glow_kit = false
@@ -5079,6 +5170,14 @@ func migrate_old_saves() -> void:
 				var src := parent.path_join(old_name).path_join(fn)
 				if FileAccess.file_exists(src):
 					DirAccess.copy_absolute(src, OS.get_user_data_dir().path_join(to))
+
+
+func sync_props() -> void:
+	# every per-prop array is exactly as long as PROPS, whatever a save file said. An old
+	# save written before a prop existed simply leaves the new slot at zero, which is the
+	# right answer: you do not own what did not exist.
+	if prop_count.size() != PROPS.size():
+		prop_count.resize(PROPS.size())
 
 
 func slot_path(i: int) -> String:
@@ -7328,6 +7427,20 @@ func resolve_act() -> void:
 	# no multiplier, nothing to compute at the end - the pile IS the purse, which is the
 	# whole point of it (Louis). A Purist night still earns its premium, since that is a
 	# promise about the whole board, not about the crowd.
+	# A CLEAN NIGHT BRINGS THE HOUSE UP. Not one drop, and the act ended on your own
+	# terms (a collapse is not a performance however few props hit the floor) with at
+	# least one goal banked, so it cannot fire on a walk-off. The bonus goes into
+	# run_flowers BEFORE the pay is taken off it, so it flows through the purse, the
+	# ledger and the record exactly like every other flower - the rain itself is then
+	# purely a picture and adds nothing more, or the night would be paid twice.
+	ovation_bonus = 0
+	ovation_left = 0
+	if dropped == 0 and not set_collapsed and goals_hit >= 1:
+		ovation_bonus = maxi(OVATION_BONUS_MIN, int(round(float(run_flowers) * OVATION_BONUS_PCT)))
+		run_flowers += ovation_bonus
+		ovation_left = OVATION_TICKS
+		applause = 1.0    # they are on their feet, and the gauge has to agree
+		play_sfx("streak", -3.0)
 	last_pay = int(round(float(run_flowers) * purist_mult))
 	if money < BROKE_GOLD and score > 0:
 		last_pay = maxi(last_pay, BUSK_FLOOR)
@@ -7396,14 +7509,23 @@ func resolve_act() -> void:
 	results_stamped = false
 	save_progress()
 	if _demo:
-		# dev: report the whole-act outcome and quit, so --demo --booking is a
-		# one-shot end-to-end check of the resolve path (goals, stripping, pay, rep)
-		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d peakappl=%.2f" % [
+		# dev: report the whole-act outcome, so --demo --booking is a one-shot end-to-end
+		# check of the resolve path (goals, stripping, pay, rep)
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
-			score, last_pay, last_rep_delta, str(results_record), tick, run_flowers, run_tomatoes, peak_applause])
+			score, last_pay, last_rep_delta, str(results_record), tick, run_flowers,
+			run_tomatoes, ovation_bonus, peak_applause])
 		if daily_active:
 			print(daily_share)
-		get_tree().quit()
+		# ...and quit ONLY once the ovation has played out. Quitting on the spot meant the
+		# harness could never reach the one path that only a perfect act takes, so the
+		# rain and its bonus had no automated coverage at all - and a screenshot of it was
+		# impossible, since the process was gone the frame the act ended. The line above
+		# still prints at the same moment, so nothing reading the log changes.
+		if ovation_left <= 0:
+			get_tree().quit()
+		else:
+			_demo_quit_after_ovation = true
 
 
 func stamina_mult() -> float:
@@ -7788,6 +7910,7 @@ func prop_color(kind: int) -> Color:
 		PROP_CLUBS:   return Color(0.90, 0.35, 0.38)
 		PROP_KNIVES:  return Color(0.82, 0.86, 0.92)
 		PROP_TORCHES: return Color(1.0, 0.62, 0.24)
+		PROP_CHAINSAW: return Color(0.96, 0.58, 0.14)
 		_:            return Color(1.0, 0.82, 0.35)
 
 
@@ -7798,6 +7921,7 @@ func prop_scale(kind: int) -> float:
 		PROP_CLUBS:   return 1.6
 		PROP_KNIVES:  return 1.5
 		PROP_TORCHES: return 1.75
+		PROP_CHAINSAW: return 1.9
 		PROP_EGGS:    return 1.1
 		_:            return 1.0
 
@@ -7996,6 +8120,7 @@ func load_progress() -> void:
 		money = int(cf.get_value("stats", "money", START_GOLD))
 		tomatoes = int(cf.get_value("stats", "tomatoes", 0))
 		reputation = int(cf.get_value("stats", "reputation", 0))
+		sync_props()
 		var pc: Variant = cf.get_value("stats", "prop_count", [])
 		if pc is Array:
 			for i in mini((pc as Array).size(), prop_count.size()):
@@ -8570,7 +8695,10 @@ func _draw_screen() -> void:
 		draw_hud(font, s)
 	draw_popups(font)
 	if results_open and not tut_active:
-		draw_results(font, s)   # the end-of-performance card, over the frozen stage
+		if ovation_left > 0:
+			draw_ovation(font, s)   # ...the room on its feet, first
+		else:
+			draw_results(font, s)   # the end-of-performance card, over the frozen stage
 	draw_parts()           # sparks and confetti ride above the stage and the card
 	if sheet_open:
 		draw_sheet_screen(font, s)
@@ -9659,10 +9787,17 @@ func draw_face_v2(head: Vector2, r: float, hair_tone: Color) -> void:
 	var bot_bow := r * 0.12
 	var open := false
 	if mood == 1:
-		hw = r * 0.36
-		lift = -r * 0.05          # corners up
-		top_bow = r * 0.14
-		bot_bow = r * 0.40        # ...and the middle well down: an open smile
+		# EASY DOES IT (2026-07-28, Louis: "the smile is a bit creepy, go easy on that
+		# part"). The first version dropped the jaw - corners up, middle 0.40r down, a
+		# band of teeth inside - and a wide open mouth with visible teeth on a face this
+		# simplified does not read as delight, it reads as a rictus. There are no eyes
+		# doing the other half of the work at 21px, so the mouth has to carry the mood
+		# on its own and a mouth carrying it ALONE must stay small. Lifted corners and a
+		# barely parted lip is a smile; anything more is a grin.
+		hw = r * 0.32
+		lift = -r * 0.045         # corners up, which is where a smile actually lives
+		top_bow = r * 0.09
+		bot_bow = r * 0.19        # ...and only just parted
 		open = true
 	elif mood == -1:
 		hw = r * 0.26
@@ -9673,10 +9808,9 @@ func draw_face_v2(head: Vector2, r: float, hair_tone: Color) -> void:
 	draw_colored_polygon(mouth_shape(mc, hw * 1.06, lip_lift, top_bow - r * 0.03, bot_bow + r * 0.05),
 		Color(0.58, 0.28, 0.25))
 	if open:
-		draw_colored_polygon(mouth_shape(mc, hw, lift, top_bow, bot_bow), Color(0.28, 0.10, 0.10))
-		if r >= 14.0:
-			draw_colored_polygon(mouth_shape(mc, hw * 0.90, lift, top_bow, top_bow + r * 0.11),
-				Color(0.96, 0.93, 0.87))
+		# the parted lip, and NO TEETH. A white band inside the mouth was tried and is
+		# exactly what tipped the smile into a grin - see the mood == 1 note above.
+		draw_colored_polygon(mouth_shape(mc, hw, lift, top_bow, bot_bow), Color(0.34, 0.14, 0.14))
 	if r >= 10.0:
 		draw_colored_polygon(mouth_shape(mc, hw * 0.86, lip_lift, bot_bow + r * 0.05, bot_bow + r * 0.12),
 			Color(0.98, 0.74, 0.60, 0.45))
@@ -10178,6 +10312,15 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 				Vector2(0, -26), Vector2(2.6, -18), Vector2(3.4, 2), Vector2(-3.4, 2), Vector2(-2.6, -18)]), col)
 			draw_line(Vector2(0, 4.0), Vector2(0, 12.5), col, 5.0)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		PROP_CHAINSAW:
+			# body and bar as two blocks: in the dark the only thing that has to survive
+			# is "long thing with a fat end", which is what tells it from a club
+			draw_set_transform(pos, ang, Vector2.ONE * sc)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(-CSAW_BODY_W, CSAW_BODY_TOP), Vector2(CSAW_BODY_W, CSAW_BODY_TOP),
+				Vector2(CSAW_BODY_W, CSAW_BODY_BOT), Vector2(-CSAW_BODY_W, CSAW_BODY_BOT)]), col)
+			draw_line(Vector2(0, CSAW_BODY_TOP), Vector2(0, CSAW_TIP), col, CSAW_BAR_W * 2.0)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		_:
 			draw_circle(pos, BALL_RADIUS_PX * sc, col)   # flat, same reason as the egg
 
@@ -10270,6 +10413,8 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 			draw_knife(pos, ang, sc)
 		PROP_TORCHES:
 			draw_torch(pos, ang, sc)
+		PROP_CHAINSAW:
+			draw_chainsaw(pos, ang, sc)
 		_:
 			draw_ball_shape(pos, b.color, sc)
 
@@ -10388,6 +10533,132 @@ func draw_knife(pos: Vector2, ang: float, sc: float) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+# THE CHAINSAW (2026-07-28, Louis: "make it actually move around and work"). Local units
+# match the other long props - the handle end is at positive y, the business end at
+# negative - so nothing about spin, hand slotting, hitboxes or layering needed a special
+# case. They are named constants because the blackout silhouette draws from the same
+# numbers, and a second hand-written copy of a prop's shape is exactly how the Glow Kit's
+# clubs came to stop turning.
+const CSAW_BODY_TOP := -2.0    # where the engine block starts...
+const CSAW_BODY_BOT := 15.0    # ...and where the rear handle ends
+const CSAW_BODY_W := 5.4       # half-width of the block
+const CSAW_TIP := -30.0        # the far end of the guide bar
+const CSAW_BAR_W := 2.6        # half-width of the bar
+const CSAW_TEETH := 13         # links drawn round the bar. THE COST OF THIS PROP is here:
+							   # one link is one quad, and at fifteen props in the air that
+							   # is ~200 shapes a frame. They go through the _soup_*
+							   # batcher, so the whole chain of one saw is ONE draw call
+							   # (see THE FLOWER PILE for why that ratio is the thing that
+							   # matters, not the vertex count)
+const CSAW_CHAIN_RATE := 0.22  # how fast the chain travels, in links per tick
+
+func chainsaw_running() -> bool:
+	# it idles in the hand and revs in the air. Purely cosmetic - nothing in the sim
+	# reads this - but it is the whole reason the prop is called "running".
+	return true
+
+
+func _soup_poly(pts: PackedVector2Array, col: Color) -> void:
+	# a convex filled polygon into the batch: the centroid, then its own ring as the fan.
+	# Convex only, which every shape that uses it is - a fan from the centroid of a
+	# concave shape would spill outside it.
+	if pts.size() < 3:
+		return
+	var c := Vector2.ZERO
+	for q in pts:
+		c += q
+	c /= float(pts.size())
+	var ring := PackedVector2Array(pts)
+	ring.append(pts[0])
+	_soup_fan(c, ring, col)
+
+
+func draw_chainsaw(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void:
+	# ONE DRAW CALL PER SAW, AND ONE BUILD PER FRAME (2026-07-28, Louis: "check for lag
+	# tho" - and he was right to ask). Measured at seven saws at the World Arena, which is
+	# the worst case the game can reach:
+	#     eleven immediate-mode shapes each   449 calls   3.0ms
+	#     batched, but rebuilt per prop       383 calls   3.0ms   <- calls down, time flat
+	#     batched and baked once per frame    383 calls   2.6ms
+	# The middle row is the trap this codebase already wrote down for the flower pile and
+	# then walked into again: cost is the NUMBER of calls times ~5us, so batching wins -
+	# but building the triangles in GDScript costs about as much as the calls it saves, so
+	# doing it once per PROP gives the saving straight back. Every saw is the same local
+	# geometry at the same tick (the transform is the only difference), so the bake is
+	# shared and the per-prop work is a single emit.
+	_saw_bake()
+	draw_set_transform(pos, ang, Vector2.ONE * sc)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _saw_idx, _saw_pts, _saw_cols)
+	if rich:
+		# the shop card can afford the exhaust and a heat shimmer off the block
+		var ct := float(cine_tick)
+		for i in 5:
+			var ph := fposmod(ct * 0.012 + float(i) * 0.2, 1.0)
+			draw_circle(Vector2(CSAW_BODY_W * 0.9 + ph * 5.0, 2.0 - ph * 16.0),
+				1.2 + ph * 3.4, Color(0.62, 0.60, 0.58, (1.0 - ph) * 0.22))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _saw_bake() -> void:
+	# the whole saw in local units: bar, running chain, engine block, vents, handle.
+	# Rebuilt only when the tick has moved, because the chain is the only part that
+	# changes and it changes with the clock, not with which saw is being drawn.
+	if _saw_tick == cine_tick:
+		return
+	_saw_tick = cine_tick
+	var t := float(cine_tick)
+	_soup_clear()
+	var body := Color(0.94, 0.55, 0.12)
+	var body_dk := Color(0.62, 0.32, 0.06)
+	var steel := Color(0.72, 0.76, 0.84)
+	var steel_dk := Color(0.38, 0.42, 0.50)
+	# THE GUIDE BAR, first so the engine block sits over its root
+	_soup_poly(PackedVector2Array([
+		Vector2(-CSAW_BAR_W, 2.0), Vector2(CSAW_BAR_W, 2.0),
+		Vector2(CSAW_BAR_W * 0.72, CSAW_TIP + 1.6), Vector2(0.0, CSAW_TIP),
+		Vector2(-CSAW_BAR_W * 0.72, CSAW_TIP + 1.6)]), steel_dk)
+	_soup_poly(PackedVector2Array([
+		Vector2(-CSAW_BAR_W * 0.46, 1.0), Vector2(CSAW_BAR_W * 0.46, 1.0),
+		Vector2(CSAW_BAR_W * 0.30, CSAW_TIP + 3.0), Vector2(-CSAW_BAR_W * 0.30, CSAW_TIP + 3.0)]), steel)
+	# THE CHAIN, and it really travels. Each link walks the bar's perimeter - up one
+	# side, round the nose, back down the other - on a phase that advances every tick, so
+	# the teeth are visibly MOVING rather than a texture painted on the edge. One draw
+	# call for the lot.
+	var run := t * CSAW_CHAIN_RATE
+	var span := CSAW_TIP - 2.0
+	for i in CSAW_TEETH:
+		var u := fposmod(float(i) + run, float(CSAW_TEETH)) / float(CSAW_TEETH)   # 0..1 round the loop
+		var side := 1.0 if u < 0.5 else -1.0
+		var v: float = (u * 2.0) if u < 0.5 else (2.0 - u * 2.0)                  # 0..1 along the bar
+		var y := lerpf(2.0, span, v)
+		var x := side * CSAW_BAR_W
+		# a tooth leans the way it is travelling, which is what makes the direction read
+		# a tooth is SMALL. At 1.9 long and 1.9 wide they read as the teeth of a comb
+		# sticking out of a ruler; a real chain's cutters barely stand proud of the bar,
+		# and the movement is what sells it, not the size.
+		_soup_line(Vector2(x, y), Vector2(x + side * 1.25, y - side * 1.1), 1.5, steel)
+	# the nose sprocket, so the chain has something to go round
+	_soup_ellipse(Vector2(0.0, CSAW_TIP + 2.4), CSAW_BAR_W * 0.55, CSAW_BAR_W * 0.55, 0.0, 10, steel_dk)
+	# THE ENGINE BLOCK: a real casing with a pull cord, vents and a rear handle
+	_soup_poly(PackedVector2Array([
+		Vector2(-CSAW_BODY_W, CSAW_BODY_TOP), Vector2(CSAW_BODY_W, CSAW_BODY_TOP),
+		Vector2(CSAW_BODY_W * 1.05, 7.0), Vector2(CSAW_BODY_W * 0.72, CSAW_BODY_BOT),
+		Vector2(-CSAW_BODY_W * 0.72, CSAW_BODY_BOT), Vector2(-CSAW_BODY_W * 1.05, 7.0)]), body)
+	_soup_poly(PackedVector2Array([                              # the lit side
+		Vector2(-CSAW_BODY_W, CSAW_BODY_TOP + 0.3), Vector2(-CSAW_BODY_W * 0.30, CSAW_BODY_TOP + 0.3),
+		Vector2(-CSAW_BODY_W * 0.30, CSAW_BODY_BOT - 0.4), Vector2(-CSAW_BODY_W * 0.70, CSAW_BODY_BOT - 0.4),
+		Vector2(-CSAW_BODY_W * 1.02, 7.0)]), Color(1.0, 0.72, 0.30))
+	for vy in [1.2, 3.2, 5.2]:                                    # cooling vents
+		_soup_line(Vector2(-2.6, vy), Vector2(2.6, vy), 0.9, body_dk)
+	_soup_poly(PackedVector2Array([                               # the top handle bar
+		Vector2(-CSAW_BODY_W * 1.35, 8.6), Vector2(CSAW_BODY_W * 1.30, 8.6),
+		Vector2(CSAW_BODY_W * 1.30, 10.4), Vector2(-CSAW_BODY_W * 1.35, 10.4)]), Color(0.18, 0.16, 0.16))
+	_soup_ellipse(Vector2(CSAW_BODY_W * 0.55, -0.4), 1.5, 1.5, 0.0, 8, Color(0.20, 0.18, 0.18))
+	_saw_pts = _soup_pts.duplicate()
+	_saw_cols = _soup_cols.duplicate()
+	_saw_idx = _soup_idx.duplicate()
+
+
 func draw_torch(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void:
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
 	var handle := Color(0.24, 0.16, 0.12)
@@ -10489,8 +10760,8 @@ func prop_spin_angle(b: Ball) -> float:
 # subpar). `mag` gives the six a shared optical weight while keeping a mild heavier-is-
 # bigger hierarchy; `off` is the y of the shape's own centre in its local units, so the
 # icon can be hung on its middle instead of on its grip.
-const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.98, 1.90, 1.72]
-const PROP_ICON_OFF := [0.0, 0.0, 0.0, -2.4, -5.2, -8.0]
+const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.98, 1.90, 1.72, 1.30]
+const PROP_ICON_OFF := [0.0, 0.0, 0.0, -2.4, -5.2, -8.0, -2.0]
 
 func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
 	# the prop as SHOP GOODS: the very same shape the stage draws (never a second art
@@ -10523,6 +10794,8 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 			draw_knife(at, ang, sc)
 		PROP_TORCHES:
 			draw_torch(at, ang, sc, true)   # the shop card gets the full fire
+		PROP_CHAINSAW:
+			draw_chainsaw(at, ang, sc, true)   # ...and the saw gets its smoke
 		_:
 			draw_ball_shape(at, col, sc)
 
@@ -11349,6 +11622,30 @@ func results_anim_sfx() -> void:
 			spawn_parts(Vector2(s.x * 0.5, s.y * 0.5 - 240.0), Color(1.0, 0.85, 0.45), 20, 2.8, "confetti")
 			spawn_parts(Vector2(s.x * 0.5 - 200.0, s.y * 0.5 - 220.0), Color(0.72, 0.86, 0.95), 12, 2.4, "confetti")
 			spawn_parts(Vector2(s.x * 0.5 + 200.0, s.y * 0.5 - 220.0), Color(0.95, 0.55, 0.45), 12, 2.4, "confetti")
+
+
+func draw_ovation(font: Font, s: Vector2) -> void:
+	# THE ROOM ON ITS FEET, and nothing else on screen. Deliberately not a card: a card
+	# is a receipt, and this is the moment before the receipt - the only thing the player
+	# should be doing is watching the flowers come down. The words fade IN over the first
+	# third and hold, so the rain is what arrives first and the caption follows it.
+	var age := float(OVATION_TICKS - ovation_left)
+	var a := clampf(age / 40.0, 0.0, 1.0) * clampf(float(ovation_left) / 30.0, 0.0, 1.0)
+	var pulse := 1.0 + 0.03 * sin(age * 0.09)
+	var y := s.y * 0.24
+	draw_glow(Vector2(s.x * 0.5, y + 14.0), s.x * 0.34, Color(1.0, 0.72, 0.36, 0.16 * a))
+	draw_text_shout(font, Vector2(0, y), "STANDING OVATION", HORIZONTAL_ALIGNMENT_CENTER, s.x,
+		int(round(40.0 * pulse)), Color(1.0, 0.90, 0.56, a))
+	draw_text_shout(font, Vector2(0, y + 34.0), "not one drop, all night", HORIZONTAL_ALIGNMENT_CENTER,
+		s.x, 16, Color(0.96, 0.80, 0.66, a * 0.95))
+	if ovation_bonus > 0:
+		var bx := s.x * 0.5
+		var by := y + 68.0
+		var txt := "+%s" % commafy(ovation_bonus)
+		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+		draw_text_shout(font, Vector2(bx - tw * 0.5 - 12.0, by), txt, HORIZONTAL_ALIGNMENT_LEFT, tw + 4.0,
+			26, Color(1.0, 0.72, 0.80, a))
+		draw_coin_mark(Vector2(bx + tw * 0.5 + 2.0, by - 8.0), 9.0, Color(1, 1, 1, a), true)
 
 
 func draw_results(font: Font, s: Vector2) -> void:
@@ -12197,10 +12494,16 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(tx + 118.0, py + 50.0), "to juggle N of a prop, own N of them", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 
-	# ---------------- PROPS: six big cards in one row ----------------
+	# ---------------- PROPS: one card per prop, in one row ----------------
+	# THE ROW FITS WHATEVER PROPS HOLDS. It was `(innerw - gap * 5) / 6`, so the seventh
+	# prop (the chainsaw) was laid out at a sixth of the width and drew its whole card
+	# out through the panel's right border and off the screen. Both terms come off the
+	# count now. This row is the reason a prop CATEGORY system is the right next move:
+	# past about eight cards there is no width left, whatever the arithmetic says.
 	draw_string(font, Vector2(tx, py + 96.0), "PROPS", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
-	var gap := 14.0
-	var cw := (innerw - gap * 5.0) / 6.0
+	var np := PROPS.size()
+	var gap := 14.0 if np <= 6 else 10.0
+	var cw := (innerw - gap * float(np - 1)) / float(np)
 	var ch := 282.0
 	var y0 := py + 110.0
 	for i in PROPS.size():   # balls included: every prop is bought stock now (Louis)
@@ -12250,7 +12553,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_meter(cx0 + 14.0, cy0 + 208.0, cw - 28.0, 7.0, setf, setc)
 		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
 		draw_fit_string(font, Vector2(cx0, cy0 + 232.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
-		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0), str(i + 1), commafy(cost), afford)
+		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0),
+			shop_key_label(i), commafy(cost), afford)
 
 	# ---------------- GEAR: four narrow cards (2026-07-19: was three, grew a
 	# fourth for the Energy-Drink Helmet - same narrow vertical template the
@@ -12276,7 +12580,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var gear_cost := [GLASSES_COST, PIE_COST, GLOW_KIT_COST,
 		ENERGY_DRINK_BATCH_COST if has_helmet else ENERGY_HELMET_COST]
 	for i in 4:
-		var gsel := shop_sel == 6 + i
+		var gsel := shop_sel == shop_gear0() + i
 		var cx0 := tx + float(i) * (gw + gap)
 		var cc: Color = gear_accent[i]
 		if gsel:
@@ -12310,7 +12614,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		else:
 			if int(gear_count[i]) > 0:
 				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % int(gear_count[i]), HORIZONTAL_ALIGNMENT_RIGHT, gw - 14.0, 12, Color(0.75, 0.9, 0.72))
-			var gkey := str(7 + i) if i < 3 else "0"
+			# the key printed here must be the key that buys it - see SHOP_KEYS
+			var gkey := shop_key_label(shop_gear0() + i)
 			draw_price_plate(font, Rect2(cx0 + 12.0, plate_top, gw - 24.0, 38.0), gkey, commafy(int(gear_cost[i])), money >= int(gear_cost[i]))
 
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
@@ -12334,7 +12639,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			detail_head = String(PROPS[shop_sel]["name"])
 			detail = String(PROPS[shop_sel]["trait"])
 		else:
-			var gi := shop_sel - 6
+			var gi := shop_sel - shop_gear0()
 			if gi >= 0 and gi < gear_names.size():
 				detail_head = gear_names[gi]
 				detail = gear_desc[gi]
@@ -12348,7 +12653,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			[[["Stick"], "choose"], [k_finish(), "buy one"], [["X"], "buy the set"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
-			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "buy the set"], [["1", "0"], "quick buy"], [["Tab"], "leave"]])
+			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "buy the set"], [["1", "-"], "quick buy"], [["Tab"], "leave"]])
 
 
 #endregion
@@ -14543,6 +14848,7 @@ func _catch_sound(kind: int) -> String:
 		PROP_CLUBS: return "c_club"
 		PROP_KNIVES: return "c_knife"
 		PROP_TORCHES: return "c_torch"
+		PROP_CHAINSAW: return "c_saw"
 		_: return "c_ball"
 
 
@@ -14877,6 +15183,10 @@ func gen_sfx() -> void:
 	sfx["c_club"] = _wav(_tone([190.0, 320.0], [1.0, 0.4], 0.10, 1, 0.001, 0.04, 0.5, 0.25), false)
 	sfx["c_knife"] = _wav(_tone([1200.0, 2760.0, 5400.0], [1.0, 0.5, 0.25], 0.42, 0, 0.001, 0.30, 0.32, 0.0), false)
 	sfx["c_torch"] = _wav(_tone([140.0], [1.0], 0.28, 0, 0.02, 0.18, 0.4, 0.7), false)
+	# THE CHAINSAW lands with a bite of engine, not a chime: a low two-stroke fundamental
+	# with a rough harmonic over it and a long-ish tail, so catching one sounds like
+	# taking hold of something that is still running rather than like a heavy ball
+	sfx["c_saw"] = _wav(_tone([96.0, 173.0, 262.0], [1.0, 0.62, 0.34], 0.34, 1, 0.004, 0.24, 0.42, 0.85), false)
 
 
 func dump_audio(dir: String) -> void:
@@ -15264,10 +15574,56 @@ func draw_parts() -> void:
 				draw_circle(p, float(d["r"]) * f + 0.6, Color(c.r, c.g, c.b, 0.9 * f))
 
 
+func ovation_step() -> void:
+	# the beat between the last catch and the results card, when the night was perfect.
+	if ovation_left <= 0:
+		return
+	ovation_left -= 1
+	applause = 1.0                    # held up, so the gauge reads what the room is doing
+	if ovation_left % OVATION_RAIN_BEAT == 0:
+		for _i in 1 + int(round(2.0 * venue_generosity())):
+			rain_flower()
+	if ovation_left == 0:
+		# the card's own count-up starts NOW, not back when the act resolved, or it would
+		# have run its whole animation behind the ovation and appeared already finished
+		results_tick = tick
+		results_stamped = false
+		if _demo_quit_after_ovation:
+			get_tree().quit()
+
+
+func rain_flower() -> void:
+	# IT COMES DOWN, it is not thrown up. throw_from_crowd arcs a flower out of a seat,
+	# which is the right picture for one person's tribute during the act; an ovation is
+	# the entire room at once and reads as WEATHER. Different spawn, same `thrown` list,
+	# so the pile, the batched drawing and the fade all work on it unchanged.
+	var s := get_viewport_rect().size
+	var fy := stage_floor_y()
+	var x := randf_range(s.x * 0.08, s.x * 0.92)
+	var v := venue_generosity()
+	var tier := 0
+	if randf() < 0.42 + 0.30 * v:
+		tier = 1
+	if randf() < 0.08 + 0.20 * v:
+		tier = FLOWER_BOUQUET if randf() < 0.45 else 2
+	var near := 0
+	for d in thrown:
+		if absf(float((d["to"] as Vector2).x) - x) < 20.0:
+			near += 1
+	thrown.append({"kind": "flower", "tier": tier,
+		"from": Vector2(x + randf_range(-30.0, 30.0), -40.0),
+		"to": Vector2(x, fy - FLOWER_STEM_FLAT - randf_range(0.0, 6.0) - minf(float(near) * 1.5, 8.0)),
+		"born": tick, "land": tick + FLOWER_FLIGHT - 8 + randi_range(-10, 10),
+		"arc": randf_range(-14.0, 14.0),   # falling, so barely an arc at all
+		"rot": randf_range(0.0, TAU), "settle": randf_range(-0.42, 0.42)})
+	_pile_dirty = true
+
+
 func step_effects() -> void:
 	step_parts()
 	throw_step()    # what the room throws, on its own beat
 	tomato_step()   # ...and what bursts on him when it gets there
+	ovation_step()  # ...and the rain, when the night was perfect
 	# lit torches shed a lazy ember now and then, so fire reads as fire
 	if tick % 9 == 0:
 		for b in balls:
@@ -15390,14 +15746,31 @@ func flower_fame() -> float:
 	return clampf(0.45 + float(reputation) / FLOWER_FAME_DIV, 0.45, FLOWER_FAME_CAP)
 
 
+func venue_generosity() -> float:
+	# 0 at the Backyard, 1 at the last stage: how much room this house has for a tribute
+	# that costs money. Used by the flower ladder and by the ovation's rain.
+	return clampf(float(run_venue) / float(maxi(MAX_VENUE, 1)), 0.0, 1.0)
+
+
 func flower_tier_roll() -> int:
-	# WHICH flower, and the answer is almost always the plain one. A posy needs a room
-	# already won over; a gold rose needs one won over with NOTHING dropped all night
-	# (Louis: "only possible / likely when the player is very deep in the green / no
-	# drops at all"). So the colour of the pile says something the size cannot.
-	if dropped == 0 and applause > 0.94 and randf() < 0.06:
-		return 2
-	if dropped <= 1 and applause > 0.84 and randf() < 0.13:
+	# WHICH flower. Two things decide it and they MULTIPLY rather than replace each other.
+	# How well you are playing still gates the top of the ladder exactly as it did - a
+	# posy needs a room already won over, and the rarest tiers need one won over with
+	# nothing dropped all night, so the colour of the pile goes on saying something its
+	# size cannot. What is new is that the size of the ROOM raises the floor and widens
+	# the odds (see FLOWER_ROOM_LIFT): the same act pays in single stems at the Backyard
+	# and in bouquets at the World Arena.
+	var v := venue_generosity()
+	if dropped == 0 and applause > 0.94:
+		if v >= 0.5 and randf() < 0.04 + 0.09 * v:
+			return FLOWER_BOUQUET          # only a big house sends a bouquet up
+		if randf() < 0.06 + 0.06 * v:
+			return 2
+	if dropped <= 1 and applause > 0.84 and randf() < 0.13 + 0.20 * v:
+		return 1
+	# ...and the floor: past the middle stages a "plain" stem is often already a posy,
+	# which is what stops a big room's pile looking like a small room's
+	if randf() < FLOWER_ROOM_LIFT * v * v:
 		return 1
 	return 0
 
@@ -15509,6 +15882,25 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 			var t := TAU * float(k) / 8.0
 			lv.append(mid + side * 3.4 * sc + Vector2(cos(t) * 3.6 * sc, sin(t) * 1.6 * sc).rotated(dir.angle()))
 		draw_colored_polygon(lv, Color(0.34, 0.60, 0.30, a))
+	if tier == FLOWER_BOUQUET:
+		# A BOUQUET IS SEVERAL FLOWERS, never one big one. Three blooms round a single
+		# binding point with the florist's paper behind them: that is the read that says
+		# "somebody bought this on the way in", and a scaled-up single flower cannot say
+		# it at any size. Each bloom recurses at a lower tier, so they are real flowers
+		# with real petals rather than a decorative cluster that would drift out of step
+		# with draw_flower the first time the petal shape changes.
+		var br := float(FLOWER_TIERS[FLOWER_BOUQUET]["r"]) * sc
+		draw_colored_polygon(PackedVector2Array([
+			p + Vector2(cos(rot + 2.30), sin(rot + 2.30)) * br * 1.30,
+			p + Vector2(cos(rot + 0.30), sin(rot + 0.30)) * br * 1.30,
+			p - Vector2(cos(rot + 1.30), sin(rot + 1.30)) * br * 0.45]),
+			Color(0.95, 0.91, 0.82, a * 0.42))
+		var spread: Array[float] = [-0.90, 0.0, 0.90]
+		var btier: Array[int] = [1, 2, 1]
+		for k in 3:
+			var ba := rot + spread[k]
+			draw_flower(p + Vector2(cos(ba), sin(ba)) * br * 0.52, btier[k], sc * 0.58, ba, a)
+		return
 	var td: Dictionary = FLOWER_TIERS[clampi(tier, 0, FLOWER_TIERS.size() - 1)]
 	var col: Color = td["col"]
 	var mid: Color = td["mid"]
@@ -15526,7 +15918,7 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 			pv.append(p + pc + Vector2(cos(t) * r * 0.52, sin(t) * r * 0.34).rotated(ang))
 		draw_colored_polygon(pv, Color(col.r, col.g, col.b, a))
 	draw_circle(p, r * 0.38, Color(mid.r, mid.g, mid.b, a))
-	if tier >= 2:
+	if tier == 2:
 		draw_star4(p, r * 0.9, Color(1.0, 0.98, 0.85, 0.45 * a))   # a gold rose glints
 
 
