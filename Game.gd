@@ -298,6 +298,13 @@ const PATTERNS := [
 # BETWEEN stages; when even those run dry for too long, the pity director in
 # enter_day gifts the nearest one (see pity_grant).
 const SHOWER_FEED := 0.5      # the feed pass's airtime as a fraction of a tap
+const SHOWER_FEED_ARC := 0.2  # ...and how much of its arc it actually rises (Louis, -80%:
+							   # "the height should be almost zero for showers"). Height and
+							   # airtime are otherwise ONE number here (arc = ARC_PER_AIR x
+							   # air), so flattening the pass by shortening it would have
+							   # sped the whole pattern up. The arc is the only half that
+							   # can move alone, which is exactly what a horizontal pass is:
+							   # same time to cross, almost no rise
 const SHOWER_MIN := 0.55      # the high hand's minimum height fraction in a shower
 const HALFSHOWER_MIN := 0.5   # the over-the-top side's minimum height fraction (0.35
 							   # left its arc only ~34px above the weave where they
@@ -319,6 +326,9 @@ const HALFSHOWER_LOW := SHOWER_FEED * 1.3   # the weave side's airtime as a frac
 							   # from three objects to fifteen (measured 0.43 to 0.55)
 const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Overthrow,
 							   # Reverse Cascade, Tennis's marked ball)
+const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher than a
+							   # plain over-the-top lob (2026-07-28, Louis) - it is the one
+							   # prop crossing over a full weave rather than one road
 # WHERE A COLUMN MAY STAND (2026-07-28, Louis: every object goes straight up and comes
 # down exactly where it was thrown, and "for many objects ... nor does it widen the arms
 # positioning (wider looks bad)"). Both rules are geometry, so the lane band is defined
@@ -742,6 +752,11 @@ class Ball:
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
 	var trick := -1           # which trick shaped this throw (TR_HIGH/TR_BTB), or -1 for a plain throw
 	var over_top := false     # an over-the-top lob: scooped from INNER, lofted wide to OUTER
+	var flat := false         # a HORIZONTAL PASS, not a throw: the shower's feed back to the
+							  # dominant hand (2026-07-28, Louis). It keeps its airtime, so
+							  # the rhythm is unchanged, but its arc is nearly flattened and
+							  # a club/knife/torch does not turn on it at all - it crosses
+							  # standing upright, which is what a real shower's pass does
 	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
 							  # balls in one hand never stack on the same line (-1 = unset)
 	var thrown_from := -1     # which hand actually released this (LEFT/RIGHT); informational
@@ -5573,7 +5588,7 @@ func next_throw_over_top(h: int) -> bool:
 			return true   # nothing marked yet: the very NEXT throw claims the mark
 		return stack(h).has(tennis_ball)
 	# the shower's and half shower's high hand ride the over-the-top road too
-	return h == RIGHT and pattern in [SHOWER, HALFSHOWER]
+	return h == dominant_hand and pattern in [SHOWER, HALFSHOWER]
 
 
 # the STRUCTURAL throw/catch point for hand h under the current pattern/trick -
@@ -6190,6 +6205,9 @@ func do_throw(h: int, hold: int) -> void:
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
 	b.bumped = false   # a fresh throw starts clean; only a NEW mid-air clack marks it
+	b.flat = false     # ...and every throw re-decides whether it is a pass or a throw. A
+					   # prop that fed once would otherwise stay flat for the rest of the
+					   # run, and its next HIGH throw would come out as a flat one
 	b.thrown_from = h
 	var weight := prop_weight()
 	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
@@ -6243,8 +6261,14 @@ func do_throw(h: int, hold: int) -> void:
 	# one throw: the player paid a press for it, so no pattern may flatten it
 	# into a low pass that would still collect the trick's full bonus on the
 	# catch (the shower feed used to do exactly that, a quiet 260-a-catch exploit).
-	if pattern == SHOWER and h == LEFT and this_trick < 0:
+	# THE FEED IS A PASS, NOT A THROW (2026-07-28, Louis: "a very low (-80% lower than
+	# the shower before) arc for non domi to dominant hand ... the height should be
+	# almost zero"). Its AIRTIME is untouched, because that is the rhythm of the pattern
+	# and he has already played it and called it fine - only the arc is flattened, which
+	# is the one thing in flight that can be moved without moving the timing with it.
+	if pattern == SHOWER and h == other(dominant_hand) and this_trick < 0:
 		air = int(round(base_air * SHOWER_FEED))
+		b.flat = true
 	# the PATTERN shapes every throw (there is exactly one pattern at a time now -
 	# Louis - so Reverse Cascade and Tennis reshape here as patterns, never as
 	# trick toggles), and Overthrow (a one-shot) sends this single throw up and
@@ -6254,7 +6278,7 @@ func do_throw(h: int, hold: int) -> void:
 	# (that is what those patterns ARE), so they inherit the outer launch, the
 	# wide landing, and the corner dodge in one mechanic.
 	var over_top := this_trick == TR_OVER
-	if h == RIGHT and pattern in [SHOWER, HALFSHOWER]:
+	if h == dominant_hand and pattern in [SHOWER, HALFSHOWER]:
 		over_top = true
 	elif pattern == RCASC:
 		over_top = true
@@ -6263,7 +6287,7 @@ func do_throw(h: int, hold: int) -> void:
 			tennis_ball = b   # the marked ball: the first one thrown under the pattern
 		if b == tennis_ball:
 			over_top = true
-	if pattern == HALFSHOWER and h == LEFT and this_trick < 0:
+	if pattern == HALFSHOWER and h == other(dominant_hand) and this_trick < 0:
 		# the weave side is capped LOW (a ceiling, not a floor), so it visibly stays clear
 		# of the over-the-top road instead of drifting up to meet it. The cap is a
 		# FRACTION OF THE TAP, not the tap plus a bit - see HALFSHOWER_LOW for why that
@@ -6271,10 +6295,14 @@ func do_throw(h: int, hold: int) -> void:
 		air = mini(air, int(round(base_air * HALFSHOWER_LOW)))
 	if over_top:
 		var high_min := OVER_TOP_MIN
-		if h == RIGHT and pattern == SHOWER:
+		if h == dominant_hand and pattern == SHOWER:
 			high_min = maxf(high_min, SHOWER_MIN)
-		elif h == RIGHT and pattern == HALFSHOWER:
+		elif h == dominant_hand and pattern == HALFSHOWER:
 			high_min = maxf(high_min, HALFSHOWER_MIN)
+		elif pattern == TENNIS:
+			# the marked prop is the only one crossing OVER a full weave rather than over
+			# one road, so it gets the extra 20% Louis asked for to clear it cleanly
+			high_min = maxf(high_min, TENNIS_MIN)
 		air = maxi(air, int(round(base_air + high_min * HOLD_GAIN * gain_mult * float(HOLD_MAX))))
 	# Columns (the pattern or the toggle trick) pulls this throw's airtime toward the
 	# lanes' running height, so a slightly early or late release still lands close to
@@ -6327,6 +6355,8 @@ func do_throw(h: int, hold: int) -> void:
 	b.launch_tick = tick
 	b.land_tick = tick + air + jitter
 	b.arc = ARC_PER_AIR * float(air)
+	if b.flat:
+		b.arc *= SHOWER_FEED_ARC   # a horizontal pass: almost no rise, same time in the air
 	# a throw's stamina price is the prop's FLAT rate (Louis): balls 1, eggs 2,
 	# rings 3, clubs 4, knives 5, torches 6. Focus shaves one point per 20
 	# Focus, never below 1 - every throw costs at least one. Lessons stay free.
@@ -10211,14 +10241,24 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 
 
 func prop_spin_angle(b: Ball) -> float:
-	# how far a tumbling prop has turned through its flight - two tumbles, launch to
-	# catch. Shared by the lit prop and Blackout's bare flame, so a torch's fire keeps
-	# turning at exactly the rate it was turning at before the handle went dark.
+	# how far a tumbling prop has turned through its flight. Shared by the lit prop and
+	# Blackout's bare flame, so a torch's fire keeps turning at exactly the rate it was
+	# turning at before the handle went dark.
+	#
+	# THE TURN COUNT IS THE THROW'S OWN HEIGHT (2026-07-28, Louis: "the low arc should
+	# only make the clubs, knives and torches turn once - that should be standard for low
+	# throws"). It was a flat two tumbles for EVERY throw, which is why a flat little pass
+	# spun as hard as a full lob: same two turns crammed into a fifth of the airtime, so
+	# the low throws were the ones that read as spinning wildly. One turn at the tap
+	# floor, two at a full-height throw, and on up from there - the prop's rotation now
+	# tells you how big the throw was, which is the whole point of watching it turn.
 	if not bool(PROPS[b.kind]["spins"]) or b.state != STATE_FLIGHT:
 		return 0.0
+	if b.flat:
+		return 0.0   # a horizontal pass crosses upright and does not turn at all
 	var span := maxi(1, b.land_tick - b.launch_tick)
 	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
-	return b.spin_dir * p * TAU * 2.0
+	return b.spin_dir * p * TAU * (1.0 + clampf(b.height, 0.0, 1.8))
 
 
 # the shop icon's two per-prop numbers (2026-07-27). The old icon simply blew the raw

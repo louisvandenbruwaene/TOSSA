@@ -740,6 +740,44 @@ and deleted. History lives in git.
   prop lands as the next leaves). The general rule, worth applying to any future pattern
   with two roads: **express one road's height as a fraction of the other, or of the tap
   both are built on, never as an offset from a base that itself moves with the count.**
+- **HOW MUCH A PROP TURNS IS HOW BIG THE THROW WAS** (2026-07-28, Louis: "the low arc
+  should only make the clubs, knives and torches turn once - that should be standard for
+  low throws"). `prop_spin_angle` was `p * TAU * 2.0`: a flat two tumbles on EVERY throw,
+  tap or full lob. That is why the LOW throws were the ones that read as spinning wildly,
+  which is the opposite of what you would expect and the opposite of what a club does:
+  the same two turns were being crammed into a fifth of the airtime. It is
+  `1.0 + b.height` turns now, so a tap-floor throw turns once, a full-height throw turns
+  twice as it always did, and the rotation finally tells you how big the throw was.
+- **A PASS IS NOT A THROW** (2026-07-28, and the reason the Shower needed a new field on
+  `Ball`). Louis's shower is: the dominant hand holds everything but one and throws them
+  all high in the usual big arc, and the other hand sends its one prop back on "a very low
+  (-80% lower than the shower before) arc ... the height should be almost zero", with
+  clubs, knives and torches "not turning at all for the shower: just a horizontal throw
+  with a vertically positioned object". `b.flat` marks that pass. Two things follow from
+  it and only those two: `prop_spin_angle` returns 0 (so a club crosses standing upright)
+  and the arc is scaled by `SHOWER_FEED_ARC`. **The airtime is deliberately untouched.**
+  Height and airtime are otherwise ONE number here (`arc = ARC_PER_AIR * air`), so
+  flattening the pass by shortening it would have sped the whole pattern up, and Louis had
+  already played the current rhythm and called it fine. The arc is the only half that can
+  move alone, and a horizontal pass is exactly the case where it should: same time to
+  cross, almost no rise. **`b.flat` is reset at the top of every `do_throw`**, next to
+  `b.bumped`, or a prop that fed once would stay flat for the rest of the run and its next
+  HIGH throw would come out as a pass.
+- **THE SHOWER PATTERNS FOLLOW THE DOMINANT HAND** (2026-07-28). Both showers hard-coded
+  the high hand as RIGHT in four places while the DEAL had just been made to follow
+  `dominant_hand`, so a left-hander would have had the whole load dealt into the left hand
+  and every high throw demanded of the right. `next_throw_over_top`, the over-the-top
+  branch, the two height floors and the feed's own test all read `dominant_hand` now,
+  which is a no-op for a right-handed save and the difference between working and broken
+  for a left-handed one. **Whenever a pattern has an asymmetric role for one hand, that
+  role belongs to `dominant_hand`, never to a literal RIGHT.**
+- **TENNIS's marked prop lobs 20% higher** (2026-07-28, Louis), `TENNIS_MIN` off
+  `OVER_TOP_MIN`: it is the one prop crossing over a full weave rather than over a single
+  road. Worth knowing before tuning it further: Tennis measures about zero clearance
+  either way (+0.3px before, -0.7px after) and the closest pass is NOT the lob against the
+  weave, it is the hand corner where an arriving prop sits on the point the next one
+  launches from. That corner is the long-standing zero-room residual this file already
+  documents for Tennis, and the lob's height does not move it.
 - **A SHOWER IS DEALT ONE-HANDED** (2026-07-28, Louis: "you should make the shower have
   all objects in the dominant hand except one"). `deal_side` is pattern-aware now: under
   SHOWER the whole load starts in the dominant hand and exactly one in the other, which
