@@ -319,10 +319,10 @@ const CAP_Y := 0.50           # where the mark's middle sits (0 top, 1 bottom)
 const CAP_GAP := 0.20         # space between letters, in units of the mark's height
 const CAP_NUDGE := [          #  x      y     scale        letter
 	Vector3(0.00, 0.00, 1.00),  #                          T  (two knives)
-	Vector3(0.00, 0.00, 1.00),  #                          O  (ring)
+	Vector3(-0.05, 0.00, 1.00),  #                          O  (ring)
 	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
 	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
-	Vector3(0.00, 0.00, 1.00),  #                          A  (two torches)
+	Vector3(0.00, -1.00, 1.00),  #                          A  (two torches)
 ]
 const GAME_TITLE := "TOSSA"
 const TITLE_MARK := "TOSS"
