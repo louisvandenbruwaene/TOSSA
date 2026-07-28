@@ -13555,120 +13555,114 @@ func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: C
 	fill_ellipse(wrist + d * w * 0.30 - n * w * 0.18, w * 0.20, w * 0.34, Color(0.95, 0.74, 0.55, 0.5))
 
 
-func capsule_letters(font: Font, s: Vector2, k: float, size: int, cy: float,
-		stem: int, bar: int, apex: int, textcol: Color, ringcol: Color) -> void:
-	# THE NAME, SPELLED PARTLY IN PROPS (2026-07-28, Louis: "replace that o with a ring
-	# (in the picture) and the T with a knive and club"). The O is a ring prop, the T is
-	# a prop standing as its stem with another laid across the top, and the rest of the
-	# word is set in the game's own face. Each glyph is measured and advanced one at a
-	# time, so a substituted letter takes exactly the space its prop needs and the word
-	# stays kerned however the name is later changed.
+func capsule_mark(s: Vector2, cy: float, size: float) -> void:
+	# THE WHOLE NAME IN PROPS, and no lettering at all (2026-07-28, Louis): the T is two
+	# knives with the vertical one lying over the horizontal, the O is a ring, each S is a
+	# line of balls following the letter's own two loops, and the A is two torches leaning
+	# together, flames up, with nothing across them. Only the background changes between
+	# the variants - the mark itself is identical in all five, which is what a wordmark is.
 	#
-	# A prop's local origin is its GRIP and it points UP at angle 0, which is what makes
-	# the T work at all: the stem is drawn straight onto the baseline (grip down, head
-	# up), and the bar is the same shape turned a quarter turn with its grip at the left
-	# end, so the crossbar reads as an object laid across rather than a rectangle.
-	var f := game_font()
-	var rr := float(size) * 0.40                 # the ring's own radius
-	var gap := float(size) * 0.06
-	# measure first, so the whole word can be centred before a single mark is drawn
+	# Everything is measured before anything is drawn, because the ring has to clear its
+	# neighbours by its OUTER edge (Louis) and a prop's advance is its real extent, not a
+	# font metric. A prop's local origin is its GRIP with the business end at negative y,
+	# which is what places every piece below.
+	var ring_r := size * 0.40
+	var s_r := size * 0.24                       # radius of each of the S's two loops
+	var gap := size * 0.20
+	var adv := {"T": size * 0.86, "O": ring_r * 2.0, "S": s_r * 2.0, "A": size * 0.78}
 	var total := 0.0
-	var widths: Array[float] = []
 	for i in GAME_TITLE.length():
-		var ch := GAME_TITLE[i]
-		var w := 0.0
-		if ch == "O":
-			w = rr * 2.0
-		elif ch == "T":
-			w = float(size) * 0.92
-		else:
-			w = f.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-		widths.append(w)
-		total += w + gap
+		total += float(adv.get(GAME_TITLE[i], size * 0.6)) + gap
 	total -= gap
 	var x := s.x * 0.5 - total * 0.5
-	var base := cy + float(size) * 0.36
+	var base := cy + size * 0.5                  # the mark's baseline
 	for i in GAME_TITLE.length():
 		var ch := GAME_TITLE[i]
-		var w: float = widths[i]
-		if ch == "O":
-			var rc := Vector2(x + rr, base - float(size) * 0.34)
-			draw_glow(rc, rr * 1.35, Color(ringcol.r, ringcol.g, ringcol.b, 0.22))
-			draw_ring_prop(rc, ringcol, rr * 0.092)
-		elif ch == "T":
-			# BUILDING A LETTER OUT OF PROPS IS ALL ORIGINS. A prop's local origin sits at
-			# its GRIP with the business end at negative y, so: turned +PI/2 the blade
-			# sweeps RIGHT and the pommel hangs left (turned -PI/2 it points the other way,
-			# which is how the first attempt threw the crossbar clear of the letter), and
-			# the stem has to be anchored by its grip 14 units below the baseline or its
-			# head stops short of the bar it is supposed to meet.
-			var bsc := w / 35.0                       # knife/club length in local units
-			var ssc := float(size) * 0.86 / 34.0
-			var top := base - float(size) * 0.86
-			capsule_prop(bar, Vector2(x + 9.0 * bsc, top), bsc, PI * 0.5)
-			capsule_prop(stem, Vector2(x + w * 0.5, base - 14.0 * ssc), ssc, 0.0)
-		else:
-			draw_string(f, Vector2(x + 3.0 * k, base + 3.0 * k), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.5))
-			draw_string(f, Vector2(x, base), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, size, textcol)
-			if ch == "A" and apex >= 0:
-				capsule_prop(apex, Vector2(x + w * 0.5, base - float(size) * 1.02), float(size) * 0.020, 0.0)
+		var w := float(adv.get(ch, size * 0.6))
+		match ch:
+			"T":
+				# the crossbar first, then the stem ON TOP of it - Louis: "the vertical
+				# above the horizontal". Turned +PI/2 a knife's blade sweeps right and its
+				# pommel hangs left, so the bar is anchored a pommel's length in.
+				var bsc := w * 1.06 / 35.0
+				var ssc := size * 0.92 / 35.0
+				var top := base - size * 0.92
+				# CENTRE THE BAR ON ITS OWN MIDDLE, not on its grip. A knife runs -26 to
+				# +9 in local units, so its middle sits 8.5 units from the origin, and
+				# anchoring by the origin hung the whole crossbar to one side of the stem.
+				draw_knife(Vector2(x + w * 0.5 - 8.5 * bsc, top), PI * 0.5, bsc)
+				draw_knife(Vector2(x + w * 0.5, base - 9.0 * ssc), 0.0, ssc)
+			"O":
+				var rc := Vector2(x + ring_r, base - size * 0.46)
+				draw_glow(rc, ring_r * 1.30, Color(0.45, 0.78, 1.0, 0.20))
+				draw_ring_prop(rc, Color(0.45, 0.75, 0.95), ring_r / 10.9)
+			"S":
+				# an S is two loops: the top one sweeps from its right tip up over and down
+				# to the waist, the bottom one carries on from the waist round to the left.
+				var cxs := x + s_r
+				var c1 := Vector2(cxs, base - size * 0.46 - s_r)
+				var c2 := Vector2(cxs, base - size * 0.46 + s_r)
+				for j in 9:
+					var a1 := lerpf(0.0, -1.5 * PI, float(j) / 8.0)
+					draw_ball_shape(c1 + Vector2(cos(a1), sin(a1)) * s_r, ball_color(j), size * 0.0075)
+				for j in 9:
+					var a2 := lerpf(-0.5 * PI, PI, float(j) / 8.0)
+					draw_ball_shape(c2 + Vector2(cos(a2), sin(a2)) * s_r, ball_color(j + 2), size * 0.0075)
+			"A":
+				# two torches leaning into each other, both burning, and nothing else -
+				# the gap between them at the top IS the letter's apex
+				var tsc := size * 0.028
+				draw_torch(Vector2(x + w * 0.10, base), 0.30, tsc, true)
+				draw_torch(Vector2(x + w * 0.90, base), -0.30, tsc, true)
+			_:
+				pass
 		x += w + gap
 
 
 func capsule_one(font: Font, s: Vector2, k: float) -> void:
-	# 1. THE CLUB STANDS, THE KNIFE LIES ACROSS. The warm one: a stage-lit backdrop, the
-	# club as the T's stem because its banded neck reads as a column, the knife as the bar.
+	# 1. STAGE LIGHT. The mark under the same shaft the game opens on.
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.05, 0.045), Color(0.02, 0.013, 0.017), 24)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.46), s.y * 0.70, Color(1.0, 0.62, 0.26, 0.24))
-	capsule_letters(font, s, k, int(round(s.y * 0.30)), s.y * 0.46,
-		PROP_CLUBS, PROP_KNIVES, -1, Color(1.0, 0.93, 0.74), Color(0.45, 0.75, 0.95))
-	draw_string(game_font(), Vector2(0, s.y * 0.86), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x,
-		int(round(28.0 * k)), Color(0.86, 0.78, 0.66))
+	draw_spotlight_cone(s, s.x * 0.5, 0.30)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.72, Color(1.0, 0.62, 0.26, 0.20))
+	capsule_mark(s, s.y * 0.50, s.y * 0.34)
 	draw_vignette(s, 0.56)
 
 
 func capsule_two(font: Font, s: Vector2, k: float) -> void:
-	# 2. THE KNIFE STANDS. Cold and steel-lit: the blade as the stem makes a much thinner,
-	# sharper T, and the club laid across gives the top bar its weight back.
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.045, 0.055, 0.085), Color(0.012, 0.015, 0.026), 22)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.66, Color(0.45, 0.72, 1.0, 0.20))
-	capsule_letters(font, s, k, int(round(s.y * 0.30)), s.y * 0.46,
-		PROP_KNIVES, PROP_CLUBS, -1, Color(0.94, 0.96, 1.0), Color(0.55, 0.82, 1.0))
-	draw_string(game_font(), Vector2(0, s.y * 0.86), "strict catches, earned heights", HORIZONTAL_ALIGNMENT_CENTER, s.x,
-		int(round(28.0 * k)), Color(0.74, 0.82, 0.92))
-	draw_vignette(s, 0.5)
+	# 2. NOTHING AT ALL. Near-black, no light source, no frame: the props are the picture.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.035, 0.028, 0.032), Color(0.008, 0.007, 0.010), 20)
+	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	draw_vignette(s, 0.70)
 
 
 func capsule_three(font: Font, s: Vector2, k: float) -> void:
-	# 3. THE T IS ON FIRE. The torch stands as the stem, so the word itself is burning at
-	# its first letter, with the knife across the top and embers climbing the whole mark.
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.03), Color(0.016, 0.011, 0.014), 24)
-	draw_glow(Vector2(s.x * 0.34, s.y * 0.40), s.y * 0.62, Color(1.0, 0.52, 0.20, 0.30))
-	capsule_letters(font, s, k, int(round(s.y * 0.30)), s.y * 0.46,
-		PROP_TORCHES, PROP_KNIVES, -1, Color(1.0, 0.90, 0.68), Color(1.0, 0.72, 0.34))
-	capsule_embers(Vector2(s.x * 0.34, s.y * 0.34), s.y * 0.44, 26, Color(1.0, 0.70, 0.32, 0.55))
+	# 3. FIRELIGHT. The A's own torches given a room to light, and embers over everything.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.12, 0.045, 0.028), Color(0.018, 0.011, 0.013), 24)
+	draw_glow(Vector2(s.x * 0.72, s.y * 0.46), s.y * 0.60, Color(1.0, 0.50, 0.18, 0.30))
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.40, Color(1.0, 0.72, 0.32, 0.20))
+	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	capsule_embers(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.52, 30, Color(1.0, 0.70, 0.32, 0.5))
 	draw_vignette(s, 0.58)
 
 
 func capsule_four(font: Font, s: Vector2, k: float) -> void:
-	# 4. EVERY PROP IT CAN CARRY. Club stem, knife bar, ring O, and a torch standing on
-	# the A - the densest version, for when the mark has room to be looked at.
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.09, 0.05, 0.06), Color(0.017, 0.012, 0.02), 22)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.72, Color(1.0, 0.66, 0.30, 0.22))
-	capsule_letters(font, s, k, int(round(s.y * 0.28)), s.y * 0.50,
-		PROP_CLUBS, PROP_KNIVES, PROP_TORCHES, Color(1.0, 0.92, 0.72), Color(0.50, 0.78, 0.96))
-	capsule_embers(Vector2(s.x * 0.72, s.y * 0.26), s.y * 0.30, 16, Color(1.0, 0.72, 0.34, 0.45))
-	draw_vignette(s, 0.56)
+	# 4. THE CURTAIN. Hung velvet behind the mark, the way the Small Theatre dresses.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.055), Color(0.03, 0.014, 0.024), 20)
+	draw_curtain_wall(s, s.y * 1.02, s.y * 0.02, Color(0.28, 0.065, 0.095), 26)
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.012, 0.02, 0.35))
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.70, Color(1.0, 0.72, 0.34, 0.18))
+	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	draw_vignette(s, 0.60)
 
 
 func capsule_five(font: Font, s: Vector2, k: float) -> void:
-	# 5. THE QUIET ONE. Near-black, one shaft of light, and only the two substitutions
-	# doing the talking - no glow behind the word, nothing else in the frame at all.
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.04, 0.03, 0.035), Color(0.01, 0.008, 0.012), 20)
-	draw_spotlight_cone(s, s.x * 0.5, 0.30)
-	capsule_letters(font, s, k, int(round(s.y * 0.32)), s.y * 0.50,
-		PROP_CLUBS, PROP_KNIVES, -1, Color(0.97, 0.94, 0.88), Color(0.62, 0.86, 1.0))
-	draw_vignette(s, 0.68)
+	# 5. NIGHT. The cold one: a deep blue field and a sky behind, so the torches read as
+	# the only warm thing in the frame.
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.025, 0.045, 0.075), Color(0.008, 0.012, 0.022), 22)
+	draw_stars(s, 46, 0.85)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.62, Color(0.35, 0.62, 1.0, 0.16))
+	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	draw_vignette(s, 0.62)
 
 
 func draw_capsule_art(font: Font, s: Vector2) -> void:
