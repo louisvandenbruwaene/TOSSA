@@ -318,11 +318,11 @@ const CAP_SIZE := 0.34        # the mark's height as a fraction of the picture's
 const CAP_Y := 0.50           # where the mark's middle sits (0 top, 1 bottom)
 const CAP_GAP := 0.20         # space between letters, in units of the mark's height
 const CAP_NUDGE := [          #  x      y     scale        letter
-	Vector3(0.00, 0.00, 1.00),  #                          T  (two knives)
-	Vector3(-0.05, 0.00, 1.00),  #                          O  (ring)
-	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
-	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
-	Vector3(0.00, -1.00, 1.00),  #                          A  (two torches)
+	Vector3(0.00, -0.10, 1.1),  #                          T  (two knives)
+	Vector3(-0.20, 0.00, 1.00),  #                          O  (ring)
+	Vector3(-0.15, 0.00, 1.00),  #                          S  (balls)
+	Vector3(-0.05, 0.00, 1.00),  #                          S  (balls)
+	Vector3(0.00, -0.30, 1.00),  #                          A  (two torches)
 ]
 const GAME_TITLE := "TOSSA"
 const TITLE_MARK := "TOSS"
@@ -13575,6 +13575,95 @@ func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: C
 	fill_ellipse(wrist + d * w * 0.30 - n * w * 0.18, w * 0.20, w * 0.34, Color(0.95, 0.74, 0.55, 0.5))
 
 
+# CAPSULE-ONLY PROPS (2026-07-28, Louis: "add more details to the objects ... far more
+# than in game is required, because that would make the gameplay laggy ... absolutely
+# gorgeous objects that look amazing even when zooming in a lot"). These are deliberately
+# extravagant: dozens of extra shapes per object, which is fine for ONE still frame and
+# would be indefensible on fifteen props at 120Hz. Nothing in here is reachable from the
+# stage - draw_ball_shape and friends are untouched and stay cheap.
+#
+# THE SCALE IS REAL (same session). A juggling ball is ~70mm, a ring ~320mm, a torch
+# ~480mm, so a ball is a 4.6th of a ring and a 6.9th of a torch. The mark drew it at a
+# 6.9th and a 9.6th - a pea beside them - and BOTH references independently said the ball
+# should be about 1.44x bigger, which is CAP_BALL_R below. Louis spotted it by eye first.
+const CAP_BALL_R := 0.119     # a ball's radius, in units of the mark's letter height
+
+func cap_ball(p: Vector2, col: Color, r: float) -> void:
+	# a juggling ball with a body: the shaded side is a second disc nudged away from the
+	# light rather than a gradient, the seams are the panel lines a real stitched ball
+	# has, and the specular is a filled shape with a hot core inside it (never a stroke -
+	# see THE ART RULE for why a stroked highlight reads as a sticker).
+	var lit := Color(minf(col.r * 1.18 + 0.05, 1.0), minf(col.g * 1.18 + 0.05, 1.0), minf(col.b * 1.18 + 0.05, 1.0))
+	var shade := Color(col.r * 0.52, col.g * 0.50, col.b * 0.56)
+	draw_circle(p, r, shade)
+	draw_circle(p - Vector2(r * 0.13, r * 0.15), r * 0.93, col)
+	draw_circle(p - Vector2(r * 0.30, r * 0.34), r * 0.62, lit)
+	# a bounce light along the shaded rim, which is what stops the dark side going flat
+	draw_arc(p, r * 0.90, PI * 0.15, PI * 0.85, 24, Color(lit.r, lit.g, lit.b, 0.35), maxf(1.0, r * 0.10), true)
+	# two panel seams, curved with the surface
+	draw_arc(p + Vector2(r * 0.42, 0), r * 0.92, PI * 0.62, PI * 1.38, 22, Color(0, 0, 0, 0.20), maxf(1.0, r * 0.055), true)
+	draw_arc(p - Vector2(r * 0.42, 0), r * 0.92, -PI * 0.38, PI * 0.38, 22, Color(0, 0, 0, 0.16), maxf(1.0, r * 0.055), true)
+	fill_ellipse(p - Vector2(r * 0.36, r * 0.42), r * 0.30, r * 0.22, Color(1, 1, 1, 0.55))
+	draw_circle(p - Vector2(r * 0.40, r * 0.47), r * 0.11, Color(1, 1, 1, 0.85))
+	draw_arc(p, r, 0.0, TAU, 40, Color(0, 0, 0, 0.28), maxf(1.0, r * 0.05), true)
+
+
+func cap_ring(c: Vector2, col: Color, R: float) -> void:
+	# the ring as a real tube: a dark underside, the body, a bright top edge, a specular
+	# sweep that follows the curve, and the grip tape a practice ring is wrapped with.
+	var w := R * 0.30                          # the tube's thickness
+	var dark := Color(col.r * 0.42, col.g * 0.46, col.b * 0.58)
+	var lit := Color(minf(col.r * 1.30 + 0.10, 1.0), minf(col.g * 1.26 + 0.10, 1.0), 1.0)
+	draw_arc(c, R - w * 0.5, 0.0, TAU, 72, dark, w * 1.14, true)
+	draw_arc(c, R - w * 0.5, 0.0, TAU, 72, col, w * 0.86, true)
+	draw_arc(c, R - w * 0.18, 0.0, TAU, 72, Color(0, 0, 0, 0.22), w * 0.18, true)   # outer shadow line
+	draw_arc(c, R - w * 0.86, 0.0, TAU, 72, lit, w * 0.20, true)                    # lit inner edge
+	draw_arc(c, R - w * 0.5, PI * 1.05, PI * 1.75, 40, Color(1, 1, 1, 0.42), w * 0.34, true)   # specular sweep
+	draw_arc(c, R - w * 0.5, PI * 0.15, PI * 0.70, 34, Color(0, 0, 0, 0.20), w * 0.30, true)   # underside
+	for i in 8:                                  # tape wraps around the tube
+		var a := TAU * float(i) / 8.0 + 0.22
+		var d := Vector2(cos(a), sin(a))
+		draw_line(c + d * (R - w * 0.96), c + d * (R - w * 0.04), Color(1, 1, 1, 0.10), maxf(1.0, R * 0.030))
+
+
+func cap_knife(p: Vector2, ang: float, sc: float) -> void:
+	# the stage knife, then the things a still frame can afford: a ground bevel down the
+	# edge, a darkened spine, a reflection band across the flat, rivets through the scales
+	# and a lit guard. Local units are the stage knife's own - blade -26 to 0, grip to +9.
+	draw_knife(p, ang, sc)
+	draw_set_transform(p, ang, Vector2.ONE * sc)
+	draw_colored_polygon(PackedVector2Array([Vector2(-0.4, -25.0), Vector2(1.5, -19.0),
+		Vector2(1.5, -1.5), Vector2(-0.4, -1.5)]), Color(1, 1, 1, 0.30))          # bevel
+	draw_colored_polygon(PackedVector2Array([Vector2(-2.5, -22.0), Vector2(-1.2, -22.0),
+		Vector2(-1.2, -2.0), Vector2(-2.5, -2.0)]), Color(0.10, 0.12, 0.16, 0.35))  # spine
+	draw_colored_polygon(PackedVector2Array([Vector2(-2.2, -14.5), Vector2(1.4, -12.0),
+		Vector2(1.4, -10.4), Vector2(-2.2, -12.9)]), Color(1, 1, 1, 0.45))         # reflection band
+	draw_line(Vector2(-2.6, 0.6), Vector2(2.6, 0.6), Color(1, 1, 1, 0.35), 0.5)    # lit guard
+	for ry in [3.0, 6.0]:
+		draw_circle(Vector2(0, ry), 0.62, Color(0.72, 0.66, 0.58))
+		draw_circle(Vector2(-0.18, ry - 0.18), 0.30, Color(1, 0.96, 0.88, 0.8))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func cap_torch(p: Vector2, ang: float, sc: float) -> void:
+	# the stage torch in its rich mode, plus the metalwork a close look wants: two ferrule
+	# bands with a highlight on each, the soaked wick wrap above them, and a white-hot
+	# core inside the flame the stage cannot afford to draw.
+	draw_torch(p, ang, sc, true)
+	draw_set_transform(p, ang, Vector2.ONE * sc)
+	for by in [2.0, 5.2, 8.4]:
+		draw_colored_polygon(PackedVector2Array([Vector2(-2.3, by), Vector2(2.3, by),
+			Vector2(2.3, by + 1.5), Vector2(-2.3, by + 1.5)]), Color(0.42, 0.33, 0.24))
+		draw_line(Vector2(-1.9, by + 0.4), Vector2(1.9, by + 0.4), Color(1.0, 0.86, 0.62, 0.45), 0.4)
+	draw_colored_polygon(PackedVector2Array([Vector2(-2.0, -1.6), Vector2(2.0, -1.6),
+		Vector2(1.6, 0.8), Vector2(-1.6, 0.8)]), Color(0.30, 0.24, 0.20))          # the wick wrap
+	for wy in [-1.2, -0.4, 0.4]:
+		draw_line(Vector2(-1.8, wy), Vector2(1.8, wy + 0.3), Color(0.16, 0.13, 0.11, 0.7), 0.28)
+	fill_ellipse(Vector2(0, -6.0), 1.05, 3.3, Color(1.0, 0.98, 0.86, 0.85))        # white-hot core
+	fill_ellipse(Vector2(0, -5.2), 0.55, 1.9, Color(1, 1, 1, 0.9))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func cap_nudge(i: int) -> Vector3:
 	# one letter's x / y / scale from the tuning table, safely - the table is edited by
 	# hand, so a name of a different length must not crash the picture
@@ -13588,7 +13677,7 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 	# the ring is measured by its OUTER edge, which is what Louis asked for
 	match ch:
 		"T": return gsz * 0.86
-		"O": return gsz * 0.80
+		"O": return gsz * 1.00
 		"S": return gsz * 0.48
 		"A": return gsz * 0.78
 		_: return gsz * 0.60
@@ -13621,7 +13710,7 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 		var size_l := size * n.z                 # this letter's own height
 		var w: float = widths[i]
 		var base := base0 + size * n.y
-		var ring_r := size_l * 0.40
+		var ring_r := size_l * 0.50
 		var s_r := size_l * 0.24                 # radius of each of the S's two loops
 		x += size * n.x
 		match ch:
@@ -13635,30 +13724,32 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 				# CENTRE THE BAR ON ITS OWN MIDDLE, not on its grip. A knife runs -26 to
 				# +9 in local units, so its middle sits 8.5 units from the origin, and
 				# anchoring by the origin hung the whole crossbar to one side of the stem.
-				draw_knife(Vector2(x + w * 0.5 - 8.5 * bsc, top), PI * 0.5, bsc)
-				draw_knife(Vector2(x + w * 0.5, base - 9.0 * ssc), 0.0, ssc)
+				cap_knife(Vector2(x + w * 0.5 - 8.5 * bsc, top), PI * 0.5, bsc)
+				cap_knife(Vector2(x + w * 0.5, base - 9.0 * ssc), 0.0, ssc)
 			"O":
 				var rc := Vector2(x + ring_r, base - size_l * 0.46)
 				draw_glow(rc, ring_r * 1.30, Color(0.45, 0.78, 1.0, 0.20))
-				draw_ring_prop(rc, Color(0.45, 0.75, 0.95), ring_r / 10.9)
+				cap_ring(rc, Color(0.45, 0.75, 0.95), ring_r)
 			"S":
 				# an S is two loops: the top one sweeps from its right tip up over and down
 				# to the waist, the bottom one carries on from the waist round to the left.
 				var cxs := x + s_r
 				var c1 := Vector2(cxs, base - size_l * 0.46 - s_r)
 				var c2 := Vector2(cxs, base - size_l * 0.46 + s_r)
-				for j in 9:
-					var a1 := lerpf(0.0, -1.5 * PI, float(j) / 8.0)
-					draw_ball_shape(c1 + Vector2(cos(a1), sin(a1)) * s_r, ball_color(j), size_l * 0.0075)
-				for j in 9:
-					var a2 := lerpf(-0.5 * PI, PI, float(j) / 8.0)
-					draw_ball_shape(c2 + Vector2(cos(a2), sin(a2)) * s_r, ball_color(j + 2), size_l * 0.0075)
+				# fewer balls, each at its REAL size against the ring and torches beside it
+				var br := size_l * CAP_BALL_R
+				for j in 7:
+					var a1 := lerpf(0.0, -1.5 * PI, float(j) / 6.0)
+					cap_ball(c1 + Vector2(cos(a1), sin(a1)) * s_r, ball_color(j), br)
+				for j in 7:
+					var a2 := lerpf(-0.5 * PI, PI, float(j) / 6.0)
+					cap_ball(c2 + Vector2(cos(a2), sin(a2)) * s_r, ball_color(j + 2), br)
 			"A":
 				# two torches leaning into each other, both burning, and nothing else -
 				# the gap between them at the top IS the letter's apex
 				var tsc := size_l * 0.028
-				draw_torch(Vector2(x + w * 0.10, base), 0.30, tsc, true)
-				draw_torch(Vector2(x + w * 0.90, base), -0.30, tsc, true)
+				cap_torch(Vector2(x + w * 0.10, base), 0.30, tsc)
+				cap_torch(Vector2(x + w * 0.90, base), -0.30, tsc)
 			_:
 				pass
 		x += w + gap - size * n.x
