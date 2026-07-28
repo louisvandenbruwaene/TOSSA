@@ -73,6 +73,13 @@ const W_LATE := 28        # ~233 ms, still a catch but sloppy
 const COMMIT := 52        # a CATCH press with a ball this near but outside the
 						  # allowed window fumbles it (drop). Beyond this = whiff.
 const MISS_GRACE := 20    # an uncaught ball drops this many ticks past arrival
+const FALLEN_LINGER := 360  # ticks a dropped prop lies on the boards before it is gone:
+                            # 3 seconds at 120Hz (2026-07-28, Louis's own number). It was
+                            # 70 - just over half a second - which is not long enough to
+                            # look down and see WHAT you dropped, and that look is the
+                            # whole reason a fallen prop is drawn at all.
+const FALLEN_FADE := 110    # ...and how much of that tail it spends fading, so it holds
+                            # solid first instead of dimming for the whole three seconds.
 
 # Off-Perfect catches are a CHANCE, not a hard window. A ball within the Good or
 # Late timing band secures with a probability that rises with Accuracy and falls
@@ -587,7 +594,15 @@ const HAND_INNER := 1        # the throw point, standard; also the catch point f
 const TR_BTB := 0
 const TR_HIGH := 1
 const TR_SPIN := 2
-const TR_OVER := 3
+# OVERTHROW IS GONE (2026-07-28, Louis: "remove overthrow as trick"). It was the last
+# "arm" trick - the kind that primes one throw and pays off when that throw is caught -
+# and it was the odd one out for a reason worth writing down: what it DID (send one prop
+# over the top of the pattern) is not a trick, it is what Reverse Cascade, Tennis, the
+# Shower and the Half Shower already are. Selling the same road twice, once as a pattern
+# with a score multiplier and once as a trick with a flat bonus, is the "heavier club"
+# mistake this project already rejected for props.
+# The over-the-top MACHINERY stays exactly where it is: the patterns above are built on
+# it. Only the trick that duplicated them is removed.
 const TRICKS := [
 	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
@@ -595,8 +610,6 @@ const TRICKS := [
 	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
 	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
 	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
-	{"id": "over", "name": "Overthrow",        "kind": "arm",    "lvl": 12, "str": 100, "perf": 30, "min_air": 0, "bonus": 120, "shout": "OVERTHROW!",
-	 "desc": "Power one throw up and OVER the top of the pattern."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
 const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
@@ -1056,6 +1069,19 @@ const UCARD_ARM := 20.0    # ...but it ignores keys for this long first. An unlo
 						    # frame after the player pressed Enter to finish it - without
 						    # an arming beat that same press would deal the card and throw
 						    # it away again too fast to read.
+# THE CARD ARRIVES FACE DOWN (2026-07-28, Louis: "just show that you unlock something: a
+# trick card or a pattern card, but not which one"). Three beats, and the middle one is the
+# whole feature: the BACK of the card (you have earned a trick, or a pattern - no more than
+# that), then a FLIP on the first press, then the face with the skill on it. The skill was
+# already rolled when the card was dealt (see deal_skill_card); the flip only shows what is
+# on it, because a reveal has to be the moment the PLAYER finds out, not the moment the
+# game makes up its mind.
+var ucard_flip := -1.0     # atick the flip began; -1 while the card is still face down
+const UCARD_FLIP := 30.0   # ...and how long the turn takes. Long enough to read as a card
+                           # being turned over, short enough not to be a cutscene.
+const UCARD_READ := 16.0   # ...then it ignores keys again for this long, so the press that
+                           # flipped the card cannot also dismiss it unread. Same reasoning
+                           # as UCARD_ARM, one beat later.
 var sheet_open := false
 var shop_open := false
 # the card CURSOR on the sheet and the shop (Louis: select with arrows / sticks / dpad,
@@ -1100,9 +1126,16 @@ const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it 
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
 const SHEET_REPEAT_RAMP := 0.55    # debug: ...and double the step size every this long held
 const SHEET_REPEAT_MAX := 16       # debug: the fastest it ever runs, points per step
+const MONEY_TAP := 50              # debug: one TAP of M/N - fine control at a shop counter
+const MONEY_HOLD_STEP := 1000      # debug: ...and one repeat while HELD, by the thousand
+const MONEY_HOLD_MAX := 64         # debug: the purse's own ramp ceiling. Higher than a
+                                   # stat's 16 because the numbers are: 200 points of
+                                   # Strength against a 60,000-gold Glow Kit.
 var _repeat_key := 0      # the debug stat-adjust key currently held for auto-repeat, 0 = none
 var _repeat_t := 0.0      # time accumulator for the held-key repeat
 var _repeat_held := 0.0   # how long the current key has been held, for the acceleration
+var _repeat_dirty := false # debug: a held money key changed the purse and the save is owed
+                           # ONE write, on release, instead of one per repeat
 var _prev_running := false
 
 # game-flow state
@@ -1601,17 +1634,32 @@ func _ready() -> void:
 		# or `--ucard pattern:shower`. The card is normally only reachable by actually
 		# crossing a wall, which is a whole career away for the later ones, so without
 		# this most of them could never be looked at.
+		# `--ucard trick:spin` / `--ucard pattern:shower` deals that card ALREADY TURNED
+		# OVER, because inspecting a face is what the flag is for. `--ucard back:trick` and
+		# `--ucard back:pattern` deal the face-down side instead - which now needs its own
+		# capture path, since a real card only shows its back until a key is pressed and a
+		# headless run presses nothing.
 		var uci := ua.find("--ucard")
 		if uci != -1 and uci + 1 < ua.size():
 			var spec: PackedStringArray = ua[uci + 1].split(":")
+			var head := String(spec[0]) if spec.size() > 0 else ""
 			var want := String(spec[1]) if spec.size() > 1 else ""
-			ucard_kind = 1 if spec.size() > 0 and String(spec[0]) == "pattern" else 0
+			var face_down := head == "back"
+			if face_down:
+				ucard_kind = 1 if want == "pattern" else 0
+			else:
+				ucard_kind = 1 if head == "pattern" else 0
 			var tab: Array = PATTERNS if ucard_kind == 1 else TRICKS
 			ucard_idx = 0
 			for k in tab.size():
 				if String((tab[k] as Dictionary)["id"]) == want:
 					ucard_idx = k
 			ucard_tick = 0.0
+			# `ucard_flip` is an atick STAMP, and any negative value means "still face
+			# down" - so a fake stamp in the past cannot be used to pre-flip it. 0.0 is
+			# the turn starting at the very first frame, which is complete long before any
+			# useful --shotat.
+			ucard_flip = -1.0 if face_down else 0.0
 		var hoi := ua.find("--hold")    # dev: the auto-player's hold per throw (0..44),
 		if hoi != -1 and hoi + 1 < ua.size():   # to verify held heights on screenshots
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
@@ -1620,6 +1668,12 @@ func _ready() -> void:
 		if ua.has("--glow"):        # dev: own the whole Glow Kit this session, for Blackout shots
 			has_glow_tape = true
 			has_glow_suit = true
+		if ua.has("--wardrobe"):    # dev: wear all five costume pieces this session. They
+			has_gloves = true       # cost 28,500 between them, i.e. most of a career, so
+			has_boots = true        # without this the finished figure had no capture path
+			has_hat = true          # at all and every piece would be checked in isolation
+			has_coat = true         # - which is how a hat and a tailcoat end up fighting.
+			has_vest = true
 		if ua.has("--boo"):         # dev: pin the room in the red, so the tomato path
 			_boo = true             # can be seen at all - see the note in update_sim
 		if ua.has("--nokit"):       # dev: the mirror of --glow. The demo save OWNS the
@@ -1728,17 +1782,43 @@ func _ready() -> void:
 
 #region MAIN LOOP & INPUT ROUTING
 func _process(delta: float) -> void:
+	# ONE DRAW PER PRESENTED FRAME, and this single line is the largest performance
+	# finding in the project's history (2026-07-28). Every `queue_redraw()` used to sit
+	# in `_physics_process`, which runs at 120Hz - and `queue_redraw()` is not a request
+	# to the renderer, it is a deferred callable pushed onto Godot's MessageQueue.
+	# `Main::iteration()` flushes that queue INSIDE its physics-step loop, so the
+	# callback fired, `NOTIFICATION_DRAW` was dispatched, and `_draw()` ran - **120 times
+	# a second, whatever the display was actually showing.** On a 60Hz panel that is
+	# every other frame thrown away; under load it was 116 of every 120.
+	#
+	# The probe had been printing the evidence for two sessions and it was read
+	# backwards. `draws/s` (counted inside `_draw`) sat pinned at 120-127 in every run
+	# while `engine fps` tracked the load exactly - 4.3 fps at fifteen torches, 94.9 with
+	# nothing in the air, same window, same second. A previous pass concluded from that
+	# disagreement that `engine fps` was a background-window artefact and dismissed it.
+	# **When two counters disagree, the one that responds to load is the real one**: a
+	# macOS throttle does not care how many props are on stage. `draws/s` was measuring
+	# the physics rate wearing a renderer's name.
+	#
+	# So the draw is driven from here, `_process`, which Godot calls exactly once per
+	# main-loop iteration - i.e. per presented frame. Nothing else had to change: `_draw`
+	# reads live state, so it is as smooth at 60 draws a second as at 120, and the sim
+	# still steps 120 times regardless. Do NOT put a `queue_redraw()` back into
+	# `_physics_process`; if a paused screen needs to animate, it already gets a frame
+	# here every frame.
+	queue_redraw()
 	# dev only: the --fps probe. Everything the game does is in _physics_process and
 	# _draw; this runs per RENDERED frame, which is the only place real fps is visible.
 	if not _fps:
 		return
-	# ENGINE FPS IS A LIE IN A BACKGROUND WINDOW, and every measurement this session took
-	# was taken in one (2026-07-28). macOS throttles the PRESENTATION of an unfocused
-	# window, so Engine.get_frames_per_second() collapses to 15-40 while the game is
-	# genuinely drawing 120 times a second - `draws` below, counted in _draw itself,
-	# stayed at ~120 in the very same runs that reported 15. A whole "fill rate cliff"
-	# was diagnosed off that number before the two were compared. **`draws/s` is the
-	# real frame rate here; treat `engine fps` as meaningful only in a FOREGROUND window.**
+	# `draws/s` AND `engine fps` SHOULD NOW AGREE, and if they ever diverge again
+	# something has put a `queue_redraw()` back on the physics clock - see the note on
+	# the call above. That divergence is what a previous pass mistook for a macOS
+	# background-window throttle: it blamed the metric that was responding correctly to
+	# load and trusted the one that was silently counting physics ticks. macOS does
+	# throttle an unfocused window's presentation, so `engine fps` from a backgrounded
+	# run is still a soft number - but it is not a fabricated one, and a drop that
+	# scales with the number of props on stage is real work, not a windowing artefact.
 	var fps := Engine.get_frames_per_second()
 	_fps_frames += 1
 	_fps_sum += fps
@@ -1783,13 +1863,19 @@ func _physics_process(delta: float) -> void:
 	if ucard_kind >= 0 and ucard_out_tick >= 0.0 and atick() - ucard_out_tick > UCARD_OUT:
 		ucard_kind = -1
 		ucard_out_tick = -1.0
-	# ...and the autoplayer presses the key for itself. It has no hands, and the card now
-	# HOLDS the sim until one arrives - so an unlock landing inside a --demo/--calib run
-	# would stop that run dead, with no ACT line and no quit, looking exactly like a hang.
-	# (--shotat still captures either way: the shot counter is above this.) Same move
-	# --demo already makes to dismiss the establishing card.
-	if ucard_kind >= 0 and _demo and ucard_out_tick < 0.0 and atick() - ucard_tick >= UCARD_ARM + 40.0:
-		ucard_out_tick = atick()
+		ucard_flip = -1.0
+	# ...and the autoplayer presses the key for itself, BOTH times: the flip and then the
+	# dismissal. It has no hands, and the card HOLDS the sim until one arrives - so an
+	# unlock landing inside a --demo/--calib run would stop that run dead, with no ACT line
+	# and no quit, looking exactly like a hang. (--shotat still captures either way: the
+	# shot counter is above this.) Same move --demo already makes to dismiss the
+	# establishing card.
+	if ucard_kind >= 0 and _demo:
+		if ucard_flip < 0.0 and atick() - ucard_tick >= UCARD_ARM + 40.0:
+			ucard_flip = atick()
+		elif ucard_flip >= 0.0 and ucard_out_tick < 0.0 \
+				and atick() - ucard_flip >= UCARD_FLIP + UCARD_READ + 40.0:
+			ucard_out_tick = atick()
 	if _shot or _collcheck or _handlog:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
 		if _shot_frames >= _shot_tick:
@@ -1802,7 +1888,6 @@ func _physics_process(delta: float) -> void:
 		if _demo and game_state == ST_ESTABLISH and cine_tick > 40:
 			establish_key()          # dev: the autoplayer dismisses each set's card, so
 									 #      --demo --booking runs a whole booking end to end
-		queue_redraw()
 		return
 	# THE UNLOCK CARD HOLDS THE ACT. It waits for a key now, so without this the crowd
 	# would drain and props would fall behind a card the player is reading. cine_tick is
@@ -1814,7 +1899,6 @@ func _physics_process(delta: float) -> void:
 	if ucard_kind >= 0:
 		cine_tick += 1
 		update_hands()
-		queue_redraw()
 		return
 	if sheet_open or shop_open or paused or debug_panel_open:
 		if sheet_open and debug_mode:
@@ -1823,8 +1907,7 @@ func _physics_process(delta: float) -> void:
 			# same stats through the same _adjust, so there was never a reason to
 			# exclude it, and its own pips are the best place to watch a stat climb
 			sheet_repeat(delta)
-		queue_redraw()   # the sheet, shop, pause menu, and debug panel all halt the sim
-		return
+		return   # the sheet, shop, pause menu, and debug panel all halt the sim
 	if freeze > 0:
 		# hit-stop: the world holds its breath for a few ticks so a drop lands with
 		# weight. Input is still read (a press during the hold acts on the held world,
@@ -1833,7 +1916,6 @@ func _physics_process(delta: float) -> void:
 		if not _demo:
 			_read_inputs()
 		update_hands()
-		queue_redraw()
 		return
 	# THE GUIDED BEAT (see the tutorial region): on a 50% or 25% lesson pass the world
 	# stops dead at every action the drill asks for. Same shape as the hit-stop above -
@@ -1850,7 +1932,6 @@ func _physics_process(delta: float) -> void:
 			else:
 				_read_inputs()
 			update_hands()
-			queue_redraw()
 			return
 	# SLOW MOTION (ideas.rtf): the sim advances by FRACTIONAL ticks while real
 	# time flows on, so every catch window stretches in the player's hands. Input
@@ -1866,7 +1947,6 @@ func _physics_process(delta: float) -> void:
 		_tick_acc += maxf(1.0 - _slow_cur, 0.12)
 		if _tick_acc < 1.0:
 			update_hands()
-			queue_redraw()
 			return
 		_tick_acc -= 1.0
 	tick += 1
@@ -1891,7 +1971,13 @@ func _physics_process(delta: float) -> void:
 		_demo_step()
 	if running:
 		update_sim()
-	if collapsing and running and balls_airborne() == 0 and falling.is_empty():
+	# THE VERDICT WAITS FOR THE LAST PROP TO LAND, not for the boards to be cleared - and
+	# the difference only started mattering when a dropped prop began lying there for three
+	# seconds instead of half of one (see FALLEN_LINGER). This was `falling.is_empty()`,
+	# i.e. "no dropped prop is still being DRAWN", which silently became a three-second
+	# stall between the collapse and the results card. `still_dropping()` asks the question
+	# that was always meant: is anything still in the air.
+	if collapsing and running and balls_airborne() == 0 and not still_dropping():
 		collapsing = false
 		running = false   # the last prop has landed: only NOW may the verdict arrive
 	if _prev_running and not running and not tut_active:
@@ -1910,7 +1996,6 @@ func _physics_process(delta: float) -> void:
 		shake *= 0.82
 	elif position != Vector2.ZERO:
 		position = Vector2.ZERO
-	queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
@@ -2011,13 +2096,23 @@ func _input(event: InputEvent) -> void:
 		save_settings()
 		return
 	if ucard_kind >= 0:
-		# ANY key dismisses the unlock card, and the key is EATEN here - it never reaches
+		# ANY key works the unlock card, and the key is EATEN here - it never reaches
 		# the screen underneath. That is the whole reason this sits above the per-state
 		# dispatch: the card usually lands on the results card or in the day hub, where
 		# the very same Enter would otherwise confirm whatever was selected behind it and
 		# the player would lose a menu choice they never saw themselves make. Keys stay
 		# eaten through the fade-out too, so a second press cannot land early either.
-		if ucard_out_tick < 0.0 and atick() - ucard_tick >= UCARD_ARM:
+		#
+		# TWO PRESSES NOW, because the card has two sides: the first TURNS IT OVER and the
+		# second puts it away. Each has its own arming beat (UCARD_ARM, then UCARD_READ)
+		# for the identical reason - a card is dealt one frame after the player pressed
+		# something, and without a beat that one press would run the whole sequence and
+		# throw the card away before it was seen.
+		if ucard_flip < 0.0:
+			if atick() - ucard_tick >= UCARD_ARM:
+				ucard_flip = atick()
+				play_sfx("ui2", -9.0)
+		elif ucard_out_tick < 0.0 and atick() - ucard_flip >= UCARD_FLIP + UCARD_READ:
 			ucard_out_tick = atick()
 			play_sfx("ui2", -11.0)
 		return
@@ -2711,39 +2806,41 @@ func reward_director() -> void:
 
 
 func pity_grant() -> void:
-	# six acts without a single new skill: gift the LOCKED skill nearest its wall,
-	# provided its STAGE requirement is already met (the venue-gated arrival skills
-	# stay sacred - they are what makes reaching a stage feel like reaching it).
-	# "Nearest" is the smallest total shortfall across level, Strength and Accuracy,
-	# so the gift is always the thing the player was visibly working toward.
-	var best_id := ""
-	var best_name := ""
-	var best_gap := 1 << 30
-	for tab: Array in [TRICKS, PATTERNS]:
-		for d: Dictionary in tab:
-			var id := String(d.get("id", ""))
-			# ...and never one whose TIME requirement is unmet either. This is the same
-			# rule the venue gate already had, for the same reason: the director exists
-			# to break a stat drought, not to hand a beginner the whole toolkit. Without
-			# this it walked straight past the new `perf` wall and undid it (six quiet
-			# acts used to gift a skill outright, which is how the walls stopped mattering
-			# at all - see skill_req_met).
-			if skill_req_met(d) or venue_index() < int(d.get("ven", 0)) \
-					or int(career["perfs"]) < int(d.get("perf", 0)):
-				continue
-			var gap := maxi(0, int(d.get("lvl", 1)) - level) \
-				+ maxi(0, int(d.get("str", 0)) - strength) \
-				+ maxi(0, int(d.get("acc", 0)) - accuracy)
-			if gap < best_gap:
-				best_gap = gap
-				best_id = id
-				best_name = String(d.get("name", id))
-	if best_id == "":
-		return   # nothing giftable: every remaining wall is a stage, which is right
-	gifted.append(best_id)
+	# six acts without a single new skill: deal a card anyway. It is the same card the
+	# walls deal - face down, one skill you do not own, flat odds - so the player cannot
+	# tell a pity card from an earned one, which is the point of a pity system.
+	#
+	# THE "NEAREST WALL" RULE IS GONE, and it had to go (2026-07-28). It used to gift the
+	# locked skill with the smallest shortfall across level/Strength/Accuracy, on the
+	# reasoning that the gift should be the thing the player was visibly working toward.
+	# With the skills hidden there is nothing visible to work toward: the player no longer
+	# knows which skill sits behind which bar, so "the one you were nearly at" is a
+	# distinction they cannot perceive and cannot be pleased by. A flat roll over
+	# everything left says the same thing more honestly.
+	#
+	# It deliberately deals BEYOND the earned entitlement, and that is what makes it a
+	# gift: the next wall the player crosses will find the card already spent and pass
+	# quietly. A pity grant is an advance on the next reward, not a free extra one.
+	var kinds: Array[bool] = []
+	if not skill_pool(true).is_empty():
+		kinds.append(true)
+	if not skill_pool(false).is_empty():
+		kinds.append(false)
+	if kinds.is_empty():
+		return   # the player owns everything; there is nothing left to be short of
+	var is_trick: bool = kinds[randi() % kinds.size()]
+	var idx := deal_skill_card(is_trick)
+	if idx < 0:
+		return
 	perfs_since_unlock = 0
-	announce_unlocks()   # queues the lesson and the banner through the normal path
-	set_day_msg("all that stage time paid off  -  %s just clicked. Practice is free, and it pays XP." % best_name)
+	if is_trick:
+		queue_lesson("trick_%s" % String(TRICKS[idx]["id"]))
+		trick_sel = idx
+		trick_primed = false
+	else:
+		queue_lesson("pattern_%s" % String(PATTERNS[idx]["id"]))
+	deal_ucard(0 if is_trick else 1, idx)
+	set_day_msg("all that stage time paid off  -  something new just clicked.")
 
 
 func set_day_msg(m: String) -> void:
@@ -2798,6 +2895,18 @@ func day_actions() -> Array[Dictionary]:
 		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
 			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
 			"sub": "no %s and no Strength tick: just +%d stamina, and one fewer egg to juggle." % [coin_word(), int(EGG_EAT_STAM)]})
+	if has_helmet:
+		# DRINKS BELONG WHERE THE RECOVERY IS (2026-07-28, Louis, describing them as
+		# bought "in the resting area"). They are stocked from the shop too and always
+		# were, but everything else that puts stamina back - the meal, the bed, the pie,
+		# the tomato, the egg - is on this drawer, and a restock is the same errand as a
+		# meal. It costs no day segment: it is a case of cans, not an evening out.
+		out.append({"id": "drinks", "grp": "rest", "icon": "drink", "name": "STOCK Energy Drinks",
+			"cost": "%s %s" % [commafy(ENERGY_DRINK_BATCH_COST), coin_word()],
+			"ok": money >= ENERGY_DRINK_BATCH_COST,
+			"why": "not enough %s" % coin_word() if money < ENERGY_DRINK_BATCH_COST else "",
+			"sub": "%d cans for the helmet, %d in reserve now. Each is +%d%% stamina, poured the moment you run dry." % [
+				ENERGY_DRINK_BATCH, energy_drinks, int(ENERGY_DRINK_STAMINA_PCT * 100.0)]})
 	out.append({"id": "shop", "grp": "prep", "icon": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
 		"sub": "props and gear. A new prop teaches itself when you buy it."})
@@ -2994,6 +3103,14 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			# vignette between the press and the shop was dead time)
 			shop_open = true
 			play_sfx("ui2", -13.0)
+		"drinks":
+			# a restock, not an errand: no vignette and no day segment, for the same
+			# reason the shop itself opens instantly. try_buy_drinks owns the whole
+			# transaction (price, cap, message, save), so the hub and the shop counter
+			# cannot end up charging differently for the same case of cans.
+			try_buy_drinks()
+			if shop_msg != "":
+				set_day_msg(shop_msg)
 		"pie", "egg", "tomato":
 			# EVERY thing you eat gets its beat of picture now (2026-07-27, Louis: only
 			# sleeping had one). Same contract as eat/inn above - the vignette plays, and
@@ -3130,13 +3247,9 @@ func sheet_input(kc: int) -> void:
 		KEY_R:
 			if debug_mode: _adjust("spd", -1)
 		KEY_M:
-			if debug_mode:
-				money += 50
-				save_progress()
+			if debug_mode: _adjust("money", MONEY_TAP)
 		KEY_N:
-			if debug_mode:
-				money = maxi(0, money - 50)
-				save_progress()
+			if debug_mode: _adjust("money", -MONEY_TAP)
 		KEY_PERIOD:
 			if debug_mode:   # raise reputation to preview later venues/costumes
 				reputation += 250
@@ -3180,13 +3293,41 @@ func shop_gear() -> Array[Dictionary]:
 			"col": Color(0.95, 0.92, 0.88), "desc": "every prop catches as forgivingly as a club does - it widens the ODDS on a Good or Late catch, never the Perfect window"})
 		g.append({"id": "boots", "name": "Stage Boots", "cost": BOOTS_COST, "owned": has_boots,
 			"col": Color(0.62, 0.50, 0.40), "desc": "every throw costs one less stamina, so a long set stops being the thing that ends the night"})
-		# the last FRONT slot is two items sharing one card: the Helmet until owned, then
-		# Energy Drinks forever after, so its name, text, cost and count all switch
-		g.append({"id": "helmet", "name": "Energy Drinks" if has_helmet else "Energy-Drink Helmet",
-			"cost": ENERGY_DRINK_BATCH_COST if has_helmet else ENERGY_HELMET_COST, "owned": false,
-			"count": energy_drinks if has_helmet else 0, "col": Color(0.95, 0.75, 0.35),
-			"desc": ("+%d%% stamina each, auto-sipped the instant you run low" % int(ENERGY_DRINK_STAMINA_PCT * 100.0)) if has_helmet \
-				else "a hat that never lets your stamina run out - buying it fills the tank"})
+		# THE HAT AND THE DRINKS ARE TWO OBJECTS (2026-07-28, Louis: the "energy drink hat
+		# ... should be distinct from energy drinks"). They used to be ONE card that
+		# shape-shifted: the Helmet until owned, Energy Drinks forever after, sharing an id
+		# and therefore sharing an ICON, so the thing you buy once and the thing you buy ten
+		# of were the same picture. They are two rows now, and the drinks row only appears
+		# once there is a hat to pour them into - which is also the honest statement of the
+		# dependency between them.
+		g.append({"id": "helmet", "name": "Energy-Drink Helmet", "cost": ENERGY_HELMET_COST,
+			"owned": has_helmet, "col": Color(0.95, 0.75, 0.35),
+			"desc": "a hat that never lets your stamina run out - buying it fills the tank"})
+		if has_helmet:
+			g.append({"id": "drinks", "name": "Energy Drinks", "cost": ENERGY_DRINK_BATCH_COST,
+				"owned": false, "count": energy_drinks, "col": Color(0.92, 0.42, 0.30),
+				"desc": "%d for %s, and each one is +%d%% stamina, auto-sipped the instant you run low" % [
+					ENERGY_DRINK_BATCH, commafy(ENERGY_DRINK_BATCH_COST), int(ENERGY_DRINK_STAMINA_PCT * 100.0)]})
+		# THE DOOR IS A CARD (2026-07-28, Louis: "i find the button c hard to intuitively
+		# use to unlock the backroom of the shop. I'd like you to create a button for that
+		# (in the shop itself, where you need to press enter, like buying something)").
+		#
+		# He is right, and the reason is worth stating: the back room is a PURCHASE - it has
+		# a price, it takes a day segment, it asks for a confirmation - and every other
+		# purchase in this game is a card you walk the cursor onto and press Enter. A
+		# hotkey with no object behind it was the only thing in the shop you had to be told
+		# about, which is exactly the definition of unintuitive. As a card it explains
+		# itself: it has a name, a price plate, a description in the detail strip and the
+		# same Enter that buys everything else.
+		#
+		# Once paid, the same card becomes the DOOR - `cost` 0, so the price plate reads
+		# free and try_buy_gear just walks through. One row rather than two, because it is
+		# one thing: the way to the back of the shop.
+		g.append({"id": "backroom", "name": "The Back Room",
+			"cost": 0 if has_backroom else BACKROOM_COST, "owned": false,
+			"col": Color(0.62, 0.26, 0.30),
+			"desc": "the sharp things are through here - knives, torches, the saw, and Uncle Dan's pie" if has_backroom \
+				else "16 and over. A one-off fee at the curtain, and an errand's worth of the day"})
 		return g
 	g.append({"id": "pie", "name": "Uncle Dan's Pie", "cost": PIE_COST, "owned": false,
 		"count": pie_count, "col": Color(0.9, 0.62, 0.3), "desc": "a whole day of slow, clear time"})
@@ -3203,6 +3344,9 @@ func shop_gear() -> Array[Dictionary]:
 	g.append({"id": "glow_kit", "name": "Glow-in-the-Dark Kit", "cost": GLOW_KIT_COST,
 		"owned": has_glow_tape and has_glow_suit, "col": Color(0.72, 1.0, 0.62),
 		"desc": "both halves at once, and cheaper than buying them apart"})
+	# ...and the way back out, as a card for the same reason the way in is one
+	g.append({"id": "frontroom", "name": "The Front Room", "cost": 0, "owned": false,
+		"col": Color(0.55, 0.62, 0.70), "desc": "back through the curtain, to the safe goods"})
 	return g
 
 
@@ -3248,11 +3392,10 @@ func try_buy_gear(id: String) -> void:
 		"hat":       try_buy_once("hat", HAT_COST)
 		"coat":      try_buy_once("coat", COAT_COST)
 		"vest":      try_buy_once("vest", VEST_COST)
-		"helmet":
-			if not has_helmet:
-				try_buy_helmet()
-			else:
-				try_buy_drinks()
+		"backroom":  shop_through_curtain()
+		"frontroom": shop_leave_back_room()
+		"helmet":    try_buy_helmet()
+		"drinks":    try_buy_drinks()
 
 
 func gear_owned_flag(id: String) -> bool:
@@ -3293,6 +3436,43 @@ func try_buy_once(id: String, cost: int) -> void:
 	play_sfx("money", -6.0)
 
 
+func shop_through_curtain() -> void:
+	# THROUGH THE CURTAIN. The first time it costs the 16+ fee and a day segment, like any
+	# errand; after that the back room is simply the other half of the shop. Refused rather
+	# than half-charged if the purse is short - and it SAYS the price, because a card that
+	# does nothing when pressed is worse than no card.
+	if has_backroom:
+		shop_room = SHOP_ROOM_BACK
+		shop_sel = 0
+		play_sfx("ui", -15.0)
+		return
+	if money < BACKROOM_COST:
+		shop_msg = "the fee at the curtain is %s" % commafy(BACKROOM_COST)
+		shop_msg_warn = true
+		shop_msg_ms = int(Time.get_ticks_msec())
+		play_sfx("whiff", -10.0)
+		return
+	if not confirm_spend("backroom", BACKROOM_COST, true):
+		return
+	money -= BACKROOM_COST
+	has_backroom = true
+	shop_room = SHOP_ROOM_BACK
+	shop_sel = 0
+	seg_used = mini(seg_used + 1, SEG_PER_DAY)
+	shop_msg = "through the curtain - mind the sharp things"
+	shop_msg_warn = false
+	shop_msg_ms = int(Time.get_ticks_msec())
+	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -6.0)
+
+
+func shop_leave_back_room() -> void:
+	shop_room = SHOP_ROOM_FRONT
+	shop_sel = 0
+	play_sfx("ui", -15.0)
+
+
 func shop_input(kc: int) -> void:
 	# the shop's keys, shared by the play overlay and the day hub. The number on
 	# each card is its buy key: 1-7 the props (balls included), 8 glasses, 9 pie,
@@ -3320,34 +3500,14 @@ func shop_input(kc: int) -> void:
 			shop_sel = clampi(shop_sel, 0, shop_cards() - 1)
 			play_sfx("ui", -15.0)
 		KEY_C:
-			# THROUGH THE CURTAIN, and back. The first time it costs the 16+ fee and a day
-			# segment, like any errand; after that the back room is simply the other half
-			# of the shop. Refused rather than half-charged if the purse is short.
+			# C is KEPT as a shortcut, and only as a shortcut. The door is a CARD now (see
+			# shop_gear), which is the way it is meant to be found; this is the same
+			# function under a key, for whoever has already learned it. Both routes going
+			# through one function is what stops the two ever charging different fees.
 			if shop_room == SHOP_ROOM_BACK:
-				shop_room = SHOP_ROOM_FRONT
-				shop_sel = 0
-				play_sfx("ui", -15.0)
-			elif has_backroom:
-				shop_room = SHOP_ROOM_BACK
-				shop_sel = 0
-				play_sfx("ui", -15.0)
-			elif money >= BACKROOM_COST:
-				if confirm_spend("backroom", BACKROOM_COST, true):
-					money -= BACKROOM_COST
-					has_backroom = true
-					shop_room = SHOP_ROOM_BACK
-					shop_sel = 0
-					seg_used = mini(seg_used + 1, SEG_PER_DAY)
-					shop_msg = "through the curtain - mind the sharp things"
-					shop_msg_warn = false
-					shop_msg_ms = int(Time.get_ticks_msec())
-					save_progress()
-					play_sfx("money", -6.0)
+				shop_leave_back_room()
 			else:
-				shop_msg = "the fee at the curtain is %s" % commafy(BACKROOM_COST)
-				shop_msg_warn = true
-				shop_msg_ms = int(Time.get_ticks_msec())
-				play_sfx("whiff", -10.0)
+				shop_through_curtain()
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
 		KEY_B, KEY_SPACE:
@@ -5099,6 +5259,12 @@ func try_buy_drinks() -> void:
 	money -= ENERGY_DRINK_BATCH_COST
 	energy_drinks += ENERGY_DRINK_BATCH
 	shop_buy_ms = int(Time.get_ticks_msec())
+	# a RECEIPT, because this is now reachable from the rest drawer as well as the counter
+	# and the hub has no price plate of its own to confirm against - the same green line
+	# try_top_up leaves after buying a set
+	shop_msg = "%d more cans - %d in reserve" % [ENERGY_DRINK_BATCH, energy_drinks]
+	shop_msg_warn = false
+	shop_msg_ms = int(Time.get_ticks_msec())
 	save_progress()
 	play_sfx("money", -6.0)
 
@@ -5973,8 +6139,8 @@ func next_throw_over_top(h: int) -> bool:
 	# always (Reverse Cascade), for one throw (Overthrow), or back and forth
 	# (Tennis's marked ball).
 	# Mirrors the over_top decision in do_throw, read BEFORE the ball is popped.
-	if trick_primed and trick_sel == TR_OVER:
-		return true
+	# (Overthrow used to claim this road for one primed throw; it was removed as a trick
+	# because the patterns below ARE that road - see the note on TRICKS.)
 	if pattern == RCASC:
 		return true
 	if pattern == TENNIS:
@@ -6671,7 +6837,7 @@ func do_throw(h: int, hold: int) -> void:
 	# The SHOWER's and HALF SHOWER's high hand ride the same over-the-top road
 	# (that is what those patterns ARE), so they inherit the outer launch, the
 	# wide landing, and the corner dodge in one mechanic.
-	var over_top := this_trick == TR_OVER
+	var over_top := false
 	if h == dominant_hand and pattern in [SHOWER, HALFSHOWER]:
 		over_top = true
 	elif pattern == RCASC:
@@ -6944,9 +7110,27 @@ func dev_meet_req(d: Dictionary) -> void:
 		reputation = maxi(reputation, VENUE_REP[int(d["ven"])])
 
 
-func skill_req_met(d: Dictionary) -> bool:
-	if gifted.has(String(d.get("id", ""))):
-		return true   # the pity director granted it outright; the wall is forgiven
+# WHAT YOU HAVE, AND WHAT YOU HAVE EARNED, ARE TWO DIFFERENT QUESTIONS (2026-07-28).
+# This is the change Louis asked for and it is worth stating the shape of it before the
+# code: "hide the tricks and patterns until they are unlocked. just show that you unlock
+# something: a trick card or a pattern card, but not which one. put a randomiser on it
+# also. You can only obtain tricks and patterns you don't have already, all equal chance."
+#
+# Before, a WALL and a SKILL were the same thing: Behind the Back was the thing behind
+# Accuracy 50, so the Skills screen could list every locked skill with the exact bar it
+# sat behind, and crossing that bar always handed you that skill. Now the wall decides
+# WHEN and the deal decides WHICH:
+#   * `skill_gate_cleared(d)` is the old test - stats, level, stage, acts played. It no
+#     longer says "you have this"; it says "you have earned a card of this kind".
+#   * `owned_skills` is the truth about what the player HAS, and it is what every gameplay
+#     check reads through `skill_req_met`. Nothing is unlocked by standing near its wall.
+#   * `deal_skill_card` rolls one skill you do not own, uniformly, and that is the one the
+#     card turns over.
+# The PACING is deliberately untouched: the same walls, cleared in the same order, deal the
+# same number of cards at the same moments. Only the identity behind each card is now a
+# surprise, which is the whole point - and it means a locked skill can no longer advertise
+# itself, so the Skills screen shows a face-down card where it used to print a name.
+func skill_gate_cleared(d: Dictionary) -> bool:
 	# TIME AT THE JOB, before anything else (2026-07-27, Louis: "i want less tricks
 	# unlocked so early in the game. i have barely any reputation or stats and yet i have
 	# them all already ... make sure the player has to play quite a bit and gets used to
@@ -6970,6 +7154,80 @@ func skill_req_met(d: Dictionary) -> bool:
 	if venue_index() < int(d.get("ven", 0)):
 		return false
 	return true
+
+
+func skill_req_met(d: Dictionary) -> bool:
+	# DO YOU HAVE IT. The one question every gameplay check asks - can this pattern be
+	# selected, will this trick fire, does the Skills screen show it - and the answer is
+	# ownership, never proximity to a wall. `gifted` is the older name of the same list
+	# (it was the pity director's own record) and stays the persisted key so no save has to
+	# be migrated; `owned_skills()` is what to call it in new code.
+	var id := String(d.get("id", ""))
+	if id == "":
+		return true
+	if skill_free(d):
+		return true   # Cascade: no wall at all, so it is yours before anything is dealt
+	return gifted.has(id)
+
+
+func skill_free(d: Dictionary) -> bool:
+	# a skill with NO requirement of any kind is the starting kit, not a prize. Cascade is
+	# the only one, and it must never enter the random pool or the very first card dealt
+	# could be the pattern the player is already using.
+	return skill_req_text(d) == "yours from the start"
+
+
+func skill_pool(is_trick: bool) -> Array[int]:
+	# EVERY SKILL OF THIS KIND THE PLAYER DOES NOT YET HAVE (Louis: "you can only obtain
+	# tricks and patterns you don't have already, all equal chance"). Indices, so the caller
+	# can pick one with a flat randi and nothing needs weighting.
+	var tab: Array = TRICKS if is_trick else PATTERNS
+	var out: Array[int] = []
+	for i in tab.size():
+		var d: Dictionary = tab[i]
+		if skill_free(d) or gifted.has(String(d["id"])):
+			continue
+		out.append(i)
+	return out
+
+
+func skill_earned_count(is_trick: bool) -> int:
+	# HOW MANY CARDS OF THIS KIND THE PLAYER HAS EARNED: one per wall cleared. Counting
+	# walls rather than matching each wall to its own skill is what lets the identity be
+	# random while the PACING stays exactly what it was - the same gates, in the same
+	# order of difficulty, deal the same number of cards at the same moments.
+	var tab: Array = TRICKS if is_trick else PATTERNS
+	var n := 0
+	for i in tab.size():
+		var d: Dictionary = tab[i]
+		if skill_free(d):
+			continue
+		if skill_gate_cleared(d):
+			n += 1
+	return n
+
+
+func skill_held_count(is_trick: bool) -> int:
+	var tab: Array = TRICKS if is_trick else PATTERNS
+	var n := 0
+	for i in tab.size():
+		var d: Dictionary = tab[i]
+		if not skill_free(d) and gifted.has(String(d["id"])):
+			n += 1
+	return n
+
+
+func deal_skill_card(is_trick: bool) -> int:
+	# ROLL ONE, uniformly, from what is left. Uses the global randi and never the sim rng:
+	# `rng` drives the deterministic catch sequence, and a card dealt mid-act must not
+	# shift it (the same rule roll_encore and the flower throws already follow).
+	var pool := skill_pool(is_trick)
+	if pool.is_empty():
+		return -1
+	var idx: int = pool[randi() % pool.size()]
+	var tab: Array = TRICKS if is_trick else PATTERNS
+	gifted.append(String((tab[idx] as Dictionary)["id"]))
+	return idx
 
 
 func skill_req_text(d: Dictionary) -> String:
@@ -7482,32 +7740,42 @@ func announce_unlocks() -> void:
 	# whatever is newly open. queue_lesson's own once-ever dedupe is the memory of
 	# what was already announced, so nothing double-fires across sessions either.
 	# Skills open from the very start (Cascade) never announce.
-	for i in TRICKS.size():
-		if not trick_unlocked(i) or skill_req_text(TRICKS[i]) == "yours from the start":
-			continue
-		if queue_lesson("trick_%s" % String(TRICKS[i]["id"])):
-			# the banner, and the fresh trick becomes the SELECTED one, so the very
-			# next Space press does the thing the banner just explained (nothing
-			# fires by itself: the one-shot still wants its own press)
-			trick_unlock = i
-			trick_unlock_tick = tick
-			trick_sel = i
-			trick_primed = false
-			perfs_since_unlock = 0   # the reward drought counter re-arms on any unlock
-			ucard_kind = 0
-			ucard_idx = i
-			ucard_tick = atick()
-			play_sfx("streak", -5.0)
-	for i in PATTERNS.size():
-		if not pattern_unlocked(i) or skill_req_text(PATTERNS[i]) == "yours from the start":
-			continue
-		if queue_lesson("pattern_%s" % String(PATTERNS[i]["id"])):
-			set_trick_msg("NEW PATTERN  -  %s  -  P switches patterns in training" % String(PATTERNS[i]["name"]).to_upper())
-			perfs_since_unlock = 0
-			ucard_kind = 1
-			ucard_idx = i
-			ucard_tick = atick()
-			play_sfx("streak", -6.0)
+	# ONE CARD PER WALL CLEARED, and which skill is on it is rolled here (see
+	# skill_req_met's header for why). Loops rather than single deals because a big stat
+	# spend or a stage arrival can cross two walls in one frame; each deal takes one card
+	# off the entitlement, so nothing is ever handed out twice and nothing is lost.
+	#
+	# The whole card is dealt at ONCE, face down, and the roll has already happened by the
+	# time the player sees it. Rolling on the flip instead would be the same odds and a
+	# worse feeling: the reveal has to be the moment the player finds out, not the moment
+	# the game makes up its mind.
+	for _pass in TRICKS.size():
+		if skill_held_count(true) >= skill_earned_count(true):
+			break
+		var ti := deal_skill_card(true)
+		if ti < 0:
+			break
+		queue_lesson("trick_%s" % String(TRICKS[ti]["id"]))
+		# the fresh trick becomes the SELECTED one, so the very next Space press does the
+		# thing the card just explained (nothing fires by itself: a trick wants its own press)
+		trick_unlock = ti
+		trick_unlock_tick = tick
+		trick_sel = ti
+		trick_primed = false
+		perfs_since_unlock = 0   # the reward drought counter re-arms on any unlock
+		deal_ucard(0, ti)
+		play_sfx("streak", -5.0)
+	for _pass2 in PATTERNS.size():
+		if skill_held_count(false) >= skill_earned_count(false):
+			break
+		var pi := deal_skill_card(false)
+		if pi < 0:
+			break
+		queue_lesson("pattern_%s" % String(PATTERNS[pi]["id"]))
+		set_trick_msg("NEW PATTERN  -  P switches patterns in training")
+		perfs_since_unlock = 0
+		deal_ucard(1, pi)
+		play_sfx("streak", -6.0)
 
 
 func energy_mult() -> float:
@@ -7569,7 +7837,12 @@ func resolve_act() -> void:
 	# worth making.
 	if set_collapsed:
 		score = goal_for(run_venue, goals_hit - 1) if goals_hit >= 1 else 0
-	elif goals_hit == 0:
+	elif goals_hit == 0 and fail_reason == "":
+		# ...unless something closer to the event already said why. The empty-air rule can
+		# end an act because the props RAN OUT ("stranded"), and overwriting that with
+		# "you chose the bow" would tell the player they made a decision they never made.
+		# Same principle the collapse path is built on: the reason belongs to whichever
+		# code actually knew.
 		fail_reason = "bow"   # walked off under the first goal: say so plainly
 	var purist_mult := PURIST_BONUS if purist else 1.0
 	# a completion XP bonus off the whole act's play
@@ -8228,7 +8501,24 @@ func sheet_repeat(dt: float) -> void:
 		key = KEY_W; which = "str"; delta = -1
 	elif Input.is_physical_key_pressed(KEY_E):
 		key = KEY_E; which = "end"; delta = -1
+	# ...AND THE PURSE, on the same mechanism (2026-07-28, Louis: "make the debug money up
+	# button (m) and down, be able to held to rapidly increase amounts (toggle by the
+	# thousand)"). Two presses were needed for every 100 gold, and the things worth testing
+	# cost 60,000 - which is twelve hundred presses of M to reach the Glow Kit.
+	#
+	# THE STEP CHANGES WITH THE GESTURE, which is the whole design: a TAP is still
+	# MONEY_TAP, because fine control is what a tap is for and "give me exactly 50 more"
+	# is a real thing to want at a shop counter. A HOLD switches to MONEY_HOLD_STEP - by
+	# the thousand - and then doubles on the same SHEET_REPEAT_RAMP curve the stats use, so
+	# a second of holding is a few thousand and three seconds crosses the whole economy.
+	elif Input.is_physical_key_pressed(KEY_M):
+		key = KEY_M; which = "money"; delta = MONEY_HOLD_STEP
+	elif Input.is_physical_key_pressed(KEY_N):
+		key = KEY_N; which = "money"; delta = -MONEY_HOLD_STEP
 	if key == 0:
+		if _repeat_key != 0 and _repeat_dirty:
+			save_progress()   # ...and the disk is written ONCE, on release. See below.
+			_repeat_dirty = false
 		_repeat_key = 0
 		return
 	if key != _repeat_key:
@@ -8243,11 +8533,21 @@ func sheet_repeat(dt: float) -> void:
 	# brief tap is still one point and a long hold crosses the whole range in a moment.
 	_repeat_t += dt
 	_repeat_held += dt
-	var burst := clampi(int(pow(2.0, _repeat_held / SHEET_REPEAT_RAMP)), 1, SHEET_REPEAT_MAX)
+	var cap := MONEY_HOLD_MAX if which == "money" else SHEET_REPEAT_MAX
+	var burst := clampi(int(pow(2.0, _repeat_held / SHEET_REPEAT_RAMP)), 1, cap)
+	# ONE _adjust PER REPEAT, WITH THE BURST FOLDED INTO THE AMOUNT for money. A stat is
+	# clamped to a cap, so stepping it `burst` times and stepping it once by `burst` are
+	# genuinely different at the ceiling and the loop is correct there. A purse has no cap,
+	# so the loop would just be MONEY_HOLD_MAX identical save_progress() calls a tick - up
+	# to sixty-four disk writes per repeat, which is what makes a held key stutter.
 	while _repeat_t >= SHEET_REPEAT_RATE:
 		_repeat_t -= SHEET_REPEAT_RATE
-		for _i in burst:
-			_adjust(which, delta)
+		if which == "money":
+			_repeat_dirty = true
+			money = maxi(0, money + delta * burst)
+		else:
+			for _i in burst:
+				_adjust(which, delta)
 
 
 func _adjust(which: String, delta: int) -> void:
@@ -8263,6 +8563,10 @@ func _adjust(which: String, delta: int) -> void:
 			stamina = minf(stamina, stamina_max)
 		"spd":
 			speed = clampi(speed + delta, 0, SPEED_CAP)
+		"money":
+			# debug only, and it is a PURSE, not a stat - no cap, no ball unlock, and it
+			# floors at nothing rather than at one
+			money = maxi(0, money + delta)
 	check_ball_unlock(prev_max)
 	save_progress()
 
@@ -8399,6 +8703,33 @@ func load_progress() -> void:
 		seg_used = int(cf.get_value("day", "seg_used", 0))
 		venue_pick = int(cf.get_value("day", "venue_pick", -1))
 		meals = int(cf.get_value("day", "meals", 0))
+	# A SAVE FROM BEFORE THE CARDS OWNED ITS SKILLS IMPLICITLY (2026-07-28) - and this
+	# migration is the part with teeth. Until today a skill was unlocked by STANDING PAST
+	# ITS WALL: nothing was written down, `gifted` held only the handful the pity director
+	# had granted, and every other skill was recomputed from the stats on every launch.
+	# Ownership is explicit now, so loading an old save without this would silently strip a
+	# mid-career juggler of every trick and pattern they had ever earned - the save file
+	# would look intact and the player would open the Skills screen to find it empty.
+	#
+	# So: seed `gifted` with everything whose wall this save has ALREADY cleared, which is
+	# exactly the set that was unlocked a moment before the update. `skill_ver` marks it
+	# done, once, per save. Nothing is taken away and nothing new is granted.
+	var skill_ver := int(cf.get_value("prog", "skill_ver", 0))
+	if skill_ver < 1:
+		for tab: Array in [TRICKS, PATTERNS]:
+			for sd: Dictionary in tab:
+				var sid := String(sd.get("id", ""))
+				if sid == "" or skill_free(sd) or gifted.has(sid):
+					continue
+				if skill_gate_cleared(sd):
+					gifted.append(sid)
+	# OVERTHROW WAS REMOVED THE SAME DAY, and it was the LAST index in TRICKS - so unlike
+	# the pattern fold above, nothing shifted and a clamp is the whole migration. Its
+	# leftovers are dropped rather than left to point at the trick that took its slot
+	# (there is none) or to keep a lesson queued that can never be taught.
+	gifted.erase("over")
+	pending_tuts.erase("trick_over")
+	trick_sel = clampi(trick_sel, -1, TRICKS.size() - 1)
 	stamina_max = 100.0 + 9.0 * float(endurance)
 	# stamina persists through the day now (sleep restores it). An old save that
 	# predates the day loop simply wakes rested.
@@ -8442,6 +8773,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
 	cf.set_value("prog", "pattern_ver", pattern_ver)
+	cf.set_value("prog", "skill_ver", 1)   # this save's skills are written down, not inferred
 	cf.set_value("prog", "career", career)
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
@@ -8474,6 +8806,16 @@ func spawn_falling(pos: Vector2, kind: int, col: Color) -> void:
 	falling.append({"pos": pos, "vel": Vector2(randf_range(-0.8, 0.8), 1.4),
 		"kind": kind, "col": col, "ang": randf_range(0.0, TAU),
 		"spin": randf_range(-0.12, 0.12), "bounced": false, "rest": -1})
+
+
+func still_dropping() -> bool:
+	# is any dropped prop STILL FALLING? A prop with `rest` set has hit the boards and is
+	# only lying there fading, which is scenery - see the collapse gate in _physics_process
+	# for why "the list is not empty" is the wrong question.
+	for d in falling:
+		if int(d["rest"]) < 0:
+			return true
+	return false
 
 
 func drop_ball(b: Ball, why: String) -> void:
@@ -8572,6 +8914,9 @@ func fail_text() -> Array:
 		"bow":
 			return ["YOU BOWED OUT UNDER THE TARGET",
 				"you chose the bow before the number fell, so the night ends here. The crowd went home happy."]
+		"stranded":
+			return ["NOTHING LEFT TO JUGGLE",
+				"one prop cannot make a pattern, and a catch only scores with something still in the air - so the act ended itself. Buy a spare set before the next booking."]
 	return ["", ""]
 
 
@@ -8676,11 +9021,32 @@ func update_sim() -> void:
 	# after the drops above so a prop lost this very tick is already counted.
 	# The grace exists so a single tick of bare air - the frame between a catch and the
 	# throw that follows it - can never read as a bow.
+	# ONE PROP IN A HAND IS THE END OF THE ACT, GOAL OR NO GOAL (2026-07-28, Louis: "the
+	# game should automatically stop, finish, when the player has only one object and he is
+	# holding it. since he can't score"). The reasoning is exactly his: pillar two says at
+	# least one prop must be in the air for a catch to score (`juggling_catch`), so a
+	# performer holding his last object cannot earn another point however long he stands
+	# there. The `goals_hit >= 1` gate above is right for the ordinary bow - you do not get
+	# to cash in before you have banked something - but it is wrong for this case, because
+	# there is nothing left to bank it WITH. Without this the act sat there, throwing and
+	# catching one prop for no score, until the crowd drained into a collapse: several
+	# minutes of a game that had already ended.
+	#
+	# Reachable at low counts specifically: three props and two drops leaves one, and two is
+	# under DROP_LIMIT, so nothing else was watching. It resolves as a graceful FINISH rather
+	# than a collapse - the player keeps what they scored, which is the honest outcome for
+	# someone whose set was ended by the props running out rather than by the room.
+	var stranded := balls.size() <= 1
 	if mode == MODE_PERFORM and booking_active and running and not collapsing \
-			and not results_open and not tut_active and goals_hit >= 1 and balls_airborne() == 0:
+			and not results_open and not tut_active and (goals_hit >= 1 or stranded) \
+			and balls_airborne() == 0:
 		_empty_air += 1
 		if _empty_air >= EMPTY_AIR_GRACE:
 			_empty_air = 0
+			if stranded and goals_hit < 1:
+				# ...and it says WHY, because an act that ends on its own with nothing
+				# banked has to explain itself or it reads as the game giving up
+				fail_reason = "stranded"
 			finish_performance()
 			return
 	else:
@@ -9624,15 +9990,30 @@ func draw_juggler(s: Vector2) -> void:
 
 	# legs: a narrow pelvis, thighs tapering to the knee, calves to the ankle, shoes
 	var shoe := Color(0.20, 0.12, 0.09)
+	# THE TROUSERS ARE THEIR OWN RUNG OF THE LADDER (2026-07-28, Louis: "make the glow in
+	# the dark legs look better"). They were drawn in `suit_dk` - which is the JACKET's
+	# shadow, picked as a shadow, and under the Kit that put the legs at 0.10/0.42/0.24
+	# against a vest at 0.78/1.0/0.86. The man's whole lower half was therefore the
+	# darkest thing on a costume whose entire selling point is that it glows, which is
+	# why the legs read as two stumps with a bright line down each. The value ladder in
+	# the recolour above covers suit/vest/collar and never had a trouser rung; it does now.
+	var trouser := suit_dk
+	if glow_suit_lit():
+		trouser = Color(0.17, 0.60, 0.34)
 	draw_colored_polygon(PackedVector2Array([   # pelvis
 		Vector2(cx - 0.62 * H, hip_y - 0.3 * H), Vector2(cx + 0.62 * H, hip_y - 0.3 * H),
-		Vector2(cx + 0.56 * H, hip_y + 0.12 * H), Vector2(cx - 0.56 * H, hip_y + 0.12 * H)]), suit_dk)
-	draw_capsule(Vector2(cx - 0.4 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
-	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
-	draw_capsule(Vector2(cx + 0.4 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
-	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
-	fill_ellipse(Vector2(cx - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
-	fill_ellipse(Vector2(cx + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+		Vector2(cx + 0.56 * H, hip_y + 0.12 * H), Vector2(cx - 0.56 * H, hip_y + 0.12 * H)]), trouser)
+	draw_capsule(Vector2(cx - 0.4 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
+	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
+	draw_capsule(Vector2(cx + 0.4 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
+	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
+	if has_boots:
+		# WARDROBE: STAGE BOOTS replace the two flat shoe ellipses - see draw_stage_boot
+		draw_stage_boot(Vector2(cx - 0.34 * H, floor_y), H, -1.0, shoe, collar, accent)
+		draw_stage_boot(Vector2(cx + 0.34 * H, floor_y), H, 1.0, shoe, collar, accent)
+	else:
+		fill_ellipse(Vector2(cx - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
+		fill_ellipse(Vector2(cx + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
 
 	# neck: a short skin column from just under the jaw down past the collar line, so a
 	# real (short) neck shows between the head and the coat instead of the head sitting
@@ -9659,13 +10040,9 @@ func draw_juggler(s: Vector2) -> void:
 			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx - 0.05 * H, shoulder_y - 0.02 * H)]), collar)
 		draw_colored_polygon(PackedVector2Array([
 			Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx + 0.05 * H, shoulder_y - 0.02 * H)]), collar)
-		var vest_top := shoulder_y + 0.52 * H
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx - 0.3 * H, vest_top), Vector2(cx + 0.3 * H, vest_top),
-			Vector2(cx + 0.28 * H, waist_y), Vector2(cx + 0.36 * H, hip_y - 0.1 * H),
-			Vector2(cx - 0.36 * H, hip_y - 0.1 * H), Vector2(cx - 0.28 * H, waist_y)]), vest)
+		draw_colored_polygon(vest_shape(cx, H, shoulder_y, waist_y, hip_y), vest)
 		for bi in 3:
-			draw_circle(Vector2(cx, vest_top + 0.3 * H + float(bi) * 0.42 * H), 0.06 * H, button)
+			draw_circle(Vector2(cx, shoulder_y + 0.82 * H + float(bi) * 0.42 * H), 0.06 * H, button)
 	else:
 		# a plain collar band across the back of the neck
 		draw_colored_polygon(PackedVector2Array([
@@ -9677,8 +10054,8 @@ func draw_juggler(s: Vector2) -> void:
 	# the jacket but BELOW the head and the arms, so the arms still pass in front of the
 	# coat and a held Columns middle ball (which rests at stage_center, i.e. over the
 	# hip) is never painted over.
-	draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, floor_y,
-		suit, suit_dk, collar, accent, facing_back)
+	draw_performer_polish(cx, H, shoulder_y, chest_y, waist_y, hip_y, knee_y, floor_y,
+		suit, suit_dk, vest, collar, accent, facing_back)
 
 	# head: a full head of hair framing the crown and temples. Facing the crowd, the skin
 	# face sits over it; facing away mid-spin, the back of the head is all hair, which is
@@ -9688,6 +10065,13 @@ func draw_juggler(s: Vector2) -> void:
 	if spin_on:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_head(head, head_r, hair, skin, facing_back)
+	# WARDROBE: the TOP HAT goes on after the head and OUTSIDE the body's width-scale,
+	# for the same reason the head is - a hat reads round from every angle, and squashed
+	# to the profile's 0.14 it would be a vertical bar balanced on his skull. It is the
+	# last thing drawn on the figure's upper half, so it sits over the hair rather than
+	# under the fringe.
+	if has_hat:
+		draw_top_hat(head, head_r, suit_dk, vest, accent)
 	if spin_on:                                                            # back to the body width-scale for the arms
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
@@ -9712,7 +10096,6 @@ func draw_juggler(s: Vector2) -> void:
 	# the cummerbund and the outseam, so the figure has EDGES at a distance instead of
 	# being one bright mass. Brighter than the cloth they sit on, or they vanish into it.
 	if glow_suit_lit():
-		var gh := 1.0
 		# ONLY the trouser outseams are left of the old tape. The two horizontal runs
 		# (across the shoulders, round the waist) were struck straight across the figure
 		# rather than along any seam, so against a costume that now glows by itself they
@@ -9721,10 +10104,39 @@ func draw_juggler(s: Vector2) -> void:
 		# so the line left the sleeve and crossed open air - a wire, not piping. The
 		# sleeve is lit cloth now and needs no help; the bare forearm reading as skin is
 		# correct, because he is wearing a glowing costume, not covered in phosphor.
-		draw_glow_strips([
-			Vector2(cx - 0.5 * H, hip_y), Vector2(cx - 0.45 * H, floor_y - 0.15 * H),  # left outseam
-			Vector2(cx + 0.5 * H, hip_y), Vector2(cx + 0.45 * H, floor_y - 0.15 * H),  # right outseam
-		], 2.0, gh)
+		#
+		# AND THE LEG RUN WAS MAKING THE ARMS' OWN MISTAKE (2026-07-28, Louis: "make the
+		# glow in the dark legs look better"). It was hip -> floor as ONE straight chord
+		# while the leg is two tapering capsules with a knee between them: measured against
+		# the shapes actually drawn above, the seam started 0.13H inside the thigh and
+		# finished 0.03H OUTSIDE the calf, so a line meant to be a seam left the cloth and
+		# ended in open air beside the ankle. It is a POLYLINE now, with a vertex at the
+		# knee, and every x is derived from the capsule centres and half-widths right
+		# there in the leg block rather than eyeballed - the thigh is 0.46H wide about
+		# cx±0.40H, the calf 0.30H about cx±0.34H, so the outer face is 0.63H then 0.49H
+		# then 0.42H, and the seam sits just inside each.
+		#
+		# A TURN-UP AT THE ANKLE is the other half of the fix, and it is the mark that
+		# gives the leg an END. A single stripe down a limb reads as a stick; a bright band
+		# across the hem reads as a trouser over a shoe, which is what is actually there.
+		var seam_l := PackedVector2Array([
+			Vector2(cx - 0.50 * H, hip_y + 0.02 * H),
+			Vector2(cx - 0.40 * H, knee_y),
+			Vector2(cx - 0.35 * H, floor_y - 0.22 * H)])
+		var seam_r := PackedVector2Array([
+			Vector2(cx + 0.50 * H, hip_y + 0.02 * H),
+			Vector2(cx + 0.40 * H, knee_y),
+			Vector2(cx + 0.35 * H, floor_y - 0.22 * H)])
+		draw_glow_seam(seam_l, 2.0, 1.0)
+		draw_glow_seam(seam_r, 2.0, 1.0)
+		# ...and the turn-up sits at whatever the trouser's real hem is: at the ankle bare,
+		# or at the top of a boot shaft when the wardrobe has put one there. A band drawn
+		# across the middle of a boot is a band drawn on the wrong garment.
+		var hem_y := floor_y - (0.54 if has_boots else 0.21) * H
+		for hemx in [-0.34 * H, 0.34 * H]:
+			draw_glow_seam(PackedVector2Array([
+				Vector2(cx + hemx - 0.15 * H, hem_y),
+				Vector2(cx + hemx + 0.15 * H, hem_y)]), 2.4, 0.9)
 	# done with the (possibly spinning) figure: return to screen space, then lay the
 	# sweeping motion streaks over the top so the turn reads as fast
 	if spin_on:
@@ -9733,8 +10145,9 @@ func draw_juggler(s: Vector2) -> void:
 
 
 func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: float,
-		waist_y: float, hip_y: float, floor_y: float,
-		suit: Color, suit_dk: Color, collar: Color, accent: Color, facing_back: bool) -> void:
+		waist_y: float, hip_y: float, knee_y: float, floor_y: float,
+		suit: Color, suit_dk: Color, vest: Color, collar: Color, accent: Color,
+		facing_back: bool) -> void:
 	# EXPERIMENTS / performer_polish: evening dress, drawn the way the rest of this
 	# figure is drawn - filled SHAPES pinned to the body's own landmarks, in the
 	# venue's own palette. The two earlier passes hung thin decorative STROKES over
@@ -9756,12 +10169,57 @@ func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: floa
 	var tie := Color(0.13, 0.09, 0.11)         # near-black, so it reads on any venue suit
 
 	# a satin stripe down the outside of each trouser leg, following the leg's own
-	# taper (hip 0.56h out, ankle 0.40h) so it sits ON the cloth at every point. It is
-	# the JACKET's shade on the trouser's darker one - the lapel silk has no contrast
-	# to give here, since the trousers are already cut from it.
+	# taper so it sits ON the cloth at every point. It is the JACKET's shade on the
+	# trouser's darker one - the lapel silk has no contrast to give here, since the
+	# trousers are already cut from it.
+	#
+	# A POLYLINE WITH THE KNEE IN IT, for the reason spelled out at the glow seam: this
+	# was hip -> ankle as one straight chord over a leg that is two capsules with a bend
+	# between them, so it crossed off the thigh's outer face and finished outside the
+	# calf. Both seams now read the same three x values off the leg block's own capsule
+	# geometry, and there is one description of where a trouser seam runs.
 	var stripe := Color(suit.r, suit.g, suit.b, 0.65)
-	draw_line(Vector2(cx - 0.56 * h, hip_y + 0.06 * h), Vector2(cx - 0.40 * h, floor_y - 0.24 * h), stripe, 2.0)
-	draw_line(Vector2(cx + 0.56 * h, hip_y + 0.06 * h), Vector2(cx + 0.40 * h, floor_y - 0.24 * h), stripe, 2.0)
+	for side in [-1.0, 1.0]:
+		draw_polyline(PackedVector2Array([
+			Vector2(cx + side * 0.50 * h, hip_y + 0.02 * h),
+			Vector2(cx + side * 0.40 * h, knee_y),
+			Vector2(cx + side * 0.35 * h, floor_y - 0.22 * h)]), stripe, 2.0)
+
+	# WARDROBE: THE TAILCOAT (6,000). Drawn before the facing_back branch, because tails
+	# are the one garment that shows MORE from behind - a Spin that hid them would be the
+	# frame where the piece disappears.
+	#
+	# THE TAILS SWING OUT, AND THAT IS WHAT MAKES THEM READ AS TAILS. First attempt hung
+	# them straight down from the hip flare, and on screen the pair read as a frock coat -
+	# or worse, a dressing gown: they were as wide as the thigh, sat directly over it, and
+	# fell to mid-shin, so there was no frame in which anything separated a tail from a
+	# trouser. Measured against the leg block, that was inevitable rather than unlucky. The
+	# thigh's outer face is at 0.63h and the calf's at 0.49h, so a panel drawn between 0.34h
+	# and 0.74h is ON the leg for its whole length.
+	#
+	# So they FLARE: the top stays on the coat's own hip flare, and the hem swings out to
+	# 0.86h - well clear of the 0.49h leg - which reads as two tails with daylight round
+	# them AND is what tails actually do on a man who is moving. They end at the back of the
+	# knee, which is where a tailcoat's do. Nothing here widens the figure: 0.86h is inside
+	# the jacket's own 0.92h shoulder, let alone the arms' 2.5h reach.
+	if has_coat:
+		for side in [-1.0, 1.0]:
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(cx + side * 0.32 * h, hip_y - 0.18 * h),   # under the waist, inboard
+				Vector2(cx + side * 0.68 * h, hip_y - 0.02 * h),   # out to the coat's hip flare
+				Vector2(cx + side * 0.86 * h, knee_y - 0.04 * h),  # the hem, swung clear of the leg
+				Vector2(cx + side * 0.72 * h, knee_y + 0.10 * h),  # the tail's point
+				Vector2(cx + side * 0.52 * h, knee_y - 0.16 * h),  # ...and the inner hem, higher
+				Vector2(cx + side * 0.36 * h, hip_y + 0.06 * h),
+			]), suit)
+			# the vent: a seam up the inner edge, which is what separates two tails from
+			# one skirt. Without it the pair reads as a single dark apron behind the legs.
+			draw_line(Vector2(cx + side * 0.38 * h, hip_y + 0.02 * h),
+				Vector2(cx + side * 0.56 * h, knee_y - 0.10 * h), Color(seam.r, seam.g, seam.b, 0.75), 1.6)
+			# ...and the cut-away front edge, the mark that says tailcoat rather than
+			# frock coat: a satin sweep from the waist out to the flare.
+			draw_line(Vector2(cx + side * 0.30 * h, waist_y + 0.10 * h),
+				Vector2(cx + side * 0.66 * h, hip_y + 0.04 * h), Color(satin.r, satin.g, satin.b, 0.85), 2.2)
 
 	if facing_back:
 		# facing away mid-Spin: a centre seam and a shoulder yoke, so the back of the
@@ -9778,6 +10236,43 @@ func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: floa
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(cx - 0.062 * h, shoulder_y - 0.02 * h), Vector2(cx + 0.062 * h, shoulder_y - 0.02 * h), apex,
 	]), linen)
+
+	# WARDROBE: THE SEQUIN WAISTCOAT (12,000), the late-game money piece, so it had better
+	# look like it cost twelve thousand. Drawn BEFORE the lapels on purpose: the vest top
+	# (shoulder+0.52h) sits above the lapel's tip (chest+0.38h), so the two overlap, and a
+	# waistcoat painted over its own lapels is the tell of art applied in the wrong order.
+	#
+	# A SEQUIN IS A DISC THAT CATCHES LIGHT, so the field is discs and the light is TIME:
+	# every sequin runs its own phase and a couple are near-white on any given frame, which
+	# is what a spangled front does under a spotlight. Two things keep it from becoming
+	# noise. The dots are 0.055h (~2.2px at 720p) and no smaller - below that they land in
+	# the sub-pixel band the round props were flattened to escape, and a shimmering torso
+	# would be the same bug wearing a waistcoat. And there are fifteen of them, in a brick
+	# offset rather than a grid: a square lattice at this size reads as a printed pattern.
+	# A SEQUIN'S COLOUR IS THE LIGHT, NOT THE CLOTH, and the first pass got that backwards.
+	# It tinted the dots toward `accent`, which at the Small Theatre is a warm orange - the
+	# same hue as the waistcoat under them - so fifteen sequins were drawn and not one was
+	# visible. Under the Glow Suit it was worse: accent 0.70/1.0/0.80 on a vest of
+	# 0.78/1.0/0.86 is the same colour twice. **Metal reads by LIGHTNESS, never by hue**, so
+	# the dots are pale house gold (the tone the footlights, the coin and the flowers
+	# already share, so it is still the venue's own light) and the field they sit on is
+	# pulled a quarter of the way DOWN toward the jacket's shade to give them something to
+	# be bright against.
+	if has_vest:
+		var seq_field := Color(vest.r * 0.80, vest.g * 0.78, vest.b * 0.76)
+		draw_colored_polygon(vest_shape(cx, h, shoulder_y, waist_y, hip_y), seq_field)
+		var top := shoulder_y + 0.62 * h
+		var spangle := Color(lerpf(1.0, accent.r, 0.30), lerpf(0.95, accent.g, 0.30), lerpf(0.76, accent.b, 0.30))
+		for row in 5:
+			var ry := top + float(row) * 0.34 * h
+			var cols := 3 if row % 2 == 0 else 2
+			for col in cols:
+				var rx := cx + (float(col) - (float(cols) - 1.0) * 0.5) * 0.19 * h
+				# each sequin's own phase, off its position, so the front twinkles rather
+				# than pulsing as one sheet
+				var tw := 0.5 + 0.5 * sin(float(atick()) * 0.09 + float(row) * 1.7 + float(col) * 2.9)
+				var c := Color(1, 1, 0.94) if tw > 0.88 else Color(spangle.r, spangle.g, spangle.b, 0.62 + 0.34 * tw)
+				draw_circle(Vector2(rx, ry), 0.055 * h, c)
 
 	# PEAKED LAPELS. Their inner edge is exactly the outer edge of the collar wedges
 	# the base figure already draws (shoulder line -> the V's apex at chest+0.22h), so
@@ -9810,6 +10305,128 @@ func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: floa
 		Vector2(cx + 0.44 * h, chest_y + 0.33 * h), Vector2(cx + 0.64 * h, chest_y + 0.28 * h),
 		Vector2(cx + 0.53 * h, chest_y + 0.13 * h),
 	]), linen)
+
+
+# THE WARDROBE, ON THE MAN (2026-07-28). The five costume pieces were buyable, persisted,
+# buffing and icon'd for a whole session before anyone put them on him - Louis's list
+# opened with exactly that. Every one obeys the three rules the polish pass was built on,
+# because they are the rules that stopped two earlier attempts from looking awful:
+#   (1) filled SHAPES, never thin decorative strokes - a stroke reads as jewellery;
+#   (2) every mark butts against something the base figure already draws (the hair's
+#       crown, the coat's hip flare, the leg capsules' outer face) or rides a solved
+#       joint (the glove sits on the hand the IK put there, like the cuff before it);
+#   (3) every colour comes out of the venue's own palette, so the Midnight Show's
+#       deliberately-vanishing costume is not lit back up by a hard white boot.
+# And the standing rule above all of them: **the figure is settled. A hat goes on the
+# head that is there; the head does not move to fit the hat.**
+
+func vest_shape(cx: float, h: float, shoulder_y: float, waist_y: float, hip_y: float) -> PackedVector2Array:
+	# ONE WAISTCOAT OUTLINE. The base figure draws the plain vest and the wardrobe's
+	# sequin pass draws a spangled one over it in the same place - which is precisely the
+	# situation where two copies of a shape drift apart and leave a rim of the old colour
+	# showing along one edge. Both read this.
+	var top := shoulder_y + 0.52 * h
+	return PackedVector2Array([
+		Vector2(cx - 0.30 * h, top), Vector2(cx + 0.30 * h, top),
+		Vector2(cx + 0.28 * h, waist_y), Vector2(cx + 0.36 * h, hip_y - 0.10 * h),
+		Vector2(cx - 0.36 * h, hip_y - 0.10 * h), Vector2(cx - 0.28 * h, waist_y)])
+
+
+func draw_top_hat(head: Vector2, r: float, silk: Color, band: Color, accent: Color) -> void:
+	# WARDROBE: THE TOP HAT (4,000). What makes a top hat a top hat is one ratio - a crown
+	# about as tall as the head is wide, over a brim wider than the head - and it has to be
+	# read at 21px of head radius from the stalls, so the crown is 1.5r tall and the brim
+	# 1.5r to each side. Any shorter and it is a bowler; any taller and the figure is a
+	# chimney, which at this scale happens fast.
+	#
+	# IT SITS ON THE HAIR, NOT ON THE SKULL. draw_hair_back swells to about 1.15r above
+	# centre, so the brim rides at -0.78r: low enough to cover the hairline the way a worn
+	# hat does, high enough to leave the brows (-0.30r) and the whole face clear. The one
+	# thing this must never do is push the head down to make room.
+	var brim_y := head.y - r * 0.78
+	var crown_top := brim_y - r * 1.50
+	var lit := silk.lightened(0.16)
+	var dark := silk.darkened(0.35)
+	# the crown, flaring very slightly toward the top the way a silk hat blocks
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(head.x - r * 0.96, brim_y + r * 0.06), Vector2(head.x + r * 0.96, brim_y + r * 0.06),
+		Vector2(head.x + r * 1.04, crown_top), Vector2(head.x - r * 1.04, crown_top)]), silk)
+	# ...its lit face. A silk hat's whole character is that it shines, and a flat-filled
+	# crown at this size is a black rectangle - the sheen is what makes it a material.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(head.x - r * 0.62, brim_y), Vector2(head.x - r * 0.14, brim_y),
+		Vector2(head.x - r * 0.18, crown_top), Vector2(head.x - r * 0.66, crown_top)]), lit)
+	# the flat top, as an ellipse, so the hat reads as a cylinder seen slightly from below
+	fill_ellipse(Vector2(head.x, crown_top), r * 1.04, r * 0.17, lit)
+	# the grosgrain band round the base of the crown, in the waistcoat's own cloth
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(head.x - r * 0.97, brim_y + r * 0.04), Vector2(head.x + r * 0.97, brim_y + r * 0.04),
+		Vector2(head.x + r * 0.99, brim_y - r * 0.30), Vector2(head.x - r * 0.99, brim_y - r * 0.30)]), band)
+	draw_circle(Vector2(head.x + r * 0.72, brim_y - r * 0.13), r * 0.10, accent)   # the band's pin
+	# the brim, over the crown's foot: an ellipse for the top face and a darker sliver
+	# under it, which is what gives the brim thickness instead of a painted-on line
+	fill_ellipse(Vector2(head.x, brim_y + r * 0.12), r * 1.52, r * 0.26, dark)
+	fill_ellipse(Vector2(head.x, brim_y + r * 0.04), r * 1.50, r * 0.24, silk)
+	fill_ellipse(Vector2(head.x, brim_y - r * 0.02), r * 1.34, r * 0.14, lit)
+
+
+func draw_stage_boot(at: Vector2, H: float, side: float, leather: Color, spat: Color,
+		accent: Color) -> void:
+	# WARDROBE: STAGE BOOTS (3,500). A boot, not a darker shoe - and the difference is two
+	# marks, both of which the old flat ellipse had neither of: a SHAFT rising past the
+	# ankle and a HEEL under it. A toe cap on its own just reads as a shinier shoe.
+	#
+	# Everything is in units of H (the figure's head unit) inside a MIRRORED transform, so
+	# one description of the boot serves both feet and it scales with the figure at any
+	# window size. `at` is the floor point under the ankle, so y runs negative upward and
+	# y = 0 is exactly where the boards are - a boot drawn to any other datum floats.
+	# TWO THINGS THE FIRST PASS GOT WRONG, both visible the moment it was on screen.
+	# (1) The leather was the plain `shoe` brown, 0.20/0.12/0.09, which against boards that
+	# are themselves near-black is not a dark boot, it is an absence. A boot has to be
+	# LIGHTER than the floor it stands on or it has no silhouette at all, so the base tone
+	# is lifted here rather than at the call site - the bare shoe is still welcome to be a
+	# shadow, since it is not a thing the player paid for. Lifted by MULTIPLYING the
+	# channels, not by `lightened()`, which lerps toward white and turned the same brown
+	# into concrete grey - the trap this file already records for `suit.lightened()`.
+	# (2) The spat was one broad band across the whole instep in the shirt's near-white
+	# cloth, which read as a WHITE SOCK: it covered more of the boot than the boot did. A
+	# spat is two narrow straps with buttons, and narrow is the entire point.
+	var hide := Color(minf(leather.r * 1.75 + 0.05, 1.0), minf(leather.g * 1.65 + 0.03, 1.0),
+		minf(leather.b * 1.50 + 0.02, 1.0))
+	var lit := Color(minf(hide.r * 1.34, 1.0), minf(hide.g * 1.30, 1.0), minf(hide.b * 1.26, 1.0))
+	var dark := Color(leather.r * 0.70, leather.g * 0.70, leather.b * 0.70)
+	draw_set_transform(at, 0.0, Vector2(side * H, H))
+	# the shaft, slightly flared at its top the way a dress boot's is. It covers the
+	# trouser hem, which is right: this is a boot worn OVER the trouser, on stage.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.18, -0.22), Vector2(0.16, -0.22), Vector2(0.19, -0.56), Vector2(-0.21, -0.56)]), hide)
+	draw_colored_polygon(PackedVector2Array([   # the shaft's lit front, so it is a tube
+		Vector2(-0.03, -0.22), Vector2(0.14, -0.22), Vector2(0.17, -0.56), Vector2(-0.01, -0.56)]), lit)
+	# the foot: a heel at the back, a long vamp, a toe that lifts a little off the boards
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.26, -0.04), Vector2(-0.22, -0.24), Vector2(0.06, -0.30),
+		Vector2(0.25, -0.20), Vector2(0.34, -0.09), Vector2(0.32, -0.03),
+		Vector2(-0.26, -0.03)]), hide)
+	draw_colored_polygon(PackedVector2Array([   # the toe cap: patent, the one part that shines
+		Vector2(0.12, -0.03), Vector2(0.32, -0.03), Vector2(0.34, -0.09), Vector2(0.23, -0.21)]), lit)
+	draw_colored_polygon(PackedVector2Array([   # the sole...
+		Vector2(-0.27, -0.03), Vector2(0.32, -0.03), Vector2(0.31, 0.0), Vector2(-0.28, 0.0)]), dark)
+	draw_colored_polygon(PackedVector2Array([   # ...and the heel block under it
+		Vector2(-0.27, 0.0), Vector2(-0.15, 0.0), Vector2(-0.15, -0.10), Vector2(-0.27, -0.10)]), dark)
+	# THE SPAT is the mark that says "stage" rather than "outdoors": ONE pale strap buttoned
+	# over the shaft, cut from the shirt's own cloth so it dims with the costume wherever the
+	# venue means the performer to stay dark.
+	#
+	# ONE, not two - checked on the stage figure, where the boot is about 22px tall. Two
+	# straps 0.14H apart merge at that size into alternating light and dark bands, and what
+	# the finished juggler had on his feet was a pair of striped SOCKS. A single band high on
+	# the shaft, with its own button, reads as the fastening it is. (The wide shop icon has
+	# the room for two and keeps them - it is drawn at three times this size.)
+	var sy := -0.42
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.20, sy), Vector2(0.18, sy - 0.02), Vector2(0.18, sy - 0.10), Vector2(-0.20, sy - 0.08)]), spat)
+	draw_circle(Vector2(-0.11, sy - 0.05), 0.034, accent)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 # THE HEAD, second version (2026-07-28, Louis: "another improved face for the juggler:
@@ -10152,6 +10769,17 @@ func solve_elbow(a: Vector2, b: Vector2, l1: float, l2: float, bend: float) -> V
 	return a + dir * x + perp * hgt
 
 
+func glove_cloth() -> Color:
+	# the silk gloves' cloth, resolved the same way every other wardrobe colour is: the
+	# venue's shirt/collar tone, swapped for phosphor when the Glow Suit is lit. It lives
+	# in its own function because draw_hand is reached without the palette in hand, and
+	# the alternative - re-deriving a white in there - is exactly how a piece ends up
+	# lighting a stage that was built to stay dark.
+	if glow_suit_lit():
+		return Color(0.90, 1.0, 0.94)
+	return venue_data(cur_venue())["collar"]
+
+
 func draw_hand(h: int) -> void:
 	var pos: Vector2 = hpos[h]
 	var close: float = hclose[h]
@@ -10169,10 +10797,38 @@ func draw_hand(h: int) -> void:
 	# needed): a palm disc with a soft cup that stretches up a little to receive
 	# when open and settles round when closed
 	var sk := Color(0.87, 0.63, 0.43)
+	# WARDROBE: SILK GLOVES (2,500). The one piece with nowhere to live but here - a glove
+	# is the hand, so it is a RECOLOUR of the mitt plus a wrist opening, not a shape laid
+	# over it. That also means it cannot come adrift: the hand is wherever the IK put it,
+	# and this draws the same ellipse the bare hand does.
+	#
+	# The cloth is the venue's own collar/shirt colour, for the reason the cuff already
+	# uses it - a hard white glove would light the Midnight Show's vanishing costume
+	# straight back up, and these are dress gloves, not surgical ones.
+	var gloved := has_gloves
+	if gloved:
+		sk = glove_cloth()
 	var openf := 1.0 - close
 	var stretch := lerpf(0.0, 6.0, openf)
 	fill_ellipse(pos + Vector2(inward * openf * 1.5, -stretch * 0.5), 11.5, 11.5 + stretch, sk)
 	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
+	if gloved:
+		# THE WRIST OPENING plus one seam is the whole read. A glove at 23px has no room
+		# for fingers (the bare hand deliberately has none either), so what has to say
+		# "glove" is the EDGE where the cloth stops - a scalloped hem across the wrist -
+		# and the stitched seam running up out of it. Both are filled shapes in the
+		# cloth's own shade, never outlines: an outlined mitt reads as a mitten.
+		var hem := sk.darkened(0.16)
+		var wy := pos.y + 7.0
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(pos.x - 10.0, wy - 3.0), Vector2(pos.x + 10.0, wy - 3.0),
+			Vector2(pos.x + 8.6, wy + 4.6), Vector2(pos.x, wy + 6.2),
+			Vector2(pos.x - 8.6, wy + 4.6)]), hem)
+		draw_line(Vector2(pos.x + inward * 1.5, wy - 2.0),
+			Vector2(pos.x + inward * 3.0, pos.y - 5.0 - stretch * 0.4), Color(hem.r, hem.g, hem.b, 0.75), 1.4)
+		# the silk's own sheen: one small filled highlight, up and left like every other
+		# light on this stage
+		fill_ellipse(pos + Vector2(-3.6, -4.0 - stretch * 0.4), 3.8, 2.6, Color(1, 1, 1, 0.28))
 
 	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
 	# drawn at stage centre while held. That was a fix for an older hand placement: the
@@ -10499,17 +11155,25 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 			draw_circle(pos, BALL_RADIUS_PX * sc, col)   # flat, same reason as the egg
 
 
-func draw_glow_strips(pts: Array, w: float, a: float) -> void:
-	# the Kit's tape on the PERFORMER: the same phosphor, run along a few lines of the
+func draw_glow_seam(pts: PackedVector2Array, w: float, a: float) -> void:
+	# the Kit's piping on the PERFORMER: the same phosphor, run along one seam of the
 	# costume so the juggler is a readable shape in the dark instead of a hole in it.
-	# Two passes, a wide soft one under a tight bright one, which is what makes a line
-	# look lit rather than merely pale.
-	var fl := 0.86 + 0.14 * sin(float(tick) * 0.32)
-	for i in range(0, pts.size() - 1, 2):
-		var p0: Vector2 = pts[i]
-		var p1: Vector2 = pts[i + 1]
-		draw_line(p0, p1, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.22 * a * fl), w * 3.0)
-		draw_line(p0, p1, Color(0.90, 1.0, 0.94, 0.75 * a * fl), w)
+	# Three passes - a wide soft skirt, a mid body, a tight near-white core - which is
+	# what makes a line look LIT rather than merely pale. Two passes was the old count and
+	# it gave a bright line with a faint aura; the middle rung is what turns that into a
+	# glow, for one more call per seam.
+	#
+	# A POLYLINE, not a pair of endpoints (2026-07-28). The old signature took a flat
+	# array read two at a time, which meant every seam was a straight chord - and a
+	# straight chord cannot follow a limb that bends. `draw_polyline` joins the segments
+	# for free and is still one call per pass, so a seam with a knee in it costs exactly
+	# what a straight one did.
+	if pts.size() < 2:
+		return
+	var fl := 0.86 + 0.14 * sin(float(atick()) * 0.32)
+	draw_polyline(pts, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.16 * a * fl), w * 3.4)
+	draw_polyline(pts, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.42 * a * fl), w * 1.8)
+	draw_polyline(pts, Color(0.92, 1.0, 0.95, 0.85 * a * fl), w)
 
 
 func draw_prop(b: Ball, pos: Vector2) -> void:
@@ -10530,24 +11194,35 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
 								   # (prop_hit_scale) ever shrinks - on a big load, or
 								   # always a bit for rings (mostly hollow rim)
-	# THE HALO, dark stages only (2026-07-27, Louis: "the faint glow always being on...
-	# perhaps that should only be the case for in the dark juggling, where it's really
-	# needed"). It was a large soft circle under EVERY prop on EVERY frame - the single
-	# most repeated draw in a seven-object set - and on a lit stage it bought nothing,
-	# since the prop already reads against the floor. It now fades in with the room:
-	# full strength where the house is genuinely dark (see stage_darkness), gone where
-	# it is not. A clacked prop's warning halo is exempt and always shows: that one is
+	# ONLY A FLAME GLOWS, AND IT GLOWS AT THE FLAME (2026-07-28, Louis: "remove the glow
+	# from the objects except the torch, whose glow should be centered around the flame").
+	#
+	# The halo was already dark-stages-only (2026-07-27) but it was still on EVERY prop,
+	# tinted with that prop's own colour - which is a claim that a lacquered club or a
+	# painted ball emits light, and nothing on this stage does except fire. Worse, it was
+	# centred on `pos`, and `pos` is the prop's SIM origin: for a torch that is the grip,
+	# about 25 units below the fire, so the one prop that genuinely glows was the one
+	# whose glow sat in the wrong place - a warm pool round the performer's hand with a
+	# flame burning outside it.
+	#
+	# So the ambient halo is gone for every other prop, and the torch gets the real thing:
+	# `torch_fire_center` puts the pool where the fire actually is, on the same partial-
+	# straightening the flame layers themselves use (see CAP_FLAME_UPRIGHT), so it tracks
+	# the tumble instead of orbiting the handle. Cheaper as well as truer - one glow quad
+	# on the torches instead of one disc per prop.
+	#
+	# A clacked prop's warning halo is exempt and always shows, on any prop: that one is
 	# information, not atmosphere.
 	if b.bumped:
 		# hard mode: a clacked prop glows warning-hot, so the player knows only
 		# a frame-tight catch can still save it
 		soft_disc(pos, 20.0 * sc, Color(1.0, 0.4, 0.3, 0.24 + 0.1 * sin(float(tick) * 0.5)), 14)
-	else:
+	elif b.kind == PROP_TORCHES:
 		var dk := stage_darkness()
 		if dk > 0.02:
-			var halo := b.color
-			halo.a = 0.16 * dk
-			soft_disc(pos, 20.0 * sc, halo, 14)
+			var fl := 0.90 + 0.10 * sin(fire_clock() * 0.5 + pos.x * 0.03)
+			draw_glow(torch_fire_center(pos, prop_spin_angle(b), sc), 40.0 * sc,
+				Color(1.0, 0.58, 0.20, 0.34 * dk * fl))
 	if glow_props_lit() and b.kind != PROP_TORCHES:
 		# THE GLOW KIT, earning its price on any dark stage rather than only inside a
 		# Blackout: the prop is charged, so it carries its own soft bloom wherever the
@@ -10766,6 +11441,54 @@ func draw_chainsaw(pos: Vector2, ang: float, sc: float, rich: bool = false) -> v
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+var _torch_pts := PackedVector2Array()
+var _torch_cols := PackedColorArray()
+var _torch_idx := PackedInt32Array()
+var _torch_baked := false
+
+func _torch_bake() -> void:
+	# THE TORCH HANDLE in local units, baked ONCE for the whole session. Every number here
+	# is a constant - the haft is waisted, the cord is wound, the ferrules are brass, the
+	# wick is charred - and none of it depends on the tick, the prop or the venue, which is
+	# exactly why it can be baked harder than the chainsaw's chain can (see _saw_bake, which
+	# has to rebuild whenever the clock moves because its chain travels).
+	#
+	# THE HANDLE RUNS THE FULL LENGTH the stage torch's does - TORCH_WICK to TORCH_BUTT - so
+	# this is the same object with more on it, never a differently-proportioned one.
+	#
+	# `ca()` is deliberately NOT used in here. A bake is shared by every torch in the frame,
+	# and `_cap_a` is a per-drawing fade (the wordmark's, a fallen prop's), so folding it
+	# into baked vertex colours would let one faded torch fade all of them - and would defeat
+	# the bake besides, since the colours would have to be rebuilt whenever the alpha moved.
+	# A torch that needs to fade is drawn under a modulate, not baked at a lower alpha.
+	if _torch_baked:
+		return
+	_torch_baked = true
+	_soup_clear()
+	_soup_poly(PackedVector2Array([          # a turned haft: waisted, not a bar
+		Vector2(-2.1, 0.0), Vector2(2.1, 0.0), Vector2(2.4, 6.0), Vector2(1.9, 11.0),
+		Vector2(2.3, TORCH_BUTT), Vector2(-2.3, TORCH_BUTT), Vector2(-1.9, 11.0), Vector2(-2.4, 6.0)]),
+		Color(0.26, 0.17, 0.12))
+	_soup_poly(PackedVector2Array([          # the lit side of the haft
+		Vector2(-2.1, 0.2), Vector2(-0.9, 0.2), Vector2(-0.8, 11.0), Vector2(-1.1, TORCH_BUTT - 0.2),
+		Vector2(-2.3, TORCH_BUTT - 0.2), Vector2(-1.9, 11.0)]), Color(0.40, 0.27, 0.18))
+	for gy in [2.4, 4.4, 6.4, 8.4, 10.4, 12.4]:        # the cord it is bound with
+		_soup_line(Vector2(-2.3, gy), Vector2(2.3, gy + 0.4), 0.7, Color(0.14, 0.09, 0.07, 0.75))
+		_soup_line(Vector2(-2.3, gy + 0.8), Vector2(2.3, gy + 1.2), 0.5, Color(0.62, 0.45, 0.28, 0.30))
+	for by in [-0.4, 1.4]:                             # the brass ferrule under the head
+		_soup_poly(PackedVector2Array([Vector2(-2.6, by), Vector2(2.6, by),
+			Vector2(2.6, by + 1.3), Vector2(-2.6, by + 1.3)]), Color(0.60, 0.47, 0.26))
+		_soup_line(Vector2(-2.2, by + 0.35), Vector2(2.2, by + 0.35), 0.4, Color(1.0, 0.90, 0.66, 0.55))
+	_soup_poly(PackedVector2Array([          # the soaked wick, charred at the top
+		Vector2(-2.2, -3.4), Vector2(2.2, -3.4), Vector2(1.8, -0.2), Vector2(-1.8, -0.2)]),
+		Color(0.24, 0.19, 0.16))
+	for wy in [-2.9, -2.1, -1.3, -0.5]:
+		_soup_line(Vector2(-2.0, wy), Vector2(2.0, wy + 0.25), 0.35, Color(0.10, 0.08, 0.07, 0.75))
+	_torch_pts = _soup_pts.duplicate()
+	_torch_cols = _soup_cols.duplicate()
+	_torch_idx = _soup_idx.duplicate()
+
+
 func _saw_bake() -> void:
 	# the whole saw in local units: bar, running chain, engine block, vents, handle.
 	# Rebuilt only when the tick has moved, because the chain is the only part that
@@ -10915,8 +11638,25 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 	# torch, so it is drawn only where it can be SEEN - a dark house, or a shop card.
 	var dk := 1.0 if rich else stage_darkness()
 	if dk > 0.02:
-		draw_glow(pos + Vector2(0.0, -10.0 * sc).rotated(ang), (54.0 if rich else 42.0) * sc,
+		draw_glow(torch_fire_center(pos, ang, sc), (54.0 if rich else 42.0) * sc,
 			Color(1.0, 0.60, 0.22, 0.34 * dk))
+
+
+func torch_fire_center(pos: Vector2, ang: float, sc: float) -> Vector2:
+	# WHERE THE FIRE ACTUALLY IS, in world space, for anything that has to be centred on
+	# it rather than on the prop (2026-07-28). `pos` is the sim origin, i.e. the grip;
+	# the wick sits at TORCH_WICK above it and the flame's visible mass a little over a
+	# third of its height above that.
+	#
+	# The offset is only PARTLY rotated, and that is the point. A leaning torch's flame
+	# comes back most of the way to vertical (CAP_FLAME_UPRIGHT is how far), so a fully
+	# rotated offset swings the pool of light out sideways past the fire it is supposed to
+	# be coming from - most visibly on a tumbling throw, where the torch passes through
+	# every angle. The wick end rides the prop exactly; the flame's mass above it is lifted
+	# mostly straight up, the same compromise the flame layers themselves are drawn with.
+	var wick := pos + Vector2(0.0, TORCH_WICK).rotated(ang) * sc
+	var rise := TORCH_FLAME_H * 0.38 * sc
+	return wick + Vector2(0.0, -rise).rotated(ang * CAP_FLAME_UPRIGHT)
 
 
 func prop_spin_angle(b: Ball) -> float:
@@ -10957,8 +11697,14 @@ func prop_spin_angle(b: Ball) -> float:
 # subpar). `mag` gives the six a shared optical weight while keeping a mild heavier-is-
 # bigger hierarchy; `off` is the y of the shape's own centre in its local units, so the
 # icon can be hung on its middle instead of on its grip.
-const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.98, 1.90, 1.72, 1.30]
-const PROP_ICON_OFF := [0.0, 0.0, 0.0, -2.4, -5.2, -8.0, -2.0]
+# ...AND BOTH NUMBERS MOVE WHEN THE SHAPE DOES (2026-07-28). Giving the club its real
+# 2.3:1 body took its nose from y -17.1 to -21, so the object grew four units taller and
+# its own centre shifted from -1.05 to -3.0. Leaving `off` alone would have hung the longer
+# club by the same point as the short one - i.e. high in its card again, the exact fault
+# this table exists to fix - and leaving `mag` alone would have run it past the hairline
+# under the goods. **A prop's silhouette and its two icon numbers are one edit.**
+const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.78, 1.90, 1.72, 1.30]
+const PROP_ICON_OFF := [0.0, 0.0, 0.0, -4.2, -5.2, -8.0, -2.0]
 
 func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
 	# the prop as SHOP GOODS: the very same shape the stage draws (never a second art
@@ -12043,26 +12789,622 @@ func draw_debug_panel() -> void:
 	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.6, 0.68, 0.72))
 
 
-func draw_unlock_card(font: Font, s: Vector2) -> void:
-	# THE UNLOCK CARD. A dealt card: it snaps in past its final size, settles, holds, and
-	# goes. The art is `draw_skill_preview`, the same little staged illustration the
-	# Skills screen uses - which is the honest answer to "recognisable as the trick or
-	# pattern", because it IS the trick, drawn from the same road data the sim throws.
-	# Nothing here is a second description of a skill that could drift from the first.
+#region SKILL CARDS - the Balatro-style deck
+# ONE CARD PER SKILL, PLUS ONE BACK PER KIND (2026-07-28, Louis: "make a design for the
+# trick card (in general) and the pattern card (in general) and then for each trick and
+# pattern a personal design card: the same way balatro has its jokers. Make the designs fun
+# and perhaps a bit funny / joking").
+#
+# The joke on each face is HIS, verbatim, and that matters more than it looks: a picture
+# chosen by the person who names the skill is a picture that reads. Spin is a ballerina.
+# Behind the Back is two people talking behind your back. High Toss is something absurdly
+# tall. Cascade is a waterfall and Reverse Cascade is that same waterfall upside down.
+# Columns is a Greek temple. Shower is a shower; Half Shower is a very SMALL shower.
+# Tennis is a tennis racket.
+#
+# WHY THESE ARE NOT `draw_skill_preview`. That function draws the skill's true choreography
+# off the sim's own road data, and it is still what the Skills screen shows once a skill is
+# yours - it is the better ANSWER to "how does this work". But it is a diagram, and every
+# diagram of a juggling pattern looks like every other one: arcs over a little man. A card
+# you are dealt has a different job. It has to be worth turning over, and it has to be
+# recognisable across a room, which is what a pun drawn large gets you and a correct
+# trajectory plot does not.
+#
+# THREE RULES, all inherited from passes that were paid for elsewhere in this file:
+#   * Every art function draws in UNIT SPACE - a box from -0.5 to 0.5 with the origin in
+#     the middle - inside a transform the dispatcher sets. One uniform scale, so circles
+#     stay circles at any card size and a line width means the same thing on the unlock
+#     card (344px) and the Skills screen (140px). Art functions must NEVER call
+#     draw_set_transform themselves: Godot REPLACES the transform rather than composing,
+#     so an inner call silently throws the card's own scale away.
+#   * No text inside the art. Under a scaled transform a font is scaled too, which is how
+#     you get a 3px-tall word or a 40px one depending on the caller. Anything that has to
+#     be read is drawn by the caller, outside the transform.
+#   * Filled SHAPES, not decorative strokes, and nothing whose feature size lands under
+#     about 1.5px at the smallest place the card is drawn - the same shimmer band the round
+#     props and the juggler's face were both rebuilt to get out of.
+const CARD_TRICK_COL := Color(1.0, 0.84, 0.42)      # warm gold: a flourish
+const CARD_PATTERN_COL := Color(0.82, 0.70, 0.98)   # cool violet: a shape
+
+func card_kind_col(is_trick: bool) -> Color:
+	return CARD_TRICK_COL if is_trick else CARD_PATTERN_COL
+
+
+func card_field(is_trick: bool) -> Color:
+	# the paper each kind is printed on: a deep version of its own accent, so a trick card
+	# and a pattern card are telling apart at a glance even face down, from the colour
+	# alone, before any of the marks on them are legible
+	return Color(0.16, 0.11, 0.06) if is_trick else Color(0.12, 0.10, 0.18)
+
+
+func draw_card_frame(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
+	# THE CARD ITSELF, shared by every face and both backs so the deck looks like a deck.
+	# Rounded body in the kind's own paper, a bright keyline, and an inset second line -
+	# which is the mark that makes a rectangle read as a printed card rather than a panel.
+	var kc := card_kind_col(is_trick)
+	soft_card(r, Color(card_field(is_trick).r, card_field(is_trick).g, card_field(is_trick).b, 0.99 * a),
+		Color(kc.r, kc.g, kc.b, 0.85 * a), 2.5 * lift, 14.0 * lift, 22.0)
+	var inset := 7.0 * lift
+	draw_rect(Rect2(r.position.x + inset, r.position.y + inset,
+		r.size.x - inset * 2.0, r.size.y - inset * 2.0), Color(kc.r, kc.g, kc.b, 0.22 * a), false, maxf(1.0, lift))
+
+
+func draw_skill_card_back(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
+	# THE BACK. This is the whole of what the player is told when the card is dealt: you
+	# have earned A TRICK, or A PATTERN. Nothing on it may hint at which one - so no prop,
+	# no arc, no silhouette that belongs to any single skill.
 	#
-	# Animated by RECT SIZE rather than by draw_set_transform: the preview draws a figure
-	# that sets its own transform for the spin, and an outer one would be clobbered
-	# mid-card. Growing the box does the same job and the art re-lays out to fit for free.
+	# What separates the two backs is what the two KINDS are. A trick is a flourish, one
+	# gesture, so its back is a rosette: rays from a centre, turning. A pattern is a shape
+	# that repeats, so its back is a LATTICE of interlocking arcs - the weave itself,
+	# abstracted, going nowhere in particular.
+	draw_card_frame(r, is_trick, a, lift)
+	var kc := card_kind_col(is_trick)
+	var k := minf(r.size.x, r.size.y)
+	var c := r.get_center()
+	_cap_a = a
+	draw_set_transform(c, 0.0, Vector2.ONE * k)
+	if is_trick:
+		# the rosette: two rings of rays on opposite spins, so the back is alive without
+		# any of it being a thing
+		var t := float(atick()) * 0.006
+		for ring in 2:
+			var n := 12 if ring == 0 else 8
+			var r0 := 0.14 + 0.13 * float(ring)
+			var r1 := 0.26 + 0.15 * float(ring)
+			for i in n:
+				var ang := t * (1.0 if ring == 0 else -0.7) + TAU * float(i) / float(n)
+				var dir := Vector2(cos(ang), sin(ang))
+				var wid := 0.030 if ring == 0 else 0.020
+				var perp := Vector2(-dir.y, dir.x) * wid
+				draw_colored_polygon(PackedVector2Array([
+					dir * r0 + perp, dir * r1, dir * r0 - perp]),
+					ca(Color(kc.r, kc.g, kc.b, 0.30 if ring == 0 else 0.20)))
+		draw_circle(Vector2.ZERO, 0.105, ca(Color(kc.r, kc.g, kc.b, 0.30)))
+		draw_circle(Vector2.ZERO, 0.075, ca(Color(card_field(true).r * 1.6, card_field(true).g * 1.6, card_field(true).b * 1.6, 0.95)))
+		# a star in the middle - the same four-point sparkle the money hat's glints use,
+		# because it is the one mark in this game that already means "a flourish"
+		draw_star4(Vector2.ZERO, 0.062, ca(Color(kc.r, kc.g, kc.b, 0.85)))
+	else:
+		# the lattice: rows of arcs, every other row offset, alternate rows leaning the
+		# other way. Read together they interlock, which is what a weave IS - and no
+		# single arc in it is any pattern's road.
+		for row in 5:
+			var y := -0.42 + float(row) * 0.21
+			var off := 0.0 if row % 2 == 0 else 0.105
+			for col in 4:
+				var x := -0.315 + float(col) * 0.21 + off
+				var up := (row + col) % 2 == 0
+				var pts := PackedVector2Array()
+				for sg in 9:
+					var u := float(sg) / 8.0
+					var bow := sin(u * PI) * (0.072 if up else -0.072)
+					pts.append(Vector2(lerpf(x - 0.10, x + 0.10, u), y + bow))
+				draw_polyline(pts, ca(Color(kc.r, kc.g, kc.b, 0.26)), 0.016)
+		draw_circle(Vector2.ZERO, 0.085, ca(Color(card_field(false).r * 1.7, card_field(false).g * 1.7, card_field(false).b * 1.7, 0.96)))
+		draw_arc(Vector2.ZERO, 0.062, 0.0, TAU, 28, ca(Color(kc.r, kc.g, kc.b, 0.75)), 0.014, true)
+		draw_circle(Vector2.ZERO, 0.026, ca(Color(kc.r, kc.g, kc.b, 0.8)))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_cap_a = 1.0
+
+
+func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
+	# THE FACE'S PICTURE, dispatched by the skill's own id - never by its index, which is
+	# the fragility that had the shop drawing a helmet for the chainsaw and the seventh
+	# prop buying glasses. Removing Overthrow on the very day these were drawn is exactly
+	# the event an index-keyed table gets wrong.
+	var tab: Array = TRICKS if is_trick else PATTERNS
+	if idx < 0 or idx >= tab.size():
+		return
+	var id := String((tab[idx] as Dictionary)["id"])
+	var k := minf(r.size.x, r.size.y)
+	# REVERSE CASCADE IS CASCADE, UPSIDE DOWN, and it is drawn that way rather than
+	# redrawn (Louis: "the upside down waterfall picture"). A negative y scale is the whole
+	# implementation, which also guarantees the two cards are the same joke told twice -
+	# if the waterfall is ever improved, its reflection improves with it.
+	var flip := -1.0 if id == "rcasc" else 1.0
+	_cap_a = a
+	draw_set_transform(r.get_center(), 0.0, Vector2(k, k * flip))
+	match id:
+		"spin":       card_art_spin()
+		"btb":        card_art_btb()
+		"high":       card_art_high()
+		"cascade":    card_art_waterfall()
+		"rcasc":      card_art_waterfall()
+		"columns":    card_art_temple()
+		"shower":     card_art_shower(1.0)
+		"halfshower": card_art_shower(0.34)
+		"tennis":     card_art_racket()
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# the arrow that says which way the water is going, drawn AFTER the flip is undone so
+	# it is never itself upside down
+	if id == "rcasc":
+		# smaller and pushed out to the margin: at its first size it was as wide as a
+		# stream and sat on top of one, so the card read as four falls and an arrow rather
+		# than three and a note
+		var up := r.get_center() + Vector2(k * 0.425, k * 0.03)
+		draw_colored_polygon(PackedVector2Array([
+			up + Vector2(0.0, -k * 0.15), up + Vector2(k * 0.033, -k * 0.095),
+			up + Vector2(k * 0.012, -k * 0.095), up + Vector2(k * 0.012, k * 0.13),
+			up + Vector2(-k * 0.012, k * 0.13), up + Vector2(-k * 0.012, -k * 0.095),
+			up + Vector2(-k * 0.033, -k * 0.095)]), ca(Color(0.72, 0.92, 1.0, 0.70)))
+	_cap_a = 1.0
+
+
+func card_art_spin() -> void:
+	# SPIN = A BALLERINA (Louis). The pirouette is the joke and the tutu is the mark that
+	# makes a stick figure a ballerina - so the tutu is the biggest thing on the card and
+	# everything else is arranged to support it.
+	var skin := ca(Color(0.92, 0.72, 0.56))
+	var tulle := ca(Color(0.98, 0.62, 0.74, 0.88))
+	var tulle_lo := ca(Color(0.86, 0.42, 0.58, 0.85))
+	var bodice := ca(Color(0.94, 0.46, 0.62))
+	# the SWEEP she is turning through: three arcs behind her, widest at the tutu, which
+	# is the only cue that says this is a turn and not a pose
+	for i in 3:
+		var rr := 0.20 + float(i) * 0.055
+		var ph := float(atick()) * 0.02 + float(i) * 0.7
+		draw_arc(Vector2(0.0, 0.02), rr, ph, ph + PI * 0.75, 22,
+			ca(Color(1.0, 0.86, 0.94, 0.20 - 0.04 * float(i))), 0.016, true)
+	# the standing leg, en pointe, and the working leg lifted behind in attitude
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.020, 0.02), Vector2(0.020, 0.02), Vector2(0.016, 0.32), Vector2(-0.008, 0.32)]), skin)
+	draw_colored_polygon(PackedVector2Array([   # the pointe shoe: a wedge, not a dot
+		Vector2(-0.012, 0.30), Vector2(0.020, 0.30), Vector2(0.014, 0.38), Vector2(-0.004, 0.38)]), tulle_lo)
+	# the working leg, tapering to the foot: the first pass ran it out at even width and it
+	# read as a plank stuck to her hip
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0.012, 0.030), Vector2(0.040, 0.062), Vector2(0.150, 0.112),
+		Vector2(0.215, 0.128), Vector2(0.212, 0.152), Vector2(0.140, 0.150),
+		Vector2(0.034, 0.108)]), skin)
+	# THE TUTU: two flat plates, the lower one darker, which is how a real one reads
+	# side-on - one soft ellipse alone looks like a skirt
+	fill_ellipse(Vector2(0.0, 0.045), 0.235, 0.055, tulle_lo)
+	fill_ellipse(Vector2(0.0, 0.015), 0.215, 0.062, tulle)
+	# the bodice, narrow, from the tutu up to the shoulders
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.048, 0.02), Vector2(0.048, 0.02), Vector2(0.040, -0.16), Vector2(-0.040, -0.16)]), bodice)
+	# arms up in a ring over the head, which is the ballet shape everybody knows. Drawn as
+	# two tapering limbs meeting, never as an arc - an arc has constant width and square
+	# ends, and at this size that reads as a coat hanger.
+	for sgn: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(sgn * 0.042, -0.15), Vector2(sgn * 0.135, -0.24),
+			Vector2(sgn * 0.055, -0.345), Vector2(sgn * 0.012, -0.335),
+			Vector2(sgn * 0.070, -0.245), Vector2(sgn * 0.014, -0.175)]), skin)
+	# the head, and the bun - the bun is the second-cheapest ballerina cue after the tutu
+	draw_circle(Vector2(0.0, -0.215), 0.052, skin)
+	draw_circle(Vector2(0.058, -0.250), 0.030, ca(Color(0.42, 0.26, 0.18)))
+	draw_colored_polygon(PackedVector2Array([   # the hair over the crown
+		Vector2(-0.052, -0.235), Vector2(0.0, -0.272), Vector2(0.050, -0.238),
+		Vector2(0.036, -0.208), Vector2(-0.040, -0.206)]), ca(Color(0.42, 0.26, 0.18)))
+	# ...and one prop still in the air, because she is a juggler doing this
+	draw_circle(Vector2(-0.20, -0.30), 0.040, ca(Color(1.0, 0.84, 0.42)))
+	draw_star4(Vector2(0.235, -0.235), 0.045, ca(Color(1.0, 0.95, 0.80, 0.75)))
+
+
+func card_art_btb() -> void:
+	# BEHIND THE BACK = TWO PEOPLE TALKING BEHIND YOUR BACK (Louis). The gag needs three
+	# figures and a very specific staging or it is just a crowd: the juggler LARGE and from
+	# BEHIND at the front of the card, and the two gossips behind him, leaning in.
+	# Front-and-large against small-and-behind is what makes it "behind his back" rather
+	# than "three people standing about".
+	#
+	# REWORKED after seeing it. The gossips were half hidden behind his shoulders and small
+	# enough to read as two purple lollipops, and the three whisper dots sat so close to
+	# their heads that they merged into the same blob. They are BIGGER now, pushed out past
+	# his silhouette so both are wholly visible, and the whisper is a proper little cloud up
+	# between their heads where nothing else is drawn. The scale gap survives because HE got
+	# bigger too - the relationship is what carries the joke, not the absolute sizes.
+	var dark := ca(Color(0.30, 0.22, 0.30))
+	var mid := ca(Color(0.52, 0.41, 0.55))
+	var mid_lo := ca(Color(0.38, 0.30, 0.42))
+	# the two gossips, clear of his shoulders, heads tipped toward each other
+	for sgn: float in [-1.0, 1.0]:
+		var gx: float = sgn * 0.290
+		var lean: float = -sgn * 0.042
+		draw_colored_polygon(PackedVector2Array([   # body, shoulders sloped inward
+			Vector2(gx - 0.082, 0.075), Vector2(gx + 0.082, 0.075),
+			Vector2(gx + 0.058, -0.190), Vector2(gx - 0.058, -0.190)]), mid)
+		draw_colored_polygon(PackedVector2Array([   # the near arm, raised to the mouth
+			Vector2(gx + lean * 0.3, -0.150), Vector2(gx + lean * 1.5, -0.235),
+			Vector2(gx + lean * 2.4, -0.212), Vector2(gx + lean * 1.0, -0.118)]), mid_lo)
+		draw_circle(Vector2(gx + lean, -0.245), 0.070, mid)
+		draw_colored_polygon(PackedVector2Array([   # hair, so a head is a head and not a dot
+			Vector2(gx + lean - 0.070, -0.240), Vector2(gx + lean - 0.052, -0.300),
+			Vector2(gx + lean + 0.030, -0.318), Vector2(gx + lean + 0.070, -0.262)]), mid_lo)
+	# THE WHISPER, up between them where nothing else is: a cloud of three, largest in the
+	# middle. A speech bubble would need words in it; muttering has none.
+	for i in 3:
+		var t := float(i) / 2.0
+		draw_circle(Vector2(lerpf(-0.115, 0.115, t), -0.345 - 0.045 * sin(t * PI)),
+			0.028 + 0.016 * sin(t * PI), ca(Color(1.0, 0.94, 0.78, 0.58)))
+	# HIM, from behind: shoulders wide across the bottom, the back of his head, and no face
+	# anywhere - the whole point is that he cannot see them
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.315, 0.50), Vector2(-0.250, 0.150), Vector2(-0.095, 0.075),
+		Vector2(0.095, 0.075), Vector2(0.250, 0.150), Vector2(0.315, 0.50)]), dark)
+	draw_circle(Vector2(0.0, 0.030), 0.125, dark)
+	draw_colored_polygon(PackedVector2Array([   # the hair, all of it: this is a nape
+		Vector2(-0.125, 0.040), Vector2(-0.106, -0.058), Vector2(0.0, -0.102),
+		Vector2(0.106, -0.058), Vector2(0.125, 0.040)]), ca(Color(0.20, 0.14, 0.11)))
+	# ...and a prop looping round behind him, low, the throw the trick is named for
+	var pt := float(atick()) * 0.012
+	draw_circle(Vector2(sin(pt) * 0.255, 0.205 - 0.035 * cos(pt)), 0.042, ca(Color(1.0, 0.84, 0.42)))
+
+
+func card_art_high() -> void:
+	# HIGH TOSS = SOMETHING TALL (Louis). Height on a card is a composition problem, not a
+	# drawing one: a tall thing drawn inside the frame is just a thing. What sells it is
+	# that the throw LEAVES the card - the arc runs off the top edge and is never resolved -
+	# with the juggler tiny at the very bottom, a cloud on the way, and a bird that has
+	# noticed. The scale gap between the man and the frame is the joke.
+	# the trail, dashed, from his hand off the top of the picture
+	for i in 13:
+		var t := float(i) / 12.0
+		var y := 0.24 - t * 0.80
+		var x := -0.10 + t * 0.055 + sin(t * 2.4) * 0.020
+		draw_circle(Vector2(x, y), 0.012 - 0.004 * t, ca(Color(1.0, 0.92, 0.62, 0.55 - 0.28 * t)))
+	# the cloud it went through, at two thirds height, and a wisp above it
+	for e in [[-0.055, -0.20, 0.085], [0.030, -0.215, 0.070], [0.100, -0.185, 0.052], [-0.135, -0.170, 0.055]]:
+		draw_circle(Vector2(float(e[0]), float(e[1])), float(e[2]), ca(Color(0.86, 0.88, 0.94, 0.30)))
+	# the bird, watching it go past. Two tapering wings from one point: a "v" of even
+	# width is a tick mark, and a bird at this size is entirely its silhouette.
+	var bp := Vector2(0.235, -0.325)
+	for sgn: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			bp, bp + Vector2(sgn * 0.075, -0.048), bp + Vector2(sgn * 0.080, -0.028)]),
+			ca(Color(0.22, 0.18, 0.22, 0.9)))
+	# ...and the prop itself, at the very top, half out of the frame
+	draw_circle(Vector2(0.115, -0.475), 0.055, ca(Color(1.0, 0.84, 0.42)))
+	draw_glow(Vector2(0.115, -0.475), 0.16, ca(Color(1.0, 0.84, 0.42, 0.30)))
+	# HIM, small, at the bottom, looking up - arms up, head tipped back
+	var g := ca(Color(0.34, 0.26, 0.32))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.150, 0.430), Vector2(-0.120, 0.300), Vector2(-0.060, 0.300), Vector2(-0.030, 0.430)]), g)
+	draw_circle(Vector2(-0.090, 0.268), 0.036, g)
+	for sgn2: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-0.090 + sgn2 * 0.022, 0.300), Vector2(-0.090 + sgn2 * 0.085, 0.225),
+			Vector2(-0.090 + sgn2 * 0.055, 0.212), Vector2(-0.090 - sgn2 * 0.002, 0.288)]), g)
+	# the boards under him, so "the bottom of the card" reads as "the ground"
+	draw_rect(Rect2(-0.50, 0.430, 1.0, 0.070), ca(Color(0.26, 0.18, 0.14, 0.85)))
+
+
+func card_art_waterfall() -> void:
+	# CASCADE = A WATERFALL (Louis), and Reverse Cascade is this exact drawing flipped (see
+	# the dispatcher). Two things had to be true for it to read as a cascade rather than as
+	# any old waterfall: the streams CROSS - that is what the pattern is - and there are
+	# three of them, the beginner count.
+	#
+	# REWORKED after seeing it on screen. Three faults, all of them the same fault: FLAT
+	# SLABS. The cliff was one brown rectangle across the top third, the pool was one blue
+	# rectangle across the bottom, and the middle stream was tinted so close to its
+	# neighbours that only two of the three read - so the card was two ribbons between two
+	# bars, and the thing it most resembled was a swimming pool. The lip is jagged and
+	# fissured now, the pool has a curved SURFACE with darker water under it, and the three
+	# streams are three distinct tones spread wide enough to show all three crossings.
+	# ALL THREE STREAMS ARE LIGHT, and the third one being dark was the last fault here.
+	# `water_lo` at 0.30/0.56/0.82 is almost exactly the pool's own tone, so the middle
+	# stream vanished into the water it was falling into and the card read as two falls.
+	# Falling water is the BRIGHTEST thing in a waterfall - it is full of air - so the three
+	# tones are three brightnesses of white-blue, and the darkest thing on the card is the
+	# rock. That also fixes the cliff, which was too light and competing with the water.
+	var rock := ca(Color(0.26, 0.22, 0.20))
+	var rock_lo := ca(Color(0.15, 0.13, 0.13))
+	var rock_hi := ca(Color(0.35, 0.30, 0.26))
+	var water := ca(Color(0.62, 0.84, 0.99, 0.90))
+	var water_hi := ca(Color(0.84, 0.95, 1.0, 0.92))
+	var water_lo := ca(Color(0.46, 0.72, 0.94, 0.90))
+	var pool_dk := ca(Color(0.16, 0.34, 0.56))
+	var foam := ca(Color(0.92, 0.97, 1.0, 0.80))
+	# THE CLIFF, with a broken lip. The jag is what makes it stone: a straight edge across
+	# the picture is a shelf, and no amount of colour fixes that.
+	# ...and the lip is DEEPLY broken rather than lightly nicked. The first jag varied by
+	# 0.05 of the card, which at this size is two small notches in a straight edge - and a
+	# straight edge with notches in it is a plank, which is exactly what it looked like. The
+	# variation is 0.13 now, on an irregular rhythm, and the flat highlight strip across the
+	# top is gone: that bar was doing more than anything else to make it read as sawn timber.
+	var lip := PackedVector2Array([Vector2(-0.50, -0.50), Vector2(0.50, -0.50)])
+	var jag := [[0.50, -0.36], [0.37, -0.27], [0.25, -0.38], [0.11, -0.29], [-0.02, -0.40],
+		[-0.17, -0.28], [-0.30, -0.37], [-0.41, -0.30], [-0.50, -0.39]]
+	for e in jag:
+		lip.append(Vector2(float(e[0]), float(e[1])))
+	draw_colored_polygon(lip, rock)
+	# facets down the face instead of drawn lines: a stroke on rock reads as a crack in
+	# paint, a shaded plane reads as stone
+	for fx in [-0.34, 0.30]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(fx - 0.075, -0.50), Vector2(fx + 0.055, -0.50),
+			Vector2(fx + 0.020, -0.325), Vector2(fx - 0.048, -0.345)]), rock_lo)
+	for fx2 in [-0.10, 0.42]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(fx2 - 0.045, -0.50), Vector2(fx2 + 0.040, -0.50),
+			Vector2(fx2 + 0.030, -0.355), Vector2(fx2 - 0.036, -0.365)]), rock_hi)
+	# the overhang's shadow, which is what makes the water come from BEHIND the lip
+	var shade := PackedVector2Array()
+	for e2 in jag:
+		shade.append(Vector2(float(e2[0]), float(e2[1])))
+	for i in range(jag.size() - 1, -1, -1):
+		shade.append(Vector2(float(jag[i][0]), float(jag[i][1]) + 0.035))
+	draw_colored_polygon(shade, rock_lo)
+	# THREE STREAMS THAT CROSS, in three tones so every crossing is visible. Each is a
+	# ribbon: a polygon whose two sides are the same sine, offset - a plain polyline would
+	# give a hose of even width, and falling water narrows as it accelerates.
+	var tones := [water, water_hi, water_lo]
+	for i in 3:
+		var x0 := -0.235 + float(i) * 0.235
+		var sway := 0.155 * (1.0 if i % 2 == 0 else -1.0)
+		var left := PackedVector2Array()
+		var right := PackedVector2Array()
+		for sg in 13:
+			var u := float(sg) / 12.0
+			var y := lerpf(-0.30, 0.235, u)
+			var x := x0 + sin(u * PI * 0.92) * sway
+			var wid := lerpf(0.055, 0.026, u)
+			left.append(Vector2(x - wid, y))
+			right.append(Vector2(x + wid, y))
+		right.reverse()
+		var band := left
+		band.append_array(right)
+		draw_colored_polygon(band, tones[i])
+	# THE POOL, with a real surface. A curved top edge and a darker body under it: the
+	# curve is what separates "water seen at an angle" from "a blue rectangle".
+	var surf := PackedVector2Array()
+	for sg2 in 17:
+		var u2 := float(sg2) / 16.0
+		surf.append(Vector2(lerpf(-0.50, 0.50, u2), 0.235 - 0.035 * sin(u2 * PI)))
+	surf.append(Vector2(0.50, 0.50))
+	surf.append(Vector2(-0.50, 0.50))
+	draw_colored_polygon(surf, pool_dk)
+	fill_ellipse(Vector2(0.0, 0.245), 0.40, 0.055, water_lo)
+	# the foam where it lands - without it the streams simply stop, and stopping water does
+	# not read as falling water
+	for i2 in 9:
+		var fx2 := -0.34 + float(i2) * 0.085 + sin(float(atick()) * 0.02 + float(i2)) * 0.014
+		draw_circle(Vector2(fx2, 0.222 + 0.018 * sin(float(atick()) * 0.03 + float(i2) * 1.7)),
+			0.036 - 0.009 * float(i2 % 3), foam)
+	# spray, thrown up off the pool
+	for i3 in 6:
+		var t := fposmod(float(atick()) * 0.008 + float(i3) * 0.17, 1.0)
+		draw_circle(Vector2(-0.26 + float(i3) * 0.105, 0.22 - t * 0.15),
+			0.016 * (1.0 - t), ca(Color(0.92, 0.97, 1.0, 0.55 * (1.0 - t))))
+
+
+func card_art_temple() -> void:
+	# COLUMNS = A GREEK TEMPLE WITH LARGE PILLARS (Louis). Everything about the pattern is
+	# in that picture already: fixed vertical lanes, evenly spaced, nothing crossing. The
+	# pillars are deliberately FAT - "large pillars" is his word, and a temple drawn with
+	# thin ones reads as a fence.
+	var stone := ca(Color(0.86, 0.82, 0.72))
+	var stone_lo := ca(Color(0.62, 0.58, 0.50))
+	var shade := ca(Color(0.44, 0.41, 0.36))
+	# the stylobate: two steps, wider than the temple, or it looks like it is floating
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.46, 0.30), Vector2(0.46, 0.30), Vector2(0.46, 0.365), Vector2(-0.46, 0.365)]), stone_lo)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.50, 0.365), Vector2(0.50, 0.365), Vector2(0.50, 0.43), Vector2(-0.50, 0.43)]), shade)
+	# FOUR PILLARS, fluted. The flutes are what make a rectangle a column, and they are
+	# drawn as filled bands rather than lines so they survive at card-back size.
+	for i in 4:
+		var x := -0.315 + float(i) * 0.21
+		var w := 0.072
+		draw_colored_polygon(PackedVector2Array([   # the shaft, tapering very slightly
+			Vector2(x - w, 0.30), Vector2(x + w, 0.30),
+			Vector2(x + w * 0.90, -0.17), Vector2(x - w * 0.90, -0.17)]), stone)
+		for f in 2:
+			var fx := x - w * 0.42 + float(f) * w * 0.84
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(fx - w * 0.12, 0.29), Vector2(fx + w * 0.12, 0.29),
+				Vector2(fx + w * 0.11, -0.16), Vector2(fx - w * 0.11, -0.16)]), stone_lo)
+		# the capital and the base: the two blocks that stop a shaft looking cut off
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x - w * 1.32, -0.17), Vector2(x + w * 1.32, -0.17),
+			Vector2(x + w * 1.18, -0.225), Vector2(x - w * 1.18, -0.225)]), stone)
+		draw_rect(Rect2(x - w * 1.20, 0.276, w * 2.40, 0.028), stone_lo)
+	# the architrave, then the pediment - a real one has both, and the flat band between
+	# the columns and the triangle is what makes the roof sit ON something
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.44, -0.225), Vector2(0.44, -0.225), Vector2(0.44, -0.295), Vector2(-0.44, -0.295)]), stone)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.47, -0.295), Vector2(0.47, -0.295), Vector2(0.0, -0.475)]), stone_lo)
+	draw_colored_polygon(PackedVector2Array([   # the tympanum, sunk into it
+		Vector2(-0.33, -0.315), Vector2(0.33, -0.315), Vector2(0.0, -0.425)]), shade)
+	# ...and one prop standing on each column, straight up and down, which is the pattern
+	for i in 4:
+		var x2 := -0.315 + float(i) * 0.21
+		var bob := 0.030 * sin(float(atick()) * 0.03 + float(i) * 1.6)
+		draw_circle(Vector2(x2, -0.285 + bob), 0.042, ca(Color(0.82, 0.70, 0.98)))
+
+
+func card_art_shower(sc: float) -> void:
+	# SHOWER = A SHOWER, and HALF SHOWER = A VERY SMALL SHOWER (Louis, and the joke is
+	# entirely in `sc`). One drawing at two scales, which is the only way the gag lands:
+	# the small one has to be recognisably the SAME shower, so the card reads as "that, but
+	# tiny" rather than as a different bathroom.
+	var chrome := ca(Color(0.80, 0.84, 0.88))
+	var chrome_lo := ca(Color(0.50, 0.55, 0.60))
+	var water := ca(Color(0.55, 0.80, 0.96, 0.72))
+	var tile := ca(Color(0.30, 0.34, 0.40))
+	# the tiled wall behind it stays FULL SIZE on both cards - it is the frame the joke is
+	# measured against, and shrinking it too would just be the same picture again
+	for row in 4:
+		for col in 4:
+			draw_rect(Rect2(-0.48 + float(col) * 0.245, -0.48 + float(row) * 0.245, 0.230, 0.230),
+				ca(Color(tile.r, tile.g, tile.b, 0.30)))
+	var top := -0.40 * sc
+	# the riser and the gooseneck: a vertical pipe with an elbow, drawn as filled bars
+	draw_rect(Rect2(-0.028 * sc + 0.16, top, 0.056 * sc, 0.30 * sc), chrome_lo)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0.16 + 0.028 * sc, top), Vector2(0.16 + 0.028 * sc, top + 0.055 * sc),
+		Vector2(-0.02, top + 0.075 * sc), Vector2(-0.02, top + 0.015 * sc)]), chrome)
+	# THE HEAD: a trapezoid with a face plate, and the holes drawn as a row of dots. At
+	# small scale the dots merge into one dark band, which still reads as a rose - so the
+	# shape survives the shrink without a special case.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.115 * sc - 0.02, top + 0.020 * sc), Vector2(0.045 * sc - 0.02, top + 0.020 * sc),
+		Vector2(0.075 * sc - 0.02, top + 0.095 * sc), Vector2(-0.145 * sc - 0.02, top + 0.095 * sc)]), chrome)
+	draw_rect(Rect2(-0.145 * sc - 0.02, top + 0.088 * sc, 0.220 * sc, 0.026 * sc), chrome_lo)
+	for i in 5:
+		draw_circle(Vector2(-0.125 * sc - 0.02 + float(i) * 0.048 * sc, top + 0.101 * sc),
+			0.009 * sc, ca(Color(0.20, 0.24, 0.28)))
+	# the water: a fan of falling lines from under the rose, each on its own phase so the
+	# spray moves. Lines, not a filled cone - a cone of water reads as a lampshade.
+	for i in 7:
+		var u := float(i) / 6.0
+		var x0 := lerpf(-0.130 * sc - 0.02, 0.060 * sc - 0.02, u)
+		var spread := (u - 0.5) * 0.22 * sc
+		var ph := fposmod(float(atick()) * 0.02 + float(i) * 0.37, 1.0)
+		var y0 := top + 0.115 * sc + ph * 0.06 * sc
+		var y1 := y0 + 0.36 * sc
+		draw_line(Vector2(x0, y0), Vector2(x0 + spread, y1), water, 0.018 * sc)
+	# the tray it lands in, and the puddle spreading - the mark that says the water arrives
+	var tray_y := top + 0.52 * sc
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.22 * sc - 0.02, tray_y), Vector2(0.18 * sc - 0.02, tray_y),
+		Vector2(0.24 * sc - 0.02, tray_y + 0.055 * sc), Vector2(-0.28 * sc - 0.02, tray_y + 0.055 * sc)]), chrome_lo)
+	fill_ellipse(Vector2(-0.02, tray_y + 0.010 * sc), 0.17 * sc, 0.030 * sc, water)
+	# ...and, on the SMALL one only, a rubber duck for scale. A tiny shower on its own is
+	# just a shower drawn small; something ordinary beside it is what makes it tiny.
+	if sc < 0.6:
+		# ...and it is SMALLER than the shower head, or the gag inverts: a duck bigger than
+		# the plumbing makes the duck the subject and the shower merely distant
+		var dp := Vector2(0.235, 0.315)
+		fill_ellipse(dp, 0.062, 0.044, ca(Color(1.0, 0.84, 0.28)))
+		draw_circle(dp + Vector2(0.042, -0.038), 0.034, ca(Color(1.0, 0.84, 0.28)))
+		draw_colored_polygon(PackedVector2Array([   # the bill
+			dp + Vector2(0.068, -0.038), dp + Vector2(0.112, -0.028), dp + Vector2(0.068, -0.020)]),
+			ca(Color(0.98, 0.55, 0.16)))
+		draw_circle(dp + Vector2(0.051, -0.046), 0.008, ca(Color(0.16, 0.12, 0.10)))
+
+
+func card_art_racket() -> void:
+	# TENNIS = A TENNIS RACKET (Louis). Drawn big and on the diagonal: a racket square-on
+	# fills a portrait card badly, and the diagonal is also how one is held.
+	var frame := ca(Color(0.95, 0.86, 0.36))
+	var frame_lo := ca(Color(0.66, 0.56, 0.20))
+	var grip := ca(Color(0.24, 0.20, 0.22))
+	var grip_hi := ca(Color(0.40, 0.34, 0.36))
+	var strung := ca(Color(0.94, 0.94, 0.90, 0.75))
+	# THE HANDLE GOES DOWN, and the first pass had it up: `ay` was the +90 perpendicular, so
+	# every `- ay` offset - throat, grip, butt cap - ran up and to the LEFT, and the racket
+	# came out held upside down with its grip clipped by the top edge of the card. One sign
+	# flip fixes all six of them at once, which is the reason they are all expressed off one
+	# axis vector rather than written out.
+	var ang := -0.62
+	var head := Vector2(-0.09, -0.20)
+	var ax := Vector2(cos(ang), sin(ang))
+	var ay := Vector2(ax.y, -ax.x)
+	# the head: an oval ring. Two filled ellipses rather than a stroked one, because a
+	# stroked ellipse at an angle is not something Godot draws - draw_arc's radius is
+	# circular, the trap the money hat's brim already paid for.
+	var ring := PackedVector2Array()
+	var hole := PackedVector2Array()
+	for i in 33:
+		var t := TAU * float(i) / 32.0
+		ring.append(head + ax * cos(t) * 0.175 + ay * sin(t) * 0.235)
+	for i in 33:
+		var t2 := TAU * float(-i) / 32.0
+		hole.append(head + ax * cos(t2) * 0.145 + ay * sin(t2) * 0.205)
+	draw_colored_polygon(ring, frame)
+	# the strings, drawn INSIDE the hole and then the hole's rim over them, so no string
+	# ever crosses the frame - which is what a stringbed drawn on top always does
+	for i in 5:
+		var u := -0.72 + float(i) * 0.36
+		draw_line(head + ax * (u * 0.145) - ay * 0.19, head + ax * (u * 0.145) + ay * 0.19, strung, 0.011)
+	for i in 6:
+		var v := -0.80 + float(i) * 0.32
+		draw_line(head - ax * 0.13 + ay * (v * 0.205), head + ax * 0.13 + ay * (v * 0.205), strung, 0.011)
+	draw_polyline(hole, frame_lo, 0.020)
+	# the throat: two arms out of the grip to the bottom of the head, with the gap between
+	# them left open. A solid triangle there reads as a frying pan.
+	for sgn: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			head - ay * 0.20 + ax * sgn * 0.030, head - ay * 0.20 + ax * sgn * 0.135,
+			head - ay * 0.33 + ax * sgn * 0.055, head - ay * 0.33 + ax * sgn * 0.020]), frame)
+	# the handle, wrapped: the wrap is drawn as slanted bands, which is what an overgrip is
+	var g0 := head - ay * 0.30
+	var g1 := head - ay * 0.58
+	draw_colored_polygon(PackedVector2Array([
+		g0 + ax * 0.050, g0 - ax * 0.050, g1 - ax * 0.062, g1 + ax * 0.062]), grip)
+	for i in 6:
+		var t3 := float(i) / 5.0
+		var p := g0.lerp(g1, t3)
+		draw_line(p - ax * 0.055 - ay * 0.012, p + ax * 0.055 + ay * 0.012, grip_hi, 0.010)
+	draw_colored_polygon(PackedVector2Array([   # the butt cap
+		g1 + ax * 0.070, g1 - ax * 0.070, g1 - ay * 0.030 - ax * 0.060, g1 - ay * 0.030 + ax * 0.060]), frame_lo)
+	# ...and the ball, mid-flight, with its own seam
+	# ...and the ball moves with it: up-RIGHT now, clear of the grip that has just swung
+	# down into the bottom-right corner
+	var bp := Vector2(0.30, -0.30) + Vector2(0.0, 0.030 * sin(float(atick()) * 0.035))
+	draw_circle(bp, 0.088, ca(Color(0.80, 0.94, 0.32)))
+	draw_arc(bp + Vector2(0.070, 0.0), 0.085, PI * 0.62, PI * 1.38, 16, ca(Color(0.98, 1.0, 0.90, 0.85)), 0.013, true)
+	draw_arc(bp - Vector2(0.070, 0.0), 0.085, -PI * 0.38, PI * 0.38, 16, ca(Color(0.98, 1.0, 0.90, 0.85)), 0.013, true)
+	# the streak behind it, so the ball is crossing rather than parked
+	for i in 3:
+		draw_circle(bp - Vector2(0.055 + float(i) * 0.045, -0.030 * float(i)), 0.070 - float(i) * 0.016,
+			ca(Color(0.80, 0.94, 0.32, 0.22 - 0.06 * float(i))))
+#endregion
+
+
+func deal_ucard(kind: int, idx: int) -> void:
+	# DEAL ONE. Every place that grants a skill goes through here so the card's three
+	# clocks can never be half-set: `ucard_tick` starts the pop-in, `ucard_flip` at -1
+	# means it is still face down, and `ucard_out_tick` at -1 means it has not been
+	# dismissed. Setting two of the three by hand at each call site is exactly how a card
+	# ends up arriving already turned over.
+	ucard_kind = kind
+	ucard_idx = idx
+	ucard_tick = atick()
+	ucard_flip = -1.0
+	ucard_out_tick = -1.0
+
+
+func draw_unlock_card(font: Font, s: Vector2) -> void:
+	# THE UNLOCK CARD, rebuilt around the FLIP (2026-07-28). It arrives face DOWN - all it
+	# says is that a trick, or a pattern, has been earned - waits for a press, TURNS OVER,
+	# and only then names what is on it. That sequence is the feature Louis asked for:
+	# "just show that you unlock something: a trick card or a pattern card, but not which
+	# one." The roll happened when the card was dealt (deal_skill_card), so the flip is a
+	# reveal and not a decision.
+	#
+	# THE TURN IS DRAWN AS A HORIZONTAL SQUASH, which is the honest 2D reading of a card
+	# rotating about its vertical axis - the same trick draw_juggler's Spin uses on the
+	# body, and for the same reason: cos(angle) is the projected width, so the card thins
+	# to nothing at the halfway point and swells back out with the other side showing.
+	# Done by RESIZING THE RECT rather than by draw_set_transform, because the faces set
+	# their own transform for their unit space and an outer one would be replaced, not
+	# composed - the trap that is written down at the top of the card region.
 	if ucard_kind < 0:
 		return
 	var age := atick() - ucard_tick
 	if age < 0.0:
 		return
-	var d: Dictionary = TRICKS[ucard_idx] if ucard_kind == 0 else PATTERNS[ucard_idx]
+	var is_trick := ucard_kind == 0
+	var d: Dictionary = TRICKS[ucard_idx] if is_trick else PATTERNS[ucard_idx]
 	# pop in, then WAIT (2026-07-27, Louis: it waits for a keypress rather than timing
 	# out). It holds for as long as it takes - the sim is held with it, see
-	# _physics_process - and only starts leaving once `ucard_out_tick` is stamped by the
-	# key that dismissed it.
+	# _physics_process - and only starts leaving once `ucard_out_tick` is stamped.
 	var grow := 1.0
 	var a := 1.0
 	if age < UCARD_IN:
@@ -12075,20 +13417,32 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 		grow = 1.0 + 0.05 * (1.0 - a)
 		if a <= 0.0:
 			return
-	var kindcol := Color(1.0, 0.84, 0.42) if ucard_kind == 0 else Color(0.82, 0.70, 0.98)
-	# SIZED AROUND THE ART, not guessed. The preview figure is a fixed pixel height (its
-	# floor, arc and body constants are absolute), so a box that is too short does not
-	# scale it down - it lets the head out through the top. The Skills screen gives the
-	# same drawing 356px; at the 176 this card first tried, the juggler stood straight
-	# through the lid and across the title pill. The card is built outward from a box
-	# that actually holds him.
+	# how far through the turn, and therefore which side is facing the room
+	var turn := 0.0
+	if ucard_flip >= 0.0:
+		turn = clampf((atick() - ucard_flip) / UCARD_FLIP, 0.0, 1.0)
+	var showing_face := turn >= 0.5
+	# the projected width. Floored at a sliver rather than allowed to reach zero, for the
+	# same reason the Spin's body width is: a card of literally no width is a degenerate
+	# polygon, and the frame's rounded corners have nothing to be rounded on.
+	var squash := absf(cos(turn * PI))
+	if ucard_flip >= 0.0 and turn < 1.0:
+		squash = maxf(squash, 0.06)
+	elif turn >= 1.0:
+		squash = 1.0
+	var kindcol := card_kind_col(is_trick)
+	# SIZED AROUND THE ART, not guessed. The face's picture wants a near-square box - it is
+	# drawn in unit space off the SMALLER side - and the words underneath want a fixed
+	# stack. 344x520 is what the Skills preview taught: at the 176 an earlier card tried,
+	# a figure stood straight through the lid.
 	var cw := 344.0 * grow
 	var ch := 520.0 * grow
 	var cx := s.x * 0.5
 	var cy := s.y * 0.46
-	var r := Rect2(cx - cw * 0.5, cy - ch * 0.5, cw, ch)
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.015, 0.03, 0.62 * a))
-	# the burst behind it: three soft pools that breathe, so the card sits in light
+	# the burst behind it: soft pools that breathe, so the card sits in light. Drawn at the
+	# card's FULL width whatever the turn - the light in the room does not thin out because
+	# the card is edge-on, and squashing it made the flip look like a wipe.
 	var br := 0.5 + 0.5 * sin(atick() * 0.05)
 	draw_glow(Vector2(cx, cy), cw * 1.25, Color(kindcol.r, kindcol.g, kindcol.b, 0.20 * a))
 	draw_glow(Vector2(cx, cy), cw * (0.85 + 0.06 * br), Color(kindcol.r, kindcol.g, kindcol.b, 0.16 * a))
@@ -12099,41 +13453,68 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 		var p0 := Vector2(cx, cy) + dir * cw * 0.42
 		var p1 := Vector2(cx, cy) + dir * cw * (0.92 + 0.10 * sin(atick() * 0.03 + float(i)))
 		draw_line(p0, p1, Color(kindcol.r, kindcol.g, kindcol.b, 0.10 * a), 6.0 * grow)
-	soft_card(r, Color(0.10, 0.07, 0.09, 0.99 * a), Color(kindcol.r, kindcol.g, kindcol.b, 0.85 * a),
-		2.5 * grow, 16.0 * grow, 26.0)
-	# the kind pill, top centre
-	var pillw := 128.0 * grow
-	var pill := Rect2(cx - pillw * 0.5, r.position.y + 13.0 * grow, pillw, 22.0 * grow)
-	draw_rect(pill, Color(kindcol.r, kindcol.g, kindcol.b, 0.20 * a))
-	draw_rect(pill, Color(kindcol.r, kindcol.g, kindcol.b, 0.75 * a), false, 1.0)
-	draw_string(font, Vector2(pill.position.x, pill.position.y + 16.0 * grow),
-		"NEW TRICK" if ucard_kind == 0 else "NEW PATTERN", HORIZONTAL_ALIGNMENT_CENTER, pillw,
-		int(maxf(8.0, 12.0 * grow)), Color(kindcol.r, kindcol.g, kindcol.b, a))
-	# THE ART
-	var art := Rect2(r.position.x + 14.0 * grow, r.position.y + 44.0 * grow,
-		cw - 28.0 * grow, 260.0 * grow)
-	draw_skill_preview(font, art, ucard_kind == 0, ucard_idx, "", false)
-	# the name, sized to fit whatever it is called
-	var namew := cw - 30.0 * grow
-	var nm := String(d["name"]).to_upper()
-	var nsz := fit_size(title_font(), nm, namew, int(maxf(10.0, 27.0 * grow)), 11)
-	draw_string(title_font(), Vector2(r.position.x + 15.0 * grow, art.position.y + art.size.y + 34.0 * grow),
-		nm, HORIZONTAL_ALIGNMENT_CENTER, namew, nsz, Color(1.0, 0.96, 0.86, a))
-	draw_ornament(cx, art.position.y + art.size.y + 46.0 * grow, cw * 0.52,
-		Color(kindcol.r, kindcol.g, kindcol.b, 0.7 * a))
-	# what it actually does, wrapped into the room that is left above the footer
-	var dbox := Rect2(r.position.x + 18.0 * grow, art.position.y + art.size.y + 58.0 * grow,
-		cw - 36.0 * grow, r.position.y + ch - 34.0 * grow - (art.position.y + art.size.y + 58.0 * grow))
-	draw_wrap_fit(font, String(d["desc"]), dbox, int(maxf(8.0, 12.0 * grow)), Color(0.88, 0.83, 0.75, 0.95 * a))
-	draw_string(font, Vector2(r.position.x, r.position.y + ch - 30.0 * grow),
-		"SKILLS shows you how" if ucard_kind == 0 else "P switches patterns in training",
-		HORIZONTAL_ALIGNMENT_CENTER, cw, int(maxf(8.0, 11.0 * grow)), Color(0.72, 0.68, 0.62, 0.9 * a))
+	var vw := cw * squash
+	var r := Rect2(cx - vw * 0.5, cy - ch * 0.5, vw, ch)
+	if not showing_face:
+		draw_skill_card_back(r, is_trick, a, grow)
+	else:
+		draw_card_frame(r, is_trick, a, grow)
+		# ...and the face, but only once the card is wide enough to hold a picture. Between
+		# about edge-on and a third open there is no room for art, and drawing it into a
+		# 20px slot is not a card turning, it is a smear.
+		if squash > 0.34:
+			var art := Rect2(r.position.x + 14.0 * grow, r.position.y + 44.0 * grow,
+				vw - 28.0 * grow, 250.0 * grow)
+			draw_skill_card_art(art, is_trick, ucard_idx, a)
+			# the name, sized to fit whatever it is called
+			var namew := vw - 30.0 * grow
+			var nm := String(d["name"]).to_upper()
+			var nsz := fit_size(title_font(), nm, namew, int(maxf(10.0, 27.0 * grow)), 11)
+			draw_string(title_font(), Vector2(r.position.x + 15.0 * grow, art.position.y + art.size.y + 34.0 * grow),
+				nm, HORIZONTAL_ALIGNMENT_CENTER, namew, nsz, Color(1.0, 0.96, 0.86, a))
+			draw_ornament(cx, art.position.y + art.size.y + 46.0 * grow, vw * 0.52,
+				Color(kindcol.r, kindcol.g, kindcol.b, 0.7 * a))
+			# what it actually does, wrapped into the room that is left above the footer
+			var dbox := Rect2(r.position.x + 18.0 * grow, art.position.y + art.size.y + 58.0 * grow,
+				vw - 36.0 * grow, r.position.y + ch - 34.0 * grow - (art.position.y + art.size.y + 58.0 * grow))
+			draw_wrap_fit(font, String(d["desc"]), dbox, int(maxf(8.0, 12.0 * grow)), Color(0.88, 0.83, 0.75, 0.95 * a))
+			draw_string(font, Vector2(r.position.x, r.position.y + ch - 30.0 * grow),
+				"SKILLS shows you how" if is_trick else "P switches patterns in training",
+				HORIZONTAL_ALIGNMENT_CENTER, vw, int(maxf(8.0, 11.0 * grow)), Color(0.72, 0.68, 0.62, 0.9 * a))
+	# THE KIND PILL rides on top of both sides, because it is the one thing that is true
+	# either way round: a trick card is a trick card face up or face down. It is what the
+	# face-down card says INSTEAD of a name, so it drops the word NEW and simply names the
+	# kind until the turn is done.
+	if squash > 0.30:
+		var pillw := 128.0 * grow * squash
+		var pill := Rect2(cx - pillw * 0.5, r.position.y + 13.0 * grow, pillw, 22.0 * grow)
+		draw_rect(pill, Color(kindcol.r, kindcol.g, kindcol.b, 0.20 * a))
+		draw_rect(pill, Color(kindcol.r, kindcol.g, kindcol.b, 0.75 * a), false, 1.0)
+		var pilltxt := ("TRICK CARD" if is_trick else "PATTERN CARD") if not showing_face \
+			else ("NEW TRICK" if is_trick else "NEW PATTERN")
+		draw_string(font, Vector2(pill.position.x, pill.position.y + 16.0 * grow),
+			pilltxt, HORIZONTAL_ALIGNMENT_CENTER, pillw,
+			fit_size(font, pilltxt, pillw - 6.0, int(maxf(8.0, 12.0 * grow)), 7),
+			Color(kindcol.r, kindcol.g, kindcol.b, a))
+	# THE FACE-DOWN CARD HAS TO SAY WHAT IT IS WORTH TURNING OVER FOR, or a player who
+	# does not yet know the mechanic reads a blank card and a "press any key" and learns
+	# nothing from the moment. One line, under the card, outside the frame so the flip
+	# never squashes the lettering.
+	if ucard_flip < 0.0:
+		draw_string(font, Vector2(0.0, cy + ch * 0.5 + 26.0 * grow),
+			"a skill you do not have yet  -  turn it over", HORIZONTAL_ALIGNMENT_CENTER, s.x,
+			int(maxf(9.0, 13.0 * grow)), Color(0.82, 0.76, 0.68, 0.9 * a))
 	# ...and the prompt, which only appears once the card will actually listen. Pulsed,
-	# because a card that waits forever has to say so or it reads as a freeze.
-	if ucard_out_tick < 0.0 and age >= UCARD_ARM:
+	# because a card that waits forever has to say so or it reads as a freeze. It names
+	# the two different things the two presses do.
+	var armed := (ucard_flip < 0.0 and age >= UCARD_ARM) \
+		or (ucard_flip >= 0.0 and turn >= 1.0 and atick() - ucard_flip >= UCARD_FLIP + UCARD_READ)
+	if ucard_out_tick < 0.0 and armed:
 		var pa := 0.55 + 0.45 * sin(atick() * 0.09)
 		draw_string(font, Vector2(r.position.x, r.position.y + ch - 13.0 * grow),
-			"press any key", HORIZONTAL_ALIGNMENT_CENTER, cw, int(maxf(8.0, 12.0 * grow)),
+			"press any key to turn it over" if ucard_flip < 0.0 else "press any key",
+			HORIZONTAL_ALIGNMENT_CENTER, vw,
+			int(maxf(7.0, (10.0 if ucard_flip < 0.0 else 12.0) * grow)),
 			Color(kindcol.r, kindcol.g, kindcol.b, pa * a))
 
 
@@ -12499,7 +13880,14 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	var dy := py + ph - 62.0
 	draw_string(font, Vector2(tx, dy), eff, HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.82, 0.79, 0.72))
 	if debug_mode:
-		draw_string(font, Vector2(tx, dy + 16.0), "DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N gold  ,/. rep", HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.6, 0.9, 1.0))
+		# the legend has to NAME the hold, or the fast path is a secret. And it says
+		# coin_word(), never a literal "gold": the purse beside it reads "flowers", and
+		# this file's own rule is that a typed currency name is a bug waiting for the
+		# switch to be flipped. Through draw_fit_string because it is now long enough to
+		# reach the panel edge, and draw_string CLIPS rather than shortens.
+		draw_fit_string(font, Vector2(tx, dy + 16.0),
+			"DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N %s (hold: x%s)  ,/. rep" % [coin_word(), commafy(MONEY_HOLD_STEP)],
+			HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.6, 0.9, 1.0))
 	var th_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "branch"]]
 	if points > 0:
 		th_items.append([k_finish(), "invest"])
@@ -12528,25 +13916,46 @@ func draw_purse(font: Font, right_x: float, y: float) -> void:
 	draw_coin_mark(Vector2(right_x - mr, y - 8.0), mr, Color(1.0, 0.84, 0.4), true)
 
 
-func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, afford: bool) -> void:
+func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, afford: bool,
+		free_word: String = "") -> void:
 	# the buy strip at the foot of a shop card: the KEY on the left is the button, the
 	# price on the right is the ask. Green means it can happen, dim red means not yet.
+	#
+	# `free_word` is for the cards that are not a purchase at all - the doors between the
+	# two rooms, once the fee is paid. "0" beside a flower mark is not free, it is a price
+	# of nothing, and a player reads it as a bug.
 	var bg := Color(0.16, 0.22, 0.13, 0.9) if afford else Color(0.16, 0.09, 0.09, 0.85)
 	var line := Color(0.55, 0.85, 0.5, 0.55) if afford else Color(0.7, 0.35, 0.3, 0.4)
 	var cc := Color(0.78, 0.96, 0.72) if afford else Color(0.85, 0.5, 0.45)
 	draw_rect(r, bg)
 	draw_rect(r, line, false, 1.0)
-	draw_keycap(font, r.position.x + 8.0, r.position.y + r.size.y * 0.5 - 9.5, keylabel)
+	# THE PLATE KNOWS HOW MUCH ROOM IS LEFT, and it did not before (2026-07-28). Both the
+	# key and the price were placed from their own edge - the key from the left, the price
+	# from the right - with nothing measuring the gap between them, and it worked only
+	# because the plate had always been wide. The eighth gear card took a card to 121px,
+	# and "12,000" at 16pt drew straight through the keycap beside it: the shop showed
+	# "7|12,000" as one run of digits, which is a price nobody can read. `kw` is measured
+	# and everything to the right of it fits in what is left.
+	var kw := draw_keycap(font, r.position.x + 8.0, r.position.y + r.size.y * 0.5 - 9.5, keylabel)
+	var room := r.size.x - kw - 26.0
 	# the price is a NUMBER FOLLOWED BY the currency's own MARK, never a letter - "20
 	# flowers", the way an amount is actually said (2026-07-27, Louis: the flower comes
 	# after the price). Right-aligned as a unit: the mark's outer edge sits on the
 	# margin and the digits are measured back from it, because `price` is data and can
 	# run to "60,000".
 	var baseline := r.position.y + r.size.y * 0.5 + 6.0
+	if free_word != "":
+		draw_fit_string(font, Vector2(r.position.x + kw + 14.0, baseline), free_word,
+			HORIZONTAL_ALIGNMENT_RIGHT, room, fit_size(font, free_word, room, 15, 9), cc)
+		return
+	# A NUMBER SHRINKS, IT NEVER TRIMS - this file's own rule, and a price is the purest
+	# case of it: "12,0..." is not a price. fit_size hands back the largest size the digits
+	# fit at, floored low enough that even the 121px card keeps them whole.
 	var mr := 7.0
+	var psz := fit_size(font, price, room - mr * 2.0 - 5.0, 16, 9)
 	var mx := r.position.x + r.size.x - 12.0 - mr
-	var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
-	draw_string(font, Vector2(mx - mr - 5.0 - pw, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, cc)
+	var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz).x
+	draw_string(font, Vector2(mx - mr - 5.0 - pw, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz, cc)
 	draw_coin_mark(Vector2(mx, baseline - 5.5), mr, cc, true)
 
 
@@ -12601,17 +14010,39 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 			# performer, and the Kit shows the set with him standing in it.
 			var gfl := 0.86 + 0.14 * sin(atick() * 0.06)
 			if id != "glow_tape":
-				# the performer, lit: the one thing the suit buys
+				# THE SUIT, NOT A STICK MAN (redrawn 2026-07-28, Louis: the glow-in-the-dark
+				# suit looked strange). It was a head, a box and four LINES - which is a
+				# figure, but the thing being sold is a COSTUME, and a costume has to have
+				# tailoring in it or the card is indistinguishable from any other little
+				# green man. It is the wardrobe's own garment now, in phosphor: sloped
+				# shoulders, a jacket that draws in at the waist, a lighter waistcoat down
+				# the front, the trouser seams that are the actual signature of the lit
+				# costume on stage, and the bloom underneath that makes it read as EMITTING
+				# rather than as a man painted green.
 				var fc := c + Vector2(-28.0 if id == "glow_kit" else 0.0, 6.0)
-				draw_glow(fc, 30.0, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.30 * gfl))
-				var gp3 := Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.92 * gfl)
-				draw_circle(fc + Vector2(0.0, -18.0), 5.0, gp3)                      # head
-				draw_colored_polygon(PackedVector2Array([                            # torso
-					Vector2(fc.x - 7.0, fc.y - 12.0), Vector2(fc.x + 7.0, fc.y - 12.0),
-					Vector2(fc.x + 5.0, fc.y + 4.0), Vector2(fc.x - 5.0, fc.y + 4.0)]), gp3)
-				for sgn5 in [-1.0, 1.0]:                                             # arms and legs
-					draw_line(fc + Vector2(sgn5 * 6.0, -10.0), fc + Vector2(sgn5 * 14.0, -18.0), gp3, 2.6)
-					draw_line(fc + Vector2(sgn5 * 3.0, 4.0), fc + Vector2(sgn5 * 5.0, 18.0), gp3, 3.0)
+				draw_glow(fc, 34.0, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.34 * gfl))
+				var gp3 := Color(GLOW_PHOS.r * 0.62, GLOW_PHOS.g * 0.78, GLOW_PHOS.b * 0.66, 0.95 * gfl)
+				var gp_hi := Color(0.86, 1.0, 0.90, 0.95 * gfl)
+				draw_colored_polygon(PackedVector2Array([                            # the trousers
+					Vector2(fc.x - 6.5, fc.y + 2.0), Vector2(fc.x + 6.5, fc.y + 2.0),
+					Vector2(fc.x + 5.5, fc.y + 20.0), Vector2(fc.x + 1.5, fc.y + 20.0),
+					Vector2(fc.x, fc.y + 9.0), Vector2(fc.x - 1.5, fc.y + 20.0),
+					Vector2(fc.x - 5.5, fc.y + 20.0)]), gp3)
+				for sgn5: float in [-1.0, 1.0]:                                      # the outseams
+					draw_line(fc + Vector2(sgn5 * 5.4, 3.0), fc + Vector2(sgn5 * 4.4, 19.0), gp_hi, 1.4)
+				draw_colored_polygon(PackedVector2Array([                            # the jacket
+					Vector2(fc.x - 9.5, fc.y - 12.0), Vector2(fc.x - 3.0, fc.y - 14.0),
+					Vector2(fc.x + 3.0, fc.y - 14.0), Vector2(fc.x + 9.5, fc.y - 12.0),
+					Vector2(fc.x + 7.0, fc.y - 3.0), Vector2(fc.x + 8.5, fc.y + 4.0),
+					Vector2(fc.x - 8.5, fc.y + 4.0), Vector2(fc.x - 7.0, fc.y - 3.0)]), gp3)
+				draw_colored_polygon(PackedVector2Array([                            # the waistcoat
+					Vector2(fc.x - 3.0, fc.y - 12.0), Vector2(fc.x + 3.0, fc.y - 12.0),
+					Vector2(fc.x + 2.6, fc.y + 3.0), Vector2(fc.x - 2.6, fc.y + 3.0)]), gp_hi)
+				for sgn6: float in [-1.0, 1.0]:                                      # the sleeves
+					draw_colored_polygon(PackedVector2Array([
+						fc + Vector2(sgn6 * 8.0, -11.0), fc + Vector2(sgn6 * 15.0, -18.0),
+						fc + Vector2(sgn6 * 17.0, -15.0), fc + Vector2(sgn6 * 9.5, -5.0)]), gp3)
+				draw_circle(fc + Vector2(0.0, -18.5), 5.0, Color(0.90, 0.72, 0.56, 0.95))   # his own face
 				if id == "glow_suit":
 					return
 			var lay := [
@@ -12630,29 +14061,56 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 				var gsc: float = float(e2[2])
 				glow_silhouette(gp2, int(e2[1]), gsc, 0.5, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.9 * gfl))
 				draw_circle(gp2, 3.2 * gsc, Color(1.0, 1.0, 1.0, 0.6 * gfl))
-		"gloves":   # SILK GLOVES: a glove, cuff down, thumb out - a mitten shape with no
-			# thumb reads as a sock, and the cuff is what says "dress glove"
+		"gloves":   # SILK GLOVES (redrawn 2026-07-28, Louis: they looked strange). The first
+			# version was TALL and NARROW with a thumb stuck out low and three straight
+			# seams up the middle, which reads as a sock with a spur. A glove is WIDER than
+			# it is long above the wrist, its fingers are ROUNDED at the top, its thumb sits
+			# high on the side, and its seams FAN from the wrist rather than running
+			# parallel. Four corrections, and the fourth is what stops it reading as a mitten.
+			var pad := c + Vector2(0.0, -2.0)
+			var mitt := PackedVector2Array()
+			for i in 13:   # the rounded finger end: an arch, not a flat top
+				var a := PI + PI * float(i) / 12.0
+				mitt.append(pad + Vector2(cos(a) * 13.0, sin(a) * 12.0))
+			mitt.append(pad + Vector2(13.0, 13.0))
+			mitt.append(pad + Vector2(-13.0, 13.0))
+			draw_colored_polygon(mitt, cc)
+			draw_colored_polygon(PackedVector2Array([                       # the thumb, high and out
+				pad + Vector2(-12.0, -3.0), pad + Vector2(-21.0, -8.0),
+				pad + Vector2(-24.0, -1.0), pad + Vector2(-13.0, 6.0)]), cc)
+			for fa in [-0.44, 0.0, 0.44]:                                   # the seams, fanning
+				var d := Vector2(sin(fa), -cos(fa))
+				draw_line(pad + d * 3.0, pad + d * 11.5, Color(0.40, 0.36, 0.34, 0.42), 1.2)
+			# the cuff: scalloped along its lower edge, which is the one detail that says
+			# "dress glove" instead of "work glove"
 			draw_colored_polygon(PackedVector2Array([
-				Vector2(c.x - 10.0, c.y + 14.0), Vector2(c.x + 10.0, c.y + 14.0),
-				Vector2(c.x + 11.0, c.y - 6.0), Vector2(c.x + 6.0, c.y - 16.0),
-				Vector2(c.x - 7.0, c.y - 16.0), Vector2(c.x - 11.0, c.y - 6.0)]), cc)
-			draw_colored_polygon(PackedVector2Array([                       # the thumb
-				Vector2(c.x - 10.0, c.y + 2.0), Vector2(c.x - 18.0, c.y - 4.0),
-				Vector2(c.x - 20.0, c.y + 2.0), Vector2(c.x - 11.0, c.y + 9.0)]), cc)
-			for fx in [-4.5, 0.0, 4.5]:                                     # the seams
-				draw_line(Vector2(c.x + fx, c.y - 15.0), Vector2(c.x + fx, c.y - 2.0),
-					Color(0.4, 0.36, 0.34, 0.45), 1.1)
-			draw_rect(Rect2(c.x - 11.0, c.y + 12.0, 22.0, 6.0), Color(cc.r * 0.72, cc.g * 0.72, cc.b * 0.72))
-		"boots":   # STAGE BOOTS: a side-on boot - sole, heel, a turned-down cuff
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(c.x - 7.0, c.y - 16.0), Vector2(c.x + 5.0, c.y - 16.0),
-				Vector2(c.x + 6.0, c.y + 6.0), Vector2(c.x + 17.0, c.y + 8.0),
-				Vector2(c.x + 17.0, c.y + 14.0), Vector2(c.x - 8.0, c.y + 14.0)]), cc)
-			draw_rect(Rect2(c.x - 9.0, c.y + 13.0, 27.0, 4.0), Color(0.16, 0.13, 0.12))   # the sole
-			draw_rect(Rect2(c.x - 9.0, c.y + 6.0, 5.0, 8.0), Color(0.16, 0.13, 0.12))     # the heel
-			draw_rect(Rect2(c.x - 8.0, c.y - 17.0, 14.0, 6.0),
-				Color(minf(1.0, cc.r * 1.3), minf(1.0, cc.g * 1.3), minf(1.0, cc.b * 1.3)))  # the cuff
-			draw_line(Vector2(c.x + 5.0, c.y - 12.0), Vector2(c.x + 6.0, c.y + 4.0), Color(1, 1, 1, 0.18), 2.0)
+				pad + Vector2(-14.0, 11.0), pad + Vector2(14.0, 11.0), pad + Vector2(13.0, 17.0),
+				pad + Vector2(6.5, 20.0), pad + Vector2(0.0, 17.0), pad + Vector2(-6.5, 20.0),
+				pad + Vector2(-13.0, 17.0)]), Color(cc.r * 0.74, cc.g * 0.74, cc.b * 0.74))
+			draw_line(pad + Vector2(-13.5, 11.5), pad + Vector2(13.5, 11.5), Color(1, 1, 1, 0.22), 1.4)
+		"boots":   # STAGE BOOTS (redrawn 2026-07-28). It is the SAME boot draw_stage_boot
+			# puts on the performer now - shaft, toe cap, heel block, and the two spat straps
+			# with their buttons - because a shop icon that does not match the thing you buy
+			# is a small lie the player finds out about on the next stage. Side-on here, since
+			# a card has the width for it and a profile is the clearer read of a boot.
+			var lit2 := Color(minf(1.0, cc.r * 1.34), minf(1.0, cc.g * 1.30), minf(1.0, cc.b * 1.26))
+			var sole := Color(0.16, 0.13, 0.12)
+			draw_colored_polygon(PackedVector2Array([   # the shaft
+				Vector2(c.x - 8.0, c.y - 18.0), Vector2(c.x + 6.0, c.y - 18.0),
+				Vector2(c.x + 7.0, c.y + 2.0), Vector2(c.x - 9.0, c.y + 2.0)]), cc)
+			draw_colored_polygon(PackedVector2Array([   # the foot, toe forward
+				Vector2(c.x - 9.0, c.y + 2.0), Vector2(c.x + 7.0, c.y + 2.0),
+				Vector2(c.x + 14.0, c.y + 7.0), Vector2(c.x + 18.0, c.y + 13.0),
+				Vector2(c.x - 9.0, c.y + 13.0)]), cc)
+			draw_colored_polygon(PackedVector2Array([   # the patent toe cap
+				Vector2(c.x + 7.0, c.y + 13.0), Vector2(c.x + 18.0, c.y + 13.0),
+				Vector2(c.x + 14.0, c.y + 7.0), Vector2(c.x + 8.0, c.y + 5.0)]), lit2)
+			draw_rect(Rect2(c.x - 10.0, c.y + 12.5, 29.0, 4.0), sole)                 # the sole
+			draw_rect(Rect2(c.x - 10.0, c.y + 5.0, 6.0, 8.0), sole)                   # the heel
+			for sy2 in [-14.0, -6.0]:                                                 # the spat straps
+				draw_rect(Rect2(c.x - 8.5, c.y + sy2, 15.0, 4.0), Color(0.92, 0.90, 0.84))
+				draw_circle(Vector2(c.x - 4.0, c.y + sy2 + 2.0), 1.6, Color(0.86, 0.70, 0.34))
+			draw_line(Vector2(c.x + 4.5, c.y - 16.0), Vector2(c.x + 5.5, c.y + 1.0), Color(1, 1, 1, 0.20), 2.0)
 		"hat":   # TOP HAT: a tall crown, a band, and a brim seen slightly from above
 			draw_colored_polygon(PackedVector2Array([
 				Vector2(c.x - 10.0, c.y + 5.0), Vector2(c.x + 10.0, c.y + 5.0),
@@ -12662,31 +14120,98 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 			draw_rect(Rect2(c.x - 10.5, c.y - 2.0, 21.0, 6.0), Color(0.88, 0.72, 0.34))   # the band
 			fill_ellipse(Vector2(c.x, c.y + 7.0), 19.0, 5.0, Color(cc.r * 0.82, cc.g * 0.82, cc.b * 0.82))
 			draw_line(Vector2(c.x - 9.0, c.y - 13.0), Vector2(c.x - 9.0, c.y + 2.0), Color(1, 1, 1, 0.16), 2.4)
-		"coat":   # TAILCOAT: shoulders, satin lapels meeting in a V, and the tails
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(c.x - 15.0, c.y - 10.0), Vector2(c.x + 15.0, c.y - 10.0),
-				Vector2(c.x + 13.0, c.y + 4.0), Vector2(c.x + 16.0, c.y + 17.0),
-				Vector2(c.x + 4.0, c.y + 17.0), Vector2(c.x, c.y + 5.0),
-				Vector2(c.x - 4.0, c.y + 17.0), Vector2(c.x - 16.0, c.y + 17.0),
-				Vector2(c.x - 13.0, c.y + 4.0)]), cc)
-			for sgn4 in [-1.0, 1.0]:                                        # the satin lapels
+		"coat":   # TAILCOAT (redrawn 2026-07-28, Louis: it looked strange - and it did: one
+			# polygon with a notch cut in the bottom, which at icon size read as a purple
+			# letter W or a bat). A coat needs THREE separate masses to be a coat: a torso
+			# with sloped shoulders, a cutaway front hem at the waist, and two TAILS hanging
+			# BELOW it with real daylight between them. Drawn as separate shapes so the gap
+			# is a gap rather than a notch, which is the whole difference.
+			var satin2 := Color(minf(1.0, cc.r * 1.6 + 0.08), minf(1.0, cc.g * 1.6 + 0.08), minf(1.0, cc.b * 1.6 + 0.08))
+			for sgn4: float in [-1.0, 1.0]:                                 # the two tails, hanging
 				draw_colored_polygon(PackedVector2Array([
-					Vector2(c.x + sgn4 * 3.0, c.y - 10.0), Vector2(c.x + sgn4 * 12.0, c.y - 10.0),
-					Vector2(c.x + sgn4 * 5.0, c.y + 4.0)]),
-					Color(minf(1.0, cc.r * 1.6 + 0.08), minf(1.0, cc.g * 1.6 + 0.08), minf(1.0, cc.b * 1.6 + 0.08)))
-			draw_circle(Vector2(c.x, c.y + 1.0), 1.8, Color(0.92, 0.82, 0.5))
-		"vest":   # SEQUIN WAISTCOAT: the waistcoat shape, and the sequins doing the work
+					Vector2(c.x + sgn4 * 4.5, c.y + 3.0), Vector2(c.x + sgn4 * 15.0, c.y + 3.0),
+					Vector2(c.x + sgn4 * 13.5, c.y + 19.0), Vector2(c.x + sgn4 * 9.0, c.y + 21.0),
+					Vector2(c.x + sgn4 * 5.5, c.y + 15.0)]), Color(cc.r * 0.93, cc.g * 0.93, cc.b * 0.93))
+			draw_colored_polygon(PackedVector2Array([                       # the body, cut away at the waist
+				Vector2(c.x - 16.0, c.y - 13.0), Vector2(c.x - 6.0, c.y - 16.0),
+				Vector2(c.x + 6.0, c.y - 16.0), Vector2(c.x + 16.0, c.y - 13.0),
+				Vector2(c.x + 14.0, c.y + 4.0), Vector2(c.x - 14.0, c.y + 4.0)]), cc)
+			for sgn5: float in [-1.0, 1.0]:                                 # the satin lapels
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(c.x + sgn5 * 2.5, c.y - 15.0), Vector2(c.x + sgn5 * 12.0, c.y - 14.0),
+					Vector2(c.x + sgn5 * 8.0, c.y - 1.0), Vector2(c.x + sgn5 * 1.5, c.y - 3.0)]), satin2)
+			draw_colored_polygon(PackedVector2Array([                       # the shirt front between them
+				Vector2(c.x - 2.0, c.y - 15.0), Vector2(c.x + 2.0, c.y - 15.0),
+				Vector2(c.x + 1.5, c.y - 2.0), Vector2(c.x - 1.5, c.y - 2.0)]), Color(0.94, 0.92, 0.86))
+			draw_colored_polygon(PackedVector2Array([                       # the bow tie
+				Vector2(c.x - 5.5, c.y - 17.0), Vector2(c.x, c.y - 14.5), Vector2(c.x + 5.5, c.y - 17.0),
+				Vector2(c.x + 5.5, c.y - 12.5), Vector2(c.x, c.y - 14.0), Vector2(c.x - 5.5, c.y - 12.5)]),
+				Color(0.14, 0.10, 0.12))
+			draw_circle(Vector2(c.x, c.y + 1.5), 1.8, Color(0.92, 0.82, 0.5))
+		"vest":   # SEQUIN WAISTCOAT (redrawn 2026-07-28). The old shape was a shield - flat
+			# across the top, tapering to a point - so it read as a crest, and the sequins
+			# were scattered on a sunflower spiral, which is a pattern nothing sewn has. A
+			# waistcoat has SHOULDER STRAPS with a V between them, a straight buttoned front,
+			# and a pointed hem; the sequins sit in offset ROWS, the way they are actually
+			# stitched, and there is nothing on the V, because that is where the shirt shows.
 			draw_colored_polygon(PackedVector2Array([
-				Vector2(c.x - 12.0, c.y - 12.0), Vector2(c.x + 12.0, c.y - 12.0),
-				Vector2(c.x + 11.0, c.y + 8.0), Vector2(c.x, c.y + 17.0),
-				Vector2(c.x - 11.0, c.y + 8.0)]), cc)
-			for si in 14:                                                   # the sequins glint
-				var sa := float(si) * 2.399
-				var sr := sqrt(float(si) / 14.0) * 9.5
-				var sp := Vector2(c.x + cos(sa) * sr, c.y - 2.0 + sin(sa) * sr * 1.15)
-				var tw := 0.5 + 0.5 * sin(atick() * 0.05 + float(si) * 1.7)
-				draw_circle(sp, 1.7, Color(1.0, 0.98, 0.86, 0.30 + 0.55 * tw))
-			draw_line(Vector2(c.x, c.y - 12.0), Vector2(c.x, c.y + 15.0), Color(0.2, 0.17, 0.12, 0.5), 1.2)
+				Vector2(c.x - 13.0, c.y - 15.0), Vector2(c.x - 4.0, c.y - 15.0),
+				Vector2(c.x, c.y - 4.0), Vector2(c.x + 4.0, c.y - 15.0),
+				Vector2(c.x + 13.0, c.y - 15.0), Vector2(c.x + 11.5, c.y + 9.0),
+				Vector2(c.x, c.y + 19.0), Vector2(c.x - 11.5, c.y + 9.0)]), cc)
+			for row2 in 4:                                                  # the sequins, in rows
+				var ry2 := c.y - 5.0 + float(row2) * 5.6
+				var ncol := 3 if row2 % 2 == 0 else 2
+				for col2 in ncol:
+					var rx2 := c.x + (float(col2) - (float(ncol) - 1.0) * 0.5) * 6.4
+					var tw := 0.5 + 0.5 * sin(atick() * 0.05 + float(row2) * 1.7 + float(col2) * 2.3)
+					draw_circle(Vector2(rx2, ry2), 1.9, Color(1.0, 0.98, 0.86, 0.32 + 0.58 * tw))
+			for by2 in [-1.0, 5.0, 11.0]:                                   # the button line
+				draw_circle(Vector2(c.x, c.y + by2), 1.1, Color(0.24, 0.20, 0.14, 0.75))
+		"backroom", "frontroom":
+			# THE DOOR. A curtained doorway, and which way it faces is the whole
+			# information: the back room's curtain is parted onto a dark red gap you can
+			# see through, the front room's is drawn nearly closed. Same object, opposite
+			# states, so the pair reads as a way IN and a way OUT rather than two doors.
+			var through := id == "backroom"
+			var jamb := Color(0.30, 0.22, 0.18)
+			var gapw := 11.0 if through else 3.0
+			draw_rect(Rect2(c.x - 22.0, c.y - 22.0, 44.0, 44.0), jamb)              # the frame
+			draw_rect(Rect2(c.x - gapw, c.y - 19.0, gapw * 2.0, 41.0),
+				Color(0.10, 0.03, 0.04) if through else Color(0.14, 0.06, 0.07))    # the dark beyond
+			if through:
+				# a warm sliver of the room past the curtain: what makes it a way through
+				draw_rect(Rect2(c.x - 3.0, c.y - 17.0, 6.0, 37.0), Color(0.85, 0.42, 0.22, 0.35))
+			for sgn6 in [-1.0, 1.0]:
+				# each half of the velvet, gathered: wider at the top where it hangs from
+				# the rail, drawn back to the jamb at the bottom the way a tied curtain is
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(c.x + sgn6 * 22.0, c.y - 19.0), Vector2(c.x + sgn6 * gapw, c.y - 19.0),
+					Vector2(c.x + sgn6 * (gapw + 4.0), c.y + 6.0), Vector2(c.x + sgn6 * 22.0, c.y + 22.0)]), cc)
+				draw_line(Vector2(c.x + sgn6 * (gapw + 2.0), c.y - 17.0),
+					Vector2(c.x + sgn6 * (gapw + 5.0), c.y + 18.0), Color(1, 1, 1, 0.12), 2.0)
+			draw_rect(Rect2(c.x - 23.0, c.y - 23.0, 46.0, 5.0), Color(0.52, 0.40, 0.20))   # the rail
+			if not has_backroom and through:
+				# the 16+ plate nailed to the jamb, which is the joke and also the gate
+				draw_rect(Rect2(c.x + 6.0, c.y + 4.0, 17.0, 13.0), Color(0.90, 0.86, 0.78))
+				draw_string(game_font(), Vector2(c.x + 7.0, c.y + 15.0), "16", HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
+					Color(0.55, 0.10, 0.10))
+		"drinks":
+			# ENERGY DRINKS, and the point of this icon is that it is NOT the helmet
+			# (2026-07-28, Louis: the hat "should be distinct from energy drinks"). One
+			# card used to serve both and drew the hat for both, so the thing you buy ten
+			# of looked exactly like the thing you buy once. This is the CANS: three of
+			# them, banded, no cap and no straws anywhere.
+			for k in 3:
+				var can2 := c + Vector2(-19.0 + float(k) * 19.0, 2.0 + (2.0 if k == 1 else 0.0))
+				var body2 := Color(0.86, 0.33, 0.24) if k != 1 else Color(0.92, 0.40, 0.28)
+				draw_rect(Rect2(can2.x - 7.0, can2.y - 15.0, 14.0, 29.0), body2)
+				draw_rect(Rect2(can2.x - 7.0, can2.y - 15.0, 3.4, 29.0), Color(1.0, 0.58, 0.48, 0.55))
+				draw_rect(Rect2(can2.x + 4.2, can2.y - 15.0, 2.8, 29.0), Color(0.0, 0.0, 0.0, 0.26))
+				fill_ellipse(Vector2(can2.x, can2.y - 15.0), 7.0, 2.5, Color(0.84, 0.86, 0.90))
+				draw_rect(Rect2(can2.x - 7.0, can2.y - 3.0, 14.0, 3.2), Color(1.0, 0.85, 0.4, 0.85))
+				# the pull ring, the one mark that says "can" rather than "tin"
+				draw_arc(Vector2(can2.x + 1.6, can2.y - 15.4), 2.2, 0.0, TAU, 10, Color(0.70, 0.72, 0.76), 1.1, true)
 		_:   # ENERGY-DRINK HELMET: the hat it actually is - a cap with a can either
 			# side and a straw running round to the mouth
 			# ...given the same lighting rule the props just got: cylinders that read as
@@ -12751,11 +14276,12 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var innerw := pw - 80.0
 	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
 	# WHICH ROOM, said in the header rather than left to be inferred from the goods
+	# ...and it no longer has to teach a hotkey. The C hint lived here because C was the
+	# only way through the curtain; the door is a card on the gear row now and explains
+	# itself where every other purchase does.
 	var sub := "to juggle N of a prop, own N of them"
 	if shop_room == SHOP_ROOM_BACK:
 		sub = "the back room  -  mind the sharp things"
-	elif not has_backroom:
-		sub = "to juggle N of a prop, own N of them    ·    C: the back room, %s at the curtain" % commafy(BACKROOM_COST)
 	draw_string(font, Vector2(tx + 118.0, py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
 		Color(0.95, 0.72, 0.55) if shop_room == SHOP_ROOM_BACK else Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
@@ -12874,7 +14400,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			if gcount > 0:
 				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % gcount, HORIZONTAL_ALIGNMENT_RIGHT, gw - 12.0, 12, Color(0.75, 0.9, 0.72))
 			draw_price_plate(font, Rect2(cx0 + 10.0, plate_top, gw - 20.0, 38.0),
-				shop_key_label(shop_gear0() + i), commafy(gcost), money >= gcost)
+				shop_key_label(shop_gear0() + i), commafy(gcost), money >= gcost,
+				"walk through" if gcost == 0 else "")
 
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
 	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
@@ -12922,20 +14449,35 @@ func draw_shop(font: Font, s: Vector2) -> void:
 #region SKILLS SCREEN
 func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: Dictionary, unlocked: bool, sel: bool) -> void:
 	# one entry in the Skills reference: name on the left, a ready / gate badge
-	# on the right, and a soft highlight when it is the selected entry. The badge
-	# stays short (the level, plus a + when stats or a stage are also asked);
-	# the detail strip below spells the full requirement out.
+	# on the right, and a soft highlight when it is the selected entry.
+	#
+	# A LOCKED ENTRY GIVES NOTHING AWAY (2026-07-28, Louis: "hide the tricks and patterns
+	# until they are unlocked"). It used to print the skill's real name and the exact bar it
+	# sat behind, which is a complete table of contents for a deck that is now supposed to
+	# be a surprise - and it would be a LIE besides, since crossing that particular bar no
+	# longer hands you that particular skill. So an unowned row is a row of pips and a
+	# "locked" badge, and the count of them is the only real information on offer: how many
+	# are left. `req` is still taken because an owned row is unchanged, and because
+	# hiding a name is exactly the kind of thing that wants one call site.
 	if sel:
 		# the same raised, rounded card the shop and the day hub use for a cursor -
 		# a flat outlined rectangle was the last bare draw_rect on this screen
 		soft_card(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.09),
 			Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
 	var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.86, 0.8, 0.68) if unlocked else Color(0.55, 0.5, 0.46))
+	if not unlocked:
+		# a little face-down card and a row of dots where the name was. The card mark is
+		# the same object the unlock deals, so the row and the reward speak the same
+		# language: what is behind this is a card you have not turned over.
+		var kc := card_kind_col(bool(req.get("kind", "") != ""))
+		draw_rect(Rect2(x, y - 12.0, 11.0, 15.0), Color(kc.r * 0.35, kc.g * 0.35, kc.b * 0.35, 0.85))
+		draw_rect(Rect2(x, y - 12.0, 11.0, 15.0), Color(kc.r, kc.g, kc.b, 0.55), false, 1.0)
+		for di in 4:
+			draw_circle(Vector2(x + 24.0 + float(di) * 13.0, y - 5.0), 2.6, Color(0.55, 0.50, 0.46, 0.9))
+		draw_string(font, Vector2(x + w - 76.0, y), "locked", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.66, 0.58, 0.52))
+		return
 	draw_fit_string(font, Vector2(x, y), ename, HORIZONTAL_ALIGNMENT_LEFT, w - 100.0, 17, nc)
-	if unlocked:
-		draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
-	else:
-		draw_string(font, Vector2(x + w - 76.0, y), skill_gate_badge(req), HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.72, 0.62, 0.5))
+	draw_string(font, Vector2(x + w - 76.0, y), "ready", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.6, 0.9, 0.62))
 
 
 # --- SKILL PREVIEWS (Skills screen) -------------------------------------------
@@ -13469,10 +15011,35 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# THE PREVIEW, third zone: whatever is selected, trick or pattern, running its own
 	# choreography on a little stage of its own (see draw_skill_preview). Never empty.
 	var prev_x := px + 644.0
-	draw_string(font, Vector2(prev_x, header_y), "PREVIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
-	draw_skill_preview(font, Rect2(prev_x, py + 152.0, px + pw - 40.0 - prev_x, 356.0),
-		skills_sel < nt, skills_sel if skills_sel < nt else int(pattern_order()[skills_sel - nt]), ename)
+	draw_string(font, Vector2(prev_x, header_y),
+		"PREVIEW" if is_unlocked else "NOT YET YOURS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	var prev_box := Rect2(prev_x, py + 152.0, px + pw - 40.0 - prev_x, 356.0)
+	if is_unlocked:
+		draw_skill_preview(font, prev_box, skills_sel < nt,
+			skills_sel if skills_sel < nt else int(pattern_order()[skills_sel - nt]), ename)
+	else:
+		# THE CARD, FACE DOWN, at the size the zone allows. The preview is the one place on
+		# this screen that could still have shown a locked pattern's whole road - it draws
+		# the real choreography off the sim - so it shows the back of the card instead.
+		# Same object the unlock deals, so browsing the list and being dealt a card are
+		# plainly the same deck.
+		var bw := minf(prev_box.size.x * 0.62, prev_box.size.y * 0.66)
+		var bh := bw * 1.42
+		var bk := Rect2(prev_box.get_center().x - bw * 0.5, prev_box.get_center().y - bh * 0.5 - 10.0, bw, bh)
+		draw_skill_card_back(bk, skills_sel < nt, 1.0)
+		draw_string(font, Vector2(prev_box.position.x, bk.position.y + bh + 30.0),
+			"a %s you have not been dealt yet" % ("trick" if skills_sel < nt else "pattern"),
+			HORIZONTAL_ALIGNMENT_CENTER, prev_box.size.x, 13, Color(0.78, 0.72, 0.64))
 
+	# ...AND THE PROSE GOES TOO. Hiding the name while leaving its "how" and "desc" in the
+	# box below would be the same spoiler with the label filed off: "In practice, press P to
+	# switch patterns. Score multiplier x1.50" names Tennis to anyone who has read the
+	# table once. A locked entry says what the SYSTEM is instead, which is the one thing a
+	# player genuinely needs to know before they own anything.
+	if not is_unlocked:
+		how = "Tricks and patterns are DEALT, not chosen. Clear a wall - a level, a stat, a stage, a run of acts - and a card comes with it, face down."
+		desc = "It is always one you do not already have, and every one left has the same chance. Turn it over to find out which."
+		req_line = ""
 	var how_w := pw - 92.0
 	# the card is sized to what "how" and "desc" actually need (up to 2 lines each),
 	# not a fixed guess - a pattern's "how" is one sentence longer than a trick's and
@@ -13489,11 +15056,20 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var dy := box_top + 6.0
 	draw_rect(Rect2(px + 30.0, box_top, pw - 60.0, box_h), Color(0.08, 0.05, 0.06, 0.7))
 	draw_rect(Rect2(px + 30.0, box_top, pw - 60.0, box_h), Color(0.9, 0.6, 0.35, 0.28), false, 1.0)
-	draw_fit_string(font, Vector2(px + 46.0, dy + 18.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, pw - 560.0 if not is_unlocked else pw - 92.0, 19, Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
+	draw_fit_string(font, Vector2(px + 46.0, dy + 18.0),
+		ename.to_upper() if is_unlocked else ("AN UNDEALT TRICK" if skills_sel < nt else "AN UNDEALT PATTERN"),
+		HORIZONTAL_ALIGNMENT_LEFT, pw - 560.0 if not is_unlocked else pw - 92.0, 19,
+		Color(1.0, 0.88, 0.55) if is_unlocked else Color(0.72, 0.62, 0.55))
 	if not is_unlocked:
-		# the full requirement, right-aligned so a long ask (level + stat + stage)
-		# never collides with the name on the left
-		draw_string(font, Vector2(px + pw - 490.0, dy + 18.0), "asks for %s" % req_line, HORIZONTAL_ALIGNMENT_RIGHT, 444.0, 13, Color(0.85, 0.62, 0.5))
+		# HOW MANY ARE LEFT, not which. The old line printed this skill's exact wall, which
+		# is both a spoiler and, since the deal is random now, untrue - crossing that wall
+		# will hand you A card, not THIS one. The honest number is the count outstanding,
+		# and it is right-aligned so it never collides with the name on the left.
+		var left_n := skill_pool(skills_sel < nt).size()
+		draw_string(font, Vector2(px + pw - 490.0, dy + 18.0),
+			"%d %s still to be dealt" % [left_n, "trick" if left_n == 1 else "tricks"] if skills_sel < nt \
+				else "%d %s still to be dealt" % [left_n, "pattern" if left_n == 1 else "patterns"],
+			HORIZONTAL_ALIGNMENT_RIGHT, 444.0, 13, Color(0.85, 0.62, 0.5))
 	# "how" (a pattern's own version can run to two sentences) wraps instead of clipping mid-word,
 	# and "desc" is placed BELOW however tall "how" actually rendered, not at a fixed
 	# offset, so the two never overlap regardless of how much "how" needed to wrap
@@ -13927,6 +15503,17 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 		"bag":
 			draw_rect(Rect2(c.x - 7.5, c.y - 3.0, 15.0, 10.0), col)
 			draw_arc(c + Vector2(0.0, -3.0), 4.5, PI, TAU, 12, col, 1.8, true)
+		"drink":
+			# ENERGY DRINKS in the rest drawer: a can, and the pull ring is what makes it
+			# a can rather than a tin. Deliberately NOT the helmet's picture - the hat and
+			# the cans are two objects and the shop had already been caught drawing one for
+			# both (see draw_gear_icon "drinks").
+			draw_rect(Rect2(c.x - 4.6, c.y - 8.0, 9.2, 16.0), col)
+			draw_rect(Rect2(c.x - 4.6, c.y - 8.0, 2.4, 16.0), Color(1.0, 1.0, 1.0, 0.30))
+			draw_rect(Rect2(c.x + 2.4, c.y - 8.0, 2.2, 16.0), Color(0.0, 0.0, 0.0, 0.24))
+			fill_ellipse(Vector2(c.x, c.y - 8.0), 4.6, 1.7, Color(0.86, 0.88, 0.92))
+			draw_rect(Rect2(c.x - 4.6, c.y - 1.4, 9.2, 2.4), Color(1.0, 0.88, 0.44, 0.9))
+			draw_arc(Vector2(c.x + 1.1, c.y - 8.2), 1.5, 0.0, TAU, 8, Color(0.70, 0.72, 0.76), 0.9, true)
 		"shop":
 			# THE SHOP: a market STALL - a striped awning over a counter with something on
 			# it. The shop row used to borrow the coin, which said "money" rather than
@@ -14184,25 +15771,51 @@ func cap_warm_rim(p: Vector2, r: float, amt: float) -> void:
 
 
 func cap_ball(p: Vector2, col_in: Color, r: float) -> void:
+	# THE BALL IS A STITCHED THING, NOT A GLASS ONE (2026-07-28, Louis: the balls "still
+	# look a bit strange"). This is the third attempt at a round prop and the first one
+	# that resolves the argument the previous two were having, so the reasoning matters.
+	#
+	# THE ROUND PROPS ARE FLAT rule (2026-07-27) banned painted highlights, for a good
+	# reason - a specular is a claim about where the light is, and this stage's light
+	# genuinely moves - and then the RICH PROPS pass (2026-07-28) put the shop's lush
+	# version on stage, which brought all of it straight back: a shaded disc, a bounce arc,
+	# a broad white ellipse, a hot 1.2px core, two 0.6px panel seams and a warm rim wedge.
+	# On a moving ball that reads as wet plastic, and half of those marks are inside the
+	# sub-pixel band that shimmers frame to frame at r = 11.
+	#
+	# The way out is not more shading or less shading, it is a different SUBJECT. A juggling
+	# ball is a matte sewn ball, and what makes one recognisable at 22px is its PANELS - a
+	# feature of the object, true from every angle, no light source implied. So: one flat
+	# body, three panels as filled shapes 2-3px wide, one broad soft sheen at low alpha
+	# (a wide dim shape cannot shimmer the way a small bright one does), and a concentric
+	# rim, which has no direction and therefore states an edge without claiming a lamp.
+	# No hairlines, no hot point, no partial thick arc anywhere.
 	var col := ca(col_in)
-	# a juggling ball with a body: the shaded side is a second disc nudged away from the
-	# light rather than a gradient, the seams are the panel lines a real stitched ball
-	# has, and the specular is a filled shape with a hot core inside it (never a stroke -
-	# see THE ART RULE for why a stroked highlight reads as a sticker).
-	var lit := ca(Color(minf(col.r * 1.18 + 0.05, 1.0), minf(col.g * 1.18 + 0.05, 1.0), minf(col.b * 1.18 + 0.05, 1.0)))
-	var shade := ca(Color(col.r * 0.52, col.g * 0.50, col.b * 0.56))
-	draw_circle(p, r, shade)
-	draw_circle(p - Vector2(r * 0.13, r * 0.15), r * 0.93, col)
-	draw_circle(p - Vector2(r * 0.30, r * 0.34), r * 0.62, lit)
-	# a bounce light along the shaded rim, which is what stops the dark side going flat
-	draw_arc(p, r * 0.90, PI * 0.15, PI * 0.85, 24, ca(Color(lit.r, lit.g, lit.b, 0.35)), maxf(1.0, r * 0.10), true)
-	# two panel seams, curved with the surface
-	draw_arc(p + Vector2(r * 0.42, 0), r * 0.92, PI * 0.62, PI * 1.38, 22, ca(Color(0, 0, 0, 0.20)), maxf(1.0, r * 0.055), true)
-	draw_arc(p - Vector2(r * 0.42, 0), r * 0.92, -PI * 0.38, PI * 0.38, 22, ca(Color(0, 0, 0, 0.16)), maxf(1.0, r * 0.055), true)
-	cap_warm_rim(p, r, 0.28)                                                # the torches, off to the right
-	fill_ellipse(p - Vector2(r * 0.36, r * 0.42), r * 0.30, r * 0.22, ca(Color(1, 1, 1, 0.55)))
-	draw_circle(p - Vector2(r * 0.40, r * 0.47), r * 0.11, ca(Color(1, 1, 1, 0.85)))
-	draw_arc(p, r, 0.0, TAU, 40, ca(Color(0, 0, 0, 0.28)), maxf(1.0, r * 0.05), true)
+	var panel := ca(Color(col_in.r * 0.84, col_in.g * 0.82, col_in.b * 0.86))
+	draw_circle(p, r, col)
+	# ONE SEAM, NOT THREE. The first pass drew three panels meeting at an off-centre hub -
+	# geometrically how a three-panel ball is cut, and on screen a propeller: three chunky
+	# spokes on a disc, which is a windmill or a citrus slice long before it is a ball. A
+	# real juggling ball's read at 22px is a single curved seam wandering across it, so that
+	# is what this is - one tapered band on an S-curve, widest in the middle, at low
+	# contrast. It says "sewn" without adding a shape the eye tries to name.
+	var seam := PackedVector2Array()
+	var lo := PackedVector2Array()
+	for i in 13:
+		var u := float(i) / 12.0
+		var sx := lerpf(-r * 0.94, r * 0.94, u)
+		var sy := sin(u * PI * 2.0) * r * 0.34
+		var wid := (0.5 + 0.5 * sin(u * PI)) * r * 0.11
+		seam.append(Vector2(p.x + sx, p.y + sy - wid))
+		lo.append(Vector2(p.x + sx, p.y + sy + wid))
+	lo.reverse()
+	seam.append_array(lo)
+	draw_colored_polygon(seam, panel)
+	# one broad, dim sheen - the diffuse fall-off a matte ball has, not a reflection
+	fill_ellipse(p - Vector2(r * 0.22, r * 0.26), r * 0.58, r * 0.46, ca(Color(1, 1, 1, 0.10)))
+	# ...and the rim, all the way round, floored so it never enters the shimmering band
+	draw_arc(p, r * 0.94, 0.0, TAU, 40, ca(Color(col_in.r * 0.46, col_in.g * 0.44, col_in.b * 0.48)),
+		maxf(1.7, r * 0.13), true)
 
 
 func cap_ring(c: Vector2, col_in: Color, R: float) -> void:
@@ -14258,21 +15871,30 @@ func cap_egg(p: Vector2, col_in: Color, sc: float) -> void:
 	# the egg with everything a still frame can afford: the ovoid silhouette is still the
 	# whole character of it, but here it gets the shading the stage refuses (see THE ROUND
 	# PROPS ARE FLAT) plus the speckling a real shell has and a bounce off the boards.
+	# REBUILT ON THE SAME REASONING AS THE BALL (2026-07-28, Louis: the eggs look strange).
+	# It had eleven speckles at `w * 0.055` - 0.5px at the size an egg is actually drawn, so
+	# floored to 0.7px, which is a hairline: not shell mottling but a scatter of dirt that
+	# crawls as the egg tumbles. And it finished with cap_warm_rim, a thick PARTIAL arc,
+	# which this file's own art note says never to shade with: a thick arc is an annulus
+	# segment with square ends, so it puts a hard-edged bite on the shell rather than light.
+	#
+	# What says EGG at 24px is the SHAPE (the asymmetric ovoid, pinched at the top - that is
+	# already right and untouched) plus a few real mottles. Five of them at w*0.13 are
+	# 2.3px: visible, and too big to shimmer.
 	var col := ca(col_in)
 	var w := 9.0 * sc
 	var h := 12.0 * sc
-	ovoid(p, w, h, ca(Color(col.r * 0.58, col.g * 0.56, col.b * 0.54)))
-	ovoid(p + Vector2(-w * 0.10, -h * 0.09), w * 0.90, h * 0.90, col)
-	ovoid(p + Vector2(-w * 0.26, -h * 0.26), w * 0.52, h * 0.50, ca(col.lightened(0.22)))
-	# the speckle: a shell is never one flat tone, and at this size the flecks are the
-	# single mark that says "egg" rather than "white ball"
-	for i in 11:
+	ovoid(p, w, h, ca(Color(col.r * 0.66, col.g * 0.64, col.b * 0.61)))
+	ovoid(p + Vector2(-w * 0.08, -h * 0.07), w * 0.91, h * 0.91, col)
+	# the mottling: soft blotches, not flecks, and never on the outline where they would
+	# break the silhouette the whole shape depends on
+	for i in 5:
 		var a := float(i) * 2.399
-		var rr := sqrt(float(i) / 11.0) * 0.72
+		var rr := sqrt(float(i) / 5.0) * 0.58
 		var q := p + Vector2(cos(a) * w * rr, sin(a) * h * rr)
-		draw_circle(q, maxf(0.7, w * 0.055), ca(Color(0.66, 0.58, 0.48, 0.34)))
-	fill_ellipse(p + Vector2(-w * 0.30, -h * 0.38), w * 0.22, h * 0.13, ca(Color(1, 1, 1, 0.6)))
-	cap_warm_rim(p, w, 0.22)
+		fill_ellipse(q, w * 0.15, h * 0.10, ca(Color(0.70, 0.62, 0.50, 0.20)))
+	# one broad dim sheen, the same diffuse mark the ball gets
+	fill_ellipse(p + Vector2(-w * 0.24, -h * 0.30), w * 0.42, h * 0.26, ca(Color(1, 1, 1, 0.13)))
 
 
 func cap_club(p: Vector2, ang: float, sc: float) -> void:
@@ -14294,10 +15916,37 @@ func cap_club(p: Vector2, ang: float, sc: float) -> void:
 		draw_line(Vector2(-1.9, gy), Vector2(1.9, gy + 0.5), ca(Color(0.62, 0.58, 0.52, 0.55)), 0.7)
 	draw_circle(Vector2(0, 15.0), 2.9, band)                       # the knob...
 	draw_circle(Vector2(-0.7, 14.4), 1.5, ca(Color(1, 1, 1, 0.55)))   # ...and its highlight
-	draw_colored_polygon(PackedVector2Array([                      # the body
-		Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16)]), body)
-	draw_colored_polygon(PackedVector2Array([                      # its shaded side
-		Vector2(1.0, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(2.4, -16)]), body_dk)
+	# THE BODY IS A BULB, NOT A CONE (2026-07-28, Louis: the club looks strange, "not the
+	# handle per se"). It was a four-point trapezoid running ±2.6 at the neck out to ±6 at
+	# the far end - so it got steadily WIDER all the way to a flat top, which is a megaphone.
+	# A juggling club swells out of the neck, reaches its widest about two thirds along, and
+	# then rounds off; the profile below is that curve, and the flat end is gone. The
+	# silhouette is what a club IS at this size, so this is the mark worth spending points on.
+	# THE RATIO, and it is the whole read. The first bulb ran 15 units long by 11.6 wide -
+	# 1.3:1 - which is not a club, it is an onion, and it is why the shop card still looked
+	# like a lollipop with a rounded top. A real club's body is about 2.3:1: it swells out of
+	# the neck, holds its width through the middle third, and only then rounds off. Longer
+	# AND narrower, both, or lengthening it alone just makes a bigger onion. (This shape is
+	# shared with the stage, deliberately - one club - and touches no sim value: the hitbox
+	# is prop_hit_scale off BALL_RADIUS_PX and never reads this polygon.)
+	var prof := [   # [y, half-width] up the body, neck to nose
+		[-2.0, 2.4], [-5.5, 3.5], [-9.0, 4.1], [-12.5, 4.2], [-15.5, 4.0],
+		[-18.0, 3.4], [-19.8, 2.4], [-20.6, 1.2]]
+	var bpts := PackedVector2Array()
+	for e in prof:
+		bpts.append(Vector2(-float(e[1]), float(e[0])))
+	bpts.append(Vector2(0.0, -21.0))            # the nose, on the centre line
+	for i in range(prof.size() - 1, -1, -1):
+		bpts.append(Vector2(float(prof[i][1]), float(prof[i][0])))
+	draw_colored_polygon(bpts, body)
+	# ...and the shaded side, following the same profile so it can never cross the outline
+	var spts := PackedVector2Array()
+	for e2 in prof:
+		spts.append(Vector2(float(e2[1]) * 0.34, float(e2[0])))
+	spts.append(Vector2(0.0, -21.0))
+	for i2 in range(prof.size() - 1, -1, -1):
+		spts.append(Vector2(float(prof[i2][1]), float(prof[i2][0])))
+	draw_colored_polygon(spts, body_dk)
 	draw_circle(Vector2(0, -16.5), 6.0, body)                      # the head
 	draw_circle(Vector2(1.9, -17.4), 4.6, body_dk)                 # ...shaded to match
 	draw_circle(Vector2(-1.6, -17.2), 3.4, ca(Color(1.0, 0.58, 0.58, 0.55)))
@@ -14457,33 +16106,32 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true) -> void:
 	# **The rule to keep: `draws/s` is the frame rate. `engine fps` means nothing unless
 	# the window has focus.** Do not conclude anything from an fps number again without
 	# checking the two against each other.
-	var glow_at := p + Vector2(0.0, -3.0).rotated(ang) * sc
 	if halo:
-		draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, ca(Color(1.0, 0.46, 0.12, 0.30)))
-		draw_glow(glow_at + Vector2(0, -8.0 * sc), 23.0 * sc, ca(Color(1.0, 0.72, 0.30, 0.26)))
-	draw_set_transform(p, ang, Vector2.ONE * sc)
+		# both pools hang off the FIRE's centre, never the grip - see torch_fire_center
+		var glow_at := torch_fire_center(p, ang, sc)
+		draw_glow(glow_at + Vector2(0, -7.0 * sc), 46.0 * sc, ca(Color(1.0, 0.46, 0.12, 0.30)))
+		draw_glow(glow_at, 23.0 * sc, ca(Color(1.0, 0.72, 0.30, 0.26)))
 	# --- the handle, first, so the fire sits over its top ---------------------------
-	# THE HANDLE RUNS THE FULL LENGTH the stage torch's does - TORCH_WICK to TORCH_BUTT -
-	# so this is the same object with more on it, never a differently-proportioned one.
-	draw_colored_polygon(PackedVector2Array([          # a turned haft: waisted, not a bar
-		Vector2(-2.1, 0.0), Vector2(2.1, 0.0), Vector2(2.4, 6.0), Vector2(1.9, 11.0),
-		Vector2(2.3, TORCH_BUTT), Vector2(-2.3, TORCH_BUTT), Vector2(-1.9, 11.0), Vector2(-2.4, 6.0)]),
-		ca(Color(0.26, 0.17, 0.12)))
-	draw_colored_polygon(PackedVector2Array([          # the lit side of the haft
-		Vector2(-2.1, 0.2), Vector2(-0.9, 0.2), Vector2(-0.8, 11.0), Vector2(-1.1, TORCH_BUTT - 0.2),
-		Vector2(-2.3, TORCH_BUTT - 0.2), Vector2(-1.9, 11.0)]), ca(Color(0.40, 0.27, 0.18)))
-	for gy in [2.4, 4.4, 6.4, 8.4, 10.4, 12.4]:        # the cord it is bound with
-		draw_line(Vector2(-2.3, gy), Vector2(2.3, gy + 0.4), ca(Color(0.14, 0.09, 0.07, 0.75)), 0.55)
-		draw_line(Vector2(-2.3, gy + 0.7), Vector2(2.3, gy + 1.1), ca(Color(0.62, 0.45, 0.28, 0.30)), 0.35)
-	for by in [-0.4, 1.4]:                             # the brass ferrule under the head
-		draw_colored_polygon(PackedVector2Array([Vector2(-2.6, by), Vector2(2.6, by),
-			Vector2(2.6, by + 1.3), Vector2(-2.6, by + 1.3)]), ca(Color(0.60, 0.47, 0.26)))
-		draw_line(Vector2(-2.2, by + 0.35), Vector2(2.2, by + 0.35), ca(Color(1.0, 0.90, 0.66, 0.55)), 0.35)
-	draw_colored_polygon(PackedVector2Array([          # the soaked wick, charred at the top
-		Vector2(-2.2, -3.4), Vector2(2.2, -3.4), Vector2(1.8, -0.2), Vector2(-1.8, -0.2)]),
-		ca(Color(0.24, 0.19, 0.16)))
-	for wy in [-2.9, -2.1, -1.3, -0.5]:
-		draw_line(Vector2(-2.0, wy), Vector2(2.0, wy + 0.25), ca(Color(0.10, 0.08, 0.07, 0.75)), 0.3)
+	# ONE DRAW CALL FOR THE WHOLE HANDLE (2026-07-28), the same move `_saw_bake` already
+	# makes and for the same measured reason. It was twenty-three immediate-mode shapes -
+	# haft, lit side, twelve cord hairlines, two ferrules with their highlights, the wick
+	# and four char lines - which at fifteen torches is 345 draw calls of a ~600-call frame,
+	# on the one prop a player is most likely to be fielding fifteen of.
+	#
+	# It is bakeable because **the handle is the same local geometry for every torch and at
+	# every tick**: nothing in it flickers, leans or turns - only the fire above it does. So
+	# unlike the saw's chain there is not even a per-tick rebuild; it is built once, on the
+	# first torch ever drawn, and every torch after that is a transform and an emit.
+	# `draw_set_transform` applies to canvas_item_add_triangle_array, which is what makes
+	# that possible at all.
+	#
+	# The cord hairlines are the part this most improves visually as well: at 0.55 and 0.35
+	# units they were drawn well under a pixel at the size a torch actually flies, so they
+	# shimmered on every tumble - the same sub-pixel band the round props and the juggler's
+	# face were both rebuilt to escape. Baked as filled bands they hold still.
+	_torch_bake()
+	draw_set_transform(p, ang, Vector2.ONE * sc)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _torch_idx, _torch_pts, _torch_cols)
 	# --- the fire ---------------------------------------------------------------------
 	# A FLAME'S BASE FOLLOWS THE TORCH; ITS TIP GOES UP. Both halves of that matter here.
 	# Drawing the fire in world space is physically the tidier idea and it wrecks the
@@ -16014,7 +17662,7 @@ func step_effects() -> void:
 	var keep_f: Array[Dictionary] = []
 	for d in falling:
 		if int(d["rest"]) >= 0:
-			if tick - int(d["rest"]) < 70:
+			if tick - int(d["rest"]) < FALLEN_LINGER:
 				keep_f.append(d)
 			continue
 		var v: Vector2 = d["vel"]
@@ -16532,28 +18180,35 @@ func draw_thrown() -> void:
 
 
 func draw_falling() -> void:
-	# the lost props on their way down, and briefly at rest on the boards
+	# the lost props on their way down, and lying on the boards afterwards.
+	#
+	# A DROPPED PROP IS THE SAME OBJECT IT WAS IN THE AIR (2026-07-28, Louis: "when the
+	# chainsaw drops, it should stay a chainsaw"). This used to be a `match` on the kind
+	# with a case per prop and a `_:` default that drew a BALL - so the seventh prop, added
+	# after this function was written, fell out of the sky as a ball. That is the exact
+	# failure mode this file already records for `draw_glow_in_dark`: **a second renderer
+	# for an existing prop is easy to write without ever asking what the prop is**, and the
+	# only durable fix is not to have a second renderer. It goes through `draw_prop_rich`
+	# now, the one dispatcher the stage and the shop already share, so the eighth prop needs
+	# no edit here and cannot come down as the wrong shape.
+	#
+	# The fade rides `_cap_a` for the same reason `capsule_mark` does: half these props
+	# paint their own reds, steels and brass inside their own functions, so multiplying the
+	# ONE colour this loop knows about faded a ball and left a chainsaw at full strength.
 	for d in falling:
 		var p: Vector2 = d["pos"]
 		var a := 1.0
 		if int(d["rest"]) >= 0:
-			a = clampf(1.0 - float(tick - int(d["rest"])) / 70.0, 0.0, 1.0)
-		var col: Color = d["col"]
-		col.a *= a
+			# IT LIES THERE FOR THREE SECONDS (Louis, and the number is the ask). It used
+			# to fade out over 70 ticks - 0.58s - which is barely long enough to look down
+			# and see what you dropped. It now holds, then fades over the last stretch, so
+			# the prop is legible on the boards and still gone before the next exchange.
+			var age := tick - int(d["rest"])
+			a = clampf(float(FALLEN_LINGER - age) / float(FALLEN_FADE), 0.0, 1.0)
 		var sc := prop_scale(int(d["kind"])) * 0.95   # a dropped prop keeps the size it flew at
-		match int(d["kind"]):
-			PROP_EGGS:
-				draw_egg(p, col, sc)
-			PROP_RINGS:
-				draw_ring_prop(p, col, sc)
-			PROP_CLUBS:
-				draw_club(p, float(d["ang"]), sc)
-			PROP_KNIVES:
-				draw_knife(p, float(d["ang"]), sc)
-			PROP_TORCHES:
-				draw_torch(p, float(d["ang"]), sc)
-			_:
-				draw_ball_shape(p, col, sc)
+		_cap_a = a
+		draw_prop_rich(int(d["kind"]), p, d["col"], float(d["ang"]), sc, false)
+		_cap_a = 1.0   # always restored, exactly as the wordmark's own fade is
 
 
 func draw_egg_splats() -> void:
@@ -17186,14 +18841,15 @@ func _demo_step() -> void:
 			h = other(h)
 		if not stack(h).is_empty():
 			if _demo_trick:
-				# mimic a real Space press per throw for the one-shot (Overthrow);
-				# the flourish toggles (High Toss / BTB) run via toggle_on, set
-				# once above like any other toggle, so nothing to prime here
+				# mimic a real Space press per throw for an "arm" trick - one that primes
+				# a throw and pays when it is caught. There is no such trick left in
+				# TRICKS (Overthrow was the last, removed 2026-07-28) but the branch and
+				# the machinery behind it are kept: the flourish toggles and the live Spin
+				# run through the same `trick_sel`, and an arm trick is a plausible thing
+				# to add back. The flourish toggles (High Toss / BTB) run via toggle_on,
+				# set once above, so there is nothing to prime for them.
 				if pin_kind == "arm":
 					trick_sel = _demo_trick_pin
-					trick_primed = true
-				elif _demo_trick_pin == -1 and (tick / DEMO_BEAT) % 2 == 0:
-					trick_sel = TR_OVER   # the lone remaining one-shot, shown each other beat
 					trick_primed = true
 			do_throw(h, _demo_hold)
 			_demo_next = other(h)

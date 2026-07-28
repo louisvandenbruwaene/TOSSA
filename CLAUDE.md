@@ -711,6 +711,40 @@ anywhere - "nobody could still have one" is a guess, not a fact.
   still would not fit FADES and hands over to a top-edge marker - which is exactly
   what a High Toss does anyway. `--skills [N]` opens it for a screenshot, optionally
   selecting entry N (0-3 tricks, 4-9 patterns in unlock order).
+- **THE DRAW WAS ON THE PHYSICS CLOCK, and that is the whole lag (2026-07-28, Louis: "the
+  F10 button says i have 10 or even 12 ms draw time. and i feel the lag even at 40% slowmo,
+  which should even help").** Every `queue_redraw()` in the game sat in `_physics_process`,
+  which runs at 120Hz - and `queue_redraw()` is not a request to the renderer, it is a
+  deferred callable pushed onto Godot's MessageQueue. `Main::iteration()` flushes that queue
+  INSIDE its physics-step loop, so the callback fired, `NOTIFICATION_DRAW` was dispatched, and
+  **`_draw()` ran 120 times a second whatever the display was actually showing.** On a 60Hz
+  panel that is every other frame thrown away; at fifteen torches it was 116 of every 120.
+  The fix is one line moved: the draw is driven from `_process`, which Godot calls exactly
+  once per presented frame. Nothing else had to change - `_draw` reads live state, so it is as
+  smooth at 60 draws a second as at 120, and the sim still steps 120 times regardless.
+  **Measured at 1920x1016 with fifteen torches and the whole wardrobe worn:**
+      before   5.2ms draw   551 calls   draws/s 122   engine fps 4.3
+      after    2.8ms draw   533 calls   draws/s 100   engine fps 99-100
+  **AND THE PROBE HAD BEEN PRINTING THE ANSWER FOR TWO SESSIONS.** `draws/s` sat pinned at
+  120-127 in every run while `engine fps` tracked the load exactly - 4.3 fps at fifteen
+  torches, 94.9 with nothing in the air, same window, same second. A previous pass concluded
+  from that disagreement that `engine fps` was a macOS background-window artefact and
+  dismissed it, and wrote that into this file. **When two counters disagree, the one that
+  RESPONDS TO LOAD is the real one**: a windowing throttle does not care how many props are on
+  stage. `draws/s` was measuring the physics rate wearing a renderer's name. macOS does
+  throttle an unfocused window, so a backgrounded `engine fps` is still a soft number - but it
+  is not a fabricated one. Do not put a `queue_redraw()` back into `_physics_process`; a paused
+  screen already gets a frame from `_process` every frame.
+- **...and the second cut was `_torch_bake`, the saw's own trick applied to the heaviest prop.**
+  The torch handle was twenty-three immediate-mode shapes - haft, lit side, twelve cord
+  hairlines, two ferrules with highlights, wick, four char lines - i.e. 345 draw calls of a
+  600-call frame at fifteen torches. It bakes HARDER than the chainsaw's chain does, because
+  the handle is the same local geometry at every tick as well as for every torch: nothing in it
+  flickers, leans or turns, only the fire above it. So it is built once for the session and
+  every torch is a transform and an emit. It also fixed a look problem - those cord lines were
+  0.55 and 0.35 units wide, well under a pixel at the size a torch flies, so they shimmered on
+  every tumble. `ca()` is deliberately not used inside a bake: `_cap_a` is a per-drawing fade,
+  and folding it into shared vertex colours would let one faded torch fade all of them.
 - **PERFORMANCE, and the one rule that came out of measuring it (2026-07-27).** Louis:
   "the game is a bit laggy right now". `--fps` is the probe that settled it, and it is
   now a permanent dev flag: it prints, once a second, microseconds spent inside
@@ -1161,6 +1195,16 @@ anywhere - "nobody could still have one" is a guess, not a fact.
   export: pair with `--debug` and an F-key venue jump (F1..F7) to push Reputation
   past `DEMO_MAX_VENUE`, then `--booking` a real act and let it resolve - the demo
   wall should fire exactly as it would in the real export.
+- **New dev flags, 2026-07-28 (evening).** `--wardrobe` wears all five costume pieces, which
+  cost 28,500 between them - without it the finished figure has no capture path at all and
+  every piece can only be judged alone. `--ucard trick:<id>` / `--ucard pattern:<id>` now deal
+  the card ALREADY TURNED OVER (inspecting a face is what the flag is for), and
+  `--ucard back:trick` / `--ucard back:pattern` deal the face-down side, which needs its own
+  path because a real card waits for a keypress and a headless run presses nothing. Note that
+  `ucard_flip` is an atick STAMP and **any negative value means face down**, so a fake stamp
+  in the past cannot pre-flip it - that cost one wasted capture round.
+- **F10's readout and `--fps` now agree with `engine fps`, and if they ever diverge again
+  something has put a `queue_redraw()` back on the physics clock.** See the PERFORMANCE entry.
 - Parse check: `godot --headless --check-only --script Game.gd` (catches unknown
   identifiers, not just syntax; it does NOT catch a runtime type error like
   comparing a Dictionary's String value against an int constant - that only
@@ -1332,16 +1376,241 @@ architecture change, not content. Do not let it be scoped as "one more pattern".
   timing feedback beyond PERFECT/GOOD/late. A metronome or a beat trace in practice would
   teach the thing the game is actually asking for.
 
-## BUILT 2026-07-28 from Louis's own choices - and the ONE part still open
+## BUILT 2026-07-28 from Louis's own choices - all of it, including the wardrobe
 
-The costume, the two-room shop and the glow split are all in and working. **What is NOT
-done: the five costume pieces are not yet DRAWN ON THE PERFORMER.** They are purchasable,
-persisted, they buff correctly and they have their own shop icons, but `draw_juggler` /
-`draw_performer_polish` does not yet put a top hat on his head, tails on the coat or
-sequins on the waistcoat. That is the next job, and the wardrobe pass's own rules apply to
-it: filled SHAPES not decorative strokes, every mark butting against something the base
-figure already draws or riding a solved joint, and every colour taken from the venue's own
-palette. Do not reshape the figure to fit a hat.
+The costume, the two-room shop and the glow split are in, and **the five pieces are now
+DRAWN ON THE PERFORMER** (the one part that was still open at the end of the first pass).
+See THE WARDROBE, ON THE MAN below for what each piece is and what the two on-screen passes
+corrected. The wardrobe pass's own rules held throughout and are the ones to keep applying:
+filled SHAPES not decorative strokes, every mark butting against something the base figure
+already draws or riding a solved joint, and every colour taken from the venue's own palette.
+Do not reshape the figure to fit a hat.
+
+## THE 2026-07-28 (evening) PASS - Louis's own list, and what each item taught
+
+- **THE LARGEST PERFORMANCE FINDING IN THE PROJECT'S HISTORY IS ONE LINE, and the previous
+  two passes had the evidence and read it backwards.** See the PERFORMANCE entry above,
+  which is rewritten: `queue_redraw()` lived in `_physics_process`, and because Godot flushes
+  its MessageQueue INSIDE the physics-step loop, `_draw()` ran 120 times a second whatever
+  the display was showing. Measured at fifteen torches, 1920x1016: **4.3 engine fps before,
+  99-100 after.** The `draws/s` counter this file trusted was measuring the physics rate
+  wearing a renderer's name.
+- **THE WARDROBE, ON THE MAN** (`draw_top_hat`, `draw_stage_boot`, the tails and sequins in
+  `draw_performer_polish`, the glove in `draw_hand` via `glove_cloth`, `vest_shape` shared so
+  the plain and spangled waistcoats cannot drift). `--wardrobe` wears all five for a capture,
+  which mattered more than it sounds: they cost 28,500 between them, so without the flag the
+  finished figure had no capture path at all and each piece would only ever be checked alone -
+  which is how a hat and a tailcoat end up fighting. **Two rounds of on-screen correction, and
+  both faults were the same fault - a mark that was geometrically right and pictorially wrong.**
+  (1) The tails hung straight down from the hip flare, which is where a tailcoat's tails
+  attach - and read as a dressing gown, because measured against the leg block they were ON
+  the leg for their whole length (thigh outer face 0.63h, calf 0.49h, tail 0.34-0.74h). They
+  FLARE now, hem swung out to 0.86h, well clear of the leg and also what tails do on a man in
+  motion. (2) The sequins were tinted toward `accent`, which at the Small Theatre is the same
+  orange as the waistcoat under them - fifteen drawn, none visible; under the Glow Suit it was
+  0.70/1.0/0.80 on 0.78/1.0/0.86, the same colour twice. **Metal reads by LIGHTNESS, never by
+  hue**: they are pale house gold on a field pulled down a fifth. The boots made the third
+  version of the same mistake in the other direction - a dark brown boot on near-black boards
+  is not a dark boot, it is an absence - and were lifted by MULTIPLYING channels, never
+  `lightened()`, which lerps toward white and turned the same brown into concrete.
+- **ONLY A FLAME GLOWS, AND IT GLOWS AT THE FLAME** (Louis: "remove the glow from the objects
+  except the torch, whose glow should be centered around the flame"). The dark-stage halo was
+  on every prop in that prop's own colour - a claim that a lacquered club emits light - and it
+  was centred on `pos`, the SIM origin, which for a torch is the grip about 25 units below the
+  fire. So the one prop that genuinely glows was the one whose glow was in the wrong place.
+  `torch_fire_center` is now the single answer to "where is the fire", shared by the stage
+  halo, the Blackout flame and the shop card, and it only PARTLY rotates its offset - the same
+  `CAP_FLAME_UPRIGHT` compromise the flame layers are drawn with, because a fully rotated
+  offset swings the pool of light out sideways past the fire on every tumble.
+- **THE GLOW LEGS, and the arms' own mistake made twice** (Louis: "make the glow in the dark
+  legs look better"). Two causes. (1) The trousers were drawn in `suit_dk`, which is the
+  JACKET's shadow, so under the Kit the man's whole lower half sat at 0.10/0.42/0.24 against a
+  vest at 0.78/1.0/0.86 - the darkest thing on a costume whose selling point is that it glows.
+  The recolour ladder covers suit/vest/collar and never had a trouser rung; it does now.
+  (2) The outseam was hip-to-floor as ONE STRAIGHT CHORD over a leg that is two tapering
+  capsules with a knee between them - measured, it started 0.13h inside the thigh and finished
+  0.03h OUTSIDE the calf. That is exactly the fault this file already records for the old arm
+  runs, repeated on the legs. `draw_glow_seam` takes a POLYLINE now (three passes, one call
+  each, so a bent seam costs what a straight one did) and both the phosphor seam and the satin
+  trouser stripe read their three x values off the leg block's own capsule geometry. A TURN-UP
+  at the hem is the other half: a single stripe down a limb reads as a stick, a band across
+  the hem reads as a trouser over a shoe - and it sits at the boot's shaft top when a boot is
+  there, because a band across the middle of a boot is a band on the wrong garment.
+- **THE SKILL DECK** (Louis: "hide the tricks and patterns until they are unlocked ... put a
+  randomiser on it also ... make a design for the trick card (in general) and the pattern card
+  (in general) and then for each trick and pattern a personal design card: the same way
+  balatro has its jokers"). The architecture change is that **a wall and a skill are no longer
+  the same thing**: `skill_gate_cleared` says you have earned A CARD, `owned_skills` (persisted
+  as `gifted`, the old pity-director list) says what you HAVE, and `deal_skill_card` rolls one
+  you do not own with flat odds. The PACING is untouched by construction - `skill_earned_count`
+  counts cleared walls, so the same gates deal the same number of cards at the same moments -
+  and only the identity behind each is a surprise. The card arrives FACE DOWN and turns over on
+  the first press (`ucard_flip`, drawn as a horizontal squash: `cos(angle)` is the projected
+  width, the same 2D pirouette `draw_juggler` uses on the body). The roll happens at DEAL, not
+  at flip, because a reveal has to be the moment the player finds out rather than the moment
+  the game makes up its mind.
+  **THE FACES ARE PUNS, AND THAT IS THE POINT.** `draw_skill_preview` still draws each skill's
+  true choreography off the sim's road data and is still what the Skills screen shows once a
+  skill is yours - it is the better answer to "how does this work". But it is a diagram, and
+  every diagram of a juggling pattern looks like every other one: arcs over a little man. A
+  card you are DEALT has to be worth turning over and recognisable across a room. So: Spin is
+  a ballerina, Behind the Back is two people talking behind your back, High Toss is a throw
+  that leaves the top of the card, Cascade is a waterfall and Reverse Cascade is that same
+  waterfall drawn upside down (one negative y scale, so improving one improves both), Columns
+  is a Greek temple, Shower is a shower, Half Shower is the same shower at 0.34 scale with a
+  rubber duck for size, Tennis is a tennis racket. Three rules for adding one: unit space
+  inside the dispatcher's transform (art functions must NEVER call `draw_set_transform` - Godot
+  REPLACES rather than composes, so an inner call throws the card's scale away), no text inside
+  the art, and no feature under ~1.5px at the smallest size the card is drawn.
+  **What the on-screen pass corrected, all four the same class of error - a shape that was
+  correct and unreadable.** The racket's `ay` was the +90 perpendicular, so every offset built
+  off it ran up-left and the racket came out held upside down with its grip clipped (one sign
+  flip fixed six offsets, which is why they are all expressed off one axis vector). The
+  waterfall's three streams included a dark one at almost exactly the pool's own tone, so it
+  vanished into the water it fell into and the card read as two falls - falling water is the
+  BRIGHTEST thing in a waterfall, so all three tones are now brightnesses of white-blue and
+  the rock is the darkest thing on the card. The waterfall's cliff was a straight edge with
+  0.05 notches in it, i.e. a plank; the jag is 0.13 on an irregular rhythm and the flat
+  highlight strip across the top - which was doing most of the sawn-timber work - is gone.
+  And the gossips were small enough behind the big figure's shoulders to read as two purple
+  lollipops with their whisper merged into them.
+- **OVERTHROW IS REMOVED** (Louis). It was the last "arm" trick and the odd one out for a real
+  reason: what it DID - send one prop over the top - is what Reverse Cascade, Tennis, the
+  Shower and the Half Shower already are, and selling the same road twice is the "heavier club"
+  mistake this file already rejected for props. The over-the-top MACHINERY stays, because those
+  patterns are built on it; the `pin_kind == "arm"` branch in the autoplayer stays too, with a
+  note, since an arm trick is a plausible thing to add back.
+- **THE SAVE MIGRATION IS THE PART WITH TEETH.** Until this pass a skill was unlocked by
+  STANDING PAST ITS WALL - nothing was written down, and every launch recomputed it from the
+  stats. Ownership is explicit now, so loading an old save without a migration would silently
+  strip a mid-career juggler of every trick and pattern they had ever earned, with the save
+  file looking perfectly intact. `skill_ver` seeds `gifted` from every wall the save has
+  ALREADY cleared - exactly the set that was unlocked a moment before the update - once, per
+  save. Overthrow was the LAST index in TRICKS, so unlike the pattern fold nothing shifted and
+  a clamp plus two `erase` calls is that whole migration.
+- **THE BACK ROOM IS A CARD** (Louis: "i find the button c hard to intuitively use to unlock
+  the backroom of the shop. I'd like you to create a button for that (in the shop itself, where
+  you need to press enter, like buying something)"). He is right and the reason generalises:
+  **the back room is a PURCHASE** - it has a price, it takes a day segment, it asks for a
+  confirmation - and every other purchase in this game is a card you walk onto and press Enter.
+  A hotkey with no object behind it was the only thing in the shop you had to be told about,
+  which is the definition of unintuitive. `shop_through_curtain` / `shop_leave_back_room` are
+  the one implementation; C survives as a shortcut into the same functions, so the two routes
+  cannot charge different fees. Once paid the card becomes the DOOR (cost 0, and
+  `draw_price_plate`'s new `free_word` prints "walk through", because "0" beside a flower mark
+  is not free, it is a price of nothing and reads as a bug).
+- **THE HAT AND THE DRINKS ARE TWO OBJECTS** (Louis: the "energy drink hat ... should be
+  distinct from energy drinks, which can be bought in the resting area"). They were ONE shop
+  card that shape-shifted - the Helmet until owned, Energy Drinks forever after - sharing an id
+  and therefore an ICON, so the thing you buy once and the thing you buy ten of were the same
+  picture. Two rows now, the drinks row appearing only once there is a hat to pour them into,
+  with their own three-can icon. And since he describes them as bought in the resting area,
+  there is a REST-drawer row for them too (`try_buy_drinks` owns the whole transaction, so the
+  hub and the counter cannot charge differently for the same case of cans); it costs no day
+  segment, because a case of cans is not an evening out.
+- **THE PRICE PLATE NOW KNOWS HOW MUCH ROOM IS LEFT.** The key was placed from the left edge
+  and the price from the right with nothing measuring the gap, which worked only while the
+  plate was wide. The eighth gear card took a card to 121px and "12,000" at 16pt drew straight
+  through the keycap: the shop printed "7|12,000" as one run of digits. `kw` is measured now
+  and the price SHRINKS through `fit_size` - this file's own rule, and a price is its purest
+  case, since "12,0..." is not a price.
+- **THE BALL, THE EGG AND THE CLUB, and the argument the last two passes were having.** THE
+  ROUND PROPS ARE FLAT (2026-07-27) banned painted highlights for a good reason; RICH PROPS
+  (2026-07-28) put the shop's lush version on stage and brought all of them straight back - a
+  shaded disc, a bounce arc, a white ellipse, a 1.2px hot core, two 0.6px seams and a warm rim
+  WEDGE (a thick partial arc, which this file says never to shade with). The way out was
+  neither more shading nor less: it was a different SUBJECT. A juggling ball is a matte sewn
+  ball, so it is one flat body, ONE curved seam as a tapered band, one broad dim sheen and a
+  concentric rim. (The first attempt drew three panels meeting at an off-centre hub - correct
+  for a three-panel ball, and on screen a propeller. **Three chunky spokes on a disc is a
+  windmill long before it is a ball.**) The egg lost eleven 0.5px speckles for five real
+  mottles. The club's body ran 15 units by 11.6 - 1.3:1, an onion - and is 2.3:1 now, longer
+  AND narrower, because lengthening alone just makes a bigger onion; **a prop's silhouette and
+  its two `PROP_ICON_MAG`/`OFF` numbers are one edit**, since the longer club would otherwise
+  hang high in its card again and run past the hairline.
+- **A DROPPED PROP IS THE SAME OBJECT IT WAS IN THE AIR** (Louis: "when the chainsaw drops, it
+  should stay a chainsaw"). `draw_falling` was a `match` on the kind with a case per prop and a
+  `_:` default that drew a BALL, so the seventh prop - added long after that function - fell
+  out of the sky as a ball. That is precisely the failure this file already records for
+  `draw_glow_in_dark`: a second renderer for an existing prop is easy to write without ever
+  asking what the prop is, and **the only durable fix is not to have a second renderer.** It
+  routes through `draw_prop_rich` now, so an eighth prop needs no edit there. Its fade rides
+  `_cap_a`, because half these props paint their own reds and brass inside their own functions
+  and multiplying the one colour the loop knew about faded a ball and left a chainsaw at full
+  strength. `FALLEN_LINGER` is 360 ticks (three seconds, his number) against the old 70, which
+  is barely long enough to look down and see what you dropped - **and that change exposed a
+  latent bug**: the collapse gate waited on `falling.is_empty()`, i.e. "nothing dropped is
+  still being DRAWN", which would have become a three-second stall before the results card.
+  `still_dropping()` asks the question that was always meant.
+- **ONE PROP IN A HAND ENDS THE ACT, GOAL OR NO GOAL** (Louis: "the game should automatically
+  stop, finish, when the player has only one object and he is holding it. since he can't
+  score"). His reasoning exactly: pillar two says a catch only scores with something still in
+  the air, so a performer holding his last prop cannot earn another point however long he
+  stands there. The existing empty-air rule required `goals_hit >= 1`, which is right for an
+  ordinary bow and wrong here because there is nothing left to bank it with. Reachable at low
+  counts specifically - three props and two drops leaves one, and two is under `DROP_LIMIT`, so
+  nothing else was watching. It resolves as a graceful FINISH with its own `fail_text`
+  ("stranded"), and `resolve_act`'s default to "bow" now only fires when no closer code already
+  said why - otherwise the player is told they chose a bow they never chose.
+- **THE DEBUG PURSE, held** (Louis: "make the debug money up button (m) and down, be able to
+  held to rapidly increase amounts (toggle by the thousand)"). M/N join the stat keys on
+  `sheet_repeat`. The step changes with the GESTURE: a tap is still `MONEY_TAP` (50), because
+  "give me exactly 50 more" is a real thing to want at a counter, and a hold switches to
+  `MONEY_HOLD_STEP` (1,000) and doubles on the same ramp. Two details worth keeping: the burst
+  is folded into the AMOUNT rather than looped, since a purse has no cap and the loop would be
+  64 `save_progress()` calls a tick; and the save is owed ONE write, on release
+  (`_repeat_dirty`). The legend names the hold, and says `coin_word()` - it read "M/N gold"
+  beside a purse reading "flowers".
+
+## MINIMUM REQUIREMENTS (2026-07-28) - derived from measurement, not guessed
+
+Louis asked for a guess at the minimum spec. It is better than a guess, because the numbers
+below are measured on this machine and the shape of this game's cost is unusual enough to be
+worth stating plainly.
+
+**What it actually costs.** MacBook Air M5, 1920x1016, full wardrobe worn, at the absolute
+ceiling the game can reach (fifteen torches at the World Arena - Strength 200 and 9,000
+flowers a prop, so almost nobody will see it):
+
+      draw time      2.85 ms per frame        draw calls   ~533      primitives  ~26k
+      physics        ~100 us per tick at 120/s (about 1.2% of one core)
+      total          45.5% of ONE core at 100 fps
+      memory         ~415 MB resident (a debug editor run; an export is lower)
+      renderer       gl_compatibility - OpenGL 3.3 / ES 3.0. **No Vulkan required.**
+
+A typical player at five props measures 1.7 ms, i.e. under half of that.
+
+**The binding constraint is single-thread CPU, and nothing else is close.** The draw is
+immediate-mode 2D on the main thread; the sim is a closed-form parabola per prop. Core count
+barely matters and clock/IPC is everything, which is an unusual shape: **a modern 4-core beats
+an old 8-core here comfortably.** The GPU bar is almost nothing - fill rate was measured as
+irrelevant (quartering the window changed nothing) and the compatibility renderer asks for
+2010-era OpenGL.
+
+Holding 60 fps needs the frame under 16.6 ms against a worst case of 2.85, so there is ~5.8x
+of headroom. A CPU with roughly a fifth of the M5's single-thread performance is the floor;
+the spec below sits a notch above it so the floor is a floor and not a cliff.
+
+      MINIMUM (60 fps at 1280x720, up to about seven props)
+        OS        Windows 10 64-bit  /  macOS 11 Big Sur  /  Ubuntu 20.04
+                  (these are Godot 4.7's own floors, not ours)
+        CPU       dual-core x86-64 with SSE4.2, ~2.4 GHz, 2013 or later -
+                  Intel Core i3-4130 / AMD FX-6300 or better. Any Apple Silicon.
+        GPU       anything with OpenGL 3.3 and 256 MB - Intel HD Graphics 4000 (2012) up
+        RAM       4 GB
+        Storage   250 MB
+        Display   1280x720
+
+      RECOMMENDED (120 fps at 1920x1080 with a heavy set of torches)
+        CPU       quad-core, 3.0 GHz, 2017 or later - Intel i5-8400 / Ryzen 5 1600 up
+        GPU       any dedicated card, or Intel Iris Xe / Apple M1 up
+        RAM       8 GB
+        Display   1920x1080; a 120 Hz panel is what the 120-tick sim was built for
+
+**Before shipping these, do the one thing this machine cannot do: run it on something slow.**
+Every number above is from a 2025 Apple laptop, and the honest use of it is as a RATIO
+(2.85 ms of a 16.6 ms budget), not as evidence about a 2013 i3. An old Windows laptop for an
+afternoon would turn the arithmetic above into a fact.
 
 ## AGREED (2026-07-28, Louis chose these explicitly)
 
@@ -1369,8 +1638,16 @@ picked and not what seemed reasonable at the time.
   also sell the individual parts"): GLOW TAPE (the props carry phosphor) and the GLOW SUIT
   (the performer does), with the Kit kept as a discounted bundle that sets both.
   `glow_kit_lit()` has to split into a props test and a suit test to match.
-- **THE FILL-RATE "CLIFF" WAS A MEASURING ERROR, and this is the entry that matters most
-  from 2026-07-28.** A pass concluded that rich props collapsed the game from 145 fps to
+- **THE FILL-RATE "CLIFF" WAS A MEASURING ERROR - and so was the correction. READ THE
+  `queue_redraw` ENTRY ABOVE BEFORE THIS ONE.** What follows was written on 2026-07-28 and its
+  diagnosis is half right: there was no fill-rate cliff, and `engine fps` from a backgrounded
+  window is indeed a soft number. But the conclusion it drew - that `draws/s` is the real frame
+  rate and `engine fps` means nothing - is **wrong**, and believing it hid a tenfold frame-rate
+  loss for a whole session. `draws/s` was pinned at 120 because the draw was on the physics
+  clock, not because the game was presenting 120 frames. The 15-prop numbers quoted below
+  ("3.2ms of draw time and 122 draws a second") are therefore a measurement of 120Hz redrawing,
+  not of 120Hz display. Kept, corrected in place, because the reasoning error in it is the most
+  instructive thing in this file. A pass concluded that rich props collapsed the game from 145 fps to
   15, blamed translucent overdraw, and wrote that into the code. It was wrong. Every one
   of those numbers came from a BACKGROUNDED window, and macOS throttles the presentation
   of an unfocused window - `Engine.get_frames_per_second()` collapses while the game goes
