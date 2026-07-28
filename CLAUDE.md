@@ -386,6 +386,31 @@ anywhere - "nobody could still have one" is a guess, not a fact.
   across day/results/booking/daily also came up clean. What is still NOT done is a real
   HANDS-ON human pass over a couple of calendar-seeded venues and a check that the shared
   result line actually lands on the clipboard - do that before calling it shipping-ready.
+- **ONE LOGO, EVERYWHERE** (2026-07-28, Louis: "the tossa logo on the welcome screen
+  should use the same logo to depict tossa as the picture you made before"). There were
+  two marks doing the same job: the store capsules spelled TOSSA entirely in PROPS - two
+  knives for the T, a ring for the O, lines of balls for the S's, two burning torches for
+  the A - while the title screen, the key art and the credits drew the WORD in the UI font
+  with a single ball standing in for the final letter. `draw_wordmark` is now a thin
+  wrapper over `capsule_mark`, so there is one logo and it cannot drift.
+  **Two things had to be solved to get there.**
+  (1) **THE MARK FADES AS ONE THING.** It is sixty-odd shapes with their own alphas, and
+  the credits fade it in and out. Rather than thread an alpha argument through every prop
+  and every highlight, `capsule_mark` sets `_cap_a` for the duration of one mark and every
+  colour passes through `ca()`. It is draw-time only and always restored, so nothing drawn
+  afterwards inherits a half-faded mark. Verified by forcing alpha 0.35 and confirming
+  every part - knives, ring, balls, flames, embers, glows - fades together.
+  (2) **THE PICTURE IS TALLER THAN ITS LETTERING, so the overhang is a named number.** The
+  A's torch handles hang below the baseline and its flames climb well above the cap line,
+  which is why the title's divider was drawn straight through the torches on the first
+  try. `MARK_RISE` / `MARK_DROP` / `mark_height()` are computed from the same values the
+  drawing uses, and every caller places what sits underneath off `mark_height()` rather
+  than off a hand-picked offset - the same rule the goal stem's bloom already established.
+  **The menu's little juggling cascade came off** while doing this: the mark is alive now
+  (torches burning, embers leaving) and a second animated ornament directly above it
+  competed for the same attention - and at title size there was no room left for it
+  anyway, so it was being clipped by the top edge. `draw_menu_cascade` survives on the key
+  art and the credits, where the mark is smaller.
 - **THE EXPERIMENTS ARE ALL SHIPPED** (2026-07-28, Louis: "you may remove the F9 options
   - not the idea itself, that i will reuse. they should all be ON and that is the way i
   like it"). `prop_art`, `round_v3`, `soft_light` and `flowers` are simply how the game
