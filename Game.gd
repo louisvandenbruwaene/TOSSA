@@ -203,16 +203,18 @@ const STAM_DRAIN_CATCH := 0.4 # flat stamina price of a catch, scaled by energy_
 const STAM_LOW := 0.25        # below this fraction of max, fatigue lowers Accuracy
 const STAM_MIN_MULT := 0.5    # Accuracy multiplier at empty stamina (GDD 4.7)
 
-# --- reputation: the career-climb currency (GDD 4.4). Scales PAY, never score
-# or catching, so it stays on the comfort axis and never touches the skill floor.
-const REP_PAY_DIV := 1400.0   # pay multiplier = 1 + reputation / REP_PAY_DIV, capped at
-const REP_PAY_CAP := 3.5      # REP_PAY_CAP (2026-07-27, Louis: "20000 gold is just
-							  # insane for the theater"). It was an UNBOUNDED 1 + rep/400,
-							  # which at a mid-career Reputation of 5,900 was already a
-							  # fifteenfold multiplier sitting on top of a score that
-							  # scales with the venue, the prop, the count AND the streak.
-							  # Four compounding curves is three too many: Reputation now
-							  # tops out as a modest premium and the score carries the pay.
+# --- reputation: the career-climb currency. It gates which STAGES you can play, and
+# nothing else - it never touches score or catching, so it stays on the comfort axis and
+# never touches the skill floor.
+#
+# IT NO LONGER MULTIPLIES PAY AT ALL, and the history is worth a line because the same
+# temptation will come back. Pay used to be score x BOOK_PAY_PER_SCORE x an unbounded
+# 1 + rep/400, which at a mid-career Reputation of 5,900 was a fifteenfold multiplier
+# sitting on top of a score that already scales with venue, prop, count and streak -
+# four compounding curves, three too many (Louis: "20000 gold is just insane for the
+# theater"). Capping it helped; the flower economy removed the question, because the
+# night's pay is now simply what the room threw, one flower at a time, in front of the
+# player. There is no end-of-act pay formula left to balance. Keep it that way.
 const REP_SWING := 60         # reputation gained by a great set, lost by a poor one
 # A NAME SURVIVES A BAD NIGHT BETTER THAN A NOBODY DOES (2026-07-27, Louis: "it is
 # slightly too hard early game to gain reputation: make it such that the more games you
@@ -800,8 +802,6 @@ const CROWD_LEAVE_BAND := 0.55   # draw_crowd: only seats below this applause le
 								  # have anyone leaving them, so ordinary play (applause
 								  # starts at 0.7 and a healthy set holds near it) never
 								  # thins the crowd - only a real crater toward a collapse does
-const BOOK_PAY_PER_SCORE := 0.0004    # gold per point banked across the booking (score already
-									  # scales with the venue, so this needs no separate venue term)
 # The Encore deck: each is a single named twist on the third set, and each is a couple
 # of lines because it toggles a constant or a draw call that already exists. Several
 # were designed months ago as "cosmetic" or "optional" (the glow-in-the-dark prop is
@@ -7691,14 +7691,6 @@ func perfect_window() -> int:
 	return w
 
 
-func pay_mult() -> float:
-	# Reputation lifts earnings only. Score and catching are untouched (skill-first
-	# guardrail: rep must stay on the comfort axis, never the timing floor) - and it is
-	# CAPPED, see REP_PAY_CAP, so a long career cannot multiply an already-scaling score
-	# into absurdity.
-	return minf(REP_PAY_CAP, 1.0 + float(reputation) / REP_PAY_DIV)
-
-
 func run_clean() -> float:
 	if caught + dropped <= 0:
 		return 1.0
@@ -10552,11 +10544,6 @@ const CSAW_TEETH := 13         # links drawn round the bar. THE COST OF THIS PRO
 							   # matters, not the vertex count)
 const CSAW_CHAIN_RATE := 0.22  # how fast the chain travels, in links per tick
 
-func chainsaw_running() -> bool:
-	# it idles in the hand and revs in the air. Purely cosmetic - nothing in the sim
-	# reads this - but it is the whole reason the prop is called "running".
-	return true
-
 
 func _soup_poly(pts: PackedVector2Array, col: Color) -> void:
 	# a convex filled polygon into the batch: the centroid, then its own ring as the fan.
@@ -10932,16 +10919,6 @@ func draw_star4(c: Vector2, r: float, col: Color) -> void:
 		c + Vector2(0.0, -r), c + Vector2(i, -i), c + Vector2(r, 0.0), c + Vector2(i, i),
 		c + Vector2(0.0, r), c + Vector2(-i, i), c + Vector2(-r, 0.0), c + Vector2(-i, -i),
 	]), col)
-
-
-func ellipse_outline(c: Vector2, rx: float, ry: float, col: Color, w: float) -> void:
-	# a closed ELLIPTICAL outline. draw_arc cannot do this: its radius is circular, so it
-	# is only ever a circle's arc however you scale the caller's idea of the shape.
-	var pts := PackedVector2Array()
-	for i in 25:
-		var a := TAU * float(i) / 24.0
-		pts.append(c + Vector2(cos(a) * rx, sin(a) * ry))
-	draw_polyline(pts, col, w, true)
 
 
 func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color, label := "") -> void:
@@ -13851,62 +13828,6 @@ func draw_menu_cascade(center: Vector2, sc: float) -> void:
 		draw_ball_shape(_cascade_pos(t, i, count, hl, hr, T, peak), col, 1.35)
 
 
-func capsule_silhouette(cx: float, floor_y: float, H: float, col: Color, reach: float) -> void:
-	# THE FIGURE AS ONE FLAT SHAPE, on draw_juggler's own eight-head canon (head at 7.5H,
-	# shoulders 6.72, hip 4, knee 2, floor 0) so a poster-scale silhouette is the SAME
-	# performer and not a second, drifting version of him - the standing rule about never
-	# reshaping this figure applies to art as much as to a mechanics fix. `reach` lifts
-	# the arms, 0 resting and 1 fully up.
-	var sh_y := floor_y - 6.72 * H
-	var hip_y := floor_y - 4.0 * H
-	var knee_y := floor_y - 2.0 * H
-	var waist_y := floor_y - 5.0 * H
-	var chest_y := floor_y - 6.0 * H
-	draw_capsule(Vector2(cx - 0.40 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.30 * H, col)
-	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.30 * H, 0.20 * H, col)
-	draw_capsule(Vector2(cx + 0.40 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.30 * H, col)
-	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.30 * H, 0.20 * H, col)
-	# the jacket's OWN outline (sloped shoulders, drawn-in waist, hip flare) rather than a
-	# capsule for a torso - a tube reads as a stick figure, and this is the shape the
-	# stage already draws
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.92 * H, sh_y + 0.1 * H), Vector2(cx - 0.30 * H, sh_y - 0.04 * H),
-		Vector2(cx + 0.30 * H, sh_y - 0.04 * H), Vector2(cx + 0.92 * H, sh_y + 0.1 * H),
-		Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
-		Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), col)
-	for side in [-1.0, 1.0]:
-		var shoulder := Vector2(cx + side * 0.80 * H, sh_y + 0.16 * H)
-		var elbow := shoulder + Vector2(side * 0.66 * H, lerpf(0.95, -0.26, reach) * H)
-		var wrist := elbow + Vector2(side * 0.30 * H, lerpf(0.95, -1.00, reach) * H)
-		draw_capsule(shoulder, elbow, 0.48 * H, 0.35 * H, col)   # same limb weights the
-		draw_capsule(elbow, wrist, 0.33 * H, 0.26 * H, col)      # stage figure carries
-		draw_circle(wrist, 0.21 * H, col)
-	draw_colored_polygon(PackedVector2Array([                    # neck
-		Vector2(cx - 0.20 * H, sh_y - 0.5 * H), Vector2(cx + 0.20 * H, sh_y - 0.5 * H),
-		Vector2(cx + 0.23 * H, sh_y + 0.14 * H), Vector2(cx - 0.23 * H, sh_y + 0.14 * H)]), col)
-	draw_circle(Vector2(cx, floor_y - 7.5 * H), 0.52 * H, col)
-
-
-func capsule_prop(kind: int, p: Vector2, sc: float, ang: float) -> void:
-	# one prop at any size, through the very shapes the stage draws (never a second art
-	# style for the same object - the shop icons learned that the hard way)
-	match kind:
-		PROP_BALLS:   draw_ball_shape(p, Color(1.0, 0.82, 0.35), sc)
-		PROP_EGGS:    draw_egg(p, Color(0.97, 0.94, 0.86), sc)
-		PROP_RINGS:   draw_ring_prop(p, Color(0.45, 0.75, 0.95), sc)
-		PROP_CLUBS:   draw_club(p, ang, sc)
-		PROP_KNIVES:  draw_knife(p, ang, sc)
-		_:            draw_torch(p, ang, sc, true)
-
-
-func capsule_wordmark(font: Font, y: float, k: float, s: Vector2, col: Color, sub: String) -> void:
-	draw_wordmark(font, y, int(round(104.0 * k)), col, s)
-	if sub != "":
-		draw_ornament(s.x * 0.5, y + 126.0 * k, 250.0 * k, Color(col.r, col.g, col.b, 0.7))
-		draw_string(font, Vector2(0, y + 172.0 * k), sub, HORIZONTAL_ALIGNMENT_CENTER, s.x,
-			int(round(26.0 * k)), Color(col.r * 0.92, col.g * 0.86, col.b * 0.78))
-
-
 func capsule_embers(c: Vector2, r: float, n: int, col: Color) -> void:
 	# the fire's own litter: sparks climbing off a flame, sized down as they rise. Cheap,
 	# and it is the thing that stops a big flame reading as a flat orange shape.
@@ -13919,25 +13840,6 @@ func capsule_embers(c: Vector2, r: float, n: int, col: Color) -> void:
 		draw_circle(Vector2(px, py), maxf(1.0, r * 0.035 * (1.0 - t * 0.7)), Color(col.r, col.g, col.b, a))
 		if i % 3 == 0:
 			draw_star4(Vector2(px, py), r * 0.06 * (1.0 - t), Color(1.0, 0.95, 0.8, a * 0.8))
-
-
-func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: Color, cuff: Color) -> void:
-	# a forearm in the costume, and nothing above the elbow: satin sleeve, a turned cuff
-	# with two buttons, and the hand. Louis: the performer himself is not one of the
-	# things worth blowing up, "perhaps just some detailed arms with the costume arms".
-	var d := (wrist - elbow).normalized()
-	var n := Vector2(-d.y, d.x)
-	var cuff_a := wrist - d * w * 1.15
-	draw_capsule(elbow, cuff_a, w * 1.20, w, dk)                    # the sleeve's shadow side
-	draw_capsule(elbow - n * w * 0.10, cuff_a - n * w * 0.10, w * 1.02, w * 0.84, suit)
-	draw_capsule(elbow - n * w * 0.26, cuff_a - n * w * 0.24, w * 0.36, w * 0.30,
-		Color(suit.r * 1.25 + 0.06, suit.g * 1.25 + 0.06, suit.b * 1.25 + 0.06, 0.55))   # satin sheen
-	draw_capsule(cuff_a, wrist - d * w * 0.35, w * 1.06, w * 0.98, cuff)   # the turned cuff
-	draw_circle(cuff_a + n * w * 0.30 + d * w * 0.30, w * 0.085, Color(0.25, 0.20, 0.16))
-	draw_circle(cuff_a + n * w * 0.30 + d * w * 0.62, w * 0.085, Color(0.25, 0.20, 0.16))
-	var skin := Color(0.87, 0.64, 0.45)
-	fill_ellipse(wrist + d * w * 0.30, w * 0.52, w * 0.62, skin)           # the hand
-	fill_ellipse(wrist + d * w * 0.30 - n * w * 0.18, w * 0.20, w * 0.34, Color(0.95, 0.74, 0.55, 0.5))
 
 
 # CAPSULE-ONLY PROPS (2026-07-28, Louis: "add more details to the objects ... far more

@@ -386,6 +386,103 @@ anywhere - "nobody could still have one" is a guess, not a fact.
   across day/results/booking/daily also came up clean. What is still NOT done is a real
   HANDS-ON human pass over a couple of calendar-seeded venues and a check that the shared
   result line actually lands on the clipboard - do that before calling it shipping-ready.
+- **THE EXPERIMENTS ARE ALL SHIPPED** (2026-07-28, Louis: "you may remove the F9 options
+  - not the idea itself, that i will reuse. they should all be ON and that is the way i
+  like it"). `prop_art`, `round_v3`, `soft_light` and `flowers` are simply how the game
+  looks now, and their OFF branches were **deleted**, not left stranded - along with
+  `draw_money_hat`, `draw_coin` and `_hat_vessel`, which were what the flower economy
+  replaced. `flowers_on()` is gone and `coin_word()` returns "flowers" unconditionally.
+  The panel keeps ONE entry, `face_v2`, and one new rule to stop the bug the old
+  dictionary invited: **every experiment is read through `exp_on(id)` and nowhere else**,
+  because a reader with its own hand-written fallback can disagree with the declaration
+  (`flowers_on` said `false` against a declaration of `true` for a while), and one
+  accessor cannot disagree with itself. The panel's row height now divides a fixed budget
+  by the entry count, so a short list explains itself properly.
+- **THE JUGGLER'S FACE** (2026-07-28, F9 `face_v2`, ON; Louis: "a nicer mouth and hair.
+  right now they just look too artificial"). What was artificial was not the amount of
+  detail, it was three specific marks. HAIR was `draw_circle(head + up, r * 1.12)`: a
+  brown disc behind a tan one. A haircut is a SILHOUETTE - a crown that is not round,
+  temples down past the eye line, a hairline that parts on one side - and none of that is
+  a strand (strands at 21px land in the same sub-pixel shimmer band the round props were
+  flattened to escape). The MOUTH was a three-point polyline of even thickness, and Godot
+  has no round caps, so it had square ends: a drawn line lying on a face. Every mouth is
+  a filled shape from `mouth_shape` now - four numbers (corner lift, top bow, bottom bow,
+  width) shared by the lips, the opening and the lower-lip highlight so they cannot come
+  apart. EYES were two dots and a speck; what makes an eye read at this size is the BROW
+  above it, and the brow is also what closes on a wince.
+  **Two things went wrong on the way and both are worth keeping.** (1) The first pass
+  drew an upper lid AND put the brows at -0.22r; a near-black lid on a near-black eye
+  does not read as a fold, it just makes the eye taller, and together the two merged into
+  one dark block. The lid is gone, the brows are at -0.30r in HAIR's colour rather than
+  the pupil's, and the eye is slimmer. (2) The pleased mouth dropped the jaw and showed
+  teeth, and Louis called it correctly: "the smile is a bit creepy, go easy on that part".
+  **A face this simplified has no eyes doing the other half of the work, so the mouth
+  carries the mood alone - and a mouth carrying it alone must stay small.** Lifted corners
+  and a barely parted lip is a smile; teeth make it a rictus.
+  `draw_head` is the ONE head now: the Skills preview used to draw its own second face
+  (two dots and an arc, no fringe, a mouth that never changed with the mood) and simply
+  passes a smaller `r`. Detail thresholds are radius-gated the way `draw_coin` learned to
+  do it - brows and nose at r >= 10, since the preview's head is 11.5px against the
+  stage's 21.
+- **A CRESCENT IS THE DIFFERENCE OF TWO CIRCLES** (2026-07-28, Louis: "improve the rest
+  icon, it's just a C right now" - and that is the geometry, exactly). The moon was
+  `draw_arc` at width 3.2, and **an arc has CONSTANT width**, so it is a ring with a gap
+  cut in it: the same thickness at the horns as at the belly, finished with two square
+  caps. That is the letter C at any size, however it is coloured. A crescent has no
+  constant width anywhere, so no arc can ever be one. `crescent_points` intersects the
+  two rims properly and walks the outer arc outside the bite, then the biting arc inside
+  the disc, which gives real horns and a limb that tapers. Both the REST drawer and the
+  SLEEP row use it. The obvious alternative - draw the disc, overdraw the bite in the
+  background colour - is wrong here because these icons sit on cards that do not share
+  one background, so the hole has to be honestly absent.
+- **THE CHAINSAW** (2026-07-28, Louis: "make it actually move around and work"): the
+  seventh prop and the deliberate end of the ladder - weight 6, Str 70, 9,000, `pwin` -4,
+  `smult` 2.10, and the only prop that is RUNNING while it flies. The chain really
+  travels round the bar (each link walks the perimeter on a phase that advances with
+  `cine_tick`), and it lands on `c_saw`, a two-stroke bite rather than a chime.
+  **What it cost, measured at seven saws at the World Arena, because Louis asked:**
+  eleven immediate-mode shapes each = 449 calls / 3.0ms; batched into a soup but rebuilt
+  per prop = 383 calls / 3.0ms; batched AND baked once per frame = 383 / 2.6ms. The
+  middle row is this file's own flower-pile lesson walked into a second time - batching
+  wins on calls, but building triangles in GDScript costs about what the calls cost, so
+  doing it per PROP hands the saving straight back. **Every saw is the same local
+  geometry at a given tick** (the transform is the only difference), so `_saw_bake()` is
+  shared and the per-prop work is one emit. `draw_set_transform` applies to
+  `canvas_item_add_triangle_array` too, which is what makes that possible.
+- **A SEVENTH PROP WALKED INTO SIX HARD-CODED LENGTHS**, and that is the real finding
+  (2026-07-28). `prop_count` was a 6-literal (`Out of bounds get index '6'`); the shop's
+  prop/gear boundary was `shop_sel <= 5` in four places, so the chainsaw's card ran
+  `try_buy_glasses`; the row width was `(innerw - gap * 5) / 6`, so the seventh card drew
+  out through the panel border and off the screen; and the gear cards' printed buy keys
+  were `7 + i`, so every one of them advertised a key that now bought a prop. All of it
+  derives from `PROPS.size()` now (`sync_props`, `shop_gear0`, `shop_cards`, `SHOP_KEYS`),
+  so an eighth prop is one `PROPS` row and no other edit. **The shop row is also the
+  honest argument for prop CATEGORIES** (Louis's own instinct): past about eight cards
+  there is no width left in a single row, whatever the arithmetic says.
+- **BOUQUETS, and the two factors that decide a tier** (2026-07-28, Louis: "bigger stages
+  should throw bouquets instead of just a couple of special flowers - mix the concepts").
+  `flower_tier_roll` multiplies the player's night by the ROOM: how deep in the green and
+  how many drops still gates the top of the ladder exactly as before, and
+  `venue_generosity()` (0 at the Backyard, 1 at the top) both widens those odds and lifts
+  the plain-stem floor. A bouquet (tier 3, worth 60) is drawn as THREE blooms recursing
+  through `draw_flower` at lower tiers plus a wrap of florist's paper - never one big
+  flower, because "somebody bought this" is a read a scaled-up single bloom cannot give
+  at any size. Neither factor can carry the roll alone, which is what stops a big stage
+  paying out for a bad act.
+- **THE STANDING OVATION** (2026-07-28, Louis: "ending a perfect performance (no drops)
+  should get a standing ovation and a rain of flowers (bonus)"). Not one prop dropped,
+  not a collapse, at least one goal banked: the room stands, `OVATION_TICKS` of flowers
+  come down from ABOVE (`rain_flower` - an ovation is the whole room at once and reads as
+  weather, where `throw_from_crowd` arcs one person's tribute up out of a seat), and only
+  then does the results card appear. `results_open` is deliberately set true throughout,
+  so every guard that already stops play during the results also covers the ovation -
+  only the card's DRAWING and its keys wait on `ovation_left`. The bonus is
+  `OVATION_BONUS_PCT` of what the night already earned, added to `run_flowers` BEFORE the
+  pay is taken off it, so it flows through the purse, the ledger and the record like any
+  other flower and the rain itself adds nothing more (or the night would be paid twice).
+  **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
+  act resolved, which made the one path only a perfect act can reach impossible to test
+  or screenshot at all.
 - **EXPERIMENTS panel** (2026-07-25): F9, from anywhere, opens a small
   debug-only overlay (`debug_panel_open`, `draw_debug_panel`) listing named toggles
   (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an
