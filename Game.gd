@@ -1089,14 +1089,12 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # What is here is what still has two real sides and wants Louis's eye on it. The
 # dictionary IS the shipped default for each - keep every reader's fallback equal to the
 # value here, or a missing key silently ships the other look.
-var experiments := {"face_v2": true, "rich_props": true}
+var experiments := {"fire_motion": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
-	{"id": "rich_props", "name": "Rich props on the stage, not just in the shop",
-	 "desc": "The props are drawn on stage the way the shop card and the store art draw them: a ball with panel seams and a real specular, a shaded egg with a speckled shell, a club with a lacquered stripe and a wrapped grip, a knife that reflects the room instead of being filled with grey, and a torch whose flame is tall, asymmetric and blue at the wick. Dozens of shapes per object against the handful the stage normally uses, so this is the one experiment that can genuinely cost frames - turn it OFF if a heavy set feels less than smooth, and see the FPS note below. OFF restores the flat stage props, which is also what three earlier passes settled on deliberately: a painted highlight is a claim about where the light is, and this stage's light really moves."},
-	{"id": "face_v2", "name": "The juggler's face: real hair, a real mouth",
-	 "desc": "The performer read as a mannequin: hair was a brown circle behind a tan one, and the mouth was a bent polyline of even thickness with square ends. Now the hair has a real silhouette - a side parting, a swept fringe that comes to a point, temples down past the eyes, a crown sheen - and the mouth is a filled shape with lips, an opening that widens with the mood, and light on the lower lip. Eyes are slimmer, sit under proper tapered brows, and squeeze shut on a wince. A soft nose plane. Same head size, same stance, same proportions - nothing outside the face moves, and the Skills preview now draws this same head instead of its own. OFF restores the old face."},
+	{"id": "fire_motion", "name": "Fire moves",
+	 "desc": "The flames flicker, lean and shed embers. OFF freezes every fire in the game to a still shape - the torches on stage, the two burning torches in the wordmark, the shop card. It changes nothing about the fire's SIZE or COLOUR, so a frozen torch is still plainly a lit torch; it just stops rebuilding seven polygons per prop per frame. Try it if a heavy set of torches ever feels less than smooth."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -1395,6 +1393,8 @@ var _calib_ticks := 3600   # 30 sim-seconds by default (deterministic ticks, not
 # this existed. Prints a line a second: real fps, the engine's own process/draw times,
 # and the two counts that actually matter (draw calls and primitives per frame).
 var _fps := false
+var _perf_hud := false        # F10 in a debug build: the readout drawn on screen
+var _perf_line := ""          # ...the last line the probe produced, held for drawing
 var _fps_t := 0.0
 var _fps_frames := 0
 var _fps_min := 9999.0
@@ -1732,6 +1732,13 @@ func _process(delta: float) -> void:
 	# _draw; this runs per RENDERED frame, which is the only place real fps is visible.
 	if not _fps:
 		return
+	# ENGINE FPS IS A LIE IN A BACKGROUND WINDOW, and every measurement this session took
+	# was taken in one (2026-07-28). macOS throttles the PRESENTATION of an unfocused
+	# window, so Engine.get_frames_per_second() collapses to 15-40 while the game is
+	# genuinely drawing 120 times a second - `draws` below, counted in _draw itself,
+	# stayed at ~120 in the very same runs that reported 15. A whole "fill rate cliff"
+	# was diagnosed off that number before the two were compared. **`draws/s` is the
+	# real frame rate here; treat `engine fps` as meaningful only in a FOREGROUND window.**
 	var fps := Engine.get_frames_per_second()
 	_fps_frames += 1
 	_fps_sum += fps
@@ -1739,7 +1746,12 @@ func _process(delta: float) -> void:
 		_fps_min = minf(_fps_min, fps)   # ignore the first frames: shader/font warm-up
 	_fps_t += delta
 	if _fps_t >= 1.0:
-		print("PHYS %.0fus/tick (%d ticks) | DRAW %.0fus/frame (%d draws) | fps avg=%.1f | calls=%d prims=%d | balls=%d parts=%d" % [
+		_perf_line = "draws/s %d   draw %.1fms   calls %d   prims %s   props %d   flowers %d" % [
+			_draw_n, float(_draw_us) / float(maxi(_draw_n, 1)) / 1000.0,
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			commafy(int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))),
+			balls.size(), thrown.size()]
+		print("PHYS %.0fus/tick (%d ticks) | DRAW %.0fus/frame | draws/s=%d | engine fps=%.1f | calls=%d prims=%d | balls=%d parts=%d" % [
 			float(_phys_us) / float(maxi(_phys_n, 1)), _phys_n,
 			float(_draw_us) / float(maxi(_draw_n, 1)), _draw_n,
 			_fps_sum / float(maxi(_fps_frames, 1)),
@@ -1979,6 +1991,15 @@ func _input(event: InputEvent) -> void:
 		set_fullscreen = not set_fullscreen
 		apply_fullscreen()
 		save_settings()
+		return
+	if kc == KEY_F10 and OS.is_debug_build():
+		# THE PERFORMANCE READOUT, on screen, in a FOCUSED window - which is the only
+		# place a frame rate means anything (2026-07-28: a whole session's worth of
+		# conclusions came off a backgrounded window's throttled fps). Deliberately NOT a
+		# Settings row: this is a dev instrument, it must never reach a release build, and
+		# Settings already has a three-view invariant that a tenth row has to honour.
+		_perf_hud = not _perf_hud
+		_fps = _perf_hud          # ...and it drives the same counters --fps prints
 		return
 	if kc == KEY_F9 and OS.is_debug_build():
 		# the EXPERIMENTS panel, available from every screen exactly like F11 above -
@@ -8777,6 +8798,16 @@ func _draw() -> void:
 	if debug_panel_open:
 		draw_debug_panel()   # same trick as _draw_state_fade: drawn on top of WHATEVER
 							  # screen just drew, so no screen needs to know about it
+	if _perf_hud and _perf_line != "":
+		# one line, top-left, over everything - and the numbers that MEAN something:
+		# draws/s is the real frame rate, draw ms is the CPU cost of building a frame.
+		# Deliberately no "fps": see the correction in cap_torch for what reading one off
+		# a background window cost.
+		var pf := game_font()
+		var pw2 := pf.get_string_size(_perf_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		draw_rect(Rect2(8.0, 8.0, pw2 + 20.0, 26.0), Color(0.02, 0.02, 0.04, 0.8))
+		draw_string(pf, Vector2(18.0, 26.0), _perf_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+			Color(0.6, 1.0, 0.7))
 	if _fps:
 		_draw_us += Time.get_ticks_usec() - t0
 		_draw_n += 1
@@ -9810,10 +9841,7 @@ func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: b
 	# code, and the preview's had already drifted to a bare arc for a mouth and no
 	# fringe at all. A face is exactly the kind of thing two copies of go quietly out of
 	# step, so there is one now and the preview simply passes a smaller r.
-	if exp_on("face_v2"):
-		draw_hair_back(head, r, hair)
-	else:
-		draw_circle(head + Vector2(0, -r * 0.32), r * 1.12, hair)
+	draw_hair_back(head, r, hair)
 	if facing_back:
 		# ALL HAIR, no nape (2026-07-27, Louis: "during spin, the back of the players
 		# head should be entirely hair: brown"). A skin patch used to sit at the bottom
@@ -9824,13 +9852,8 @@ func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: b
 		return
 	draw_circle(head, r, skin)                                        # face over the hair
 	draw_circle(head + Vector2(-r * 0.26, -r * 0.08), r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
-	if exp_on("face_v2"):
-		draw_hair_front(head, r, hair)   # the hairline goes UNDER the features...
-		draw_face_v2(head, r, hair)      # ...and the brows come with the face
-	else:
-		draw_face_polish(head, r, hair)
-		draw_face(head, r)
-		draw_brows(head, r, hair)
+	draw_hair_front(head, r, hair)   # the hairline goes UNDER the features...
+	draw_face_v2(head, r, hair)      # ...and the brows come with the face
 
 
 func draw_hair_back(head: Vector2, r: float, hair: Color) -> void:
@@ -9994,34 +10017,6 @@ func draw_face_v2(head: Vector2, r: float, hair_tone: Color) -> void:
 			Color(0.98, 0.74, 0.60, 0.45))
 
 
-func draw_face_polish(head: Vector2, r: float, hair: Color) -> void:
-	# THE OLD FRINGE (the `face_v2` OFF side): a side-parted crescent laid over the top
-	# of the face disc, so the head reads as hair-over-a-face instead of a bare oval
-	# with a hair halo behind it. One filled crescent, outer edge = the face's circle.
-	var pts := PackedVector2Array()
-	for i in 11:
-		var a := -PI + PI * float(i) / 10.0            # left -> over the crown -> right
-		pts.append(head + Vector2(cos(a), sin(a)) * r * 1.02)
-	pts.append(head + Vector2(r * 0.86, -r * 0.20))    # the hairline, sweeping back
-	pts.append(head + Vector2(r * 0.10, -r * 0.50))    # ...to the part
-	pts.append(head + Vector2(-r * 0.52, -r * 0.34))
-	pts.append(head + Vector2(-r * 0.98, -r * 0.02))
-	draw_colored_polygon(pts, hair)
-
-
-func draw_brows(head: Vector2, r: float, hair: Color) -> void:
-	# the OLD brows (the `face_v2` OFF side): two even strokes carrying the same mood the
-	# mouth does - lifted on a streak, pinched in after a drop
-	var mood := face_mood()
-	var bx := r * 0.34
-	var by := -r * 0.20                     # low enough to clear the fringe's hairline
-	var inner := by + (r * 0.08 if mood == -1 else (-r * 0.04 if mood == 1 else 0.0))
-	var outer := by + (-r * 0.04 if mood == -1 else (-r * 0.10 if mood == 1 else 0.0))
-	var col := hair.darkened(0.15)
-	draw_line(head + Vector2(-bx - r * 0.15, outer), head + Vector2(-bx + r * 0.15, inner), col, maxf(1.8, r * 0.11))
-	draw_line(head + Vector2(bx + r * 0.15, outer), head + Vector2(bx - r * 0.15, inner), col, maxf(1.8, r * 0.11))
-
-
 func draw_spin_streaks(center: Vector2) -> void:
 	var prog := 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)   # 0 at start, 1 at end
 	# curved motion streaks sweeping around the body, flattened to read as a turn
@@ -10100,28 +10095,6 @@ func face_mood() -> int:
 	if tick - last_drop_tick < 45:
 		return -1
 	return 1 if streak >= 3 else 0
-
-
-func draw_face(head: Vector2, r: float = 21.0) -> void:
-	# features scale to the head radius r, so the face stays proportioned after the
-	# figure moved to the eight-head canon (a smaller head than the old drawing)
-	var eye := Color(0.16, 0.10, 0.08)
-	var ex := r * 0.34
-	var ey := -r * 0.05
-	draw_circle(head + Vector2(-ex, ey), r * 0.14, eye)
-	draw_circle(head + Vector2(ex, ey), r * 0.14, eye)
-	draw_circle(head + Vector2(-ex + r * 0.05, ey - r * 0.05), r * 0.05, Color(1, 1, 1, 0.7))
-	draw_circle(head + Vector2(ex + r * 0.05, ey - r * 0.05), r * 0.05, Color(1, 1, 1, 0.7))
-	# expression: a smile on a streak, a wince just after a drop, else calm
-	var mood := face_mood()
-	var my := head.y + r * 0.42
-	var mw := r * 0.3
-	var mouth := PackedVector2Array([Vector2(head.x - mw, my), Vector2(head.x + mw, my)])
-	if mood == 1:
-		mouth = PackedVector2Array([Vector2(head.x - mw, my - r * 0.09), Vector2(head.x, my + r * 0.16), Vector2(head.x + mw, my - r * 0.09)])
-	elif mood == -1:
-		mouth = PackedVector2Array([Vector2(head.x - mw, my + r * 0.12), Vector2(head.x, my - r * 0.09), Vector2(head.x + mw, my + r * 0.12)])
-	draw_polyline(mouth, Color(0.45, 0.20, 0.16), maxf(1.8, r * 0.11))
 
 
 func draw_capsule(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> void:
@@ -10425,6 +10398,15 @@ const GLOW_PHOS := Color(0.62, 1.0, 0.72)   # the Kit's phosphor: a cool green-w
 											# reads as CHARGED rather than merely bright,
 											# and never collides with a venue's own palette
 
+func fire_clock() -> float:
+	# EVERY FIRE IN THE GAME READS ITS TIME FROM HERE, so one switch stops all of them
+	# together (2026-07-28, Louis: "i want you to put a toggle for fire motion on and
+	# off"). Frozen, a flame keeps its size, its colours and its shape - it simply stops
+	# being rebuilt, which is the whole cost of it. Returning a CONSTANT rather than
+	# skipping the draw is what keeps a stopped torch plainly a lit torch.
+	return atick() if exp_on("fire_motion") else FIRE_STILL_T
+
+
 func warm_room(amount: float) -> void:
 	# EVERY WAY THE CROWD WARMS GOES THROUGH HERE. It was six separate
 	# `applause = minf(1.0, applause + x)` lines, which is fine until something needs to
@@ -10444,12 +10426,6 @@ func glow_props_lit() -> bool:
 
 func glow_suit_lit() -> bool:
 	return has_glow_suit and is_dark_context()
-
-
-func glow_kit_lit() -> bool:
-	# "the whole kit is on" - the one test that still wants both halves, used where the
-	# question is about the SET rather than about a prop or a costume
-	return glow_props_lit() and glow_suit_lit()
 
 
 func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0,
@@ -10588,9 +10564,10 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 
 
 func draw_prop_body(b: Ball, pos: Vector2, ang: float, sc: float) -> void:
-	# WHICH PICTURE OF A PROP THE STAGE DRAWS, behind the F9 `rich_props` switch so the
-	# cost can be turned off in one keypress if a heavy set ever feels less than smooth -
-	# those shapes were written for a still frame, not for fifteen objects at 120Hz.
+	# THE STAGE DRAWS THE SAME OBJECT THE SHOP DOES (2026-07-28, Louis: "i want the rich
+	# props ... both toggles may be on standard and then removed from F9"). There is one
+	# picture of each prop now; `halo` is the only thing the stage drops, and only because
+	# it has its own light for a dark house.
 	#
 	# THE SQUASH LIVES HERE, ABOVE THE SWITCH, deliberately. It is MOTION, not artwork, so
 	# both sides of the toggle have to get it - otherwise flipping the experiment would
@@ -10608,30 +10585,10 @@ func draw_prop_body(b: Ball, pos: Vector2, ang: float, sc: float) -> void:
 			k = clampf(vel.length() * 0.055, 0.0, 0.22)
 			vang = vel.angle()
 		draw_set_transform(pos, vang, Vector2(1.0 + k, 1.0 - k))
-		if exp_on("rich_props"):
-			draw_prop_rich(b.kind, Vector2.ZERO, b.color, ang, sc, false)
-		elif b.kind == PROP_EGGS:
-			draw_egg(Vector2.ZERO, b.color, sc)
-		else:
-			draw_ball_shape(Vector2.ZERO, b.color, sc)
+		draw_prop_rich(b.kind, Vector2.ZERO, b.color, ang, sc, false)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
-	if exp_on("rich_props"):
-		draw_prop_rich(b.kind, pos, b.color, ang, sc, false)   # shape, not light
-		return
-	match b.kind:
-		PROP_RINGS:
-			draw_ring_prop(pos, b.color, sc)
-		PROP_CLUBS:
-			draw_club(pos, ang, sc)
-		PROP_KNIVES:
-			draw_knife(pos, ang, sc)
-		PROP_TORCHES:
-			draw_torch(pos, ang, sc)
-		PROP_CHAINSAW:
-			draw_chainsaw(pos, ang, sc)
-		_:
-			draw_ball_shape(pos, b.color, sc)
+	draw_prop_rich(b.kind, pos, b.color, ang, sc, false)   # shape, not light
 
 # THE ROUND PROPS ARE FLAT, and that is a decision, not a shortcut (2026-07-27, Louis:
 # "get rid of the 'light' and 'shadows' of both", and "i don't like the dark border on
@@ -10897,6 +10854,10 @@ func draw_torch(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void
 # units tall against the stage torch's 39 with a flame that was 63% of the whole object.
 # A real juggling torch is mostly HANDLE. These are the numbers both versions build from
 # now, so the shop can only ever add detail inside the same silhouette.
+const FIRE_STILL_T := 137.0  # the phase every flame freezes at with fire motion off -
+							  # picked because the flicker and the lean are both near
+							  # their middle there, so a still fire looks like a fire
+							  # caught mid-burn rather than one at a stretched extreme
 const TORCH_BUTT := 16.0    # the handle's far end
 const TORCH_WICK := -3.0    # where the fire starts
 const TORCH_FLAME_H := 22.0 # ...and how far it reaches above that
@@ -10928,7 +10889,7 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 	# WRITHES instead of pulsing. In play that is three polygons, one more than the two
 	# flat triangles it replaces; `rich` adds the aura, the embers and the pool of light
 	# for the shop card, where nothing is moving and the cost is paid once.
-	var t := float(tick)
+	var t := fire_clock()
 	var fl := 1.0 + 0.16 * sin(t * 0.5) + 0.07 * sin(t * 1.31)     # two-rate flicker
 	var sway := 2.2 * sin(t * 0.29) + 0.9 * sin(t * 0.71)          # the lean
 	var base := Vector2(0.0, TORCH_WICK)
@@ -14281,16 +14242,14 @@ func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, 
 		PROP_RINGS:    cap_ring(pos, col, 12.0 * sc)
 		PROP_CLUBS:    cap_club(pos, ang, sc)
 		PROP_KNIVES:   cap_knife(pos, ang, sc)
-		# FIRE IS THE ONE PROP THAT CANNOT BE RICHER ON STAGE, and the measurements above
-		# are why: a flame is large translucent AREA, and seven of them cost 145 fps ->
-		# 15. Every other prop's detail is opaque shape, which is nearly free. So the
-		# stage keeps the three-layer flame it already had (which is good, and which the
-		# lush one is now proportioned to match) and the shop gets the full fire.
-		PROP_TORCHES:
-			if halo:
-				cap_torch(pos, ang, sc, true)
-			else:
-				draw_torch(pos, ang, sc)
+		# THE STAGE TORCH IS THE SHOP TORCH WITHOUT ITS LIGHT (2026-07-28, Louis: "the
+		# torches deserve their better look like in the shop, but that doesn't mean they
+		# have to be as crazily detailed, just the same look and not just a brown stick").
+		# It was falling back to draw_torch, which is a brown LINE with a flame on it -
+		# he is describing it exactly. Now both paths draw the same waisted haft, cord
+		# binding, brass ferrule and charred wick; `halo` is the only difference, and it
+		# only drops the two big glow quads, the widest aura layer and the embers.
+		PROP_TORCHES:  cap_torch(pos, ang, sc, halo)
 		PROP_CHAINSAW: draw_chainsaw(pos, ang, sc, true)
 		_:             cap_ball(pos, col, BALL_RADIUS_PX * sc)
 
@@ -14475,30 +14434,29 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true) -> void:
 	# so on the title screen - the one place this fire is the largest thing on screen -
 	# the flicker, the sway and the embers were all frozen at whatever value tick held.
 	# atick() is the cosmetic clock that runs in every state and exists for exactly this.
-	var t := atick()
+	var t := fire_clock()
 	var fl := 1.0 + 0.14 * sin(t * 0.5) + 0.06 * sin(t * 1.31)
 	var sway := 2.0 * sin(t * 0.29) + 0.8 * sin(t * 0.71)
-	# THE POOL OF LIGHT IS THE EXPENSIVE PART, and `halo` is what turns it off.
+	# `halo` drops the two big translucent glow quads and the widest aura layer.
 	#
-	# MEASURED (2026-07-28), seven torches at the World Arena, and the numbers are worth
-	# keeping because they contradict this file's own performance note:
-	#     stage props (flat)          423 calls   2.80ms   145 fps
-	#     rich props, 7 BALLS         478 calls   2.90ms   145 fps
-	#     rich props, 7 TORCHES       587 calls   4.91ms    15 fps   <-- and there it is
-	# The draw-call and CPU numbers barely move between the last two, so the usual rule
-	# ("cost is the NUMBER of calls times ~5us, vertex counts barely register") does not
-	# explain a tenfold drop in frame rate. This case is FILL RATE: two big translucent
-	# quads plus a wide low-alpha aura polygon, times seven props, is an enormous amount
-	# of blended overdraw, and none of that is visible to a CPU timer around _draw. The
-	# earlier finding that fill rate did not matter here was measured on props that had
-	# no glow on them - it was true, and it stopped being true the moment fire was drawn
-	# this way. **When frame rate falls and DRAW microseconds do not, stop counting calls
-	# and start looking at how much translucent area is being painted.**
+	# A CORRECTION, AND THE MEASURING LESSON THAT CAME WITH IT (2026-07-28). This comment
+	# used to claim a "fill rate cliff" - 145 fps down to 15 the moment seven torches went
+	# rich - and cite it as evidence against this file's own draw-call rule. **That number
+	# was an artefact and the conclusion was wrong.** Every measurement was taken in a
+	# BACKGROUNDED window, and macOS throttles the presentation of an unfocused window, so
+	# Engine.get_frames_per_second() collapsed while the game went on genuinely drawing:
+	# the `draws/s` counter, taken inside _draw itself, read ~120 in the very same runs
+	# that reported 15. Re-measured at 1920x1016 with FIFTEEN rich props: 3.2ms of draw
+	# and 122 draws a second. There is no cliff.
 	#
-	# So the stage gets the fire's SHAPE - the smooth asymmetric silhouette, the writhing
-	# layers, the blue base, the white heart, which is all of what makes it look better -
-	# and not its pool of light, which the stage already provides its own version of when
-	# the house is dark (see draw_prop's halo and stage_darkness).
+	# What is true: the rich torch costs ~2.1ms more CPU draw time than the flat one at
+	# seven props (4.9ms against 2.8ms), which is real but comfortably inside a 120Hz
+	# budget. `halo` stays because it is still the cheapest thing to drop and the stage
+	# has its own light for a dark house anyway - not because of a cliff that never was.
+	#
+	# **The rule to keep: `draws/s` is the frame rate. `engine fps` means nothing unless
+	# the window has focus.** Do not conclude anything from an fps number again without
+	# checking the two against each other.
 	var glow_at := p + Vector2(0.0, -3.0).rotated(ang) * sc
 	if halo:
 		draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, ca(Color(1.0, 0.46, 0.12, 0.30)))

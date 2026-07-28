@@ -1369,6 +1369,18 @@ picked and not what seemed reasonable at the time.
   also sell the individual parts"): GLOW TAPE (the props carry phosphor) and the GLOW SUIT
   (the performer does), with the Kit kept as a discounted bundle that sets both.
   `glow_kit_lit()` has to split into a props test and a suit test to match.
+- **THE FILL-RATE "CLIFF" WAS A MEASURING ERROR, and this is the entry that matters most
+  from 2026-07-28.** A pass concluded that rich props collapsed the game from 145 fps to
+  15, blamed translucent overdraw, and wrote that into the code. It was wrong. Every one
+  of those numbers came from a BACKGROUNDED window, and macOS throttles the presentation
+  of an unfocused window - `Engine.get_frames_per_second()` collapses while the game goes
+  on drawing perfectly happily. The probe's own `draws/s` counter, incremented inside
+  `_draw`, read ~120 in the very same runs that reported 15, and nobody compared the two.
+  Re-measured at 1920x1016 with FIFTEEN rich props and a full flower pile: **3.2ms of draw
+  time and 122 draws a second.** `--fps` now prints `draws/s` first and labels the engine
+  number `engine fps`. **Treat `engine fps` as meaningless unless the window has focus.**
+  The wider lesson is the one this file already half-knew ("beware fps as a metric") and
+  did not apply: when a metric disagrees with every other metric, suspect the metric.
 - **RICH PROPS SHIP ON.** Louis's call, made against the numbers below - he wants to judge
   it by feel and F9 it off if a heavy set drags. **The optimisation is the open follow-up:**
   batch `cap_ball` into one draw call the way `_saw_bake` already does for the chainsaw,
