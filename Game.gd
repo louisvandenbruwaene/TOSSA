@@ -13775,12 +13775,24 @@ func draw_menu(font: Font, s: Vector2) -> void:
 		draw_circle(Vector2(lx, s.y - 28.0), 5.0, Color(1.0, 0.72, 0.32, 0.6 * fl))
 	draw_dust(s, 22, Color(1.0, 0.85, 0.55))
 
-	# a slow, graceful cascade above the title, with soft motion trails
-	draw_menu_cascade(Vector2(cx, s.y * 0.17), 1.0)
-
-	draw_wordmark(font, s.y * 0.32, 92, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(cx, s.y * 0.32 + 112.0, 230.0, Color(0.82, 0.62, 0.34, 0.85))
-	draw_string(font, Vector2(0, s.y * 0.32 + 160.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
+	# THE TITLE, and everything under it placed off the MARK'S REAL BOTTOM rather than off
+	# a guess (2026-07-28). The prop mark is a picture, not a line of type: the A's torch
+	# handles hang below the baseline and its flames climb well above the cap line, so the
+	# old `title y + 112` put the divider straight through the torches. mark_height() is
+	# computed from the same MARK_RISE/MARK_DROP the drawing uses, so growing the mark
+	# moves the divider instead of colliding with it.
+	# NO CASCADE ABOVE IT ANY MORE. A small juggling loop used to arc over the title,
+	# because the title was a static word and the screen needed something alive on it.
+	# The mark IS alive now - two torches burning, embers leaving them - and a second
+	# animated ornament directly above competes with it for the same attention. There is
+	# also no room: at title size the mark starts a sixth of the way down the screen, and
+	# the cascade was being clipped by the top edge. (draw_menu_cascade is still used by
+	# the key art and the credits, where the mark is smaller and the room is there.)
+	var mark_top := s.y * 0.19
+	var mark_bot := mark_top + mark_height(float(MENU_MARK))
+	draw_wordmark(mark_top, MENU_MARK, Color(1.0, 0.88, 0.5), s)
+	draw_ornament(cx, mark_bot + 16.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, mark_bot + 58.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
 
 	var opts := menu_options()   # the same live list menu_input drives, so cursor and drawing agree
 	var oy := s.y * 0.62
@@ -13868,56 +13880,70 @@ const CAP_KNIFE_MID := (CAP_KNIFE_TIP + CAP_KNIFE_BUTT) * 0.5  # -4.85, the bala
 # whole warm band. Adding detail without adding this is what makes a still frame read as
 # a row of stickers: the objects were beautifully drawn and lit by nothing.
 const CAP_FIRE := Color(1.0, 0.58, 0.20)   # what the torches throw onto everything else
+# THE MARK FADES AS ONE THING (2026-07-28). The wordmark is drawn on screens that fade it
+# in and out - the credits roll it past, the final card fades it up - and the picture is
+# made of sixty-odd separate shapes with their own alphas. Rather than thread an alpha
+# argument through every prop and every highlight, `capsule_mark` sets this multiplier for
+# the duration of one mark and every colour in the picture passes through `ca()`.
+# It is a DRAW-TIME multiplier, never stored state: capsule_mark always restores it, so
+# nothing drawn afterwards can inherit a half-faded mark.
+var _cap_a := 1.0
+
+func ca(c: Color) -> Color:
+	return Color(c.r, c.g, c.b, c.a * _cap_a) if _cap_a < 1.0 else c
+
 
 func cap_warm_rim(p: Vector2, r: float, amt: float) -> void:
 	# the torch-side rim on a round prop: an arc down its right edge, warm, faint.
-	draw_arc(p, r * 0.90, -PI * 0.42, PI * 0.42, 20, Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, amt),
+	draw_arc(p, r * 0.90, -PI * 0.42, PI * 0.42, 20, ca(Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, amt)),
 		maxf(1.0, r * 0.15), true)
 
 
-func cap_ball(p: Vector2, col: Color, r: float) -> void:
+func cap_ball(p: Vector2, col_in: Color, r: float) -> void:
+	var col := ca(col_in)
 	# a juggling ball with a body: the shaded side is a second disc nudged away from the
 	# light rather than a gradient, the seams are the panel lines a real stitched ball
 	# has, and the specular is a filled shape with a hot core inside it (never a stroke -
 	# see THE ART RULE for why a stroked highlight reads as a sticker).
-	var lit := Color(minf(col.r * 1.18 + 0.05, 1.0), minf(col.g * 1.18 + 0.05, 1.0), minf(col.b * 1.18 + 0.05, 1.0))
-	var shade := Color(col.r * 0.52, col.g * 0.50, col.b * 0.56)
+	var lit := ca(Color(minf(col.r * 1.18 + 0.05, 1.0), minf(col.g * 1.18 + 0.05, 1.0), minf(col.b * 1.18 + 0.05, 1.0)))
+	var shade := ca(Color(col.r * 0.52, col.g * 0.50, col.b * 0.56))
 	draw_circle(p, r, shade)
 	draw_circle(p - Vector2(r * 0.13, r * 0.15), r * 0.93, col)
 	draw_circle(p - Vector2(r * 0.30, r * 0.34), r * 0.62, lit)
 	# a bounce light along the shaded rim, which is what stops the dark side going flat
-	draw_arc(p, r * 0.90, PI * 0.15, PI * 0.85, 24, Color(lit.r, lit.g, lit.b, 0.35), maxf(1.0, r * 0.10), true)
+	draw_arc(p, r * 0.90, PI * 0.15, PI * 0.85, 24, ca(Color(lit.r, lit.g, lit.b, 0.35)), maxf(1.0, r * 0.10), true)
 	# two panel seams, curved with the surface
-	draw_arc(p + Vector2(r * 0.42, 0), r * 0.92, PI * 0.62, PI * 1.38, 22, Color(0, 0, 0, 0.20), maxf(1.0, r * 0.055), true)
-	draw_arc(p - Vector2(r * 0.42, 0), r * 0.92, -PI * 0.38, PI * 0.38, 22, Color(0, 0, 0, 0.16), maxf(1.0, r * 0.055), true)
+	draw_arc(p + Vector2(r * 0.42, 0), r * 0.92, PI * 0.62, PI * 1.38, 22, ca(Color(0, 0, 0, 0.20)), maxf(1.0, r * 0.055), true)
+	draw_arc(p - Vector2(r * 0.42, 0), r * 0.92, -PI * 0.38, PI * 0.38, 22, ca(Color(0, 0, 0, 0.16)), maxf(1.0, r * 0.055), true)
 	cap_warm_rim(p, r, 0.28)                                                # the torches, off to the right
-	fill_ellipse(p - Vector2(r * 0.36, r * 0.42), r * 0.30, r * 0.22, Color(1, 1, 1, 0.55))
-	draw_circle(p - Vector2(r * 0.40, r * 0.47), r * 0.11, Color(1, 1, 1, 0.85))
-	draw_arc(p, r, 0.0, TAU, 40, Color(0, 0, 0, 0.28), maxf(1.0, r * 0.05), true)
+	fill_ellipse(p - Vector2(r * 0.36, r * 0.42), r * 0.30, r * 0.22, ca(Color(1, 1, 1, 0.55)))
+	draw_circle(p - Vector2(r * 0.40, r * 0.47), r * 0.11, ca(Color(1, 1, 1, 0.85)))
+	draw_arc(p, r, 0.0, TAU, 40, ca(Color(0, 0, 0, 0.28)), maxf(1.0, r * 0.05), true)
 
 
-func cap_ring(c: Vector2, col: Color, R: float) -> void:
+func cap_ring(c: Vector2, col_in: Color, R: float) -> void:
+	var col := ca(col_in)
 	# the ring as a real tube: a dark underside, the body, a bright top edge, a specular
 	# sweep that follows the curve, and the grip tape a practice ring is wrapped with.
 	# EVERY BAND IS A FULL CIRCLE and the hole is never filled, so you look straight
 	# through it at the backdrop - which is the one thing a ring does that no other prop
 	# here does, and the first thing a viewer checks without knowing they are checking.
 	var w := R * 0.30                          # the tube's thickness
-	var dark := Color(col.r * 0.42, col.g * 0.46, col.b * 0.58)
-	var lit := Color(minf(col.r * 1.30 + 0.10, 1.0), minf(col.g * 1.26 + 0.10, 1.0), 1.0)
+	var dark := ca(Color(col.r * 0.42, col.g * 0.46, col.b * 0.58))
+	var lit := ca(Color(minf(col.r * 1.30 + 0.10, 1.0), minf(col.g * 1.26 + 0.10, 1.0), 1.0))
 	draw_arc(c, R - w * 0.5, 0.0, TAU, 72, dark, w * 1.14, true)
 	draw_arc(c, R - w * 0.5, 0.0, TAU, 72, col, w * 0.86, true)
-	draw_arc(c, R - w * 0.18, 0.0, TAU, 72, Color(0, 0, 0, 0.22), w * 0.18, true)   # outer shadow line
+	draw_arc(c, R - w * 0.18, 0.0, TAU, 72, ca(Color(0, 0, 0, 0.22)), w * 0.18, true)   # outer shadow line
 	draw_arc(c, R - w * 0.86, 0.0, TAU, 72, lit, w * 0.20, true)                    # lit inner edge
-	draw_arc(c, R - w * 0.5, PI * 1.05, PI * 1.75, 40, Color(1, 1, 1, 0.42), w * 0.34, true)   # specular sweep
-	draw_arc(c, R - w * 0.5, PI * 0.15, PI * 0.70, 34, Color(0, 0, 0, 0.20), w * 0.30, true)   # underside
+	draw_arc(c, R - w * 0.5, PI * 1.05, PI * 1.75, 40, ca(Color(1, 1, 1, 0.42)), w * 0.34, true)   # specular sweep
+	draw_arc(c, R - w * 0.5, PI * 0.15, PI * 0.70, 34, ca(Color(0, 0, 0, 0.20)), w * 0.30, true)   # underside
 	# the torches again: a cool blue ring is where warm bounce shows most, so this is the
 	# mark that ties the O to the A four letters away
-	draw_arc(c, R - w * 0.5, -PI * 0.34, PI * 0.30, 26, Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, 0.30), w * 0.52, true)
+	draw_arc(c, R - w * 0.5, -PI * 0.34, PI * 0.30, 26, ca(Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, 0.30)), w * 0.52, true)
 	for i in 8:                                  # tape wraps around the tube
 		var a := TAU * float(i) / 8.0 + 0.22
 		var d := Vector2(cos(a), sin(a))
-		draw_line(c + d * (R - w * 0.96), c + d * (R - w * 0.04), Color(1, 1, 1, 0.10), maxf(1.0, R * 0.030))
+		draw_line(c + d * (R - w * 0.96), c + d * (R - w * 0.04), ca(Color(1, 1, 1, 0.10)), maxf(1.0, R * 0.030))
 
 
 func cap_knife(p: Vector2, ang: float, sc: float) -> void:
@@ -13934,12 +13960,12 @@ func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 	# Local units are the stage knife's own so the layout maths is unchanged: blade -26
 	# to +2, guard at 3, grip to 13.
 	draw_set_transform(p, ang, Vector2.ONE * sc)
-	var steel := Color(0.66, 0.71, 0.80)
-	var steel_lo := Color(0.28, 0.32, 0.40)          # the dark room, reflected
-	var steel_hi := Color(0.94, 0.97, 1.0)           # the key light, reflected
-	var brass := Color(0.72, 0.58, 0.32)
-	var wood := Color(0.34, 0.21, 0.13)
-	var wood_hi := Color(0.50, 0.33, 0.20)
+	var steel := ca(Color(0.66, 0.71, 0.80))
+	var steel_lo := ca(Color(0.28, 0.32, 0.40))          # the dark room, reflected
+	var steel_hi := ca(Color(0.94, 0.97, 1.0))           # the key light, reflected
+	var brass := ca(Color(0.72, 0.58, 0.32))
+	var wood := ca(Color(0.34, 0.21, 0.13))
+	var wood_hi := ca(Color(0.50, 0.33, 0.20))
 	var blade := PackedVector2Array([
 		Vector2(0, -26), Vector2(2.6, -18), Vector2(3.4, 2), Vector2(-3.4, 2), Vector2(-2.6, -18)])
 	draw_colored_polygon(blade, steel)
@@ -13953,29 +13979,29 @@ func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 		Vector2(0.15, 1.2), Vector2(-0.5, -17.4)]), steel_hi)
 	draw_colored_polygon(PackedVector2Array([                                  # the torches
 		Vector2(2.25, -17.4), Vector2(3.1, 1.6), Vector2(2.35, 1.6), Vector2(1.8, -17.4)]),
-		Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, 0.42))
+		ca(Color(CAP_FIRE.r, CAP_FIRE.g, CAP_FIRE.b, 0.42)))
 	# the fuller: a groove is a dark line with a LIT line under it, never one line alone
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(0, -20.5), Vector2(0.85, -16), Vector2(0.85, 0), Vector2(-0.85, 0), Vector2(-0.85, -16)]),
-		Color(0.20, 0.23, 0.29, 0.75))
-	draw_line(Vector2(-0.85, -15.0), Vector2(-0.85, -0.5), Color(1, 1, 1, 0.30), 0.35)
+		ca(Color(0.20, 0.23, 0.29, 0.75)))
+	draw_line(Vector2(-0.85, -15.0), Vector2(-0.85, -0.5), ca(Color(1, 1, 1, 0.30)), 0.35)
 	# THE GROUND EDGE as a sliver that converges on the blade's own point, so it can
 	# never overhang it at any scale and the tip stays exactly as sharp as the polygon
 	# says (2026-07-27, Louis: "the point is a bit too thick ... it sticks out a tiny
 	# amount" - a stroked line ending ON the tip straddles the centreline there).
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(0, -26), Vector2(-2.6, -18), Vector2(-3.4, 2),
-		Vector2(-2.0, 2), Vector2(-1.3, -17.6)]), Color(1, 1, 1, 0.92))
+		Vector2(-2.0, 2), Vector2(-1.3, -17.6)]), ca(Color(1, 1, 1, 0.92)))
 	# a satin grain across the flat: a few faint scratches, which is what tells the eye
 	# the surface is metal that has been used rather than a shape filled with grey
 	for gy in [-21.0, -14.5, -8.0, -2.5]:
-		draw_line(Vector2(-1.6, gy), Vector2(2.4, gy + 0.5), Color(1, 1, 1, 0.10), 0.28)
+		draw_line(Vector2(-1.6, gy), Vector2(2.4, gy + 0.5), ca(Color(1, 1, 1, 0.10)), 0.28)
 	# BOLSTER: the block of brass between blade and grip. Real knives have one, and it is
 	# what stops the handle reading as a stick glued to a blade.
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-4.3, 2.2), Vector2(4.3, 2.2), Vector2(3.9, 5.2), Vector2(-3.9, 5.2)]), brass)
-	draw_line(Vector2(-3.6, 3.0), Vector2(3.6, 3.0), Color(1.0, 0.92, 0.70, 0.55), 0.7)
-	draw_line(Vector2(-3.9, 5.0), Vector2(3.9, 5.0), Color(0.20, 0.14, 0.06, 0.7), 0.5)
+	draw_line(Vector2(-3.6, 3.0), Vector2(3.6, 3.0), ca(Color(1.0, 0.92, 0.70, 0.55)), 0.7)
+	draw_line(Vector2(-3.9, 5.0), Vector2(3.9, 5.0), ca(Color(0.20, 0.14, 0.06, 0.7)), 0.5)
 	# HANDLE: contoured scales, not a rectangle - narrow at the bolster, swelling to the
 	# butt, with the scale's own edge catching light along one side and a lanyard hole
 	# through the tail. A juggling knife is gripped and thrown all night; it has a shape.
@@ -13987,11 +14013,11 @@ func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 		Vector2(-2.7, 13.2), Vector2(-3.1, 9.0)]), wood_hi)
 	for ry in [6.6, 11.2]:                                  # the pins the scales sit on
 		draw_circle(Vector2(0, ry), 0.72, brass)
-		draw_circle(Vector2(-0.20, ry - 0.20), 0.32, Color(1.0, 0.94, 0.78, 0.9))
-	draw_circle(Vector2(0, 15.0), 0.62, Color(0.05, 0.04, 0.04))            # lanyard hole
+		draw_circle(Vector2(-0.20, ry - 0.20), 0.32, ca(Color(1.0, 0.94, 0.78, 0.9)))
+	draw_circle(Vector2(0, 15.0), 0.62, ca(Color(0.05, 0.04, 0.04)))            # lanyard hole
 	draw_colored_polygon(PackedVector2Array([                               # butt cap
 		Vector2(-2.7, 13.4), Vector2(2.7, 13.4), Vector2(2.3, 16.3), Vector2(-2.3, 16.3)]), brass)
-	draw_line(Vector2(-2.3, 14.2), Vector2(2.3, 14.2), Color(1.0, 0.92, 0.70, 0.45), 0.6)
+	draw_line(Vector2(-2.3, 14.2), Vector2(2.3, 14.2), ca(Color(1.0, 0.92, 0.70, 0.45)), 0.6)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -14047,29 +14073,29 @@ func cap_torch(p: Vector2, ang: float, sc: float) -> void:
 	# the pool of light the fire throws, first of all, so it sits BEHIND the object it
 	# comes off rather than as a haze laid over it
 	var glow_at := p + Vector2(0.0, -3.0).rotated(ang) * sc
-	draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, Color(1.0, 0.46, 0.12, 0.30))
-	draw_glow(glow_at + Vector2(0, -8.0 * sc), 23.0 * sc, Color(1.0, 0.72, 0.30, 0.26))
+	draw_glow(glow_at + Vector2(0, -15.0 * sc), 46.0 * sc, ca(Color(1.0, 0.46, 0.12, 0.30)))
+	draw_glow(glow_at + Vector2(0, -8.0 * sc), 23.0 * sc, ca(Color(1.0, 0.72, 0.30, 0.26)))
 	draw_set_transform(p, ang, Vector2.ONE * sc)
 	# --- the handle, first, so the fire sits over its top ---------------------------
 	draw_colored_polygon(PackedVector2Array([          # a turned haft: waisted, not a bar
 		Vector2(-2.1, 0.0), Vector2(2.1, 0.0), Vector2(2.4, 6.0), Vector2(1.9, 11.0),
 		Vector2(2.3, 15.5), Vector2(-2.3, 15.5), Vector2(-1.9, 11.0), Vector2(-2.4, 6.0)]),
-		Color(0.26, 0.17, 0.12))
+		ca(Color(0.26, 0.17, 0.12)))
 	draw_colored_polygon(PackedVector2Array([          # the lit side of the haft
 		Vector2(-2.1, 0.2), Vector2(-0.9, 0.2), Vector2(-0.8, 11.0), Vector2(-1.1, 15.3),
-		Vector2(-2.3, 15.3), Vector2(-1.9, 11.0)]), Color(0.40, 0.27, 0.18))
+		Vector2(-2.3, 15.3), Vector2(-1.9, 11.0)]), ca(Color(0.40, 0.27, 0.18)))
 	for gy in [2.4, 4.4, 6.4, 8.4, 10.4, 12.4]:        # the cord it is bound with
-		draw_line(Vector2(-2.3, gy), Vector2(2.3, gy + 0.4), Color(0.14, 0.09, 0.07, 0.75), 0.55)
-		draw_line(Vector2(-2.3, gy + 0.7), Vector2(2.3, gy + 1.1), Color(0.62, 0.45, 0.28, 0.30), 0.35)
+		draw_line(Vector2(-2.3, gy), Vector2(2.3, gy + 0.4), ca(Color(0.14, 0.09, 0.07, 0.75)), 0.55)
+		draw_line(Vector2(-2.3, gy + 0.7), Vector2(2.3, gy + 1.1), ca(Color(0.62, 0.45, 0.28, 0.30)), 0.35)
 	for by in [-0.4, 1.4]:                             # the brass ferrule under the head
 		draw_colored_polygon(PackedVector2Array([Vector2(-2.6, by), Vector2(2.6, by),
-			Vector2(2.6, by + 1.3), Vector2(-2.6, by + 1.3)]), Color(0.60, 0.47, 0.26))
-		draw_line(Vector2(-2.2, by + 0.35), Vector2(2.2, by + 0.35), Color(1.0, 0.90, 0.66, 0.55), 0.35)
+			Vector2(2.6, by + 1.3), Vector2(-2.6, by + 1.3)]), ca(Color(0.60, 0.47, 0.26)))
+		draw_line(Vector2(-2.2, by + 0.35), Vector2(2.2, by + 0.35), ca(Color(1.0, 0.90, 0.66, 0.55)), 0.35)
 	draw_colored_polygon(PackedVector2Array([          # the soaked wick, charred at the top
 		Vector2(-2.2, -3.4), Vector2(2.2, -3.4), Vector2(1.8, -0.2), Vector2(-1.8, -0.2)]),
-		Color(0.24, 0.19, 0.16))
+		ca(Color(0.24, 0.19, 0.16)))
 	for wy in [-2.9, -2.1, -1.3, -0.5]:
-		draw_line(Vector2(-2.0, wy), Vector2(2.0, wy + 0.25), Color(0.10, 0.08, 0.07, 0.75), 0.3)
+		draw_line(Vector2(-2.0, wy), Vector2(2.0, wy + 0.25), ca(Color(0.10, 0.08, 0.07, 0.75)), 0.3)
 	# --- the fire ---------------------------------------------------------------------
 	# A FLAME'S BASE FOLLOWS THE TORCH; ITS TIP GOES UP. Both halves of that matter here.
 	# Drawing the fire in world space is physically the tidier idea and it wrecks the
@@ -14088,17 +14114,17 @@ func cap_torch(p: Vector2, ang: float, sc: float) -> void:
 	# burns, and the layers have to differ in HEIGHT much more than in width or they
 	# stack into one mass with no visible heart.
 	for lay in [
-			{"h": 40.0, "w": 4.6, "sw": 1.3, "wob": 0.16, "ph": 0.0, "col": Color(1.0, 0.30, 0.05, 0.26)},
-			{"h": 31.0, "w": 3.5, "sw": 1.0, "wob": 0.14, "ph": 1.1, "col": Color(1.0, 0.42, 0.08, 0.92)},
-			{"h": 22.0, "w": 2.6, "sw": 0.7, "wob": 0.12, "ph": 2.3, "col": Color(1.0, 0.66, 0.16, 0.94)},
-			{"h": 14.0, "w": 1.9, "sw": 0.45, "wob": 0.10, "ph": 3.4, "col": Color(1.0, 0.88, 0.44, 0.95)},
-			{"h": 8.0, "w": 1.2, "sw": 0.25, "wob": 0.08, "ph": 4.6, "col": Color(1.0, 0.99, 0.90, 0.95)},
+			{"h": 40.0, "w": 4.6, "sw": 1.3, "wob": 0.16, "ph": 0.0, "col": ca(Color(1.0, 0.30, 0.05, 0.26))},
+			{"h": 31.0, "w": 3.5, "sw": 1.0, "wob": 0.14, "ph": 1.1, "col": ca(Color(1.0, 0.42, 0.08, 0.92))},
+			{"h": 22.0, "w": 2.6, "sw": 0.7, "wob": 0.12, "ph": 2.3, "col": ca(Color(1.0, 0.66, 0.16, 0.94))},
+			{"h": 14.0, "w": 1.9, "sw": 0.45, "wob": 0.10, "ph": 3.4, "col": ca(Color(1.0, 0.88, 0.44, 0.95))},
+			{"h": 8.0, "w": 1.2, "sw": 0.25, "wob": 0.08, "ph": 4.6, "col": ca(Color(1.0, 0.99, 0.90, 0.95))},
 			# THE BLUE BASE, last and small, sitting ON the wick and nowhere else: the
 			# richest and hottest part of a fuel flame, and the one detail that says
 			# "burning" rather than "orange". It has to stay SMALL - blown up it is just
 			# a blue blob at the bottom of the fire, which is what the first pass got.
-			{"h": 4.0, "w": 1.5, "sw": 0.10, "wob": 0.05, "ph": 5.5, "col": Color(0.42, 0.68, 1.0, 0.50)},
-			{"h": 2.2, "w": 0.85, "sw": 0.0, "wob": 0.04, "ph": 6.1, "col": Color(0.74, 0.90, 1.0, 0.50)}]:
+			{"h": 4.0, "w": 1.5, "sw": 0.10, "wob": 0.05, "ph": 5.5, "col": ca(Color(0.42, 0.68, 1.0, 0.50))},
+			{"h": 2.2, "w": 0.85, "sw": 0.0, "wob": 0.04, "ph": 6.1, "col": ca(Color(0.74, 0.90, 1.0, 0.50))}]:
 		var lh: float = float(lay["h"]) * fl
 		var lsway: float = sway * float(lay["sw"]) - sin(ang) * lh * CAP_FLAME_UPRIGHT
 		draw_colored_polygon(cap_flame_shape(wick, lh, float(lay["w"]), lsway,
@@ -14113,7 +14139,7 @@ func cap_torch(p: Vector2, ang: float, sc: float) -> void:
 		var ey := -27.0 * sc - rise * 42.0 * sc
 		var er := (0.85 + 0.9 * fposmod(cos(sd) * 12.9, 1.0)) * sc * (1.0 - 0.45 * rise)
 		var ea := (1.0 - rise) * (1.0 - rise) * 0.95
-		draw_circle(wpos + Vector2(ex, ey), er, Color(1.0, 0.62 + 0.25 * rise, 0.22, ea))
+		draw_circle(wpos + Vector2(ex, ey), er, ca(Color(1.0, 0.62 + 0.25 * rise, 0.22, ea)))
 
 
 func cap_nudge(i: int) -> Vector3:
@@ -14135,7 +14161,26 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 		_: return gsz * 0.60
 
 
-func capsule_mark(s: Vector2, cy: float, size: float) -> void:
+# HOW FAR THE MARK REACHES OUTSIDE ITS OWN LETTER HEIGHT, so a neighbour can be placed
+# off a number rather than off a screenshot (the rule the goal stem's bloom already
+# established). The letters are `size` tall and sit on a baseline; the A's torch FLAMES
+# climb well above the cap line and its HANDLES hang below it, so the picture is a good
+# deal taller than the lettering it is standing in for.
+const MARK_RISE := 1.34   # above the baseline, in units of letter height
+const MARK_DROP := 0.30   # ...and below it
+const MENU_MARK := 108    # the title screen's letter height. The prop mark is far WIDER
+						   # than the word it replaced (five objects and their gaps against
+						   # five glyphs) and a good deal taller, so it is sized by the room
+						   # it has to fill rather than by the point size of the text that
+						   # used to sit here. At 108 the mark runs about half the screen
+						   # width, which is what a title screen wants.
+
+func mark_height(size: float) -> float:
+	# the whole picture's height, flame tips to handle butts
+	return size * (MARK_RISE + MARK_DROP)
+
+
+func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> void:
 	# THE WHOLE NAME IN PROPS, and no lettering at all (2026-07-28, Louis): the T is two
 	# knives with the vertical one lying over the horizontal, the O is a ring, each S is a
 	# line of balls following the letter's own two loops, and the A is two torches leaning
@@ -14146,6 +14191,7 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 	# neighbours by its OUTER edge (Louis) and a prop's advance is its real extent, not a
 	# font metric. A prop's local origin is its GRIP with the business end at negative y,
 	# which is what places every piece below.
+	_cap_a = clampf(alpha, 0.0, 1.0)
 	var gap := size * CAP_GAP
 	var widths: Array[float] = []
 	var total := 0.0
@@ -14188,8 +14234,8 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 				cap_knife(Vector2(x + w * 0.5, base - CAP_KNIFE_BUTT * ssc), 0.0, ssc)
 			"O":
 				var rc := Vector2(x + ring_r, base - size_l * 0.46)
-				draw_glow(rc, ring_r * 1.30, Color(0.45, 0.78, 1.0, 0.20))
-				cap_ring(rc, Color(0.45, 0.75, 0.95), ring_r)
+				draw_glow(rc, ring_r * 1.30, ca(Color(0.45, 0.78, 1.0, 0.20)))
+				cap_ring(rc, ca(Color(0.45, 0.75, 0.95)), ring_r)
 			"S":
 				# an S is two loops: the top one sweeps from its right tip up over and down
 				# to the waist, the bottom one carries on from the waist round to the left.
@@ -14213,6 +14259,7 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 			_:
 				pass
 		x += w + gap - size * n.x
+	_cap_a = 1.0   # always restored: nothing drawn after a mark inherits its fade
 
 
 func capsule_one(font: Font, s: Vector2, k: float) -> void:
@@ -14299,10 +14346,16 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 		draw_circle(Vector2(lx, s.y - 20.0 * k), 12.0 * k, Color(1.0, 0.7, 0.3, 0.09 * fl))
 		draw_circle(Vector2(lx, s.y - 20.0 * k), 4.0 * k, Color(1.0, 0.72, 0.32, 0.65 * fl))
 	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
-	draw_menu_cascade(Vector2(cx, s.y * 0.34), 1.6 * k)
-	draw_wordmark(font, s.y * 0.58, int(round(112.0 * k)), Color(1.0, 0.88, 0.5), s)
-	draw_ornament(cx, s.y * 0.58 + 134.0 * k, 270.0 * k, Color(0.82, 0.62, 0.34, 0.85))
-	draw_string(font, Vector2(0, s.y * 0.58 + 182.0 * k), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, int(round(27.0 * k)), Color(0.88, 0.76, 0.62))
+	# same rule as the title screen: the cascade sits above the mark, and everything below
+	# is placed off mark_height() rather than off a hand-picked offset, so the picture
+	# cannot grow into its own subtitle
+	var cap_sz := int(round(112.0 * k))
+	var cap_top := s.y * 0.30
+	var cap_bot := cap_top + mark_height(float(cap_sz))
+	draw_menu_cascade(Vector2(cx, s.y * 0.15), 1.2 * k)
+	draw_wordmark(cap_top, cap_sz, Color(1.0, 0.88, 0.5), s)
+	draw_ornament(cx, cap_bot + 22.0 * k, 300.0 * k, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, cap_bot + 68.0 * k), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, int(round(27.0 * k)), Color(0.88, 0.76, 0.62))
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0 * k, Color(0.82, 0.62, 0.34, 0.55))
 
@@ -15250,7 +15303,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		var btxt := String(row["b"])
 		match kind:
 			"title":
-				draw_wordmark(font, ry - 49.0, 76, Color(gold.r, gold.g, gold.b, a), s)
+				draw_wordmark(ry - 78.0, 52, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
 			"orn":
@@ -15274,7 +15327,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.42
-		draw_wordmark(font, fy - 55.0, 84, Color(1.0, 0.9, 0.55, fa), s)
+		draw_wordmark(fy - 96.0, 58, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.72, 0.6, 0.65 * fa))
 
@@ -15354,25 +15407,21 @@ func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, 
 	draw_string(font, Vector2(0, y + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, col)
 
 
-func draw_wordmark(font: Font, y: float, size: int, col: Color, s: Vector2) -> void:
-	# the wordmark: TITLE_MARK followed by a juggling ball standing in for the name's
-	# final letter - TOSS, then a ball for the a. The ball is a REAL drawn prop, never
-	# a letterform, and it bobs very slightly, a prop at the top of a tiny toss.
-	var text := TITLE_MARK + " "
-	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	var br := float(size) * 0.30           # ball radius, sized like a lowercase o
-	var total := tw + br * 2.0
-	var x := s.x * 0.5 - total * 0.5
-	var base := y + float(size)            # same baseline convention as draw_title_glow
-	draw_string(font, Vector2(x + 2.0, base + 2.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, Color(0, 0, 0, 0.55 * col.a))
-	draw_string(font, Vector2(x, base), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
-	var bob := 3.0 * sin(float(cine_tick) * 0.045)
-	var bc := Vector2(x + tw + br, base - br * 1.08 + bob)
-	draw_circle(bc + Vector2(2.5, 2.5), br, Color(0, 0, 0, 0.35 * col.a))
-	draw_circle(bc, br * 1.5, Color(1.0, 0.82, 0.35, 0.10 * col.a))   # the soft flight halo
-	var ball := ball_color(0)
-	ball.a = col.a
-	draw_ball_shape(bc, ball, br / 11.0)
+# THE WORDMARK IS THE PICTURE, EVERYWHERE (2026-07-28, Louis: "the tossa logo on the
+# welcome screen should use the same logo to depict tossa as the picture you made
+# before"). There used to be two marks doing the same job and drifting apart: the store
+# capsules spelled TOSSA entirely in props - two knives for the T, a ring for the O, lines
+# of balls for the S's, two burning torches for the A - while the title screen, the key
+# art and the credits still drew the WORD in the UI font with a single ball standing in
+# for the final letter. A game has one logo. This is it, at whatever size the caller asks.
+#
+# `size` is the LETTER height, not the picture's - see MARK_RISE / MARK_DROP for how far
+# the flames and handles reach past it, and `mark_height()` for the total. Callers place
+# whatever sits underneath off that number rather than off a guess.
+func draw_wordmark(y: float, size: int, col: Color, s: Vector2) -> void:
+	# `y` is the top of the picture, the same convention the text mark used, so the
+	# baseline sits MARK_RISE letter-heights down from it
+	capsule_mark(s, y + float(size) * MARK_RISE - float(size) * 0.5, float(size), col.a)
 
 
 func draw_dust(s: Vector2, n: int, glow: Color) -> void:
