@@ -1201,6 +1201,7 @@ var _demo_hold := 7       # dev: --hold <n> sets the auto-player's throw hold (0
 var _collcheck := false   # dev: --collcheck measures the tightest mid-air clearance
 						  # of the session (throw inaccuracy zeroed, so it audits the
 						  # IDEAL pattern geometry), printed on the --shot capture
+var _capsule_variant := 0   # dev: which --capsule picture (0 = the original)
 var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
 var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
 # ...AND THE SAME MEASUREMENT AT DRAWN SIZE (2026-07-28, Louis, of the Half Shower's two
@@ -1491,8 +1492,11 @@ func _ready() -> void:
 		game_state = ST_REMAP   # focuses the gamepad column instead of keyboard)
 		if ua.has("--pad"):
 			remap_col = 1
-	if ua.has("--capsule"):     # dev: pure key-art for the Steam store, no UI chrome
+	var capi := ua.find("--capsule")   # dev: pure key-art for the Steam store, no UI chrome
+	if capi != -1:                     # an optional 1..5 picks one of the five pictures
 		game_state = ST_CAPSULE
+		if capi + 1 < ua.size() and not ua[capi + 1].begins_with("--"):
+			_capsule_variant = clampi(int(ua[capi + 1]), 0, 5)
 	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls
 	if ti != -1:
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
@@ -13437,6 +13441,199 @@ func draw_menu_cascade(center: Vector2, sc: float) -> void:
 		draw_ball_shape(_cascade_pos(t, i, count, hl, hr, T, peak), col, 1.35)
 
 
+func capsule_silhouette(cx: float, floor_y: float, H: float, col: Color, reach: float) -> void:
+	# THE FIGURE AS ONE FLAT SHAPE, on draw_juggler's own eight-head canon (head at 7.5H,
+	# shoulders 6.72, hip 4, knee 2, floor 0) so a poster-scale silhouette is the SAME
+	# performer and not a second, drifting version of him - the standing rule about never
+	# reshaping this figure applies to art as much as to a mechanics fix. `reach` lifts
+	# the arms, 0 resting and 1 fully up.
+	var sh_y := floor_y - 6.72 * H
+	var hip_y := floor_y - 4.0 * H
+	var knee_y := floor_y - 2.0 * H
+	var waist_y := floor_y - 5.0 * H
+	var chest_y := floor_y - 6.0 * H
+	draw_capsule(Vector2(cx - 0.40 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.30 * H, col)
+	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.30 * H, 0.20 * H, col)
+	draw_capsule(Vector2(cx + 0.40 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.30 * H, col)
+	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.30 * H, 0.20 * H, col)
+	# the jacket's OWN outline (sloped shoulders, drawn-in waist, hip flare) rather than a
+	# capsule for a torso - a tube reads as a stick figure, and this is the shape the
+	# stage already draws
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(cx - 0.92 * H, sh_y + 0.1 * H), Vector2(cx - 0.30 * H, sh_y - 0.04 * H),
+		Vector2(cx + 0.30 * H, sh_y - 0.04 * H), Vector2(cx + 0.92 * H, sh_y + 0.1 * H),
+		Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
+		Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), col)
+	for side in [-1.0, 1.0]:
+		var shoulder := Vector2(cx + side * 0.80 * H, sh_y + 0.16 * H)
+		var elbow := shoulder + Vector2(side * 0.66 * H, lerpf(0.95, -0.26, reach) * H)
+		var wrist := elbow + Vector2(side * 0.30 * H, lerpf(0.95, -1.00, reach) * H)
+		draw_capsule(shoulder, elbow, 0.48 * H, 0.35 * H, col)   # same limb weights the
+		draw_capsule(elbow, wrist, 0.33 * H, 0.26 * H, col)      # stage figure carries
+		draw_circle(wrist, 0.21 * H, col)
+	draw_colored_polygon(PackedVector2Array([                    # neck
+		Vector2(cx - 0.20 * H, sh_y - 0.5 * H), Vector2(cx + 0.20 * H, sh_y - 0.5 * H),
+		Vector2(cx + 0.23 * H, sh_y + 0.14 * H), Vector2(cx - 0.23 * H, sh_y + 0.14 * H)]), col)
+	draw_circle(Vector2(cx, floor_y - 7.5 * H), 0.52 * H, col)
+
+
+func capsule_prop(kind: int, p: Vector2, sc: float, ang: float) -> void:
+	# one prop at any size, through the very shapes the stage draws (never a second art
+	# style for the same object - the shop icons learned that the hard way)
+	match kind:
+		PROP_BALLS:   draw_ball_shape(p, Color(1.0, 0.82, 0.35), sc)
+		PROP_EGGS:    draw_egg(p, Color(0.97, 0.94, 0.86), sc)
+		PROP_RINGS:   draw_ring_prop(p, Color(0.45, 0.75, 0.95), sc)
+		PROP_CLUBS:   draw_club(p, ang, sc)
+		PROP_KNIVES:  draw_knife(p, ang, sc)
+		_:            draw_torch(p, ang, sc, true)
+
+
+func capsule_wordmark(font: Font, y: float, k: float, s: Vector2, col: Color, sub: String) -> void:
+	draw_iacto_logo(font, y, int(round(104.0 * k)), col, s)
+	if sub != "":
+		draw_ornament(s.x * 0.5, y + 126.0 * k, 250.0 * k, Color(col.r, col.g, col.b, 0.7))
+		draw_string(font, Vector2(0, y + 172.0 * k), sub, HORIZONTAL_ALIGNMENT_CENTER, s.x,
+			int(round(26.0 * k)), Color(col.r * 0.92, col.g * 0.86, col.b * 0.78))
+
+
+func capsule_one(font: Font, s: Vector2, k: float) -> void:
+	# 1. IN THE LIGHT. One hard shaft, the performer as a black cut-out inside it, and the
+	# props the only colour in the frame. The whole picture is a value study: three tones.
+	var cx := s.x * 0.5
+	var floor_y := s.y * 0.92
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.06), Color(0.02, 0.012, 0.02), 24)
+	draw_spotlight_cone(s, cx, 0.62)
+	draw_glow(Vector2(cx, floor_y), s.x * 0.30, Color(1.0, 0.72, 0.34, 0.30))
+	fill_ellipse(Vector2(cx, floor_y), s.x * 0.20, s.y * 0.035, Color(1.0, 0.66, 0.30, 0.16))
+	var H := s.y * 0.066
+	# five props on a slow arc over his head. Kept INSIDE the cone and below the wordmark:
+	# a prop drifting out into the dark reads as a stray light, not as juggling.
+	for i in 5:
+		var t := float(i) / 4.0
+		var px := cx + lerpf(-3.0, 3.0, t) * H
+		var py := floor_y - 8.9 * H - sin(t * PI) * 1.9 * H
+		draw_glow(Vector2(px, py), 2.4 * H, Color(1.0, 0.78, 0.38, 0.26))
+		capsule_prop([PROP_BALLS, PROP_CLUBS, PROP_TORCHES, PROP_CLUBS, PROP_BALLS][i],
+			Vector2(px, py), 1.5 * k, lerpf(-0.9, 0.9, t))
+	capsule_silhouette(cx, floor_y, H, Color(0.03, 0.015, 0.02), 0.85)
+	capsule_wordmark(font, s.y * 0.035, k, s, Color(1.0, 0.88, 0.5), "")
+	draw_vignette(s, 0.62)
+
+
+func capsule_two(font: Font, s: Vector2, k: float) -> void:
+	# 2. THE PATTERN IS THE PICTURE. No stage and no frame: the ROADS a cascade actually
+	# flies, drawn as long luminous ribbons that cross the way the real weave crosses,
+	# with the name sitting inside them. Six roads, alternating direction, each one a
+	# real parabola between the two hand points - the same geometry do_throw throws.
+	var cx := s.x * 0.5
+	var span := s.x * 0.21
+	var hy := s.y * 0.86
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.045, 0.025, 0.06), Color(0.012, 0.008, 0.018), 20)
+	var hl := Vector2(cx - span, hy)
+	var hr := Vector2(cx + span, hy)
+	for i in 6:
+		var t := float(i) / 5.0
+		var a := hl if i % 2 == 0 else hr
+		var b := hr if i % 2 == 0 else hl
+		var peak := s.y * lerpf(0.34, 0.66, absf(t - 0.5) * 2.0)
+		var col := ball_color(i)
+		var prev := a
+		for st in range(1, 41):
+			var u := float(st) / 40.0
+			var q := a.lerp(b, u) - Vector2(0, 4.0 * peak * u * (1.0 - u))
+			var w := lerpf(9.0, 2.0, absf(u - 0.5) * 2.0) * k
+			draw_line(prev, q, Color(col.r, col.g, col.b, 0.16 + 0.10 * sin(u * PI)), w)
+			prev = q
+		# the prop itself, riding its own road
+		var up := 0.30 + 0.09 * float(i)
+		var pp := a.lerp(b, up) - Vector2(0, 4.0 * peak * up * (1.0 - up))
+		draw_glow(pp, 40.0 * k, Color(col.r, col.g, col.b, 0.30))
+		draw_ball_shape(pp, col, 1.7 * k)
+	capsule_silhouette(cx, hy + s.y * 0.30, s.y * 0.050, Color(0.02, 0.012, 0.024), 0.9)
+	capsule_wordmark(font, s.y * 0.40, k, s, Color(1.0, 0.94, 0.76), "a juggler's climb")
+	draw_vignette(s, 0.5)
+
+
+func capsule_three(font: Font, s: Vector2, k: float) -> void:
+	# 3. THE SIX. A collection plate: every prop the game gives you, laid out on a dark
+	# ground and lit by the only one of them that burns.
+	var cy := s.y * 0.40
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.09, 0.05, 0.045), Color(0.02, 0.014, 0.018), 22)
+	draw_rect(Rect2(0, cy + s.y * 0.20, s.x, s.y), Color(0.05, 0.028, 0.03))
+	draw_line(Vector2(0, cy + s.y * 0.20), Vector2(s.x, cy + s.y * 0.20), Color(0.9, 0.65, 0.35, 0.30), 2.0 * k)
+	var order := [PROP_BALLS, PROP_EGGS, PROP_RINGS, PROP_CLUBS, PROP_KNIVES, PROP_TORCHES]
+	for i in order.size():
+		var t := (float(i) + 0.5) / float(order.size())
+		var px := s.x * (0.09 + 0.82 * t)
+		var py := cy - sin(t * PI) * s.y * 0.10
+		var kind: int = order[i]
+		fill_ellipse(Vector2(px, cy + s.y * 0.20), s.x * 0.045, s.y * 0.012, Color(0, 0, 0, 0.35))
+		if kind == PROP_TORCHES:
+			draw_glow(Vector2(px, py - s.y * 0.06), s.x * 0.20, Color(1.0, 0.62, 0.26, 0.32))
+		capsule_prop(kind, Vector2(px, py), 3.9 * k, -0.16 + 0.05 * float(i))
+	capsule_wordmark(font, s.y * 0.66, k, s, Color(1.0, 0.88, 0.5), "six props, one pair of hands")
+	draw_vignette(s, 0.55)
+	draw_frame(s, 20.0 * k, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func capsule_four(font: Font, s: Vector2, k: float) -> void:
+	# 4. FROM THE BACK OF THE HOUSE. The theatre itself is the picture: arch, drapes,
+	# footlights, a small lit figure a long way off, and the audience in the dark.
+	var fy := s.y * 0.80
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.055), Color(0.03, 0.015, 0.025), 20)
+	draw_curtain_wall(s, fy, s.y * 0.06, Color(0.30, 0.07, 0.10), 26)
+	draw_theatre_boxes(s, fy)
+	draw_spotlight_cone(s, s.x * 0.5, 0.34)
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.10, 0.06, 0.05))
+	draw_footlights(s, fy)
+	var H := s.y * 0.030
+	capsule_silhouette(s.x * 0.5, fy - s.y * 0.02, H, Color(0.06, 0.03, 0.04), 0.95)
+	for i in 3:
+		var t := float(i) / 2.0
+		var px := s.x * 0.5 + lerpf(-3.4, 3.4, t) * H
+		var py := fy - s.y * 0.02 - 8.6 * H - sin(t * PI) * 3.0 * H
+		draw_glow(Vector2(px, py), 26.0 * k, Color(1.0, 0.82, 0.42, 0.34))
+		draw_ball_shape(Vector2(px, py), ball_color(i), 1.15 * k)
+	# the audience, near and out of focus
+	for i in 13:
+		var hx := s.x * (float(i) + 0.5) / 13.0 + sin(float(i) * 2.1) * s.x * 0.02
+		var hy := s.y * (1.02 + 0.02 * sin(float(i) * 1.7))
+		draw_circle(Vector2(hx, hy - s.y * 0.115), s.y * 0.045, Color(0.02, 0.01, 0.015))
+		fill_ellipse(Vector2(hx, hy), s.y * 0.085, s.y * 0.10, Color(0.02, 0.01, 0.015))
+	capsule_wordmark(font, s.y * 0.10, k, s, Color(1.0, 0.90, 0.56), "")
+	draw_vignette(s, 0.66)
+
+
+func capsule_five(font: Font, s: Vector2, k: float) -> void:
+	# 5. THE MIDNIGHT SHOW. The one cold picture in the set: the last room, down an alley,
+	# after everyone has gone home. Green and blue against the other four's gold.
+	var gy := s.y * 0.86
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.02, 0.035, 0.055), Color(0.01, 0.015, 0.025), 22)
+	draw_stars(s, 40, 0.55)
+	# the alley walls FIRST, then the moon in the gap between them - painted the other way
+	# round the near wall simply covered the moon up
+	draw_rect(Rect2(0, 0, s.x * 0.17, gy), Color(0.035, 0.045, 0.06))
+	draw_rect(Rect2(s.x * 0.83, 0, s.x * 0.17, gy), Color(0.03, 0.04, 0.055))
+	draw_moon(Vector2(s.x * 0.74, s.y * 0.17), s.y * 0.07)
+	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.045, 0.05, 0.06))
+	draw_marquee(Vector2(s.x * 0.5, s.y * 0.17), s.x * 0.40)
+	draw_streetlamp(Vector2(s.x * 0.22, gy), gy)
+	# a wash of phosphor BEHIND the performer, so the glow-kit costume reads as the thing
+	# lighting the alley rather than as a hole in it
+	draw_glow(Vector2(s.x * 0.5, gy - s.y * 0.16), s.x * 0.30, Color(0.35, 1.0, 0.55, 0.16))
+	var H := s.y * 0.062
+	capsule_silhouette(s.x * 0.5, gy, H, Color(0.07, 0.16, 0.11), 0.85)
+	for i in 4:
+		var t := float(i) / 3.0
+		var px := s.x * 0.5 + lerpf(-2.6, 2.6, t) * H
+		var py := gy - 9.0 * H - sin(t * PI) * 1.7 * H
+		draw_glow(Vector2(px, py), 3.4 * H, Color(0.55, 1.0, 0.62, 0.34))
+		draw_circle(Vector2(px, py), 0.36 * H, Color(0.84, 1.0, 0.84))
+	capsule_wordmark(font, s.y * 0.66, k, s, Color(0.72, 1.0, 0.78), "the last room, after everyone has gone")
+	draw_vignette(s, 0.72)
+
+
 func draw_capsule_art(font: Font, s: Vector2) -> void:
 	# dev only (--capsule): pure key-art for the Steam store, no UI chrome at all -
 	# reuses the exact menu-screen visual language (same backdrop, ball motif,
@@ -13454,6 +13651,19 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 	# cannot afford). `k` off the SMALLER of the two axis ratios, so a portrait render
 	# for the 600x900 library capsule cannot push the wordmark out through the sides.
 	var k := minf(s.x / 1280.0, s.y / 720.0)
+	# FIVE DIFFERENT PICTURES, not five dressings of one (2026-07-28, Louis asked for five
+	# "very different and very intriguing" ones). `--capsule N` picks: 1 the silhouette in
+	# the light, 2 the pattern itself as the whole image, 3 the six props as a collection
+	# plate, 4 the theatre seen from the back of the house, 5 the Midnight Show's alley -
+	# the one cold picture in the set. Every one of them draws its props and its performer
+	# through the SAME functions the stage uses, so none of them can promise a look the
+	# game does not have. `--capsule` with no number keeps the original.
+	match _capsule_variant:
+		1: capsule_one(font, s, k); return
+		2: capsule_two(font, s, k); return
+		3: capsule_three(font, s, k); return
+		4: capsule_four(font, s, k); return
+		5: capsule_five(font, s, k); return
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.12, 0.055, 0.075), Color(0.03, 0.02, 0.03), 22)
 	draw_spotlight_cone(s, cx, 0.16)
 	for i in 20:
