@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>TOSSA - How the Game Works</title>
+<style>
+  @page { size: A4; margin: 17mm 15mm 15mm 15mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 9.6pt;
+         line-height: 1.5; color: #221c18; margin: 0; }
+  h1 { font-size: 30pt; margin: 0 0 2mm; letter-spacing: .10em; color: #7a2f22; }
+  h1 + .sub { font-size: 10pt; color: #6b5f57; margin: 0 0 8mm; letter-spacing: .04em; }
+  h2 { font-size: 13pt; margin: 7mm 0 2.5mm; color: #7a2f22; border-bottom: 1.2pt solid #d8bfa6;
+       padding-bottom: 1.2mm; letter-spacing: .02em; page-break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 5mm 0 1.5mm; color: #3f342c; page-break-after: avoid; }
+  p { margin: 0 0 2.4mm; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 8.6pt;
+          page-break-inside: avoid; }
+  th { background: #f2e6d8; text-align: left; padding: 1.5mm 2mm; border-bottom: 1pt solid #c9ac8e;
+       font-weight: 600; color: #5a4436; }
+  td { padding: 1.4mm 2mm; border-bottom: .5pt solid #e6dbcf; vertical-align: top; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:nth-child(even) td { background: #faf6f1; }
+  .lead { background: #fbf4ea; border-left: 2.5pt solid #c8843a; padding: 2.5mm 3mm;
+          margin: 0 0 4mm; }
+  .note { font-size: 8.4pt; color: #6b5f57; margin: -2mm 0 4mm; }
+  code { font-family: "SF Mono", Menlo, monospace; font-size: 8.4pt; background: #f2ece5;
+         padding: .3mm 1mm; border-radius: 1mm; }
+  .two { display: flex; gap: 6mm; }
+  .two > div { flex: 1; }
+  .tag { display: inline-block; font-size: 7.6pt; padding: .3mm 1.4mm; border-radius: 1mm;
+         background: #e8ddd0; color: #5a4436; margin-right: 1mm; }
+  /* content FLOWS. Forced breaks left three pages half empty, and a reference document
+     that wastes a third of its paper reads as unfinished. Headings avoid orphaning and
+     tables never split instead. */
+  ul { margin: 0 0 3mm; padding-left: 5mm; }
+  li { margin-bottom: 1mm; }
+  .foot { margin-top: 8mm; padding-top: 2mm; border-top: .5pt solid #d8bfa6;
+          font-size: 8pt; color: #7d7168; }
+</style></head><body>
+
+<h1>TOSSA</h1>
+<p class="sub">How the game works &mdash; every rule, every number. Revised 29 July 2026.</p>
+
+<div class="lead">
+<strong>The three pillars.</strong> Everything below serves these, and anything that would break one
+is not in the game.
+<ul style="margin-bottom:0">
+<li><strong>Skill first.</strong> Stats govern access and comfort &mdash; which props and counts are
+practical, how forgiving a catch is. Player skill governs excellence: score, records, high counts.
+No stat ever plays the timing for you.</li>
+<li><strong>Juggling is real.</strong> At least one prop must be in the air for a catch to score.
+Throwing one object up and down is not juggling and pays nothing.</li>
+<li><strong>The first impression is calm.</strong> A warm theatrical stage, chill music. The
+excitement is in catches, streaks, tricks and unlocks &mdash; never in flash.</li>
+</ul>
+</div>
+
+<h2>1 &nbsp; The throw</h2>
+<p>A throw is one continuous gesture. Tapping the throw key gives the lowest, snappiest throw;
+holding it lifts the throw continuously toward the ceiling. Height buys airtime and costs accuracy.</p>
+<table>
+<tr><th>Quantity</th><th class="n">Value</th><th>What it means</th></tr>
+<tr><td>Tap airtime</td><td class="n">84 ticks</td><td>0.70 s at the 120&nbsp;Hz simulation rate</td></tr>
+<tr><td>Full hold</td><td class="n">+44 ticks held</td><td>holding longer than this adds nothing more</td></tr>
+<tr><td>Airtime per tick held</td><td class="n">1.9</td><td>a full hold roughly doubles the airtime</td></tr>
+<tr><td>Arc height</td><td class="n">2.15 px per tick</td><td>height and airtime are one number, not two</td></tr>
+<tr><td>Ordinary ceiling</td><td class="n">1.40</td><td>height fraction; a plain throw cannot exceed it</td></tr>
+<tr><td>Trick ceiling</td><td class="n">1.80</td><td>only a held High Toss reaches it</td></tr>
+<tr><td>Landing drift</td><td class="n">up to 26 px</td><td>at maximum height, before Accuracy reduces it</td></tr>
+<tr><td>Arrival jitter</td><td class="n">up to 5 ticks</td><td>likewise &mdash; this is what makes a high throw hard</td></tr>
+</table>
+<p class="note">Big loads must fly higher simply to have room to weave. From five objects the tap
+floor scales: &times;1.30 at five, and +0.15 for every object above that, so fifteen objects tap at
+&times;2.80 the airtime of three.</p>
+
+<h2>2 &nbsp; The catch</h2>
+<p>A catch is judged purely on <em>timing</em>: how many ticks your press falls from the prop's true
+arrival. Where the prop is on screen never matters &mdash; only when.</p>
+<table>
+<tr><th>Band</th><th class="n">Window</th><th>Result</th></tr>
+<tr><td><span class="tag">PERFECT</span></td><td class="n">&plusmn;7 ticks</td>
+    <td>always secured. Scores 100 &times; streak &times; multipliers, and continues the streak.</td></tr>
+<tr><td><span class="tag">GOOD</span></td><td class="n">&plusmn;10 ticks</td>
+    <td>a <em>chance</em> to secure. Scores 50 &times; streak &times; multipliers. Does not break the streak if secured.</td></tr>
+<tr><td><span class="tag">LATE</span></td><td class="n">to +28 ticks</td>
+    <td>a poorer chance. Scores a flat 10 &times; multipliers, and <strong>resets the streak</strong>.</td></tr>
+<tr><td>Commit distance</td><td class="n">52 ticks</td>
+    <td>a press with a prop this near but outside the window is a whiff, not a free press.</td></tr>
+<tr><td>Miss grace</td><td class="n">20 ticks</td>
+    <td>how long past its arrival an uncaught prop hangs before it is a drop.</td></tr>
+</table>
+
+<h3>Whether an off-Perfect catch is secured</h3>
+<p>Perfect always works. Good and Late are a probability:</p>
+<p style="text-align:center;margin:1mm 0 3mm"><code style="font-size:7.8pt">chance = base + (Accuracy/100) &times; 0.30 &minus; height &times; 0.35 + prop + gear + Strength</code></p>
+<table>
+<tr><th>Term</th><th class="n">Value</th><th>Notes</th></tr>
+<tr><td>Base, Good</td><td class="n">0.50</td><td></td></tr>
+<tr><td>Base, Late</td><td class="n">0.30</td><td></td></tr>
+<tr><td>Accuracy contribution</td><td class="n">up to +0.30</td><td>reached at Accuracy 100; more Accuracy becomes Focus instead</td></tr>
+<tr><td>Height penalty</td><td class="n">up to &minus;0.35</td><td>at the 1.40 ceiling &mdash; the honest cost of a big throw</td></tr>
+<tr><td>Silk Gloves</td><td class="n">+0.10</td><td>on every prop</td></tr>
+<tr><td>Glasses</td><td class="n">+0.20</td><td>the only route to a near-certain off-Perfect catch</td></tr>
+<tr><td>Strength</td><td class="n">&plusmn;0.05 per weight step</td><td>surplus steadies a heavy prop; a deficit unsteadies it</td></tr>
+<tr><td>Floor</td><td class="n">0.06</td><td>a wild prop is never quite hopeless</td></tr>
+</table>
+<p class="note">Purist acts strip Accuracy, Strength and all gear from this formula. Only your hands.</p>
+
+<h2>3 &nbsp; The four stats</h2>
+<p>Points come from levelling: <code>3 + level/12</code> per level. All four caps together cost 850
+points, which arrives at about level 115 &mdash; roughly 30&ndash;40 hours of skilled play. Every
+piece of content has unlocked long before that, by level 20&ndash;25.</p>
+
+<h3>Accuracy &mdash; cap 250</h3>
+<table>
+<tr><th>Range</th><th>Effect</th></tr>
+<tr><td>1 &ndash; 100</td><td>Lands throws closer to their mark: inaccuracy scales from &times;1.00 at
+  Accuracy 1 down to &times;0.35 at 100. Also raises the off-Perfect catch chance by up to +0.30.</td></tr>
+<tr><td>101 &ndash; 200 <span class="tag">FOCUS</span></td><td>Every point past 100 is Focus.
+  The first 100 Focus cut stamina costs, from &times;1.00 down to &times;0.25.</td></tr>
+<tr><td>101 &ndash; 250</td><td>Focus also widens the Perfect window: +1 tick per 10 Focus, capped at
+  +6, and never past the Good window of 10. This is the one place a stat touches timing, and it is
+  deliberately small and hard-capped.</td></tr>
+<tr><td colspan="2" style="background:#fbf4ea">Skill walls: Columns at 50, Half Shower at 150.</td></tr>
+</table>
+
+<h3>Strength &mdash; cap 200</h3>
+<p>Strength is the access stat. It gates how many objects you can field and which props you can
+throw at all. Every gate is one even step of 16.7 points.</p>
+<table>
+<tr><th>Objects</th><th class="n">4</th><th class="n">5</th><th class="n">6</th><th class="n">7</th><th class="n">8</th><th class="n">9</th><th class="n">10</th><th class="n">11</th><th class="n">12</th><th class="n">13</th><th class="n">14</th><th class="n">15</th></tr>
+<tr><td>Strength needed</td><td class="n">16</td><td class="n">33</td><td class="n">50</td><td class="n">66</td><td class="n">83</td><td class="n">100</td><td class="n">116</td><td class="n">133</td><td class="n">150</td><td class="n">166</td><td class="n">183</td><td class="n">200</td></tr>
+</table>
+<p>Throwing a prop you are <strong>under-strength</strong> for is punished on three axes at once:
+the tap floor sags by up to 40%, the extra height a hold buys is halved, and inaccuracy roughly
+doubles &mdash; with a floor, so even a low under-strength throw stays unsteady. Being <strong>over</strong>
+a prop's requirement lofts it a little higher and steadies it in the hand.</p>
+
+<h3>Endurance &mdash; cap 200</h3>
+<p>Maximum stamina is <code>100 + 9 &times; Endurance</code>, so a capped juggler carries 1,900. Stamina
+persists between acts through the day; sleep and meals restore it. Below 25% of maximum, fatigue
+starts dragging effective Accuracy down, reaching &times;0.50 at empty. At empty your hands stop
+closing and the act collapses.</p>
+
+<h3>Speed &mdash; cap 200</h3>
+<p>Speed slows the whole world, which stretches every catch window in real time without changing the
+simulation. Every 8 points gives 1% of slow motion, so the cap is 25%. Slow motion sources stack:</p>
+<table>
+<tr><th>Source</th><th class="n">Share</th><th>Lasts</th></tr>
+<tr><td>Speed stat</td><td class="n">up to 25%</td><td>permanent</td></tr>
+<tr><td>Uncle Dan's Pie</td><td class="n">15%</td><td>the whole day, until you sleep</td></tr>
+<tr><td>Amazing! (a frame-perfect catch)</td><td class="n">15%</td><td>3 seconds</td></tr>
+<tr><td>Fifty straight Perfects</td><td class="n">15%</td><td>15 seconds, then re-earn it</td></tr>
+<tr><td><strong>Hard ceiling</strong></td><td class="n">50%</td><td>the stack can never exceed this</td></tr>
+</table>
+<p class="note">A Purist act keeps the two <em>earned</em> bursts and strips the two bought ones.</p>
+
+<h2>4 &nbsp; The props</h2>
+<p>Every prop class is a real choice rather than a heavier ball, across four levers.</p>
+<table>
+<tr><th>Prop</th><th class="n">Weight</th><th class="n">Strength</th><th class="n">Cost</th>
+    <th class="n">Perfect window</th><th class="n">Pays</th><th class="n">Stamina / throw</th><th class="n">Catch bonus</th></tr>
+<tr><td><strong>Balls</strong></td><td class="n">1</td><td class="n">&mdash;</td><td class="n">20</td><td class="n">7</td><td class="n">&times;1.00</td><td class="n">1</td><td class="n">&mdash;</td></tr>
+<tr><td><strong>Eggs</strong></td><td class="n">1</td><td class="n">&mdash;</td><td class="n">1</td><td class="n">7</td><td class="n">&times;1.10</td><td class="n">2</td><td class="n">&mdash;</td></tr>
+<tr><td><strong>Rings</strong></td><td class="n">2</td><td class="n">12</td><td class="n">200</td><td class="n">7</td><td class="n">&times;1.15</td><td class="n">2</td><td class="n">&mdash;</td></tr>
+<tr><td><strong>Clubs</strong></td><td class="n">3</td><td class="n">22</td><td class="n">500</td><td class="n">6</td><td class="n">&times;1.32</td><td class="n">4</td><td class="n">+0.12</td></tr>
+<tr><td><strong>Knives</strong></td><td class="n">4</td><td class="n">34</td><td class="n">1,000</td><td class="n">5</td><td class="n">&times;1.55</td><td class="n">5</td><td class="n">&mdash;</td></tr>
+<tr><td><strong>Torches</strong></td><td class="n">5</td><td class="n">48</td><td class="n">2,000</td><td class="n">4</td><td class="n">&times;1.70</td><td class="n">6</td><td class="n">&mdash;</td></tr>
+<tr><td><strong>Chainsaw</strong></td><td class="n">6</td><td class="n">70</td><td class="n">9,000</td><td class="n">3</td><td class="n">&times;2.10</td><td class="n">8</td><td class="n">&mdash;</td></tr>
+</table>
+<p class="note">The Perfect window never tightens below 3 ticks, whatever the prop and whatever the
+challenge &mdash; so every prop stays hittable. A catch also costs stamina: a flat 0.4, plus 25%
+more per weight step.</p>
+
+<h3>Each prop's signature</h3>
+<table>
+<tr><th>Prop</th><th>What makes it worth choosing</th></tr>
+<tr><td><strong>Balls</strong></td><td>The honest baseline. Cheapest, steadiest, easiest to catch clean. Nothing to learn around.</td></tr>
+<tr><td><strong>Eggs</strong></td><td>Nearly free and pay a little more &mdash; but <strong>one drop and the egg is gone for good</strong>.
+  A raw egg can also be eaten in the day for +10 stamina, at the cost of an egg you no longer have to juggle.</td></tr>
+<tr><td><strong>Rings</strong></td><td>The endurance prop: half the stamina their weight would suggest. Built for the longest sets.</td></tr>
+<tr><td><strong>Clubs</strong></td><td>Forgiving. A wider off-Perfect catch than their weight asks (+0.12), which survives even a Purist act.</td></tr>
+<tr><td><strong>Knives</strong></td><td>A demanding crowd pays extra for the risk: <strong>+0.30 to the multiplier</strong> before The Critic
+  or The Hecklers. Heavy props also feed the crowd extra patience on a Perfect catch, scaled by weight.</td></tr>
+<tr><td><strong>Torches</strong></td><td>Self-lit. <strong>+0.30 to the multiplier wherever the stage is dark</strong> &mdash; a Blackout, Stage Fright,
+  or the Midnight Show &mdash; and they keep their flame when everything else is only a glow.</td></tr>
+<tr><td><strong>Chainsaw</strong></td><td>The end of the ladder. Heaviest, dearest, tightest window, and running the whole time it flies.</td></tr>
+</table>
+
+<h2>5 &nbsp; Patterns</h2>
+<p>Exactly one pattern is running at any moment. P switches between the ones you have, live, without
+restarting. Each has its own score multiplier.</p>
+<table>
+<tr><th>Pattern</th><th class="n">Pays</th><th>The shape</th></tr>
+<tr><td><strong>Cascade</strong></td><td class="n">&times;1.00</td><td>The weave. An odd count crosses to the other hand;
+  an even count keeps each hand its own circle. Every throw leaves the inside and lands on the outside.</td></tr>
+<tr><td><strong>Columns</strong></td><td class="n">&times;1.15</td><td>Every object goes straight up and comes down where it left,
+  in fixed lanes. An odd count opens a middle lane too. Lanes sit between 44&nbsp;px and 100&nbsp;px from the
+  centre line and never spread wider, however many objects &mdash; so the stance never widens.</td></tr>
+<tr><td><strong>Half Shower</strong></td><td class="n">&times;1.25</td><td>The dominant hand throws over the top; the other keeps the
+  weave but <em>low</em> &mdash; capped at 0.65 of a tap, so the two roads stay clearly apart at every count.</td></tr>
+<tr><td><strong>Shower</strong></td><td class="n">&times;1.40</td><td>The full circle, one direction. The dominant hand makes every
+  high throw (floor 0.55) and the other returns a fast flat pass: 0.16 of a tap, at a fifth of the usual rise.
+  Dealt one-handed &mdash; everything in the throwing hand, one in the other &mdash; and switching to it re-deals.</td></tr>
+<tr><td><strong>Reverse Cascade</strong></td><td class="n">&times;1.45</td><td>Both hands throw over the top. The weave runs backward.</td></tr>
+<tr><td><strong>Tennis</strong></td><td class="n">&times;1.50</td><td>One marked prop sails over the top, back and forth across the
+  weave, 20% higher than an ordinary over-the-top throw because it crosses a whole pattern rather than one road.</td></tr>
+</table>
+
+<h2>6 &nbsp; Tricks</h2>
+<p>Tricks are separate from patterns and ride on top of whichever one is running. C cycles which
+trick is loaded; the trick key uses it.</p>
+<table>
+<tr><th>Trick</th><th>Kind</th><th>What it does</th><th class="n">Bonus</th></tr>
+<tr><td><strong>Behind the Back</strong></td><td>toggle</td>
+    <td>Every throw loops behind the back while it runs. Switch on, switch off.</td><td class="n">60</td></tr>
+<tr><td><strong>High Toss</strong></td><td>toggle</td>
+    <td>Every throw flies sky high &mdash; a tap already reaches 1.35, and holding takes it to the 1.80
+    ceiling, high enough to leave the frame for a beat.</td><td class="n">90</td></tr>
+<tr><td><strong>Spin</strong></td><td>live</td>
+    <td>You turn on the spot for 44 ticks. <strong>Every catch during a Spin scores double</strong>, and you catch
+    blind: the off-Perfect chance drops by 0.28. 96-tick cooldown, and it needs at least one prop airborne.</td><td class="n">&mdash;</td></tr>
+</table>
+<p class="note">Only one toggle runs at a time &mdash; switching replaces the running one. A Spin can
+run at the same time as a toggle. A trick bonus is paid on a clean catch of the throw it shaped.</p>
+
+<h3>Which tricks go with which patterns</h3>
+<p>A pattern and a toggle can run together, and a Spin can run on top of either. Fifteen of the
+eighteen combinations are clean. Three are not &mdash; not because they are hard, but because the two
+shapes contradict each other &mdash; and the game warns you as you switch them on rather than
+refusing. Measured as mid-air clearance at five clubs with realistic catch timing:</p>
+<table>
+<tr><th>Pattern</th><th class="n">alone</th><th class="n">+ High Toss</th><th class="n">+ Behind the Back</th></tr>
+<tr><td>Cascade</td><td class="n">+29</td><td class="n">+19</td><td class="n">+7</td></tr>
+<tr><td>Columns</td><td class="n">+29</td><td class="n">+29</td><td class="n"><strong>&minus;14</strong></td></tr>
+<tr><td>Half Shower</td><td class="n">+28</td><td class="n">+38</td><td class="n">+17</td></tr>
+<tr><td>Shower</td><td class="n">+19</td><td class="n"><strong>&minus;4</strong></td><td class="n">+3</td></tr>
+<tr><td>Reverse Cascade</td><td class="n">+24</td><td class="n">+21</td><td class="n"><strong>&minus;10</strong></td></tr>
+<tr><td>Tennis</td><td class="n">&minus;0.4</td><td class="n">+4</td><td class="n">+15</td></tr>
+</table>
+<p class="note">A negative number means the props can touch in flight. <strong>Behind the Back under
+Columns</strong> is the clearest contradiction: a column is defined by coming down where it left, and
+Behind the Back by releasing from across the body &mdash; both cannot hold. <strong>Behind the Back under
+Reverse Cascade</strong> puts two crossings on one road. <strong>High Toss under a Shower</strong> crowds a
+high road that already carries every prop. Tennis's own &minus;0.4 is not a combination problem: that
+pattern flies an over-the-top road straight through the weave it crosses, and always has.</p>
+
+<h2>7 &nbsp; Score</h2>
+<p style="text-align:center;margin:1mm 0 3mm"><code style="font-size:8.2pt">catch score = base &times; streak &times; pattern &times; objects &times; prop &times; challenge</code></p>
+<table>
+<tr><th>Term</th><th>Value</th></tr>
+<tr><td>Base</td><td>100 for a Perfect, 50 for a Good, a flat 10 for a Late (which also carries no streak)</td></tr>
+<tr><td>Streak</td><td>The streak <em>is</em> the multiplier: one per clean catch. Capped at <strong>10 per object</strong>
+    &mdash; 30 at three objects, 70 at seven &mdash; so a comfortable small load cannot out-earn a hard one.</td></tr>
+<tr><td>Objects</td><td><code>1 + 0.12 &times; (count &minus; 3)</code></td></tr>
+<tr><td>Prop</td><td>the prop's own multiplier from the table above, plus its context bonus if it applies</td></tr>
+<tr><td>Spin</td><td>doubles whatever the catch scored, while a Spin is running</td></tr>
+</table>
+<p>Climbing <em>both</em> axes compounds: seven torches far out-earn three balls &mdash; but only for a
+player who can actually sustain them.</p>
+
+<h2>8 &nbsp; An act</h2>
+<p>One continuous performance at a chosen venue, with three goals. From the first goal on you may
+cash in at any time: press the finish key, or catch every prop and hold them &mdash; the empty air ends
+the act.</p>
+<table>
+<tr><th>Venue</th><th class="n">Reputation</th><th class="n">First goal</th><th class="n">Second</th><th class="n">Final</th></tr>
+<tr><td>Backyard</td><td class="n">0</td><td class="n">8,000</td><td class="n">15,200</td><td class="n">25,600</td></tr>
+<tr><td>Street Corner</td><td class="n">80</td><td class="n">20,000</td><td class="n">38,000</td><td class="n">64,000</td></tr>
+<tr><td>Small Theatre</td><td class="n">260</td><td class="n">55,000</td><td class="n">104,500</td><td class="n">176,000</td></tr>
+<tr><td>The Circus</td><td class="n">700</td><td class="n">85,000</td><td class="n">161,500</td><td class="n">272,000</td></tr>
+<tr><td>Championship</td><td class="n">1,700</td><td class="n">100,000</td><td class="n">190,000</td><td class="n">320,000</td></tr>
+<tr><td><strong>World Arena</strong></td><td class="n">4,000</td><td class="n">140,000</td><td class="n">266,000</td><td class="n">448,000</td></tr>
+<tr><td>The Midnight Show</td><td class="n">9,000 + won</td><td class="n">200,000</td><td class="n">380,000</td><td class="n">640,000</td></tr>
+</table>
+<p class="note">Every completed act at a venue raises that venue's bar by a further 15%, permanently.
+The <strong>World Arena</strong> is where the game is won: set a record there. The Midnight Show is bonus
+content that opens afterwards.</p>
+
+<h3>How an act ends</h3>
+<ul>
+<li><strong>Cash in.</strong> Every point on the board is kept. Available from the first goal.</li>
+<li><strong>Collapse.</strong> The crowd empties, three drops are made, or stamina runs out. The score is
+  stripped back to the last goal reached &mdash; and to nothing if no goal was.</li>
+<li><strong>Stranded.</strong> Down to one prop and holding it: the act finishes itself, because a single
+  object can never score again.</li>
+<li><strong>Standing ovation.</strong> Not one prop dropped, no collapse, at least one goal banked: the
+  room stands, flowers rain down, and the night pays <strong>+35%</strong> on top.</li>
+</ul>
+
+<h3>The crowd</h3>
+<p>The crowd's patience only ever falls unless it is fed. Perfect catches, big throws and Spins feed
+it; Late catches and whiffs drain it. Where the meter sits decides what the room does:</p>
+<table>
+<tr><th>Applause</th><th>What happens</th></tr>
+<tr><td>above 0.78 <span class="tag">GREEN</span></td><td>they throw flowers, on their own beat &mdash; every 26 ticks, one roll per thrower</td></tr>
+<tr><td>0.34 &ndash; 0.78</td><td>with you, but nothing comes up</td></tr>
+<tr><td>below 0.30 <span class="tag">RED</span></td><td>they throw tomatoes instead. Worth nothing at the counter, but eatable later for +14 stamina</td></tr>
+<tr><td>empty</td><td>the room walks out and the act collapses</td></tr>
+</table>
+<p>What they throw depends on both how well you are playing <em>and</em> how grand the house is:
+a flower is worth 1, a posy 5, a gold rose 25, a bouquet 60. The rare tiers only appear deep in the
+green with drops at or near zero &mdash; and only a big house sends a bouquet at all.
+<strong>The night's pay is simply what the crowd threw</strong>, so it was earned in front of you.</p>
+
+<h2>9 &nbsp; The day</h2>
+<p>Three action segments a day. Performing, practising and shopping each spend one; dressing, reading
+your skills and restocking drinks are free.</p>
+<table>
+<tr><th>Action</th><th class="n">Cost</th><th>Effect</th></tr>
+<tr><td>Hot meal</td><td class="n">10</td><td>restores 35% of maximum stamina; every third meal adds a point of Strength</td></tr>
+<tr><td>Sleep at the inn</td><td class="n">30</td><td>ends the day and wakes you fully rested. Always keep the bed money aside.</td></tr>
+<tr><td>Uncle Dan's Pie</td><td class="n">1,000</td><td>the whole day runs 15% slower, until you sleep</td></tr>
+<tr><td>Raw egg</td><td class="n">an egg</td><td>+10 stamina, no money, no Strength &mdash; and one fewer egg to juggle</td></tr>
+<tr><td>Thrown tomato</td><td class="n">free</td><td>+14 stamina, and a little humbling</td></tr>
+<tr><td>Energy Drinks</td><td class="n">40 for 10</td><td>+10% stamina each, poured automatically the instant you would hit empty</td></tr>
+</table>
+<p class="note">Below 12 stamina you cannot work at all &mdash; only sleep.</p>
+
+<h3>The shop</h3>
+<table>
+<tr><th>Item</th><th class="n">Cost</th><th>Effect</th></tr>
+<tr><td>Glasses</td><td class="n">8,000</td><td>+0.20 to every off-Perfect catch chance</td></tr>
+<tr><td>Silk Gloves</td><td class="n">2,500</td><td>+0.10 to every off-Perfect catch chance &mdash; a club's forgiveness on any prop</td></tr>
+<tr><td>Stage Boots</td><td class="n">3,500</td><td>every throw costs one less stamina, floored at 1</td></tr>
+<tr><td>Top Hat</td><td class="n">4,000</td><td>lifts the room's generosity by 0.30 &mdash; better tributes, more often</td></tr>
+<tr><td>Tailcoat</td><td class="n">6,000</td><td>the crowd warms 15% faster</td></tr>
+<tr><td>Sequin Waistcoat</td><td class="n">12,000</td><td>+20% flower throw rate &mdash; the late-game money piece</td></tr>
+<tr><td>Energy-Drink Helmet</td><td class="n">10,000</td><td>lets you stock and auto-drink Energy Drinks; buying it fills the tank</td></tr>
+<tr><td>Glow Tape</td><td class="n">34,000</td><td>the props carry phosphor: the pattern stays readable on any dark stage</td></tr>
+<tr><td>Glow Suit</td><td class="n">34,000</td><td>the costume does: you stop being a hole in the dark</td></tr>
+<tr><td>Glow-in-the-Dark Kit</td><td class="n">60,000</td><td>both halves at once, cheaper than apart</td></tr>
+<tr><td>The Back Room</td><td class="n">500</td><td>a one-off fee and one segment. Opens knives, torches, the chainsaw and the pie.</td></tr>
+</table>
+<p class="note">Wearing is decided in <strong>the Tailor</strong> and is purely cosmetic: every bonus you own
+keeps paying whether the piece is on or not. The one exception is the Glow Suit, whose whole effect is
+being seen. The Tailor also holds one standard costume per stage you have reached.</p>
+
+<h2>10 &nbsp; Reputation, pay and records</h2>
+<ul>
+<li><strong>Reputation</strong> swings by up to 60 on how many of the three goals an act reached. Reaching
+  none of them loses reputation. Reputation is the key to the venues, and nothing else.</li>
+<li><strong>Pay</strong> is what the crowd threw, multiplied by 1.4 on a Purist act. A broke juggler always
+  earns at least a busking floor, so the road never ends purely because a night went badly.</li>
+<li><strong>Records</strong> are an act's score, per venue, on two separate boards: an ordinary one and a
+  <strong>Purist</strong> one. A Purist act runs with no stats, no gear and no bought slow motion &mdash; only
+  your hands &mdash; and pays and scores 40% more for it.</li>
+<li><strong>Mastery.</strong> Once all four stats are capped, each level-up converts its points to money
+  instead, at 250 apiece.</li>
+</ul>
+
+<h2>11 &nbsp; Encores</h2>
+<p>One optional challenge colours a whole act, rolled per booking from The Street upward. The Backyard
+is always clean.</p>
+<table>
+<tr><th>Encore</th><th>What changes</th></tr>
+<tr><td>The Hecklers</td><td>the crowd's attention drains twice as fast</td></tr>
+<tr><td>Stage Fright</td><td>no landing markers at all</td></tr>
+<tr><td>The Gale</td><td>only a clean Perfect catch survives</td></tr>
+<tr><td>Blackout</td><td>the house lights are out. In the air a prop is only the glow it carries. A torch keeps its flame.</td></tr>
+<tr><td>Cold Hands</td><td>the Perfect window is two ticks tighter (never below 3)</td></tr>
+<tr><td>The Long Set</td><td>the final goal is doubled, but the crowd is patient</td></tr>
+<tr><td>The Understudy</td><td>one drop and it is over</td></tr>
+<tr><td>The Purist's Night</td><td>no gear, no stats, no help</td></tr>
+<tr><td>For the Danger</td><td>only clubs, knives and torches score. Never below The Circus, and never without a real set of one.</td></tr>
+<tr><td>Close Quarters</td><td>props that clip mid-air turn treacherous</td></tr>
+<tr><td>The Critic</td><td>only a Perfect catch pays. Good and Late score nothing.</td></tr>
+</table>
+
+<h2>12 &nbsp; How skills are earned</h2>
+<p>Tricks and patterns are <strong>dealt, not chosen</strong>. Clearing a wall &mdash; a level, a stat, a stage,
+a run of acts performed &mdash; earns a card, face down. Turning it over reveals one skill you do not
+already have, with every remaining one equally likely. Until then a locked skill shows nothing about
+itself but its kind.</p>
+<p>Cascade is yours from the start and never enters the deck. If six acts pass with no unlock at all,
+the game deals a card anyway.</p>
+
+<div class="foot">
+TOSSA &mdash; a skill-based juggling game. This document describes the rules of play only; it contains no
+implementation detail. All numbers are taken directly from the running game as of 29 July 2026.
+Simulation rate is 120 ticks per second throughout.
+</div>
+</body></html>
