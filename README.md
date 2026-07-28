@@ -1,4 +1,4 @@
-# IACTO
+# TOSSA
 
 A skill-based juggling game wrapped in a light performer-career sim. Godot 4.7,
 one self-contained GDScript file (`Game.gd`), code-only art, original music.
