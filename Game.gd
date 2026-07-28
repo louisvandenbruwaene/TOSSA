@@ -304,6 +304,26 @@ const PATTERNS := [
 # differently from the way it is written: the picture is the sentence "I act" with a
 # juggling ball finishing the word, so the mark needs the name minus its final letter,
 # spaced as the joke reads. TITLE_MARK's last character is the one the ball replaces.
+# MOVING THE CAPSULE MARK AROUND (2026-07-28, Louis: "is it possible for me to move
+# around the objects? and how"). Yes: everything the picture places is one of the numbers
+# below, and nothing else needs touching. Re-render with
+#     godot --path . --resolution 1232x706 -- --capsule 4 --shot out.png --shotat 40
+#
+# CAP_NUDGE has one row per LETTER OF THE NAME, in order, so the two S's move
+# independently: x, y, scale. x and y are in units of the mark's own height (0.1 is a
+# tenth of the letter height, positive y is DOWN), and scale multiplies that one letter.
+# A letter's slot widens with its scale, so making one bigger pushes the others aside
+# instead of overlapping them.
+const CAP_SIZE := 0.34        # the mark's height as a fraction of the picture's height
+const CAP_Y := 0.50           # where the mark's middle sits (0 top, 1 bottom)
+const CAP_GAP := 0.20         # space between letters, in units of the mark's height
+const CAP_NUDGE := [          #  x      y     scale        letter
+	Vector3(0.00, 0.00, 1.00),  #                          T  (two knives)
+	Vector3(0.00, 0.00, 1.00),  #                          O  (ring)
+	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
+	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
+	Vector3(0.00, 0.00, 1.00),  #                          A  (two torches)
+]
 const GAME_TITLE := "TOSSA"
 const TITLE_MARK := "TOSS"
 # NAMES STILL ON THE TABLE (Louis, 2026-07-28) - kept here beside the switch so choosing
@@ -13555,6 +13575,25 @@ func capsule_sleeve(wrist: Vector2, elbow: Vector2, w: float, suit: Color, dk: C
 	fill_ellipse(wrist + d * w * 0.30 - n * w * 0.18, w * 0.20, w * 0.34, Color(0.95, 0.74, 0.55, 0.5))
 
 
+func cap_nudge(i: int) -> Vector3:
+	# one letter's x / y / scale from the tuning table, safely - the table is edited by
+	# hand, so a name of a different length must not crash the picture
+	if i < 0 or i >= CAP_NUDGE.size():
+		return Vector3(0.0, 0.0, 1.0)
+	return CAP_NUDGE[i]
+
+
+func cap_letter_width(ch: String, gsz: float) -> float:
+	# how much room one letter's marks actually need, so its neighbours sit clear of it -
+	# the ring is measured by its OUTER edge, which is what Louis asked for
+	match ch:
+		"T": return gsz * 0.86
+		"O": return gsz * 0.80
+		"S": return gsz * 0.48
+		"A": return gsz * 0.78
+		_: return gsz * 0.60
+
+
 func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 	# THE WHOLE NAME IN PROPS, and no lettering at all (2026-07-28, Louis): the T is two
 	# knives with the vertical one lying over the horizontal, the O is a ring, each S is a
@@ -13566,57 +13605,63 @@ func capsule_mark(s: Vector2, cy: float, size: float) -> void:
 	# neighbours by its OUTER edge (Louis) and a prop's advance is its real extent, not a
 	# font metric. A prop's local origin is its GRIP with the business end at negative y,
 	# which is what places every piece below.
-	var ring_r := size * 0.40
-	var s_r := size * 0.24                       # radius of each of the S's two loops
-	var gap := size * 0.20
-	var adv := {"T": size * 0.86, "O": ring_r * 2.0, "S": s_r * 2.0, "A": size * 0.78}
+	var gap := size * CAP_GAP
+	var widths: Array[float] = []
 	var total := 0.0
 	for i in GAME_TITLE.length():
-		total += float(adv.get(GAME_TITLE[i], size * 0.6)) + gap
+		var gsz := size * cap_nudge(i).z
+		widths.append(cap_letter_width(GAME_TITLE[i], gsz))
+		total += widths[i] + gap
 	total -= gap
 	var x := s.x * 0.5 - total * 0.5
-	var base := cy + size * 0.5                  # the mark's baseline
+	var base0 := cy + size * 0.5                 # the mark's baseline
 	for i in GAME_TITLE.length():
 		var ch := GAME_TITLE[i]
-		var w := float(adv.get(ch, size * 0.6))
+		var n := cap_nudge(i)
+		var size_l := size * n.z                 # this letter's own height
+		var w: float = widths[i]
+		var base := base0 + size * n.y
+		var ring_r := size_l * 0.40
+		var s_r := size_l * 0.24                 # radius of each of the S's two loops
+		x += size * n.x
 		match ch:
 			"T":
 				# the crossbar first, then the stem ON TOP of it - Louis: "the vertical
 				# above the horizontal". Turned +PI/2 a knife's blade sweeps right and its
 				# pommel hangs left, so the bar is anchored a pommel's length in.
 				var bsc := w * 1.06 / 35.0
-				var ssc := size * 0.92 / 35.0
-				var top := base - size * 0.92
+				var ssc := size_l * 0.92 / 35.0
+				var top := base - size_l * 0.92
 				# CENTRE THE BAR ON ITS OWN MIDDLE, not on its grip. A knife runs -26 to
 				# +9 in local units, so its middle sits 8.5 units from the origin, and
 				# anchoring by the origin hung the whole crossbar to one side of the stem.
 				draw_knife(Vector2(x + w * 0.5 - 8.5 * bsc, top), PI * 0.5, bsc)
 				draw_knife(Vector2(x + w * 0.5, base - 9.0 * ssc), 0.0, ssc)
 			"O":
-				var rc := Vector2(x + ring_r, base - size * 0.46)
+				var rc := Vector2(x + ring_r, base - size_l * 0.46)
 				draw_glow(rc, ring_r * 1.30, Color(0.45, 0.78, 1.0, 0.20))
 				draw_ring_prop(rc, Color(0.45, 0.75, 0.95), ring_r / 10.9)
 			"S":
 				# an S is two loops: the top one sweeps from its right tip up over and down
 				# to the waist, the bottom one carries on from the waist round to the left.
 				var cxs := x + s_r
-				var c1 := Vector2(cxs, base - size * 0.46 - s_r)
-				var c2 := Vector2(cxs, base - size * 0.46 + s_r)
+				var c1 := Vector2(cxs, base - size_l * 0.46 - s_r)
+				var c2 := Vector2(cxs, base - size_l * 0.46 + s_r)
 				for j in 9:
 					var a1 := lerpf(0.0, -1.5 * PI, float(j) / 8.0)
-					draw_ball_shape(c1 + Vector2(cos(a1), sin(a1)) * s_r, ball_color(j), size * 0.0075)
+					draw_ball_shape(c1 + Vector2(cos(a1), sin(a1)) * s_r, ball_color(j), size_l * 0.0075)
 				for j in 9:
 					var a2 := lerpf(-0.5 * PI, PI, float(j) / 8.0)
-					draw_ball_shape(c2 + Vector2(cos(a2), sin(a2)) * s_r, ball_color(j + 2), size * 0.0075)
+					draw_ball_shape(c2 + Vector2(cos(a2), sin(a2)) * s_r, ball_color(j + 2), size_l * 0.0075)
 			"A":
 				# two torches leaning into each other, both burning, and nothing else -
 				# the gap between them at the top IS the letter's apex
-				var tsc := size * 0.028
+				var tsc := size_l * 0.028
 				draw_torch(Vector2(x + w * 0.10, base), 0.30, tsc, true)
 				draw_torch(Vector2(x + w * 0.90, base), -0.30, tsc, true)
 			_:
 				pass
-		x += w + gap
+		x += w + gap - size * n.x
 
 
 func capsule_one(font: Font, s: Vector2, k: float) -> void:
