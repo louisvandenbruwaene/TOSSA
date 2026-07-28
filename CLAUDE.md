@@ -1455,6 +1455,28 @@ architecture change, not content. Do not let it be scoped as "one more pattern".
 
 ## Gotchas that keep biting
 
+- **THE THING THAT BREAKS ON A RENAME LIVES OUTSIDE THE REPO.** Louis plays by clicking
+  `/Applications/TOSSA.app`, which is not an exported game at all - it is a wrapper whose
+  entire payload is `exec godot --path <folder>`. That path is hard-coded, it sits outside
+  the project, and it is therefore invisible to every grep, rename and commit made inside
+  it. Renaming the folder on 2026-07-28 broke both launchers instantly and SILENTLY:
+  Godot exits immediately when `--path` points at nothing, so the icon bounces once and
+  stops, with no error printed anywhere. `install_apps.sh` rebuilds both from the repo -
+  **run it after moving or renaming the project folder**, and remember the general shape
+  of the mistake: when renaming anything, ask what refers to it from OUTSIDE the thing
+  being renamed. Here that was three places, and only one of them was in the repo (the
+  save files' folder, the GitHub remote, and these launchers).
+- **THE APP ICON WAS A BAD EXPORT, not a bad drawing** (found the same day). `icon.svg` is
+  a clean 128x128 tile filling its whole viewBox, but `export/icons/icon_1024.png` had the
+  art rendered at ~440px in the TOP-LEFT corner of a 1024 canvas with the rest
+  transparent - so the Dock drew it at under half size, tucked into a corner, and had done
+  for as long as the icons existed. Rebuilt on Apple's actual grid (an app tile occupies
+  824 of 1024, a 100px margin all round) by rendering the SVG through **headless Brave**,
+  which is the only image tool on this machine - there is no ImageMagick and no PIL. The
+  `.icns` comes from `iconutil` over a generated `.iconset`; the Windows `.ico` is packed
+  by hand (an ICO is just a 6-byte header, 16 bytes per size, and embedded PNGs). macOS
+  caches icons hard, so `lsregister -f` plus `killall Dock` is part of installing one.
+
 - Godot user args need `--` (see above). And in ZSH, an unquoted `$var` holding
   `--day work` is passed as ONE argument, not two, so `ua.find("--day")` misses it and
   the run silently lands wherever `skip_menu` sent it (usually ST_PLAY). A two-word dev
