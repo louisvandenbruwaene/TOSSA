@@ -1056,7 +1056,7 @@ var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
 	{"id": "face_v2", "name": "The juggler's face: real hair, a real mouth",
-	 "desc": "The performer read as a mannequin: hair was a brown circle behind a tan one, and the mouth was a bent polyline of even thickness with square ends. Now the hair has a real silhouette - a side parting, a swept fringe that comes to a point, temples down past the eyes, a crown sheen - and the mouth is a filled shape with lips, an opening that widens with the mood, teeth on a streak and light on the lower lip. Eyes are slimmer, sit under proper tapered brows, and squeeze shut on a wince. A soft nose plane. Same head size, same stance, same proportions - nothing outside the face moves, and the Skills preview now draws this same head instead of its own. OFF restores the old face."},
+	 "desc": "The performer read as a mannequin: hair was a brown circle behind a tan one, and the mouth was a bent polyline of even thickness with square ends. Now the hair has a real silhouette - a side parting, a swept fringe that comes to a point, temples down past the eyes, a crown sheen - and the mouth is a filled shape with lips, an opening that widens with the mood, and light on the lower lip. Eyes are slimmer, sit under proper tapered brows, and squeeze shut on a wince. A soft nose plane. Same head size, same stance, same proportions - nothing outside the face moves, and the Skills preview now draws this same head instead of its own. OFF restores the old face."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
