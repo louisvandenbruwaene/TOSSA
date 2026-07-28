@@ -1213,6 +1213,100 @@ NON-COMMERCIAL - he will re-render under one paid Suno month before release and 
 the files. SFX are synthesized at startup (`gen_sfx`); catch sounds are quality-led
 (perfect sparkle / good / dull late), crowd bed deleted, tonal stingers only.
 
+## The idea review (2026-07-28) - what was accepted, and the test that decided it
+
+Louis brought a long list of future ideas and asked which were worth building. The list is
+in the session log; what matters here is **the test that sorted it**, because it will sort
+the next list too. An idea is in if it passes all three pillars, and the one that rejects
+the most is the first:
+
+1. **Skill first.** A miss must always be the player's fault. Anything that perturbs a
+   flight path the player cannot read - magnetism, wind, bounce randomness - is out, not
+   because it is hard to build but because it breaks the contract the whole game rests on.
+   Same for anything that catches FOR you (an "assistant" that saves one drop a show is
+   the stats-auto-play failure the two-axis guardrail exists to prevent; Energy Drinks are
+   the acceptable shape - a resource that buys stamina, never a catch).
+2. **Juggling is real.** The sim has ONE gravity and `flight_pos` is a closed-form
+   parabola every other number derives from. Zero-g, planets, black holes and boomerang
+   props are not content, they are a second physics model.
+3. **The first impression is calm.** Warm, theatrical, Balatro-grade. A rubber chicken at
+   the World Arena undercuts the thing the climb is for. One or two joke props as a late
+   unlock is a real juggler's joke routine; a joke CATEGORY is a different game.
+
+**ACCEPTED, roughly in order of value per unit of work:**
+- **PROP CATEGORIES, and the shop rebuilt around them** (Louis's own instinct, and the
+  strongest item on the list). A CATEGORY - balls, rings, clubs, knives, torches, eggs,
+  chainsaw - owns the mechanics that already live in `PROPS` (spin, stam, pwin, smult,
+  fgive). A VARIANT inside it owns one modifier and a look: glass balls (harder to see,
+  shatter on a drop, pay more), small rings (tighter catch, bigger multiplier), giant
+  rings (slower and dramatic), double-spin clubs. The shop becomes a row of CATEGORY
+  cards that opens into variants - the same drawer pattern the day hub already uses.
+  **This is not only a content idea, it is a fix**: the prop row physically ran out of
+  width at seven cards on 2026-07-28, and no arithmetic saves it at ten. It also turns
+  "one more prop" from a balance problem into a variant within a known family.
+- **AUDIENCE TASTE per venue**, extending a system that already exists rather than
+  inventing one. `is_picky_crowd` already pays knives more before The Critic and The
+  Hecklers, and `is_dark_context` already pays torches more where the stage is dark.
+  Making that explicit and per-venue - a children's party loves big and funny, a
+  connoisseur crowd pays for the hard pattern, a rich room pays for the expensive prop -
+  makes the prop CHOICE matter more, which is exactly the balance goal, at the cost of
+  one field and one multiplier.
+- **A NAMED RIVAL per venue**: a score to beat with a face and a name, escalating up the
+  ladder. It is a leaderboard the player can see, it gives the mid-game a shape the
+  record boards alone do not, and it is nearly free - the number already exists.
+- **MORE ENCORES.** Half the "random events" on the list (rain, a famous juggler in the
+  room, a child on stage) ARE Encores, which is the cheapest content lever in the
+  codebase: one `ENCORES` entry plus usually one `if encore_on(...)`. **Shadows only** is
+  the good version of "invisible props" - the Blackout work already found that removing
+  the shape entirely is "way too difficult", and a shadow tells you the x honestly.
+- **TWO OR THREE MORE VENUES** mid-ladder (a children's party, a festival, a royal
+  palace are all real gigs). Pure content: a `VENUES` row and its dressing.
+- **VERIFY AND SHIP THE DAILY CHALLENGE.** It is built and still UNVERIFIED, and it is
+  the best marketing hook on the whole list. A shareable result image would extend it.
+- **GHOST REPLAYS**, medium-term and unusually feasible here: the sim is deterministic on
+  a fixed 120Hz tick, which is the hard prerequisite most games lack.
+
+**REJECTED, with the reason:**
+- **Bouncy / magnetic balls, wind, environmental hazards that push a prop.** Pillar 1.
+  A hazard that changes TIMING deterministically is fine and is really an Encore.
+- **An assistant that auto-catches.** Pillar 1, most directly of anything on the list.
+- **Zero-g, planets, black holes, clones, boomerang clubs.** Pillar 2.
+- **Rubber chickens, fish, bananas, toilet rolls as a category.** Pillar 3. Note that
+  **hats and plates are real juggling props with real technique** and would be welcome.
+- **Heavy clubs, fireballs, sword clubs.** These are the weight axis `PROPS` already has;
+  a heavier club is the stat re-skin the 2026-07-26 prop-identity pass explicitly
+  rejected. Fireballs are torches.
+- **Explosive balls, meteorites.** Tone.
+- **Stacking rings.** Not juggling.
+- **A full roguelike restructure and a prestige reset.** The career already supplies the
+  run structure, and a prestige wipe throws away the RECORDS, which are the long-term
+  hook. The cheap version of the same payoff is already built (the Purist Legend chase).
+- **"Flaming knives: +100% flowers, -20% catch window".** Not rejected as an idea - it is
+  already IMPLEMENTED, as `smult` and `pwin`. What is missing is that the shop states the
+  reward ("pays x1.55") far more loudly than the risk. That is a UI beat, not a feature.
+- **A crowd meter with faces.** `draw_gauge` already does this better.
+
+**MILLS MESS is its own case and worth stating plainly.** It is the most famous pattern
+not in the game and the one most worth having - and it is the most expensive thing on the
+list, because arms currently reach exactly two points (`inner_pos`, `outer_pos`) with no
+exceptions at all, and Mills Mess is *defined* by the arms crossing. It is an
+architecture change, not content. Do not let it be scoped as "one more pattern".
+
+**Claude's own additions, for whenever these come up again:**
+- **A ROUTINE, BUILT IN ADVANCE** - the highest-value structural idea available. An act
+  currently picks one prop, one pattern, one count and holds it. Letting the player build
+  a routine of segments (3 clubs Cascade, then 5 balls Shower, then 7 torches) and having
+  the crowd pay for VARIETY would use everything already built - patterns, props, counts,
+  the applause clock - and give an act the shape it currently lacks.
+- **THE SAVE SHOULD BE THE BIGGEST NUMBER IN THE GAME.** A drop costs a pip; a near-miss
+  recovery pays nothing special. Balatro is the stated bar, and in Balatro the largest
+  number comes from the most desperate moment. A prop caught late and low, below the
+  normal line, is the most exciting thing that happens on this stage and the scoring is
+  currently silent about it.
+- **A RHYTHM READOUT in practice.** The game is entirely about timing and gives no direct
+  timing feedback beyond PERFECT/GOOD/late. A metronome or a beat trace in practice would
+  teach the thing the game is actually asking for.
+
 ## Still open (from ideas.rtf and the old docs, worth doing)
 
 - **Teaching lessons as income** (mastered skills earn gold/rep as a day action).
