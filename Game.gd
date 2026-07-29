@@ -883,7 +883,13 @@ const ANTE_CAP := 6.0
 # inside the E50 Louis named.
 #
 # These are the FIRST goal; the final is 3.2x it (GOAL_STEP).
-const VENUE_BASE := [250.0, 1600.0, 11000.0, 62000.0, 750000.0, 1.25e7, 3.1e8]
+# THE TOP TWO RUNGS CAME DOWN AFTER `--ladder` WAS BUILT, which is the whole argument for
+# building it: at 1.25e7 and 3.1e8 the World Arena and the Midnight Show each needed ONE MORE
+# trick activation than the build they were supposedly derived from, and took 162 and 201
+# seconds against clock floors of 55 and 60. The arithmetic had been wrong since it was
+# written and no simulation could have caught it, because the bot cannot juggle eleven
+# chainsaws. Run `--ladder` after touching any of these.
+const VENUE_BASE := [250.0, 1600.0, 11000.0, 62000.0, 750000.0, 4.1e6, 9.2e7]
 const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
 const GOAL_BAR_GAMMA := 0.62          # goal-meter fill exponent (<1 = concave): spreads a
 									   # streak-accelerated score evenly along the bar. See goal_bar_pos
@@ -2004,6 +2010,10 @@ func _ready() -> void:
 		enter_day()
 		skills_open = true
 		skills_sel = int(ua[ssi + 1]) if ssi + 1 < ua.size() and not ua[ssi + 1].begins_with("--") else 0
+	if ua.has("--ladder"):            # dev: print the whole score ladder and quit
+		print_ladder()
+		get_tree().quit()
+		return
 	if ua.has("--tailor"):            # dev: open the dressing room for a screenshot
 		enter_day()
 		tailor_open = true
@@ -2835,6 +2845,74 @@ func goal_for(venue: int, gi: int) -> float:
 	var a := minf(pow(ANTE_GROWTH, float(ante[clampi(venue, 0, ante.size() - 1)])), ANTE_CAP)
 	var enc := encore_target_mult() if gi == NUM_GOALS - 1 else 1.0
 	return base * step * a * enc
+
+
+# THE BUILD EACH HOUSE EXPECTS, as data rather than as a sentence in a comment. VENUE_BASE was
+# derived from these, and until they were written down the derivation lived only in my head and
+# in prose - which is how a ladder ends up with assumptions nobody can check. `--ladder` reads
+# them and prints the arithmetic.
+const LADDER_BUILD := [
+	{"n": 3,  "prop": 0, "pat": 0, "set": 0, "acts": 0},   # Backyard: three balls, no tricks
+	{"n": 4,  "prop": 0, "pat": 1, "set": 2, "acts": 2},   # Street Corner
+	{"n": 5,  "prop": 3, "pat": 1, "set": 4, "acts": 2},   # Small Theatre: clubs
+	{"n": 5,  "prop": 4, "pat": 2, "set": 6, "acts": 3},   # The Circus: knives
+	{"n": 7,  "prop": 5, "pat": 2, "set": 8, "acts": 4},   # Championship: torches
+	{"n": 9,  "prop": 5, "pat": 4, "set": 8, "acts": 4},   # World Arena
+	{"n": 11, "prop": 6, "pat": 5, "set": 8, "acts": 5},   # Midnight: chainsaws, Tennis
+]
+
+func print_ladder() -> void:
+	# dev (--ladder): THE WHOLE SCORE LADDER, computed from the live constants and printed in
+	# one second. It exists because the autoplayer cannot measure the upper houses - at seven
+	# objects in a plain Cascade a catch arrives every 19 ticks and a Spin needs 52 clear, and
+	# at eleven chainsaws the bot simply drops everything - so every rung above the Small
+	# Theatre was arithmetic hiding in a comment. Arithmetic in a comment rots; arithmetic in a
+	# tool gets re-run.
+	#
+	# It models a FLAWLESS act: an unbroken chain, the build in LADDER_BUILD, and `acts` trick
+	# activations landed. That is an upper bound on a real player, which is the right side to
+	# calibrate from - the goal should be reachable by someone playing well, not by everyone.
+	print("%-18s %-13s %-16s %7s %12s %14s %5s %7s %9s" % ["VENUE", "BUILD", "PATTERN", "rate/s", "goal 1", "final", "needs", "floor", "at-build"])
+	for v in VENUE_BASE.size():
+		var b: Dictionary = LADDER_BUILD[v]
+		var n := int(b["n"])
+		var pk := int(b["prop"])
+		var pat := int(b["pat"])
+		var acts := int(b["acts"])
+		# the catch rate: one catch per prop per cycle, and the cycle is the tap airtime
+		var scale := 1.0 if n < 5 else 1.3 + 0.15 * float(n - 5)
+		var air_s := BASE_AIR * scale / 120.0
+		var cps := float(n) / air_s
+		# the per-catch multiplier, at the chain's settled value rather than its ramp
+		var setb := 1.0 + SET_PIECE_BONUS * float(b["set"])
+		if int(b["set"]) >= WEAR_PIECES.size():
+			setb *= SET_FULL_BONUS
+		var pm := float(PATTERNS[pat]["mult"]) * (1.0 + OBJ_BALL_BONUS * float(n - MIN_BALLS)) \
+			* float(PROPS[pk]["smult"]) * setb
+		var settled := 1.0 + CHAIN_GAIN * 0.82     # ~x3.5, the chain past its ramp
+		var rate := CATCH_PTS * settled * pm * cps
+		# what one trick activation is worth in THIS build
+		var ctx := (1.0 + TRICK_DIFF_WEIGHT * float(int(PROPS[pk]["weight"]) - 1)) \
+			* (1.0 + TRICK_DIFF_COUNT * float(n - MIN_BALLS)) * float(PATTERNS[pat]["mult"])
+		var p := 1.0 + (2.0 - 1.0) * ctx           # a Spin, the strongest
+		var mult := pow(p, float(acts))
+		var g1 := float(VENUE_BASE[v]) * float(GOAL_STEP[0])
+		var g3 := float(VENUE_BASE[v]) * float(GOAL_STEP[2])
+		# seconds to the FINAL goal at this build, and the clock floor it must also clear
+		var secs := g3 / maxf(rate * mult, 0.0001)
+		var floor_s: float = lerpf(GOAL_MIN_S_LOW[2], GOAL_MIN_S_HIGH[2], float(v) / float(maxi(MAX_VENUE, 1)))
+		# ...and how many activations it would actually take to meet that floor
+		var need := 0
+		while need < 40 and g3 / maxf(rate * pow(p, float(need)), 0.0001) > floor_s:
+			need += 1
+		print("%-18s %2dx %-9s %-16s %7.0f %12s %14s %5d %6.0fs %8.0fs" % [
+			String(venue_data(v)["name"]), n, String(PROPS[pk]["name"]), String(PATTERNS[pat]["name"]),
+			rate, score_text(g1), score_text(g3), need, floor_s, secs])
+	print("")
+	print("rate/s     points a second at that build with an unbroken chain and NO tricks")
+	print("needs      trick activations required to reach the final goal by its clock floor")
+	print("at-build   seconds to the final goal with the activations LADDER_BUILD assumes")
+	print("A house is calibrated when `needs` is at or just under the build's own `acts`.")
 
 
 func goal_seconds(gi: int) -> float:
