@@ -821,6 +821,21 @@ const TUT_SLOW_START := 0.5    # the first step of a lesson: half speed (the
 # catches and slowed on drops: it taught the rhythm by attrition, and a beginner who
 # could not find the first beat never saw the second.
 const TUT_PHASES: Array[float] = [0.5, 0.25, 0.0]
+# THE TALKING WINDOW (2026-07-29). Two numbers that exist so the lesson's own furniture can
+# never sit on the performer - Louis's standing requirement that he "should be visible at
+# all times". The speech box ends above TUT_SPEECH_BOT of the screen height and the
+# dominant-hand question starts below TUT_PICK_TOP, and the performer's hat brim to his
+# boots live between the two.
+const TUT_SPEECH_BOT := 0.26   # the speech box may not reach past this share of the height
+# ...AND EVERYTHING ELSE STANDS BESIDE HIM, NOT UNDER HIM. The first try put the hand
+# question below the speech box at 0.74 of the height and it sat across the performer's
+# legs: there is no room under him, because his boots are at ~0.80 and the key row owns the
+# last 60px. There is a whole empty third of the stage to his right, so the lesson's
+# side panels live there - clear of the arms at their widest AND clear of both text rows.
+const TUT_SIDE_X := 0.70       # the side panel's left edge, as a share of the width
+const TUT_SIDE_W := 300.0      # ...and how wide it is
+const TUT_SIDE_Y := 0.34       # its top, well below the speech box and above the boots
+const TUT_SPEECH_CPS := 46.0   # characters a second: a talking pace, not a crawl
 # THE TWO STYLES (2026-07-27, Louis). Every juggler holds a pattern one of two ways,
 # and which one you are doing changes every single beat - so the lessons name them,
 # teach them apart, and say what the difference is.
@@ -1578,6 +1593,12 @@ var tut_step := 0         # index into tut_lesson(tut_id)
 var tut_count := 0        # catches (or throws) banked in the current step
 var tut_threw_l := false  # a left-hand throw happened this step
 var tut_threw_r := false  # a right-hand throw happened this step
+var tut_caught_l := false # ...and the same for catches, since the basics name one key at
+var tut_caught_r := false # a time and a catch in the wrong hand must not clear the beat
+var tut_throws := 0       # throws banked this step (the `free` beats want both)
+var tut_hand_picked := false  # the dominant-hand question has been answered
+var tut_speech_tick := 0  # when the live line started arriving, for the letter-by-letter
+var tut_speech_said := 0  # ...and how many of its characters have already blipped
 var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw lands)
 var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
 var tut_keys := 0         # command-key presses banked this step (the R and P teaching
@@ -2349,6 +2370,7 @@ func _physics_process(delta: float) -> void:
 	_prev_running = running
 	if tut_active:
 		tut_maintain()   # advance the lesson and keep the hands stocked
+		tut_speech_step()   # ...and let the line arrive, a letter and a blip at a time
 	update_hands()
 	age_popups()
 	if _fps:
@@ -2560,6 +2582,16 @@ func _input(event: InputEvent) -> void:
 		if kc == K_CYCLE and tut_id.begins_with("trick_"):
 			cycle_trick()   # C is part of a trick lesson's teaching, so it stays live
 			return          # (the next Space re-pins the taught trick regardless)
+		# THE HAND QUESTION owns Left/Right while it is up, and only while it is up: it is
+		# the one beat that asks something with the arrow keys rather than with a juggling
+		# key, and answering it is what unlocks its Enter.
+		if String(tut_step_data().get("goal", "")) == "hand" and kc in [KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D]:
+			dominant_hand = LEFT if kc in [KEY_LEFT, KEY_A] else RIGHT
+			tut_hand_picked = true
+			save_settings()
+			play_sfx("ui2", -12.0)
+			tut_check()
+			return
 		match kc:
 			KEY_ENTER, KEY_KP_ENTER:
 				tut_advance()   # a met goal holds open until the player says done
@@ -4421,66 +4453,101 @@ func tut_lesson(id: String) -> Array:
 		return pattern_lesson_steps(pattern_by_id(id.substr(8)))
 	if id == TUT_ADVANCED:
 		return advanced_lesson_steps()
-	# THE BASICS. Three drills - one ball, then two, then three - and each of them run
-	# down the whole TUT_PHASES ladder before the next one starts: half speed guided,
-	# quarter speed guided, full speed alone. So a player meets one ball nine beats
-	# hand-held, plays it themselves, and only then is a second ball added; by the
-	# cascade they have already been walked through the exact throw-then-catch
-	# exchange twice at a speed where it cannot go wrong.
+	# =========================================================================
+	# THE BASICS, rewritten to Louis's script (2026-07-29 evening). It is a CONVERSATION
+	# now, not a drill ladder: one line at a time, one key at a time, in the order a
+	# person would actually teach it.
 	#
-	# The old shape (two scripted call-and-response steps, then freestyle on an
-	# adaptive pace ladder) is gone: the response was scripted for exactly two presses
-	# and everything after it was sink-or-swim.
+	# WHAT CAME OUT, and why each piece went:
+	#   * the TUT_PHASES ladder - every drill run three times, at 50%, 25% and full speed.
+	#     Louis: "remove all slowmo from the tutorial". Slow motion taught the player to
+	#     juggle in a world that does not exist, and then handed them the real one.
+	#   * the top BANNER and the full-screen INTRO CARD. "Remove all unnecessary text from
+	#     the current tutorial, the player only needs the buttons that are on the bottom of
+	#     the screen." The key row stays; everything else is spoken.
+	#   * the paragraph-long `sub` explanations. A line of dialogue is one sentence.
 	#
-	# Only the LAST pass of the three-ball drill gates on REAL juggling (the "juggle"
-	# key): catches that leave the air empty behind them do not count, so nobody walks
-	# out of the basics having only ever thrown one ball at a time. Key names come from
-	# the live bindings, so a remapped player is taught THEIR keys, and every step still
-	# names them (Louis: never assumed remembered).
-	var kj := OS.get_keycode_string(K_RT)
-	var kf := OS.get_keycode_string(K_LT)
-	var kd := OS.get_keycode_string(K_LC)
-	var kk := OS.get_keycode_string(K_RC)
+	# WHAT IT IS NOW: `say` beats (a line, then Enter), `do` beats (a line, then the ONE
+	# key it names - Enter is dead on those, so the only way past is the actual press), a
+	# `hand` beat that asks which hand is dominant, and `free` beats that hold the lesson
+	# open until the player has juggled a real count. Every key name is resolved from the
+	# live bindings AND from the dominant hand, so a left-hander is taught their own hands
+	# in their own keys - see tut_kt / tut_kc.
+	var dom := dominant_hand
+	var off := other(dom)
+	var TD := tut_kt(dom)     # throw, dominant hand      (J by default)
+	var TO := tut_kt(off)     # throw, other hand         (F)
+	var CD := tut_kc(dom)     # catch, dominant hand      (K)
+	var CO := tut_kc(off)     # catch, other hand         (D)
 	var out: Array = []
-	# THE WARM-UPS run on the ADVANCED mechanic (hands empty, catch then throw) and are
-	# never called that, because with one or two props the choice does not exist yet:
-	# there is nothing to hold back, so keeping the air alive is the only thing to do.
-	# What it buys is that every beat after the opening throw is a real two-key pair -
-	# catch it, send it back - instead of a string of lone presses (Louis: no single
-	# button pause screens past the opening). The word BEGINNER is saved for three
-	# props, where holding two back is a genuine decision, and ADVANCED for its own
-	# lesson right after.
-	out += tut_paced({"prop": PROP_BALLS, "balls": 1, "hand": RIGHT, "goal": "catch", "need": 4,
-		"style": TUT_ADVANCED,
-		"text": "One ball, hand to hand",
-		"sub": "Every hand has its own two keys: %s and %s throw, %s and %s catch. Catch the ball, then send it straight back the other way." % [kf, kj, kd, kk]},
-		[4, 4, 6], "add a second ball")
-	# BOTH balls start stacked in one hand, so throw, throw, catch, catch is the only
-	# sequence physically available - the player is always juggling by construction,
-	# never scolded into it (Louis). The throws CROSS (a forced cascade), rehearsing
-	# the weave three will ask for.
-	out += tut_paced({"prop": PROP_BALLS, "balls": 2, "hand": RIGHT, "goal": "catch", "need": 4,
-		"pattern": CASCADE, "style": TUT_ADVANCED,
-		"text": "Two balls - throw, throw, catch, catch",
-		"sub": "Both start stacked in one hand. %s throws the first, %s throws the second BEFORE it lands - then keep them going: catch one, send it straight back. That handover, one ball crossing right after the other, is the whole weave three balls will ask for." % [kj, kj]},
-		[4, 4, 6], "add the third ball")
-	out += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 10,
-		"juggle": true, "style": TUT_BEGINNER,
-		"text": "Three balls - the BEGINNER cascade",
-		"sub": "Two stay in your hands, one is in the air. As it comes down, throw the ball waiting in that hand up under it FIRST, then catch: %s then %s, or %s then %s. Throw, catch, throw, catch - that exchange, over and over, is juggling." % [kj, kk, kf, kd]},
-		[6, 6, 10], "learn the other keys")
-	# --- R, drilled rather than described: it is the key that rescues every tangle.
-	#     Named through k_restart, so a pad player is taught THEIR button ---
-	out.append({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "press_r", "need": 1,
-		"slow": 0.4, "next": "see every key at once",
-		"text": "Tangled? %s starts you over" % String(k_restart()[0]),
-		"sub": "Press %s now and watch the balls come back to your hands. In any practice it re-deals - on stage it does nothing, because a performance is not restartable." % String(k_restart()[0])})
-	# --- and the whole command set, named, in one place ---
-	out.append({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "read", "need": 0,
-		"slow": 0.4, "next": "finish the lesson",
-		"text": "Every key you have",
-		"sub": "These work whenever you are juggling - practice or performance. You never need to memorise them: the row along the bottom of the screen always names the ones that matter."})
+	out.append(tut_say("Hello, this is a game about juggling. If you want to learn it, you've come to the right place!"))
+	out.append({"goal": "hand", "prop": PROP_BALLS, "balls": 0, "need": 0, "slow": 0.0, "say": true,
+		"text": "Let's start with one ball in your strong hand.", "next": "one ball"})
+	# ONE BALL, hand to hand. Four presses, each one named and waited for.
+	out.append(tut_do("Great! Now throw it to your other hand in an arc.", "throw", dom, TD, 1, dom, 1))
+	out.append(tut_do("Now catch it.", "catch", off, CO, 1, dom, 1))
+	out.append(tut_do("Amazing! Now throw it back.", "throw", off, TO, 1, dom, 1))
+	out.append(tut_do("Catch it.", "catch", dom, CD, 1, dom, 1))
+	out.append(tut_free("That's it! Feel free to master one ball before moving on.", 1, dom, 0, 0,
+		"When you are ready, press Enter for the second ball.", 1))
+	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
+	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, dom, 1))
+	out.append(tut_do("Throw the second before it lands.", "throw", off, TO, 2, dom, 1))
+	out.append(tut_free("Now catch and throw on one side, %s %s, then the other, %s %s. And repeat." % [CD, TD, CO, TO],
+		2, dom, 6, 6, "Try it out. Enter when you've got it.", 1))
+	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
+	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, dom, 2))
+	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, dom, 2, true))
+	out.append(tut_do("Then catch the first.", "catch", off, CO, 3, dom, 2))
+	out.append(tut_do("Now the same on the other side. Throw.", "throw", dom, TD, 3, dom, 2))
+	out.append(tut_do("Catch.", "catch", dom, CD, 3, dom, 2))
+	out.append(tut_do("And again. Throw.", "throw", off, TO, 3, dom, 2))
+	out.append(tut_do("Catch.", "catch", off, CO, 3, dom, 2))
+	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, dom, 10, 10,
+		"Prove you are ready: ten throws and ten catches.", 2))
+	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
+		"next": "finish the lesson", "say": true,
+		"text": "Tangled? %s starts you over, any time you are practising." % String(k_restart()[0])})
 	return out
+
+
+func tut_kt(h: int) -> String:
+	# the THROW key for a hand, in the player's own bindings. The tutorial names keys rather
+	# than hands ("press J"), so every line has to be built from these two functions or a
+	# left-handed player is taught somebody else's hands.
+	return OS.get_keycode_string(K_LT if h == LEFT else K_RT)
+
+
+func tut_kc(h: int) -> String:
+	return OS.get_keycode_string(K_LC if h == LEFT else K_RC)
+
+
+func tut_say(line: String) -> Dictionary:
+	# A LINE, and Enter to go on. Nothing to do but read it.
+	return {"goal": "read", "prop": PROP_BALLS, "balls": 0, "need": 0, "slow": 0.0, "say": true,
+		"next": "go on", "text": line}
+
+
+func tut_do(line: String, act: String, h: int, keyname: String, n: int, dom: int, stack: int = 0,
+		peak: bool = false) -> Dictionary:
+	# A LINE AND ONE KEY. `goal` names the exact press, so Enter cannot skip it (see
+	# tut_advance: a `do` beat holds until the goal is met, and only then does Enter mean
+	# anything). `peak` is Louis's "pause and highlight the first ball at its peak" beat -
+	# see tut_peak_hold.
+	var g := ("throw_l" if h == LEFT else "throw_r") if act == "throw" else ("catch_l" if h == LEFT else "catch_r")
+	return {"goal": g, "prop": PROP_BALLS, "balls": n, "hand": dom, "stack": stack, "need": 1, "slow": 0.0,
+		"say": true, "key": keyname, "peak": peak, "next": "go on",
+		"text": "%s  [%s]" % [line, keyname]}
+
+
+func tut_free(line: String, n: int, dom: int, throws: int, catches: int, sub: String,
+		stack: int = 0) -> Dictionary:
+	# FREE PLAY, held open until the player has actually done it - and with no goal at all
+	# (throws and catches both zero) it is simply "play with this until you press Enter",
+	# which is what "feel free to master one ball" means.
+	return {"goal": "free", "prop": PROP_BALLS, "balls": n, "hand": dom, "stack": stack, "need": maxi(catches, 0),
+		"throws": throws, "slow": 0.0, "say": true, "next": "go on",
+		"text": line, "sub": sub}
 
 
 func advanced_lesson_steps() -> Array:
@@ -4724,6 +4791,12 @@ func tut_setup_step() -> void:
 		# so does the two-ball step (Louis: both stacked in one hand, so throw-throw-
 		# catch-catch is the only sequence available - three and up split through
 		# deal_side, which puts the odd prop in the DOMINANT hand like every other deal)
+		# A STEP MAY SAY EXACTLY HOW THE HANDS START (2026-07-29). `stack` is how many go in
+		# the DOMINANT hand, which is the whole difference between the two-ball drill (one
+		# each, so throw-throw is available) and the three-ball one (two in the strong hand,
+		# the real cascade opening). Without it the deal follows the old rule, which is
+		# right for every lesson that is not the scripted basics.
+		var want_stack := int(step.get("stack", -1))
 		for i in num_balls:
 			var b := Ball.new()
 			b.state = STATE_HAND
@@ -4731,7 +4804,10 @@ func tut_setup_step() -> void:
 			b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
 			b.spin_dir = 1.0 if i % 2 == 0 else -1.0
 			balls.append(b)
-			stack(deal_side(i) if num_balls > 2 else start_hand).append(b)
+			if want_stack >= 0:
+				stack(start_hand if i < want_stack else other(start_hand)).append(b)
+			else:
+				stack(deal_side(i) if num_balls > 2 else start_hand).append(b)
 	else:
 		# top up: the new step wants more balls, so they join the hands that are already
 		# holding - through top_up_side, so the dominant hand still ends with the odd one
@@ -4746,6 +4822,10 @@ func tut_setup_step() -> void:
 	tut_count = 0
 	tut_threw_l = false
 	tut_threw_r = false
+	tut_caught_l = false
+	tut_caught_r = false
+	tut_throws = 0
+	tut_hand_picked = false
 	tut_tricks = 0
 	tut_keys = 0
 	tut_advance_at = -1
@@ -4755,6 +4835,8 @@ func tut_setup_step() -> void:
 	# asked for is a throw from the hand the step deals into.
 	tut_hold.clear()
 	tut_hold_end = tick + TUT_STEP_READ
+	tut_speech_tick = tick    # the line starts arriving now, a letter at a time
+	tut_speech_said = 0
 	tut_last_throw = other(start_hand)
 	if _demo:
 		print("TUTTRACE setup step=%d goal=%s balls=%d slow=%.2f guide=%s juggle=%s tick=%d" % [tut_step, String(step["goal"]), num_balls, tut_slow(), str(step.get("guide", false)), str(step.get("juggle", false)), tick])
@@ -5084,12 +5166,19 @@ func tut_on_throw(h: int) -> void:
 		tut_threw_l = true
 	else:
 		tut_threw_r = true
+	tut_throws += 1      # the `free` beats count real throws as well as catches
 	tut_last_throw = h   # feed throws alternate off this, which is what crosses a cascade
 	tut_hold_mark("throw", h)
 	tut_check()
 
 
-func tut_on_catch(juggled: bool) -> void:
+func tut_on_catch(juggled: bool, hand: int = -1) -> void:
+	# WHICH HAND CAUGHT matters now: the basics ask for one named key at a time ("catch it
+	# with D"), so a catch in the wrong hand must not clear the beat.
+	if hand == LEFT:
+		tut_caught_l = true
+	elif hand == RIGHT:
+		tut_caught_r = true
 	# a step marked "juggle" only accepts catches that leave a ball in the air behind
 	# them (juggling_catch): the two- and three-ball steps must not be clearable by
 	# throwing one ball at a time, which is the thing they exist to teach against
@@ -5140,6 +5229,10 @@ func tut_check() -> void:
 	match String(step["goal"]):
 		"throw_r": done = tut_threw_r
 		"throw_l": done = tut_threw_l
+		"catch_r": done = tut_caught_r
+		"catch_l": done = tut_caught_l
+		"hand": done = tut_hand_picked
+		"free": done = tut_count >= int(step.get("need", 0)) and tut_throws >= int(step.get("throws", 0))
 		"trick_on": done = toggle_on == int(step.get("trick", -1))   # the toggle is running
 		"trick_off": done = toggle_on < 0                             # ...and now switched off
 		"trick_use": done = tut_tricks >= int(step["need"])           # arm/live: reward_trick fired
@@ -5172,6 +5265,22 @@ func tut_advance() -> void:
 		tut_setup_step()
 
 
+func tut_speech_step() -> void:
+	# THE VOICE, one blip per letter as the line arrives (Louis: "also create a small noise
+	# for that: in balatro they have some kind of explanation sound which i like"). Fired
+	# from the SIM rather than from the drawing, because a draw pass can run more than once
+	# for a tick and the sound would stutter; and every third character rather than every
+	# one, which is what turns a machine-gun into speech.
+	if not tut_active:
+		return
+	var want := tut_speech_chars()
+	if want <= tut_speech_said:
+		return
+	if int(want / 3) > int(tut_speech_said / 3):
+		play_sfx("talk", -19.0, randf_range(0.94, 1.10))
+	tut_speech_said = want
+
+
 func tut_maintain() -> void:
 	# the --demo autoplayer has no Enter: it takes each met goal after a beat, so a
 	# dev run can walk a whole lesson end to end unattended (never in normal play).
@@ -5184,6 +5293,12 @@ func tut_maintain() -> void:
 		match String(tut_step_data().get("goal", "")):
 			"press_r": tut_demo_reset()
 			"press_p": tut_demo_pattern_off()
+			"hand":
+				# the autoplayer has no arrow keys either: it answers the dominant-hand
+				# question the same way it mimes R and P, through the state the real key
+				# would set, so a --demo run can still walk the whole basics lesson
+				tut_hand_picked = true
+				tut_check()
 	# keep the step playable by topping the hands back up shortly after a ball is
 	# lost, so a fumble never stalls a lesson (34 ticks, ~0.28s: enough of a beat
 	# for the drop to actually register before the ball reappears)
@@ -5292,6 +5407,142 @@ func tut_intro(title: String, body: String, cap: String) -> Dictionary:
 		"text": title, "sub": body}
 
 
+func draw_tut_keyrow(font: Font, s: Vector2) -> void:
+	# THE ONE PIECE OF FURNITURE THE REWRITE KEPT (Louis: "the player only needs the buttons
+	# that are on the bottom of the screen: FJ throw, DK catch, R restart and esc escape").
+	# It carries the lesson's own key too - trick or pattern - so every command the game has
+	# gets its moment of attention in the lesson that owns it.
+	var items: Array = []
+	items.append([k_throw(), "throw"])
+	items.append([k_catch(), "catch"])
+	if tut_id.begins_with("trick_"):
+		items.append([k_trick(), "trick"])
+		items.append([k_cycle(), "switch trick"])
+	elif tut_id.begins_with("pattern_"):
+		items.append([k_pattern(), "pattern"])
+	items.append([k_restart(), "restart"])
+	items.append([k_pause(), "game menu"])
+	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
+
+
+func draw_tut_tally(font: Font, s: Vector2, step: Dictionary) -> void:
+	# TEN THROWS AND TEN CATCHES, counted where the player can see them (Louis: "show a
+	# window that just counts to 10 catches and 10 throws"). Same side panel the hand
+	# question uses, which is empty by then - see TUT_SIDE_X for why nothing sits under him.
+	var need_t := int(step.get("throws", 0))
+	var need_c := int(step.get("need", 0))
+	var bw := TUT_SIDE_W
+	var bx := s.x * TUT_SIDE_X
+	var by := s.y * TUT_SIDE_Y
+	soft_card(Rect2(bx, by, bw, 74.0), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.45), 1.4, 12.0, 14.0, 0.05)
+	var rows := [["throws", mini(tut_throws, need_t), need_t], ["catches", mini(tut_count, need_c), need_c]]
+	for i in rows.size():
+		var r: Array = rows[i]
+		var y := by + 28.0 + float(i) * 26.0
+		var doneR := int(r[1]) >= int(r[2])
+		draw_string(font, Vector2(bx + 20.0, y), String(r[0]), HORIZONTAL_ALIGNMENT_LEFT, 120.0, 14, Color(0.82, 0.78, 0.70))
+		draw_string(font, Vector2(bx + bw - 100.0, y), "%d / %d" % [int(r[1]), int(r[2])], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 16,
+			Color(0.72, 0.95, 0.70) if doneR else Color(1.0, 0.90, 0.62))
+
+
+func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
+	# SOMEBODY IS TALKING TO YOU (2026-07-29, Louis: "create another window that looks
+	# better and like a person talking"). A head in a lit disc on the left, the line beside
+	# it, and a tail pointing down out of the box - the three marks that turn a text panel
+	# into speech.
+	#
+	# **IT SITS ABOVE THE JUGGLER AND CANNOT REACH HIM.** Louis: "make sure none of this ...
+	# ever overlap with the juggler, which should be visible at all times". The performer's
+	# hat brim is the highest thing he has and it sits at about 0.30 of the screen, so the
+	# box is clamped to end above TUT_SPEECH_BOT of the height - the same rule the goal
+	# stem's bloom follows, a named number rather than a look at one screenshot.
+	var line := String(step.get("text", ""))
+	if line == "":
+		return
+	var bw := minf(720.0, s.x - 120.0)
+	var bx := s.x * 0.5 - bw * 0.5
+	var by := 24.0
+	# the box grows to its own wrapped text and no further, then the whole thing is checked
+	# against the juggler's ceiling
+	var inner := bw - 128.0
+	var lines := _wrap_lines(font, line, inner, 17)
+	var sub := String(step.get("sub", ""))
+	var subl: Array = _wrap_lines(font, sub, inner, 13) if sub != "" else []
+	var bh := 46.0 + 24.0 * float(maxi(lines.size(), 1)) + (8.0 + 18.0 * float(subl.size()) if subl.size() > 0 else 0.0)
+	bh = minf(bh, s.y * TUT_SPEECH_BOT - by)
+	soft_card(Rect2(bx, by, bw, bh), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.55), 1.6, 14.0, 18.0, 0.06)
+	# the tail, so the box reads as something being SAID rather than a heading
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(bx + 74.0, by + bh - 1.0), Vector2(bx + 104.0, by + bh - 1.0),
+		Vector2(bx + 80.0, by + bh + 13.0)]), Color(0.10, 0.07, 0.09, 0.95))
+	# the speaker: a lit disc with the game's own head in it, so the voice has a face and it
+	# is a face the player already knows
+	var hc := Vector2(bx + 52.0, by + bh * 0.5)
+	draw_glow(hc, 34.0, Color(1.0, 0.78, 0.42, 0.14))
+	draw_circle(hc, 26.0, Color(0.16, 0.11, 0.12, 0.95))
+	draw_arc(hc, 26.0, 0.0, TAU, 28, Color(1.0, 0.86, 0.55, 0.45), 1.4)
+	# the same skin and hair draw_juggler uses, so the voice looks like the man on stage
+	draw_head(hc + Vector2(0.0, 3.0), 15.0, Color(0.28, 0.16, 0.11), Color(0.87, 0.64, 0.45), false)
+	# THE LINE, revealed a letter at a time. A line that appears whole is a sign; a line
+	# that arrives is a person talking, and it is what the blip sound is timed against.
+	var shown := tut_speech_chars()
+	var ty := by + 34.0
+	var used := 0
+	for l in lines:
+		var lt := String(l)
+		var take := clampi(shown - used, 0, lt.length())
+		if take > 0:
+			draw_string(font, Vector2(bx + 96.0, ty), lt.substr(0, take), HORIZONTAL_ALIGNMENT_LEFT, inner, 17, Color(1.0, 0.94, 0.80))
+		used += lt.length()
+		ty += 24.0
+	if subl.size() > 0 and shown >= _tut_line_len(lines):
+		ty += 6.0
+		for l2 in subl:
+			draw_string(font, Vector2(bx + 96.0, ty), String(l2), HORIZONTAL_ALIGNMENT_LEFT, inner, 13, Color(0.80, 0.86, 0.95))
+			ty += 18.0
+	# ...and the prompt, only once the beat is actually clearable, so an Enter icon never
+	# appears on a step whose key has not been pressed yet
+	if tut_advance_at >= 0:
+		draw_keycap(font, bx + bw - 78.0, by + bh - 30.0, "Enter")
+
+
+func _tut_line_len(lines: Array) -> int:
+	var n := 0
+	for l in lines:
+		n += String(l).length()
+	return n
+
+
+func tut_speech_chars() -> int:
+	# how much of the line has arrived. Reset at every step (tut_speech_tick) and paced by
+	# TUT_SPEECH_CPS, with the blip fired from update_sim rather than here - a draw pass can
+	# run more than once for a tick and would stutter the sound.
+	return int(float(maxi(0, tick - tut_speech_tick)) * TUT_SPEECH_CPS / 120.0)
+
+
+func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
+	# WHICH HAND IS YOUR STRONG ONE. One question, two cards, and like the speech box it is
+	# kept clear of the performer - it sits UNDER him, above the key row, because the two
+	# cards are wide and a wide box at the top would have to sit on his hat.
+	var bw := TUT_SIDE_W
+	var bx := s.x * TUT_SIDE_X
+	var by := s.y * TUT_SIDE_Y
+	soft_card(Rect2(bx, by, bw, 150.0), Color(0.10, 0.07, 0.09, 0.96), Color(1.0, 0.86, 0.55, 0.5), 1.6, 12.0, 16.0, 0.05)
+	draw_string(font, Vector2(bx, by + 28.0), "which hand is your strong one?", HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.92, 0.88, 0.78))
+	for i in 2:
+		var h := LEFT if i == 0 else RIGHT
+		var sel := dominant_hand == h
+		var cw := bw - 48.0
+		var cx := bx + 24.0
+		var cy := by + 44.0 + float(i) * 46.0
+		soft_card(Rect2(cx, cy, cw, 38.0), Color(1.0, 0.86, 0.45, 0.12) if sel else Color(0.14, 0.10, 0.11, 0.9),
+			Color(1.0, 0.88, 0.5, 0.9) if sel else Color(0.6, 0.55, 0.5, 0.4), 1.6 if sel else 1.0, 9.0, 10.0)
+		draw_string(font, Vector2(cx, cy + 25.0), "LEFT" if h == LEFT else "RIGHT", HORIZONTAL_ALIGNMENT_CENTER, cw, 16,
+			Color(1.0, 0.92, 0.62) if sel else Color(0.72, 0.68, 0.62))
+	draw_hints_row(font, bx + bw * 0.5, by + 162.0,
+		[[["Left", "Right"], "choose"], [["Enter"], "yes"]])
+
+
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var step := tut_step_data()
 	var steps := tut_lesson(tut_id)
@@ -5302,6 +5553,19 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		# at full brightness rather than being dimmed along with the scenery.
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.30))
 	draw_tut_prompts(font, s, step)   # a timing ring + bare handed key over the hands, no boxes
+	# **A SCRIPTED STEP SPEAKS INSTEAD** (2026-07-29). Every beat of the rewritten basics
+	# carries `say`, and for those the banner below - the kind tag, the title, the pace pips,
+	# the goal dots - is simply not drawn: Louis asked for the window and the key row and
+	# nothing else. The older lessons (props, tricks, patterns) still run the banner, which
+	# is why both live here rather than one replacing the other outright.
+	if bool(step.get("say", false)):
+		draw_tut_speech(font, s, step)
+		if String(step["goal"]) == "hand":
+			draw_tut_hand_pick(font, s)
+		if String(step["goal"]) == "free" and int(step.get("throws", 0)) > 0:
+			draw_tut_tally(font, s, step)
+		draw_tut_keyrow(font, s)
+		return
 	# a SMALL rectangle at the top (2026-07-18, Louis: "not above and below, out of
 	# vision, long texts of what to do - that is bad design"): the lesson kind, its
 	# one-line title, and progress only. The old two-line "sub" paragraph explaining
@@ -5360,20 +5624,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(bx, by + bh - 12.0), "GOOD JOB", HORIZONTAL_ALIGNMENT_RIGHT, bw - 18.0, 12, Color(0.72, 0.95, 0.7, ga))
 	if bool(step.get("intro", false)):
 		draw_tut_intro_card(font, s, step, kind_col)
-	# the controls that actually WORK in a lesson, always, along the very bottom - plus
-	# the lesson's own key (trick / pattern) so every command the game has gets its
-	# moment of attention in the lesson that owns it (Louis)
-	var items: Array = []
-	items.append([k_throw(), "throw"])
-	items.append([k_catch(), "catch"])
-	if tut_id.begins_with("trick_"):
-		items.append([k_trick(), "trick"])
-		items.append([k_cycle(), "switch trick"])
-	elif tut_id.begins_with("pattern_"):
-		items.append([k_pattern(), "pattern"])
-	items.append([k_restart(), "restart"])
-	items.append([k_pause(), "game menu"])
-	draw_hints_row(font, s.x * 0.5, s.y - 40.0, items)
+	draw_tut_keyrow(font, s)
 	# ONE cue slot, and exactly one thing may hold it - a screen that asks for two keys
 	# at once has asked for neither. A frozen BEAT wins outright: the world is not
 	# moving until it is answered, so nothing else on screen is the live question.
@@ -7125,7 +7376,7 @@ func on_catch(h: int) -> void:
 	career["catches"] = int(career["catches"]) + 1
 	if tut_active:
 		tut_hold_mark("catch", h)   # the beat's catch has landed; the world may move again
-		tut_on_catch(juggled)   # a guided lesson counts your clean catches toward its goal
+		tut_on_catch(juggled, h)   # a guided lesson counts your clean catches toward its goal
 	spend_stamina(STAM_DRAIN_CATCH * energy_mult() * (1.0 + WEIGHT_STAM * float(prop_weight(best.kind) - 1)))
 	# NO per-prop catch texture here (Louis, 2026-07-18: only perfect/good/late/
 	# whiff, never a special sound per object) - it used to be
@@ -18965,6 +19216,12 @@ func gen_sfx() -> void:
 	sfx["streak"] = _wav(_seq_bells([784.0, 987.8, 1318.5], 0.08, 0.5), false)
 	sfx["ui"] = _wav(_tone([880.0], [1.0], 0.05, 0, 0.001, 0.02, 0.3, 0.0), false)
 	sfx["ui2"] = _wav(_tone([1174.7, 1568.0], [1.0, 0.5], 0.10, 0, 0.001, 0.05, 0.35, 0.0), false)
+	# THE TUTORIAL'S VOICE (2026-07-29, Louis asked for Balatro's explanation blip). One
+	# very short, very soft wooden click per few characters, pitched a little differently
+	# each time (see tut_speech_step) so a sentence sounds like talking rather than like a
+	# machine. Deliberately quiet and deliberately mid-range: it plays dozens of times a
+	# line, so anything bright or long would be unbearable by the second sentence.
+	sfx["talk"] = _wav(_tone([523.3, 784.0], [1.0, 0.28], 0.045, 0, 0.001, 0.018, 0.16, 0.0), false)
 	sfx["gasp"] = _wav(_gasp_sound(), false)
 	sfx["groan"] = _wav(_groan_sound(), false)
 	# per-prop catch textures: NOT PLAYED right now (Louis: only perfect/good/late/
