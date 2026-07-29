@@ -38,7 +38,7 @@
 </style></head><body>
 
 <h1>TOSSA</h1>
-<p class="sub">How the game works &mdash; every rule, every number. Revised 29 July 2026.</p>
+<p class="sub">How the game works &mdash; every rule, every number. Revised 29 July 2026 (second pass: scoring, antes, the tailor).</p>
 
 <div class="lead">
 <strong>The three pillars.</strong> Everything below serves these, and anything that would break one
@@ -207,74 +207,108 @@ restarting. Each has its own score multiplier.</p>
 </table>
 
 <h2>6 &nbsp; Tricks</h2>
-<p>Tricks are separate from patterns and ride on top of whichever one is running. C cycles which
-trick is loaded; the trick key uses it.</p>
+<p>Tricks ride on top of whichever pattern is running. C cycles which trick is loaded; the trick key
+uses it. <strong>Every trick multiplies your current run once per activation</strong> &mdash; see
+Score &mdash; so what matters is how many times you can afford to press it, not how long you hold it.</p>
 <table>
-<tr><th>Trick</th><th>Kind</th><th>What it does</th><th class="n">Bonus</th></tr>
-<tr><td><strong>Behind the Back</strong></td><td>toggle</td>
-    <td>Every throw loops behind the back while it runs. Switch on, switch off.</td><td class="n">60</td></tr>
-<tr><td><strong>High Toss</strong></td><td>toggle</td>
-    <td>Every throw flies sky high &mdash; a tap already reaches 1.35, and holding takes it to the 1.80
-    ceiling, high enough to leave the frame for a beat.</td><td class="n">90</td></tr>
-<tr><td><strong>Spin</strong></td><td>live</td>
-    <td>You turn on the spot for 44 ticks. <strong>Every catch during a Spin scores double</strong>, and you catch
-    blind: the off-Perfect chance drops by 0.28. 96-tick cooldown, and it needs at least one prop airborne.</td><td class="n">&mdash;</td></tr>
+<tr><th>Trick</th><th>Kind</th><th>Works in</th><th>What it does</th></tr>
+<tr><td><strong>Spin</strong></td><td>live</td><td>any pattern</td>
+    <td>You turn on the spot for 44 ticks, and <strong>while you turn you can neither throw nor
+    catch</strong>. No cooldown at all &mdash; the blindness is the cost. The biggest multiplier in
+    the game.</td></tr>
+<tr><td><strong>High Toss</strong></td><td>toggle</td><td>any pattern</td>
+    <td>Every throw flies sky high &mdash; a tap already reaches 1.35 and holding takes it to the
+    1.80 ceiling. Pays least, but the airtime is what makes a Spin survivable.</td></tr>
+<tr><td><strong>Behind the Back</strong></td><td>toggle</td><td><strong>Cascade only</strong></td>
+    <td>Every throw loops behind the back. No other pattern survives it: every pattern but Cascade
+    is a fixed geometry, and a trick that reshapes every throw contradicts it.</td></tr>
 </table>
-<p class="note">Only one toggle runs at a time &mdash; switching replaces the running one. A Spin can
-run at the same time as a toggle. A trick bonus is paid on a clean catch of the throw it shaped.</p>
+<p class="note">Only one toggle runs at a time; switching replaces it. A Spin can run alongside a
+toggle. <strong>A Spin at a high count needs a gap to fit in</strong>: seven objects in a plain
+Cascade give you a catch every 19 ticks and a Spin needs 52 clear, so it cannot fit &mdash; but Half
+Shower's high road leaves gaps of about 50. Choosing a high-throwing pattern is how you make room to
+spin.</p>
 
 <h3>Which tricks go with which patterns</h3>
-<p>A pattern and a toggle can run together, and a Spin can run on top of either. Fifteen of the
-eighteen combinations are clean. Three are not &mdash; not because they are hard, but because the two
-shapes contradict each other &mdash; and the game warns you as you switch them on rather than
-refusing. Measured as mid-air clearance at five clubs with realistic catch timing:</p>
-<table>
-<tr><th>Pattern</th><th class="n">alone</th><th class="n">+ High Toss</th><th class="n">+ Behind the Back</th></tr>
-<tr><td>Cascade</td><td class="n">+29</td><td class="n">+19</td><td class="n">+7</td></tr>
-<tr><td>Columns</td><td class="n">+29</td><td class="n">+29</td><td class="n"><strong>&minus;14</strong></td></tr>
-<tr><td>Half Shower</td><td class="n">+28</td><td class="n">+38</td><td class="n">+17</td></tr>
-<tr><td>Shower</td><td class="n">+19</td><td class="n"><strong>&minus;4</strong></td><td class="n">+3</td></tr>
-<tr><td>Reverse Cascade</td><td class="n">+24</td><td class="n">+21</td><td class="n"><strong>&minus;10</strong></td></tr>
-<tr><td>Tennis</td><td class="n">&minus;0.4</td><td class="n">+4</td><td class="n">+15</td></tr>
-</table>
-<p class="note">A negative number means the props can touch in flight. <strong>Behind the Back under
-Columns</strong> is the clearest contradiction: a column is defined by coming down where it left, and
-Behind the Back by releasing from across the body &mdash; both cannot hold. <strong>Behind the Back under
-Reverse Cascade</strong> puts two crossings on one road. <strong>High Toss under a Shower</strong> crowds a
-high road that already carries every prop. Tennis's own &minus;0.4 is not a combination problem: that
-pattern flies an over-the-top road straight through the weave it crosses, and always has.</p>
+<p>Every pattern &times; trick combination was measured for mid-air clearance at five clubs with
+realistic catch timing. Behind the Back is restricted to Cascade because outside it the shapes
+genuinely contradict &mdash; a column is defined by coming down where it left, and a behind-the-back
+throw releases from across the body. High Toss and Spin ride anything: one changes height, the other
+changes nothing about the throw at all.</p>
+<p class="note">One residual worth knowing: Tennis measures about zero clearance on its own, because
+it flies an over-the-top road straight through the weave it crosses. That is the pattern's nature and
+not a fault &mdash; the hitbox is the same single size for every prop, count and pattern, chosen so
+that even fifteen chainsaws in Columns has room to run.</p>
 
 <h2>7 &nbsp; Score</h2>
-<p style="text-align:center;margin:1mm 0 3mm"><code style="font-size:8.2pt">catch score = base &times; streak &times; pattern &times; objects &times; prop &times; challenge</code></p>
-<table>
-<tr><th>Term</th><th>Value</th></tr>
-<tr><td>Base</td><td>100 for a Perfect, 50 for a Good, a flat 10 for a Late (which also carries no streak)</td></tr>
-<tr><td>Streak</td><td>The streak <em>is</em> the multiplier: one per clean catch. Capped at <strong>10 per object</strong>
-    &mdash; 30 at three objects, 70 at seven &mdash; so a comfortable small load cannot out-earn a hard one.</td></tr>
-<tr><td>Objects</td><td><code>1 + 0.12 &times; (count &minus; 3)</code></td></tr>
-<tr><td>Prop</td><td>the prop's own multiplier from the table above, plus its context bonus if it applies</td></tr>
-<tr><td>Spin</td><td>doubles whatever the catch scored, while a Spin is running</td></tr>
-</table>
-<p>Climbing <em>both</em> axes compounds: seven torches far out-earn three balls &mdash; but only for a
-player who can actually sustain them.</p>
+<p>An act is a series of <strong>runs</strong>. A run is the stretch since your last drop. Inside a
+run points accumulate steadily; landing a trick multiplies <em>the whole run</em>. A drop banks the
+run at whatever it grew to and opens the next one at &times;1.</p>
+<p style="text-align:center;margin:1mm 0 3mm"><code style="font-size:8.6pt">score = banked runs + (this run's points &times; this run's multiplier)</code></p>
+<p>So a drop is not a small setback. It is the end of an exponential, and the later it happens the
+more it costs &mdash; which is what makes a big multiplier something you carry nervously.</p>
 
-<h2>8 &nbsp; An act</h2>
-<p>One continuous performance at a chosen venue, with three goals. From the first goal on you may
-cash in at any time: press the finish key, or catch every prop and hold them &mdash; the empty air ends
-the act.</p>
+<h3>The points</h3>
 <table>
-<tr><th>Venue</th><th class="n">Reputation</th><th class="n">First goal</th><th class="n">Second</th><th class="n">Final</th></tr>
-<tr><td>Backyard</td><td class="n">0</td><td class="n">8,000</td><td class="n">15,200</td><td class="n">25,600</td></tr>
-<tr><td>Street Corner</td><td class="n">80</td><td class="n">20,000</td><td class="n">38,000</td><td class="n">64,000</td></tr>
-<tr><td>Small Theatre</td><td class="n">260</td><td class="n">55,000</td><td class="n">104,500</td><td class="n">176,000</td></tr>
-<tr><td>The Circus</td><td class="n">700</td><td class="n">85,000</td><td class="n">161,500</td><td class="n">272,000</td></tr>
-<tr><td>Championship</td><td class="n">1,700</td><td class="n">100,000</td><td class="n">190,000</td><td class="n">320,000</td></tr>
-<tr><td><strong>World Arena</strong></td><td class="n">4,000</td><td class="n">140,000</td><td class="n">266,000</td><td class="n">448,000</td></tr>
-<tr><td>The Midnight Show</td><td class="n">9,000 + won</td><td class="n">200,000</td><td class="n">380,000</td><td class="n">640,000</td></tr>
+<tr><th>Term</th><th class="n">Value</th><th>Notes</th></tr>
+<tr><td>A Perfect catch</td><td class="n">2.5</td><td>&times; the chain multiplier &times; every multiplier below</td></tr>
+<tr><td>A Good catch</td><td class="n">0.6</td><td>and it <strong>resets the chain</strong></td></tr>
+<tr><td>A Late catch</td><td class="n">0.25</td><td>also resets the chain</td></tr>
+<tr><td>Chain multiplier</td><td class="n">&times;1 to &times;4</td>
+    <td><code>1 + 3 &times; c/(c+40)</code>. &times;2.5 at forty straight Perfects, approaching &times;4 and
+    never reaching it. There is no cap &mdash; it is a limit.</td></tr>
+<tr><td>Objects</td><td class="n">+12% each</td><td>per object above three</td></tr>
+<tr><td>Prop</td><td class="n">&times;1.00 to &times;2.10</td><td>from the prop table, plus its context bonus</td></tr>
+<tr><td>Pattern</td><td class="n">&times;1.00 to &times;1.50</td><td>from the pattern table</td></tr>
+<tr><td>Costume</td><td class="n">up to &times;1.78</td><td>see the Tailor</td></tr>
 </table>
-<p class="note">Every completed act at a venue raises that venue's bar by a further 15%, permanently.
-The <strong>World Arena</strong> is where the game is won: set a record there. The Midnight Show is bonus
-content that opens afterwards.</p>
+<p class="note">The chain multiplier <em>saturates</em> deliberately. If it grew without limit the
+score would be quadratic in how long you juggled, and a sixty-second act would be worth four times a
+thirty-second one &mdash; so the way to a big number would be patience rather than skill. Flat means
+a longer act pays proportionally, and everything above proportional has to be earned.</p>
+
+<h3>The multiplier</h3>
+<p>Every trick multiplies the current run, <strong>once per activation</strong> &mdash; switching a
+toggle on, or pressing Spin. Ten activations of a &times;3 trick is &times;59,000 on everything the
+run has scored and everything it will.</p>
+<p style="text-align:center;margin:1mm 0 3mm"><code style="font-size:8.6pt">p = 1 + (trick's own value &minus; 1) &times; weight &times; count &times; pattern</code></p>
+<table>
+<tr><th>Trick</th><th class="n">Own value</th><th>What one activation is worth</th></tr>
+<tr><td>Spin</td><td class="n">2.00</td><td>&times;2 with three balls in a Cascade; &times;6.9 with fifteen chainsaws in Tennis</td></tr>
+<tr><td>Behind the Back</td><td class="n">1.90</td><td>Cascade only, so it never gets the pattern bonus</td></tr>
+<tr><td>High Toss</td><td class="n">1.25</td><td>the weakest &mdash; but the airtime it buys is what makes a Spin possible</td></tr>
+</table>
+<p class="note">Context scaling: +20% per step of prop weight, +8% per object above three, and the
+pattern's own multiplier. A hard setup makes every trick worth more, which is the whole reason to
+climb.</p>
+
+<h3>What the numbers look like</h3>
+<p>The Backyard finishes under a thousand and reads as an ordinary number. Scores are printed in E
+notation only past a billion, which in practice means the last two houses.</p>
+
+<h2>8 &nbsp; An act, and the ante</h2>
+<p>One continuous performance at a chosen venue, with three goals. A goal banks when
+<strong>two</strong> gates open: a score, and a clock.</p>
+<table>
+<tr><th>Venue</th><th class="n">Reputation</th><th class="n">First goal</th><th class="n">Second</th><th class="n">Final</th><th class="n">Clock floors</th></tr>
+<tr><td>Backyard</td><td class="n">0</td><td class="n">94</td><td class="n">179</td><td class="n">300</td><td class="n">8 / 16 / 30 s</td></tr>
+<tr><td>Street Corner</td><td class="n">80</td><td class="n">720</td><td class="n">1,368</td><td class="n">2,304</td><td class="n">9 / 19 / 35 s</td></tr>
+<tr><td>Small Theatre</td><td class="n">260</td><td class="n">6,050</td><td class="n">11,495</td><td class="n">19,360</td><td class="n">10 / 21 / 40 s</td></tr>
+<tr><td>The Circus</td><td class="n">700</td><td class="n">38,400</td><td class="n">72,960</td><td class="n">122,880</td><td class="n">12 / 24 / 45 s</td></tr>
+<tr><td>Championship</td><td class="n">1,700</td><td class="n">525,000</td><td class="n">997,500</td><td class="n">1.68M</td><td class="n">13 / 27 / 50 s</td></tr>
+<tr><td><strong>World Arena</strong></td><td class="n">4,000</td><td class="n">3.20M</td><td class="n">6.08M</td><td class="n">10.24M</td><td class="n">14 / 29 / 55 s</td></tr>
+<tr><td>The Midnight Show</td><td class="n">9,000 + won</td><td class="n">78.0M</td><td class="n">148.2M</td><td class="n">249.6M</td><td class="n">15 / 32 / 60 s</td></tr>
+</table>
+<p><strong>The clock is a floor, not a target.</strong> However enormous your multiplier, the final
+goal of a house cannot be banked before its clock opens &mdash; so no act is ever over in five
+seconds. What tricks buy you is the difference between being held back by the <em>number</em> (which
+can take minutes, or never happen) and being held only by the clock.</p>
+<p><strong>The ante.</strong> Every act you complete at a venue raises that venue's bars by 25%,
+compounding, up to six times over. A house you have played out stops being worth playing, which is
+the game's way of pushing you up the ladder rather than letting you farm the easy room.</p>
+<p class="note">The score bar is what a weak setup cannot reach; three balls will not clear the World
+Arena in any amount of time. The bar is cleared by bringing more &mdash; heavier props, more of them,
+a harder pattern, a matching wardrobe, and tricks pressed at the right moments.</p>
 
 <h3>How an act ends</h3>
 <ul>
@@ -309,34 +343,52 @@ your skills and restocking drinks are free.</p>
 <tr><th>Action</th><th class="n">Cost</th><th>Effect</th></tr>
 <tr><td>Hot meal</td><td class="n">10</td><td>restores 35% of maximum stamina; every third meal adds a point of Strength</td></tr>
 <tr><td>Sleep at the inn</td><td class="n">30</td><td>ends the day and wakes you fully rested. Always keep the bed money aside.</td></tr>
-<tr><td>Uncle Dan's Pie</td><td class="n">1,000</td><td>the whole day runs 15% slower, until you sleep</td></tr>
+<tr><td>Uncle Dan's Pie</td><td class="n">1,000</td><td>bought and eaten here. The whole day runs 15% slower, until you sleep.</td></tr>
 <tr><td>Raw egg</td><td class="n">an egg</td><td>+10 stamina, no money, no Strength &mdash; and one fewer egg to juggle</td></tr>
 <tr><td>Thrown tomato</td><td class="n">free</td><td>+14 stamina, and a little humbling</td></tr>
-<tr><td>Energy Drinks</td><td class="n">40 for 10</td><td>+10% stamina each, poured automatically the instant you would hit empty</td></tr>
+<tr><td>Energy Drinks</td><td class="n">40 for 10</td><td>bought here only. +10% stamina each, poured automatically the instant you would hit empty &mdash; if you are wearing the helmet.</td></tr>
 </table>
-<p class="note">Below 12 stamina you cannot work at all &mdash; only sleep.</p>
+<p class="note">Below 12 stamina you cannot work at all &mdash; only sleep. Performing, practising and shopping each spend a day segment; dressing, reading your skills, buying a pie and restocking drinks are free.</p>
 
 <h3>The shop</h3>
+<p>The shop sells what you juggle: one card per prop, bought by the object, plus one piece of gear
+that is about the props rather than about you.</p>
 <table>
 <tr><th>Item</th><th class="n">Cost</th><th>Effect</th></tr>
-<tr><td>Glasses</td><td class="n">8,000</td><td>+0.20 to every off-Perfect catch chance</td></tr>
-<tr><td>Silk Gloves</td><td class="n">2,500</td><td>+0.10 to every off-Perfect catch chance &mdash; a club's forgiveness on any prop</td></tr>
-<tr><td>Stage Boots</td><td class="n">3,500</td><td>every throw costs one less stamina, floored at 1</td></tr>
-<tr><td>Top Hat</td><td class="n">4,000</td><td>lifts the room's generosity by 0.30 &mdash; better tributes, more often</td></tr>
-<tr><td>Tailcoat</td><td class="n">6,000</td><td>the crowd warms 15% faster</td></tr>
-<tr><td>Sequin Waistcoat</td><td class="n">12,000</td><td>+20% flower throw rate &mdash; the late-game money piece</td></tr>
-<tr><td>Energy-Drink Helmet</td><td class="n">10,000</td><td>lets you stock and auto-drink Energy Drinks; buying it fills the tank</td></tr>
-<tr><td>Glow Tape</td><td class="n">34,000</td><td>the props carry phosphor: the pattern stays readable on any dark stage</td></tr>
-<tr><td>Glow Suit</td><td class="n">34,000</td><td>the costume does: you stop being a hole in the dark</td></tr>
-<tr><td>Glow-in-the-Dark Kit</td><td class="n">60,000</td><td>both halves at once, cheaper than apart</td></tr>
-<tr><td>The Back Room</td><td class="n">500</td><td>a one-off fee and one segment. Opens knives, torches, the chainsaw and the pie.</td></tr>
+<tr><td>Balls / Eggs / Rings / Clubs / Knives / Torches / Chainsaw</td><td class="n">20 &ndash; 9,000</td>
+    <td>one each. You need one prop per object you juggle, and the card shows your stock against
+    tonight's count. One press buys the whole shortfall.</td></tr>
+<tr><td>Glow Tape</td><td class="n">34,000</td><td>the props carry phosphor, so the pattern stays readable on a dark stage</td></tr>
 </table>
-<p class="note">Wearing is decided in <strong>the Tailor</strong> and is purely cosmetic: every bonus you own
-keeps paying whether the piece is on or not. The one exception is the Glow Suit, whose whole effect is
-being seen. The Tailor also holds one standard costume per stage you have reached.</p>
 
-<h2>10 &nbsp; Reputation, pay and records</h2>
+<h2>10 &nbsp; The Tailor</h2>
+<p>Everything you wear is bought here, and <strong>what you wear is what you get</strong> &mdash; a
+piece you own but leave on the rack does nothing at all.</p>
+<p><strong>Every garment comes in one cut per house.</strong> A piece tailored for tonight's stage
+pays; the same piece cut for another is only clothes. Each matching piece adds 6% to everything you
+score, and a complete matching set adds a further 20% on top &mdash; eight pieces is <strong>&times;1.78
+on every catch</strong>.</p>
+<table>
+<tr><th>Garment</th><th class="n">Base cost</th><th>What wearing it does</th></tr>
+<tr><td>Silk Gloves</td><td class="n">2,500</td><td>+0.10 to every off-Perfect catch chance</td></tr>
+<tr><td>Stage Boots</td><td class="n">3,500</td><td>every throw costs one less stamina, floored at 1</td></tr>
+<tr><td>Top Hat</td><td class="n">4,000</td><td>the room throws a better tier more often</td></tr>
+<tr><td>Tailcoat</td><td class="n">6,000</td><td>the crowd warms 15% faster</td></tr>
+<tr><td>Glasses</td><td class="n">8,000</td><td>+0.20 to every off-Perfect catch chance</td></tr>
+<tr><td>Energy Helmet</td><td class="n">10,000</td><td>stocked drinks pour themselves the instant you would hit empty</td></tr>
+<tr><td>Sequin Waistcoat</td><td class="n">12,000</td><td>+20% flower throw rate</td></tr>
+<tr><td>Glow Suit</td><td class="n">34,000</td><td>you glow on a dark stage instead of vanishing into it</td></tr>
+</table>
+<p><strong>A grand house costs more to dress for.</strong> The base cost above is multiplied by the
+stage: &times;0.35 at the Backyard rising to &times;3.60 at the Midnight Show. A Backyard top hat is
+1,400; a Midnight one is 14,400.</p>
+<p class="note">The Tailor also holds one standard suit per stage you have reached, and a mirror
+showing exactly what you will walk on in. Gloves stay white and boots stay brown at every house
+&mdash; they are the two pieces whose own material is the point.</p>
+
+<h2>11 &nbsp; Reputation, pay and records</h2>
 <ul>
+<li><strong>Every goal you bank is answered</strong> with a flower thrown from each wing of the house, and the room stands for a night with no drops at all.</li>
 <li><strong>Reputation</strong> swings by up to 60 on how many of the three goals an act reached. Reaching
   none of them loses reputation. Reputation is the key to the venues, and nothing else.</li>
 <li><strong>Pay</strong> is what the crowd threw, multiplied by 1.4 on a Purist act. A broke juggler always
@@ -348,7 +400,7 @@ being seen. The Tailor also holds one standard costume per stage you have reache
   instead, at 250 apiece.</li>
 </ul>
 
-<h2>11 &nbsp; Encores</h2>
+<h2>12 &nbsp; Encores</h2>
 <p>One optional challenge colours a whole act, rolled per booking from The Street upward. The Backyard
 is always clean.</p>
 <table>
@@ -366,7 +418,7 @@ is always clean.</p>
 <tr><td>The Critic</td><td>only a Perfect catch pays. Good and Late score nothing.</td></tr>
 </table>
 
-<h2>12 &nbsp; How skills are earned</h2>
+<h2>13 &nbsp; How skills are earned</h2>
 <p>Tricks and patterns are <strong>dealt, not chosen</strong>. Clearing a wall &mdash; a level, a stat, a stage,
 a run of acts performed &mdash; earns a card, face down. Turning it over reveals one skill you do not
 already have, with every remaining one equally likely. Until then a locked skill shows nothing about
@@ -376,7 +428,7 @@ the game deals a card anyway.</p>
 
 <div class="foot">
 TOSSA &mdash; a skill-based juggling game. This document describes the rules of play only; it contains no
-implementation detail. All numbers are taken directly from the running game as of 29 July 2026.
+implementation detail. All numbers are taken directly from the running game as of 29 July 2026, and the venue ladder can be re-checked at any time with the game's own <code>--ladder</code> tool.
 Simulation rate is 120 ticks per second throughout.
 </div>
 </body></html>
