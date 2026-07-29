@@ -440,15 +440,32 @@ const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward th
 const OBJ_BALL_BONUS := 0.12    # per ball above MIN_BALLS
 # --- THE EXPONENTIAL SCORE (2026-07-29). See the note on `score` for the shape; these are
 # the numbers that decide how steep it is.
-const CATCH_PTS := 100.0        # raw points a Perfect catch puts into the run...
-const CATCH_PTS_GOOD := 25.0    # ...and a Good one, which also resets the chain
-const CHAIN_STEP := 0.05        # the LINEAR half, and it is deliberately shallow: the chain
-							     # multiplier is 1 + 0.05 x chain, so sixty straight Perfects
-							     # multiply by 4, not by sixty. It used to be the chain length
-							     # itself, capped at ten per object - a cap Louis asked to
-							     # remove, and removing it from THAT curve would have made
-							     # linear play stronger rather than weaker. Shallow and
-							     # uncapped is the combination he asked for.
+# A CATCH IS WORTH ONE POINT (2026-07-29, Louis: "the scoring should feel normal and not
+# exponential in the beginning ... The backyard should stay below 1000 as final score"). It was
+# 100, which put a first act in the tens of thousands before anything interesting had happened
+# and started the ladder where it ought to end. At 1 point a catch a flawless thirty-second
+# Backyard act with three balls totals about 550 - a number a player reads as a NUMBER - and
+# every zero after that is earned by a heavier prop, a bigger count, a harder pattern or a trick.
+# DERIVED, NOT GUESSED. A flawless three-ball Backyard act runs at 4.29 catches a second
+# (num_balls / the tap airtime), so thirty seconds is 129 catches; averaged over the chain's
+# ramp that is about 2.3x each, i.e. ~297 chain-weighted catches. Louis wants that act to
+# finish under a thousand, so a catch is worth 2.5 and the act lands near 740.
+const CATCH_PTS := 2.5          # raw points a Perfect catch puts into the run...
+const CATCH_PTS_GOOD := 0.6     # ...and a Good one, which also resets the chain
+# THE CHAIN MULTIPLIER SATURATES, AND IT HAS TO (2026-07-29). `1 + 0.05 x chain` was shallow
+# and uncapped, which sounded like the answer to "no maximum multiplier" and was arithmetically
+# wrong: summed over k catches it gives ~0.025k^2, so the score is QUADRATIC IN TIME. A sixty
+# second act scored four times a thirty second one, which makes "each stage has linear scoring"
+# impossible however the constants are tuned - and it is why my first calibration was, in
+# Louis's words, out of whack.
+#
+# A saturating curve fixes it without reintroducing a hard ceiling: the multiplier climbs fast
+# at first, then flattens toward CHAIN_GAIN + 1, so after the first forty-odd catches every
+# further catch is worth about the same and the TOTAL is linear in time. A long clean run still
+# pays much better per catch than a broken one - which is the whole point of the chain - it
+# just stops compounding.
+const CHAIN_GAIN := 3.0         # the most the chain can add: x1 cold, approaching x4 held
+const CHAIN_HALF := 40.0        # ...and the chain length at which it is halfway there
 const TRICK_DIFF_WEIGHT := 0.20 # how much each step of prop weight scales a trick's
 							     # difficulty: a chainsaw is worth twice a ball
 const TRICK_DIFF_COUNT := 0.08  # ...and each object past three: fifteen nearly doubles it
@@ -546,6 +563,13 @@ const GLOW_SUIT_COST := 34000  # the costume alone
 # ofcourse gives the best possible score"). Every piece cut for tonight's house pays; the
 # full set pays more than the sum of its parts, so completing one is a goal rather than a
 # rounding error. Eight pieces at +6% is x1.48, and the full-set kicker takes it to x1.78.
+# A BACKYARD SUIT IS NOT A MIDNIGHT SUIT (2026-07-29, Louis: "Not all wardrobes should be
+# equally expensive, backyard should be cheap, midnight expensive"). One flat price per garment
+# made the seven cuts interchangeable purchases, which is exactly wrong: the whole point of a
+# per-house wardrobe is that the grand houses are an ASPIRATION. A Backyard top hat is now 1,400
+# and a Midnight one 14,400 - and since the houses arrive in order, the cost curve tracks the
+# earning curve instead of fighting it.
+const WEAR_STAGE_COST := [0.35, 0.55, 0.85, 1.25, 1.80, 2.60, 3.60]
 const SET_PIECE_BONUS := 0.06
 const SET_FULL_BONUS := 1.20
 const GLOVES_COST := 2500
@@ -653,14 +677,17 @@ const TR_SPIN := 2
 # trick multiplies the whole current run by, before the context scaling in trick_difficulty()
 # lifts it for a hard prop, a big count and a demanding pattern.
 #
-# **A TOGGLE'S p IS PER CATCH; A LIVE TRICK'S IS PER PRESS**, and that is why their numbers
-# look nothing alike. A toggle shapes EVERY throw while it runs, so every catch under it is a
-# landing and x is the length of the run - measured, Behind the Back at 1.55 cleared all three
-# goals of the Small Theatre in 3.2 seconds and scored 791,803, because p^60 of anything near
-# 1.9 is not a game. At 1.055 the same toggle held for sixty catches is worth about x100, and
-# for a hundred and fifty at fifteen chainsaws about x1e12, which is the curve that was
-# wanted. Spin is pressed once and pays 2.0 flat, limited by costing you the ability to catch
-# while it runs rather than by its own number.
+# **EVERY TRICK PAYS PER ACTIVATION - ONE PRESS, ONE MULTIPLICATION** (2026-07-29, Louis:
+# "different stages scale exponential, but each stage has linear scoring"). This is the change
+# that makes that sentence true, and it took two goes to see. A toggle shapes every throw while
+# it runs, so paying it per CATCH made x the length of the act - an exponential in TIME, and
+# therefore exponential scoring *within* a stage, which is exactly what he does not want. Paid
+# per activation, x is the number of times the player pressed the key: something they choose,
+# bounded by attention and risk rather than by the clock. The score inside a run is then
+# (linear in time) x (a multiplier you built), which is Balatro's shape - the build sets the
+# scale, the accumulation is flat, and the exponential lives across antes.
+#
+# Because x is small again, p is large again: these are what a trick is worth ONCE.
 #
 # `cascade_only` is Louis's gating: "make tricks only work on the cascade pattern, except high
 # toss and spin which work everywhere". It reads well because Cascade is the one pattern with
@@ -669,9 +696,9 @@ const TR_SPIN := 2
 # that: Behind the Back under Columns clears -13.6px, because a column comes down where it
 # left and a behind-the-back throw releases from across the body.
 const TRICKS := [
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "diff": 1.055, "cascade_only": true, "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "diff": 1.90, "cascade_only": true, "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Cascade only - no other pattern survives it. Every catch under it multiplies the run."},
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "diff": 1.012, "cascade_only": false, "shout": "HIGH TOSS!",
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "diff": 1.25, "cascade_only": false, "shout": "HIGH TOSS!",
 	 "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
 	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!",
 	 "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
@@ -785,11 +812,81 @@ const NUM_GOALS := 3
 # The 7th entry (The Midnight Show, 2026-07-18) is a first guess extrapolating the
 # same growth trend, NOT yet calib-verified like the rest - it is genuinely new,
 # post-game content with no strong-player data behind it yet.
-const VENUE_BASE := [8000, 20000, 55000, 85000, 100000, 140000, 200000]
+# A GOAL HAS TWO GATES: A NUMBER AND A CLOCK (2026-07-29, Louis: "make sure every single
+# performance takes at least 15 seconds for the first reward and at least 60 seconds for the
+# biggest reward, which can be improved marginally with tricks etc. (no 20 second biggest
+# reward possible, and no 5 second first reward possible at all)").
+#
+# **A SCORE BAR ALONE CANNOT ENFORCE A TIME, and that is not a tuning problem, it is an
+# arithmetic one.** The score is exponential now: a run carrying a x500 multiplier passes any
+# fixed number in a handful of throws, so whatever the bar is set to, there exists a player who
+# clears it in four seconds. The only thing that reliably enforces a minimum time is a minimum
+# time. So a goal banks when BOTH gates open - and the two do different jobs:
+#
+#   * THE NUMBER is what makes a weak setup struggle. Three balls at the World Arena will not
+#     reach the bar in sixty seconds however cleanly they are juggled.
+#   * THE CLOCK is what stops a strong one finishing early. It is a floor, not a target.
+#
+# Tricks therefore move you from number-gated to clock-gated, which is a LARGE improvement if
+# you were slow and a marginal one once you are already at the wall - exactly the shape Louis
+# described. And the wall is absolute: no combination of props, counts, patterns and tricks can
+# produce a five-second first goal or a twenty-second final one.
+# THE FLOORS GROW WITH THE HOUSE (2026-07-29, Louis: "early stages such as backyard don't have
+# to be that long: final score 30 seconds is enough"). A first act should be a minute of
+# juggling, not two; the World Arena is where sixty seconds of holding a set is the ask. Both
+# ends are his: 8/16/30 at the Backyard rising to 15/32/60 at the Midnight Show, interpolated
+# across the ladder so no rung is a jump.
+const GOAL_MIN_S_LOW := [8.0, 16.0, 30.0]    # ...at the Backyard
+const GOAL_MIN_S_HIGH := [15.0, 32.0, 60.0]  # ...and at the last house
+# THE ANTE, BALATRO-STYLE (Louis: "i want both exponential scoring and ante's. just like
+# balatro"). It was `1 + 0.15 x ante` - linear, so the tenth act at a venue asked 2.5x the
+# first, which against exponential scoring is no wall at all. It compounds now, which is what
+# an ante IS: a venue you have played out stops being worth playing, and the game pushes you up
+# the ladder rather than letting you farm the Backyard.
+#
+# CAPPED, though, and the cap is a safety rather than a nicety: reputation comes from goals, so
+# a bar that grows without limit could wall a player out of the only venue they can reach and
+# leave them unable to earn the reputation to leave it. Twelve is about six acts of growth.
+# GENTLER THAN THE FIRST GUESS, because a rung is only ~6x and the ante has to fit UNDER that:
+# at 1.45 capped at 12 the second act at a venue was already harder than the venue above it,
+# which does not push a player up the ladder, it strands them. At 1.25 the ante reaches 2.4x
+# after four acts and 6x after eight - a venue that quietly stops being worth farming.
+const ANTE_GROWTH := 1.25
+const ANTE_CAP := 6.0
+# THE LADDER IS DERIVED FROM WHAT A BUILD CAN REACH, not from a ceiling - and getting that
+# backwards is what Louis called out as "out of whack" (2026-07-29). My first attempt set the
+# top rung at E48 because he had named E50 as an upper BOUND, then divided down: 152x a rung,
+# which no build in the game can bridge. A ladder has to be climbed, so it is measured from the
+# climbing.
+#
+# WHAT A PLAYER ACTUALLY GAINS PER HOUSE, all multiplying into `pm` and `run_mult`:
+#     count       +12% a prop above three
+#     prop        x1.00 balls to x2.10 chainsaw
+#     pattern     x1.00 Cascade to x1.50 Tennis
+#     costume     up to x1.78 for a full matching set
+#     tricks      p per activation, itself scaled by prop, count and pattern
+# A realistic build gains roughly 6x a rung early and 20x late, as counts, weights and the
+# number of tricks a player can land all climb together. So:
+#
+#     Backyard      3 balls, no tricks                    final    800
+#     Street        4 balls, a couple of Behind the Backs  final    5,100
+#     Theatre       5 clubs, three activations             final    35,000
+#     Circus        5 knives, four                         final    198,000
+#     Championship  7 torches, six                         final    2.4M
+#     World Arena   9 torches, eight                       final    40M
+#     Midnight      11 chainsaws, ten                      final    992M
+#
+# The Backyard finishes under a thousand and the Midnight Show around E9, with E notation
+# arriving about the World Arena. An expert pushing the top house - fifteen chainsaws, Tennis,
+# a full wardrobe, a dozen Spins - measures near E17, which is the RECORD rather than the bar:
+# the goal is what you must clear, the number you leave on the board is the flex. Both sit far
+# inside the E50 Louis named.
+#
+# These are the FIRST goal; the final is 3.2x it (GOAL_STEP).
+const VENUE_BASE := [250.0, 1600.0, 11000.0, 62000.0, 750000.0, 1.25e7, 3.1e8]
 const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
 const GOAL_BAR_GAMMA := 0.62          # goal-meter fill exponent (<1 = concave): spreads a
 									   # streak-accelerated score evenly along the bar. See goal_bar_pos
-const ANTE_STEP := 0.15               # each complete act at a venue raises its bar 15%
 # the crowd's patience bleeds this much per tick, per venue (120 ticks a second),
 # draining from the 0.7 an act starts at. At the Backyard a still juggler (no
 # catches, pure decay) loses the room in ~17s; at the World Arena in ~6. Every
@@ -2735,9 +2832,33 @@ func goal_for(venue: int, gi: int) -> float:
 	# stretches only the FINAL goal - the hardest number is the one it makes harder.
 	var base := float(VENUE_BASE[clampi(venue, 0, VENUE_BASE.size() - 1)])
 	var step := float(GOAL_STEP[clampi(gi, 0, GOAL_STEP.size() - 1)])
-	var a := 1.0 + ANTE_STEP * float(ante[clampi(venue, 0, ante.size() - 1)])
+	var a := minf(pow(ANTE_GROWTH, float(ante[clampi(venue, 0, ante.size() - 1)])), ANTE_CAP)
 	var enc := encore_target_mult() if gi == NUM_GOALS - 1 else 1.0
 	return base * step * a * enc
+
+
+func goal_seconds(gi: int) -> float:
+	# the CLOCK gate for goal gi at THIS venue, in seconds - see GOAL_MIN_S_LOW/HIGH.
+	var g := clampi(gi, 0, GOAL_MIN_S_LOW.size() - 1)
+	var t := clampf(float(run_venue) / float(maxi(MAX_VENUE, 1)), 0.0, 1.0)
+	return lerpf(GOAL_MIN_S_LOW[g], GOAL_MIN_S_HIGH[g], t)
+
+
+func goal_ticks(gi: int) -> int:
+	# ...in sim ticks. Measured from the first throw, not from the establishing card, so
+	# reading the venue's name is not part of the thirty seconds.
+	return int(round(goal_seconds(gi) * 120.0))
+
+
+func goal_clock_open(gi: int) -> bool:
+	return tick >= goal_ticks(gi)
+
+
+func goal_clock_left(gi: int) -> float:
+	# seconds still to run on that floor, for the HUD. A goal whose NUMBER is already beaten
+	# but whose clock has not opened must say so - otherwise the player watches a bar sit full
+	# and concludes the game is broken, which is the one failure a hidden gate always causes.
+	return maxf(0.0, float(goal_ticks(gi) - tick) / 120.0)
 
 
 func next_goal() -> float:
@@ -6758,7 +6879,8 @@ func check_goals() -> void:
 	# for the next number and risk the collapse.
 	if not booking_active or mode != MODE_PERFORM or tut_active:
 		return
-	while goals_hit < NUM_GOALS and score >= goal_for(run_venue, goals_hit):
+	while goals_hit < NUM_GOALS and score >= goal_for(run_venue, goals_hit) \
+			and goal_clock_open(goals_hit):
 		goals_hit += 1
 		var s := get_viewport_rect().size
 		var names := ["FIRST GOAL", "SECOND GOAL", "FINAL GOAL"]
@@ -6767,6 +6889,14 @@ func check_goals() -> void:
 			txt = "FINAL GOAL  -  the night is yours. Cash in, or chase the record"
 		add_popup(Vector2(s.x * 0.5, s.y * 0.24), txt, Color(1.0, 0.86, 0.42))
 		play_sfx("cheer", -5.0)
+		# A GOAL IS PAID IN FLOWERS, ONE FROM EACH SIDE (2026-07-29, Louis: "subgoals should
+		# flower small flowers, one on each side"). The room already throws on its own beat
+		# when it is pleased; this is the room answering a MOMENT, which is a different thing
+		# and reads as one because it is symmetrical - two stems arriving together from
+		# opposite wings is a gesture, where one more stem in the drift is just weather.
+		# Deliberately tier 0, the plain flower: the goal is the reward, not the tribute.
+		throw_from_crowd("flower", 0, -1.0)
+		throw_from_crowd("flower", 0, 1.0)
 		play_sfx("record", -8.0)
 		spawn_parts(Vector2(s.x * 0.5, s.y * 0.16), Color(1.0, 0.85, 0.45), 22, 2.5, "confetti")
 
@@ -7458,13 +7588,12 @@ func prop_thrill() -> float:
 
 
 func chain_mult() -> float:
-	# THE LINEAR HALF, and it is shallow ON PURPOSE. It used to be the streak length itself,
-	# capped at ten per object. Louis asked for the cap gone and for linear play to be a far
-	# worse way to reach a goal - and simply deleting the cap would have done the opposite,
-	# since an uncapped streak length is the steepest linear curve there is. So the curve came
-	# down as the ceiling came off: 1 + 0.05 x chain, uncapped, which turns sixty straight
-	# Perfects into x4 rather than into x60.
-	return 1.0 + CHAIN_STEP * float(chain)
+	# A SATURATING CURVE, so the score stays LINEAR IN TIME - see CHAIN_GAIN for why that
+	# matters and what the previous version got wrong. x1.0 cold, x2.5 at forty straight
+	# Perfects, approaching x4 and never reaching it. No hard cap anywhere: it is a limit, not
+	# a wall, so nothing ever "maxes out" on screen.
+	var c := float(chain)
+	return 1.0 + CHAIN_GAIN * c / (c + CHAIN_HALF)
 
 
 func trick_difficulty(t: int) -> float:
@@ -7721,6 +7850,11 @@ func on_trick() -> void:
 			else:
 				toggle_on = trick_sel
 				toggle_scored = false
+				# ONE PRESS, ONE MULTIPLICATION - see the note on TRICKS. Switching a toggle
+				# ON is the activation; holding it costs nothing more and pays nothing more,
+				# so the score inside a run stays linear in time.
+				if not tut_active:
+					apply_trick_mult(trick_sel)
 				# ...AND IT SAYS SO WHEN THE COMBINATION FIGHTS ITSELF. Three of the
 				# eighteen pattern x toggle states are geometrically contradictory rather
 				# than merely hard - see trick_pattern_warning - and the player is TOLD
@@ -7777,14 +7911,11 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 	var td: Dictionary = TRICKS[t]
 	if encore_score_mult() <= 0.0:
 		return   # For the Danger: a light prop scores nothing, and neither do its tricks
-	# THE TRICK MULTIPLIES THE RUN. It used to add a flat bonus - 60 for a Behind the Back, 90
-	# for a High Toss - which is a rounding error beside a run worth millions and was never
-	# going to produce the curve Louis asked for. One landing, one multiplication, so x
-	# landings give p^x with no special case (see apply_trick_mult).
-	var before := score
-	apply_trick_mult(t)
+	# **THE MULTIPLICATION ALREADY HAPPENED, AT THE PRESS.** This function runs on every catch
+	# of a shaped throw, so multiplying here is multiplying per CATCH - which is the time-based
+	# exponential the per-activation rule exists to remove. What is left for a landing to do is
+	# what a landing always did: warm the room, count once toward the tally, and shout.
 	var tog := String(td["kind"]) == "toggle"
-	trick_score += int(round(clampf(score - before, 0.0, 1.0e18)))
 	warm_room(0.03 if tog else 0.09)
 	if tog:
 		if not toggle_scored:
@@ -11054,6 +11185,18 @@ func suit_name(i: int) -> String:
 	return String(venue_data(i)["name"])
 
 
+func wear_cost(piece: String, stage: int) -> int:
+	# what this garment costs IN THIS HOUSE'S CUT. The base is the piece's own worth and the
+	# multiplier is the house's - see WEAR_STAGE_COST. Rounded to a readable figure rather
+	# than left at 1,417, because a shop price with three significant figures reads as a price
+	# and one with four reads as an accident.
+	var base := float(wear_piece_def(piece).get("cost", 0))
+	var m: float = WEAR_STAGE_COST[clampi(stage, 0, WEAR_STAGE_COST.size() - 1)]
+	var raw := base * m
+	var step := 100.0 if raw < 5000.0 else 500.0
+	return int(round(raw / step) * step)
+
+
 func wear_piece_def(piece: String) -> Dictionary:
 	# ONE ROW PER GARMENT: what it is called, what it costs, and what wearing it does. The cost
 	# is per STAGE cut, so a full wardrobe for one house is the sum of these and a full wardrobe
@@ -11075,7 +11218,7 @@ func wear_piece_def(piece: String) -> Dictionary:
 
 func tailor_buy(piece: String, stage: int) -> void:
 	var d := wear_piece_def(piece)
-	var cost := int(d["cost"])
+	var cost := wear_cost(piece, stage)
 	if owns_wear(piece, stage) or money < cost:
 		if money < cost:
 			set_day_msg("not enough %s  -  %s asks %s" % [coin_word(), String(d["name"]), commafy(cost)])
@@ -12620,13 +12763,16 @@ func score_text(v: float) -> String:
 	# 41,882,610 and 41,883,004 - so it goes to E notation, which is also the only honest way
 	# to print 1e47.
 	#
-	# The threshold is deliberately LOW. Balatro switches early for the same reason: the moment
-	# a number is scenery, showing it as scenery is clearer than showing it as a ledger, and it
-	# makes the jump from "a good act" to "an absurd one" legible at a glance.
+	# THE THRESHOLD IS HIGH ON PURPOSE (2026-07-29, Louis: "the scoring should feel normal and
+	# not exponential in the beginning. It's only the later stages that have E counting"). At
+	# 1e6 the Small Theatre already printed in exponent form, which made an early career look
+	# like a spreadsheet. At 1e9 the first four houses read as ordinary comma-grouped numbers -
+	# the Backyard finishes under a thousand - and E notation arrives with the Circus, where the
+	# figures genuinely stop being quantities and start being scenery.
 	if not is_finite(v):
 		return "E300+"
 	var a := absf(v)
-	if a < 1.0e6:
+	if a < 1.0e9:
 		return commafy(int(round(v)))
 	var e := int(floor(log(a) / log(10.0)))
 	var m := a / pow(10.0, float(e))
@@ -12796,7 +12942,25 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			goal_head = "NEXT GOAL"
 		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(0.85, 0.72, 0.55))
 		if goals_hit < NUM_GOALS:
-			draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), score_text(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
+			# THE NUMBER, and then - only while it matters - THE CLOCK. A goal banks on both
+			# gates (see GOAL_MIN_S), and a bar sitting full with nothing happening is the one
+			# failure a hidden gate always causes: the player concludes the game is broken.
+			# So the moment the score passes the bar, the target line becomes a countdown and
+			# says plainly what is being waited for.
+			var clock_left := goal_clock_left(goals_hit)
+			if score >= target and clock_left > 0.0:
+				var cp := 0.65 + 0.35 * sin(float(tick) * 0.12)
+				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), "%.1fs" % clock_left,
+					HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(0.72, 0.95, 0.68, cp))
+				draw_string(font, Vector2(LX + 14, tcard_y + 150), "number beaten  -  hold the set",
+					HORIZONTAL_ALIGNMENT_LEFT, 150.0, 10, Color(0.72, 0.95, 0.68, 0.85))
+			else:
+				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), score_text(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
+				if clock_left > 0.0:
+					# ...and before the number is beaten, the clock is still worth showing,
+					# quietly, so nobody is surprised by it later
+					draw_string(font, Vector2(LX + 14, tcard_y + 150), "opens in %.0fs" % clock_left,
+						HORIZONTAL_ALIGNMENT_LEFT, 150.0, 10, Color(0.78, 0.72, 0.62, 0.75))
 		else:
 			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, 12, Color(1.0, 0.88, 0.5))
 		if goals_hit > 0:
@@ -14978,8 +15142,9 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 12,
 			Color(0.78, 0.90, 0.72))
 		if not owned3:
-			var afford2 := money >= int(pdf["cost"])
-			draw_string(font, Vector2(cx2, fy2 + 40.0), "buy for %s" % commafy(int(pdf["cost"])),
+			var pcost := wear_cost(pc, stg)
+			var afford2 := money >= pcost
+			draw_string(font, Vector2(cx2, fy2 + 40.0), "buy for %s" % commafy(pcost),
 				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13,
 				Color(0.78, 0.96, 0.72) if afford2 else Color(0.90, 0.55, 0.48))
 		elif worn_stage(pc) == stg:
@@ -18610,13 +18775,24 @@ func flower_tier_roll() -> int:
 	return 0
 
 
-func throw_from_crowd(kind: String, tier: int) -> void:
+func throw_from_crowd(kind: String, tier: int, side: float = 0.0) -> void:
 	# one flower (or tomato) leaves a seat and arcs down to the boards near the feet.
 	# It comes from a random point along the crowd line and lands in a loose scatter
 	# around the juggler, so a heavy shower reads as a shower and not as a stack.
+	#
+	# `side` PINS WHICH WING IT COMES FROM (-1 left, +1 right, 0 anywhere), which the goal
+	# salute uses. Two stems arriving together from opposite wings reads as a GESTURE; the same
+	# two thrown from random seats read as one more gust of the ordinary drift, and the moment
+	# is lost. It is a parameter rather than a second function because everything else about
+	# the throw - the arc, the landing scatter, the pile - is identical.
 	var s := get_viewport_rect().size
 	var fy := stage_floor_y()
-	var from := Vector2(randf_range(s.x * 0.05, s.x * 0.95), fy + randf_range(16.0, 46.0))
+	var fx := randf_range(s.x * 0.05, s.x * 0.95)
+	if side < 0.0:
+		fx = randf_range(s.x * 0.06, s.x * 0.22)
+	elif side > 0.0:
+		fx = randf_range(s.x * 0.78, s.x * 0.94)
+	var from := Vector2(fx, fy + randf_range(16.0, 46.0))
 	# A TOMATO IS AIMED (2026-07-27, Louis: "make sure they are towards his body and
 	# visible stains"). Flowers are TRIBUTE and are tossed at the feet; a tomato is an
 	# ATTACK and goes at the man. It therefore takes the torso as its target - the same
