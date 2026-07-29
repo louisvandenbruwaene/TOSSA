@@ -1746,6 +1746,35 @@ Do not reshape the figure to fit a hat.
   loudly - and commit before any structural edit, which is the other half of why the loss was
   survivable at all.
 
+- **THE LAST FOUR ICONS, and one rule that covers all of them** (2026-07-29, Louis: "The
+  tailor icon ... look bad", "make the boots and gloves look better tho", "i want there to be a
+  good looking visible icon of the pie"). Every one failed the same way: **the silhouette was
+  doing none of the work and the details were being asked to carry it.**
+    * THE TAILOR was a coat hanger, and the comment I wrote for it said the read "depends on
+      that little question-mark of wire above the shoulders" - which is a confession, because a
+      hanger at 18px is a triangle with a wire on it. It is a DRESS FORM now: a torso, so it is
+      instantly a human shape and instantly about clothes, and nothing else in the game looks
+      remotely like one.
+    * THE PIE was a flat wedge with two lines across it. A slice of pie is not a flat shape -
+      what makes one recognisable is the CUT FACE, the tall filled side you see because
+      somebody took it out of a pie. Golden crimped top, dark filling below it, pastry base,
+      steam.
+    * THE BOOT had all the right parts and still read as a lump, because **it had no ankle**:
+      every shape was a straight-sided slab stacked on the next. A real boot pinches at the
+      ankle and swells again at the calf, and that single waist is what the eye reads as "boot"
+      before it reads any detail. Plus a turned-down cuff, a stacked heel and a welt.
+    * THE GLOVE had a scalloped hem and one seam, which at 23px is a pale blob with a frill.
+      What was missing is the THUMB - the one shape a glove has that a bare hand does not - so
+      it is drawn even though the bare hand deliberately has no fingers at all, because here it
+      is the identifying mark rather than a detail.
+- **EVERY RACK ROW CARRIES ITS OWN OBJECT** (Louis: "it's not obvious what the glowsuit button
+  does"). He is right, and a NAME is a poor answer for a garment: eight text labels is a list,
+  and a list is the one thing a wardrobe should never be. `draw_gear_icon` already draws each of
+  these as the thing it is - it was built for the shop cards these rows replaced - so the
+  picture costs nothing and the two cannot drift. Scaled 0.42 and sized by the WIDEST icon
+  rather than the average: the glasses span 28 units either side and the helmet 40, so at 0.62
+  they ran through the label beside them and the screen read "Energy Helme" with a can on the t.
+
 ## MINIMUM REQUIREMENTS (2026-07-28) - derived from measurement, not guessed
 
 Louis asked for a guess at the minimum spec. It is better than a guess, because the numbers
