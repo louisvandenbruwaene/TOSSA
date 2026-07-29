@@ -304,9 +304,8 @@ const TENNIS := 5
 # tamed routine is never optimal). P cycles the unlocked patterns in training.
 # "mult" is `s` in the segment formula: it multiplies a WHOLE clean stretch, not a
 # catch. Louis's values, 2026-07-29: Cascade 1, Columns 1.2, Half Shower 2, Reverse
-# Cascade 1.5, Tennis 1.5. The Shower is the one he did not name and is taken at 1.8,
-# above the two 1.5s and below the Half Shower, which is the order the old table already
-# had - say if it should be otherwise.
+# Cascade 1.5, Tennis 1.5, and the Shower is 3 (he named it on 2026-07-29 evening - it is
+# the biggest coefficient in the table, above the Half Shower's 2).
 # EXACTLY ONE pattern is active at a time (Louis): Reverse Cascade and Tennis live
 # HERE now, not as Space toggles, so switching patterns always switches the whole
 # routine and Columns can never run "on top of" anything.
@@ -339,7 +338,7 @@ const PATTERNS := [
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 10, "acc": 150, "ven": 1, "perf": 24, "mult": 2.0, "room": 0.05,
 	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
-	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.8, "room": 0.7,
+	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 3.0, "room": 0.7,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
 	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.5, "room": 1.0,
 	 "desc": "BOTH hands throw over the top, the weave runs backward."},
@@ -1153,8 +1152,6 @@ class Ball:
 	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
 							  # balls in one hand never stack on the same line (-1 = unset)
 	var thrown_from := -1     # which hand actually released this (LEFT/RIGHT); informational
-	var bumped := false       # hard mode: this ball clacked another mid-air; only a
-							  # half-Perfect-window catch can still save it
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
 
 
@@ -1224,11 +1221,13 @@ var score := 0.0
 var banked_pts := 0.0   # segments already closed, at what they were worth
 # THE LIVE SEGMENT. n, p and s are held rather than read live because they are factors of
 # the WHOLE segment - see seg_open for why a mid-segment switch has to close it instead.
-var seg_x := 0.0                    # weighted catches: Perfect 3, Good 2, Late 1
-var seg_tricks: Dictionary = {}     # trick index -> how many times it landed (the mi)
-var seg_n := MIN_BALLS              # objects this segment is being juggled with
-var seg_p := 1.0                    # ...their signature
-var seg_s := 1.0                    # ...and the pattern multiplier
+var segments: Array[Dictionary] = []  # every CLOSED streak this act: x, n, o, pat, str
+var act_tricks: Dictionary = {}     # trick index -> how many times it landed IN THE ACT (m_j)
+var seg_x := 0.0                    # weighted catches in the live streak: Perfect 3, Good 2, Late 1
+var seg_n := MIN_BALLS              # objects it is being juggled with (n_i)
+var seg_o := 1.0                    # ...their signature (o)
+var seg_pat := 1.0                  # ...the pattern coefficient (p)
+var seg_str := 1                    # ...and their Strength cost per object (s)
 var seg_reason := ""                # what closed the last one, for the readout
 var won_the_room := false           # the crowd meter has been GREEN at some point tonight,
 									 # which switches the tomatoes off for good - see warm_room
@@ -1663,10 +1662,10 @@ var dominant_hand := RIGHT  # which hand is the strong one (Settings). It holds 
                             # extra prop on an odd count and starts the pattern -
                             # every juggler deals the odd ball to their strong hand,
                             # so a left-hander should not have to juggle mirrored.
-var set_collide := false  # hard mode: props that clack mid-air become nearly
-						  # uncatchable (half the Perfect window, no chance roll).
-						  # A PERFECT pattern never collides, so this only ever
-						  # punishes sloppy heights that share air.
+# (set_collide, the hard-collisions toggle, was here. Removed 2026-07-29 with the mechanic
+# it drove - see update_sim's clack loop. Its saved key is simply not read any more, which
+# is the right way to retire a setting: an old settings file keeps the value, nothing looks
+# at it, and nobody has to migrate anything.)
 var set_music := 1.0      # the music tracks' shared volume, 0..1 (was a bool)
 var set_sfx := 1.0        # catch/throw/drop sound effects' volume, 0..1 (was a bool)
 var set_fullscreen := false  # borderless fullscreen (also toggled live with F11)
@@ -2027,8 +2026,6 @@ func _ready() -> void:
 		var hoi := ua.find("--hold")    # dev: the auto-player's hold per throw (0..44),
 		if hoi != -1 and hoi + 1 < ua.size():   # to verify held heights on screenshots
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
-		if ua.has("--collide"):     # dev: force the hard-collisions toggle ON this session
-			set_collide = true
 		if ua.has("--glow"):        # dev: a full glowing set of everything, for Blackout shots
 			for gk in glow_count.size():
 				glow_count[gk] = MAX_BALLS_HARD
@@ -3010,10 +3007,16 @@ func goal_catches(venue: int, gi: int) -> float:
 
 func goal_for(venue: int, gi: int) -> float:
 	# ...and the score that run length is worth at the CURRENT load, which is the number the
-	# bar and the results card compare against. Tricks are deliberately not in it: they are
-	# the player's own upside, so landing them is how you clear a goal early rather than
-	# something the house already expected of you.
-	return pattern_mult() * safe_pow(goal_catches(venue, gi), float(num_balls) * prop_sig())
+	# bar and the results card compare against. It is the SAME expression score_log10 uses,
+	# with one streak of that length and no tricks, so "the goal came down with the scores"
+	# is true by construction rather than by a second table kept in step by hand (Louis:
+	# nerf the scores "and the required score along with it in the same amounts").
+	#
+	# Tricks are deliberately not in it: they are the player's own upside, so landing them is
+	# how you clear a goal early rather than something the house already expected of you.
+	var x := goal_catches(venue, gi)
+	var expo := float(prop_str_unit()) * float(num_balls)
+	return from_log10(log_10(x) + expo * log_10(prop_sig() * pattern_mult() + 1.0))
 
 
 # THE BUILD EACH HOUSE EXPECTS, as data rather than as a sentence in a comment. VENUE_BASE was
@@ -3070,10 +3073,14 @@ func print_ladder() -> void:
 		var per_catch: float = lerpf(CATCH_WEIGHT[2], CATCH_WEIGHT[0], skill)
 		var need1 := goal_catches(v, 0) / per_catch
 		var need3 := goal_catches(v, 2) / per_catch
-		# the score those runs work out to, through the game's own function
-		var e := float(n) * prop_sig(pk)
-		var g1 := float(PATTERNS[pat]["mult"]) * safe_pow(goal_catches(v, 0), e)
-		var g3 := float(PATTERNS[pat]["mult"]) * safe_pow(goal_catches(v, 2), e)
+		# the score those runs work out to, in the SAME expression goal_for uses - one streak
+		# of that length, no tricks. (It read `mult * x^(n*sig)` until 2026-07-29 evening,
+		# which was the previous formula, and a calibration tool carrying its own copy of the
+		# scoring is exactly the drift this rewrite was supposed to have ended.)
+		var e := float(int(PROP_STR_UNIT[pk])) * float(n)
+		var base := prop_sig(pk) * float(PATTERNS[pat]["mult"]) + 1.0
+		var g1 := from_log10(log_10(goal_catches(v, 0)) + e * log_10(base))
+		var g3 := from_log10(log_10(goal_catches(v, 2)) + e * log_10(base))
 		var floor_s: float = lerpf(GOAL_MIN_S_LOW[2], GOAL_MIN_S_HIGH[2], float(v) / float(maxi(MAX_VENUE, 1)))
 		print("%-18s %2dx %-9s %-16s %5.2f %8.2f %9s %14s %8.0fs  (clock floor %.0fs, %.0f catches)" % [
 			String(venue_data(v)["name"]), n, String(PROPS[pk]["name"]), String(PATTERNS[pat]["name"]),
@@ -5835,8 +5842,13 @@ func slots_input(kc: int) -> void:
 
 
 func settings_input(kc: int) -> void:
-	var n := 10  # music, sound, shake, reduce-motion, collisions, fullscreen, dominant
-				 # hand, controls, records, Back
+	# HARD COLLISIONS CAME OUT ON 2026-07-29 (Louis: "remove hard collisions from settings,
+	# since it's no longer implemented"). It was the last reader of the mid-air clack, which
+	# lost its other one when the Close Quarters Encore was replaced. The Ball.bumped field
+	# and the clack loop go with it - a setting nobody can reach is a mechanic nobody can
+	# meet, and leaving the machinery in place only makes the next reader believe it works.
+	var n := 9   # music, sound, shake, reduce-motion, fullscreen, dominant hand, controls,
+				 # records, Back
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -5862,19 +5874,17 @@ func settings_input(kc: int) -> void:
 				3:
 					reduce_motion = not reduce_motion
 				4:
-					set_collide = not set_collide
-				5:
 					set_fullscreen = not set_fullscreen
 					apply_fullscreen()
-				6:
+				5:
 					dominant_hand = LEFT if dominant_hand == RIGHT else RIGHT
-				7:
+				6:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				8:
+				7:
 					game_state = ST_STATS   # the career ledger, back with Esc
-				9:
+				8:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -6028,7 +6038,6 @@ func load_settings() -> void:
 		set_shake = bool(cf.get_value("opt", "shake", true))
 		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
 		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
-		set_collide = bool(cf.get_value("opt", "collide", false))
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
 		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
@@ -6056,7 +6065,6 @@ func save_settings() -> void:
 	cf.set_value("opt", "shake", set_shake)
 	cf.set_value("opt", "reduce_motion", reduce_motion)
 	cf.set_value("opt", "dominant_hand", dominant_hand)
-	cf.set_value("opt", "collide", set_collide)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
 	cf.set_value("opt", "fullscreen", set_fullscreen)
@@ -6902,12 +6910,13 @@ func start_run(n: int) -> void:
 	peak_applause = 0.7
 	won_the_room = false
 	score = 0.0
-	banked_pts = 0.0
+	segments = []
+	act_tricks = {}
 	seg_x = 0.0
-	seg_tricks = {}
 	seg_n = num_balls
-	seg_p = prop_sig()
-	seg_s = pattern_mult()
+	seg_o = prop_sig()
+	seg_pat = pattern_mult()
+	seg_str = prop_str_unit()
 	seg_reason = ""
 	streak = 0
 	best_streak = 0
@@ -7082,13 +7091,6 @@ func on_catch(h: int) -> void:
 	# the set - see the exhaustion redirect in drop_ball, straight to eat/sleep.
 	if stamina <= 0.0 and not sure:
 		drop_ball(best, "SPENT")
-		return
-	# hard mode (set_collide): a ball that clacked another mid-air only catches
-	# on PERFECT timing - the full Perfect window (Louis: same frames as normal,
-	# not halved), but the Good/Late chance roll never applies. Saving one still
-	# counts as the Perfect it timing-wise is.
-	if best.bumped and best_d > perfect_window() and not sure:
-		drop_ball(best, "collided")
 		return
 	# Perfect timing always secures. A Good or Late catch is a chance that rises
 	# with Accuracy and falls with how far off the standard height the throw was.
@@ -7338,7 +7340,6 @@ func do_throw(h: int, hold: int) -> void:
 		return
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
-	b.bumped = false   # a fresh throw starts clean; only a NEW mid-air clack marks it
 	b.flat = false     # ...and every throw re-decides whether it is a pass or a throw. A
 					   # prop that fed once would otherwise stay flat for the rest of the
 					   # run, and its next HIGH throw would come out as a flat one
@@ -7988,18 +7989,17 @@ const CATCH_WEIGHT := [3.0, 2.0, 1.0]   # what a Perfect, a Good and a Late are 
 
 
 func seg_open(reason: String = "") -> void:
-	# BANK WHAT IS STANDING AND START A NEW SEGMENT on the load in hand. Called on a drop, at
-	# the start of an act, and whenever the load itself changes - because n, p and s are
-	# factors of the whole segment, so a player who built a long x on three balls and then
-	# switched to seven torches would otherwise have the switch reach backwards and rescore
-	# every catch they already made. Closing the segment at the switch is both the honest
-	# reading of the formula and the thing that stops it being an exploit.
-	banked_pts = minf(banked_pts + seg_value(), SCORE_CEIL)
+	# CLOSE THE STANDING SEGMENT AND START A NEW ONE on the load in hand. Called on a drop,
+	# at the start of an act, and whenever the load itself changes - n, o and p are per
+	# segment, so a player who built a long streak on three balls and then switched to seven
+	# torches would otherwise have the switch reach backwards and rescore all of it.
+	if seg_x > 0.0:
+		segments.append({"x": seg_x, "n": seg_n, "o": seg_o, "pat": seg_pat, "str": seg_str})
 	seg_x = 0.0
-	seg_tricks.clear()
 	seg_n = num_balls
-	seg_p = prop_sig()
-	seg_s = pattern_mult()
+	seg_o = prop_sig()
+	seg_pat = pattern_mult()
+	seg_str = prop_str_unit()
 	seg_reason = reason
 	recalc_score()
 
@@ -8007,76 +8007,174 @@ func seg_open(reason: String = "") -> void:
 func seg_sync_load() -> void:
 	# the load may have changed without a drop (the O, P and 1/2 keys all do it mid-act).
 	# Nothing happens if it has not - this is cheap enough to call from anywhere that might.
-	if seg_n != num_balls or not is_equal_approx(seg_p, prop_sig()) or not is_equal_approx(seg_s, pattern_mult()):
+	if seg_n != num_balls or not is_equal_approx(seg_o, prop_sig()) \
+			or not is_equal_approx(seg_pat, pattern_mult()) or seg_str != prop_str_unit():
 		seg_open("load")
 
 
-func seg_exponent() -> float:
-	return float(seg_n) * seg_p
+func act_trick_ids() -> Array:
+	# the DISTINCT tricks landed anywhere in this act. Both the outer exponent and the
+	# per-segment product are built off this list, so "how many different tricks did you
+	# use" is asked once and answered the same way everywhere.
+	var out := act_tricks.keys()
+	out.sort()
+	return out
 
 
-func seg_value() -> float:
-	# one segment, worth exactly the expression at the head of this region
-	if seg_x <= 0.0:
+func score_log10() -> float:
+	# LOUIS'S FORMULA, 2026-07-29 evening, in logs. In his notation:
+	#
+	#   ( SUM over streaks i  PROD over tricks j
+	#         (1 + m_j) * x_i * (o * t_j * p + 1) ^ (s * n_i / (T + 1))
+	#   ) ^ (T + 1)
+	#
+	# x_i is the streak's weighted catch count, n_i the objects in it, o the prop's
+	# signature, p the pattern coefficient, s the prop's Strength cost per object, t_j a
+	# trick's multiplier, m_j how many times it landed, T how many DIFFERENT tricks the act
+	# used.
+	#
+	# **WHY IT REPLACED x^(n*p), which is the whole point of the change** (Louis: "the scores
+	# are a bit too high early on ... i just want the numbers to be smaller early game as to
+	# exaggerate the late game amounts"). The old shape had the streak as the BASE and the
+	# load as the exponent, so even three balls ran at x^3 and a first act at the Backyard
+	# was already in the millions. Here the streak is LINEAR and the load sets an exponential
+	# constant: three balls in a Cascade is 2^3 = 8 a catch, so a good Backyard night is a
+	# few hundred, while fifteen chainsaws in Tennis is 8.5^195, which is past E150. Same
+	# ladder, three orders of magnitude lower at the bottom and higher at the top.
+	#
+	# **THE EXPONENT IS THE STRENGTH THE LOAD COSTS** (s * n), which is the neatest thing
+	# about it: your score grows exponentially in the muscle you are actually using, and it
+	# is bounded by construction, because s * n can never exceed the Strength stat's own cap
+	# of 195. Louis pointed that out himself when he wrote it down.
+	#
+	# **IT IS COMPUTED IN LOGS AND ONLY EXPONENTIATED AT THE END.** A maxed act - fifteen
+	# chainsaws, Tennis, all three tricks landed twenty times each - reaches about 10^167
+	# INSIDE the brackets, and the outer power of four takes that to 10^668. A double stops
+	# at 1.8e308, so the honest version of this arithmetic overflows to INF and poisons every
+	# comparison downstream of it. Logs cannot overflow, and the one clamp at the end is the
+	# only place a ceiling is applied.
+	var tricks := act_trick_ids()
+	var T := tricks.size()
+	var outer := float(T + 1)
+	var terms: Array[float] = []          # log10 of each streak's product
+	var all := segments.duplicate()
+	if seg_x > 0.0:
+		all.append({"x": seg_x, "n": seg_n, "o": seg_o, "pat": seg_pat, "str": seg_str})
+	for sg in all:
+		var x := float(sg["x"])
+		if x <= 0.0:
+			continue
+		var expo := float(sg["str"]) * float(sg["n"]) / outer
+		var lg := 0.0
+		if T == 0:
+			# NO TRICKS IS NOT AN EMPTY PRODUCT. Taken literally the formula would collapse
+			# to (number of streaks)^1 for a trickless act, which is plainly not the intent -
+			# it is one factor with t = 1 (no flourish) and m = 0 (landed none), which leaves
+			# exactly x * (o * p + 1) ^ (s * n). Every trickless act in the game runs through
+			# this branch, so it is the shape most players will meet first.
+			lg = log_10(x) + expo * log_10(float(sg["o"]) * float(sg["pat"]) + 1.0)
+		else:
+			for t in tricks:
+				var m := float(act_tricks.get(t, 0))
+				lg += log_10(1.0 + m) + log_10(x) \
+					+ expo * log_10(float(sg["o"]) * trick_mult(int(t)) * float(sg["pat"]) + 1.0)
+		terms.append(lg)
+	if terms.is_empty():
+		return -1.0e30
+	# the sum, in logs (log-sum-exp): factor the largest term out so the rest can be added
+	# as ordinary numbers however far apart they are
+	var top: float = terms[0]
+	for lg2 in terms:
+		top = maxf(top, lg2)
+	var acc := 0.0
+	for lg3 in terms:
+		acc += pow(10.0, minf(lg3 - top, 0.0))
+	return outer * (top + log_10(acc))
+
+
+func log_10(v: float) -> float:
+	return log(maxf(v, 1e-300)) / log(10.0)
+
+
+func from_log10(l: float) -> float:
+	# back to a number, with the game's one ceiling applied here and nowhere else
+	if l <= 0.0:
 		return 0.0
-	var m := seg_s
-	for t in seg_tricks:
-		m *= pow(trick_mult(int(t)), float(seg_tricks[t]))
-	return minf(m * safe_pow(seg_x, seg_exponent()), SCORE_CEIL)
+	if l >= 300.0:
+		return SCORE_CEIL
+	return pow(10.0, l)
 
 
 func safe_pow(base: float, e: float) -> float:
-	# pow() OVERFLOWS TO INF LONG BEFORE THE CEILING DOES, and an INF score poisons every
+	# pow() OVERFLOWS TO INF LONG BEFORE SCORE_CEIL DOES, and an INF score poisons every
 	# comparison downstream of it (a goal check, a record, a pay calculation) in a way that
-	# is very hard to trace back here. Fifteen chainsaws is an exponent of 75, so a segment
-	# of only 10,000 weighted catches is already 10^300. Decided in logs, which cannot
-	# overflow, and only then raised.
+	# is very hard to trace back here. Decided in logs, which cannot overflow.
 	if base <= 0.0 or e <= 0.0:
 		return 0.0
-	if log(base) / log(10.0) * e >= 300.0:
-		return SCORE_CEIL
-	return pow(base, e)
+	return from_log10(log_10(base) * e)
 
 
 func seg_add_catch(quality: int) -> void:
-	# quality 0 Perfect, 1 Good, 2 Late
+	# quality 0 Perfect, 1 Good, 2 Late.
+	# LOUIS WROTE "the amount of throws" for x, and this keeps the 3 / 2 / 1 weighting he
+	# specified earlier in the same brief. The weighting matters far less than it did - x is
+	# linear now, so a Perfect is worth three catches rather than cubing something - but a
+	# Perfect being worth three Lates is the one place catch QUALITY still reaches the score
+	# at all, and dropping it would leave timing paying nothing but the crowd.
 	seg_x += CATCH_WEIGHT[clampi(quality, 0, 2)]
 	recalc_score()
 
 
 func trick_mult(t: int) -> float:
-	# `ti` FOR ONE LANDING OF THIS TRICK - Louis's own flat values, straight out of TRICKS.
-	# THE CONTEXT SCALING IS GONE (it used to grow a trick's worth with prop weight, count
-	# and pattern, so a Spin was x2 on three balls and x6.9 on fifteen chainsaws in Tennis).
-	# Under the new formula the load is already in the exponent, where it is worth orders of
-	# magnitude more than it ever was as a multiplier, so scaling the trick by the load as
-	# well was charging for the same difficulty twice.
-	# STILL TO BALANCE: nothing caps how many times a trick may land in one segment, so
-	# ti^mi is unbounded and cheapest to farm at the LOWEST load - see tasks.md for the two
-	# candidate nerfs. Louis asked for the suggestion, not the implementation.
+	# `t_j` for one landing of this trick - Louis's own flat values, straight out of TRICKS.
+	# It is not a multiplier on the score any more: it sits inside (o * t * p + 1), the BASE
+	# of the load's exponential, so a trick raises what every catch of that load is worth
+	# rather than multiplying the run once.
 	if t < 0 or t >= TRICKS.size():
 		return 1.0
 	return float(TRICKS[t].get("diff", 1.0))
 
 
 func seg_add_trick(t: int) -> void:
-	# ONE LANDING, ONE MULTIPLICATION: mi landings of trick i multiply this segment by
-	# ti^mi with no special case anywhere, which is exactly the sentence Louis wrote it as.
+	# tricks are counted for the WHOLE ACT, not per streak (m_j and T have no i in Louis's
+	# notation), so landing one early keeps paying through every streak after it - and a
+	# drop cannot take a flourish away from you.
 	if trick_mult(t) <= 1.0:
 		return
-	seg_tricks[t] = int(seg_tricks.get(t, 0)) + 1
+	act_tricks[t] = int(act_tricks.get(t, 0)) + 1
 	recalc_score()
 
 
 func close_run() -> void:
-	# A DROP BANKS THE SEGMENT. Everything it grew to is locked in and a new one opens at
-	# x = 0 - so a drop is not a small setback, it is the end of an exponential, and the
-	# later it happens the more it costs. That is the tension the whole system is for.
+	# A DROP CLOSES THE SEGMENT. **It no longer costs the score directly** and that is worth
+	# being deliberate about: with x linear and the outer power applied to the SUM, a streak
+	# split in two is worth what one streak of the same total length is worth, unless the act
+	# is running two or more DIFFERENT tricks (then x appears T times inside the sum and the
+	# split does cost). What a drop still costs is the act itself - three of them collapse
+	# the night and strip the score back to the last goal banked - so it remains the most
+	# expensive thing on the stage, just through the crowd rather than through the arithmetic.
 	seg_open("drop")
 
 
+func seg_per_catch() -> float:
+	# what ONE more weighted catch adds to the live streak's own term, for the rail. It is
+	# the streak's product with x factored out, which under a trickless act is simply
+	# (o * p + 1) ^ (s * n) - the number the whole formula is built around.
+	var tricks := act_trick_ids()
+	var outer := float(tricks.size() + 1)
+	var expo := float(seg_str) * float(seg_n) / outer
+	var lg := 0.0
+	if tricks.is_empty():
+		lg = expo * log_10(seg_o * seg_pat + 1.0)
+	else:
+		for t in tricks:
+			lg += log_10(1.0 + float(act_tricks.get(t, 0))) \
+				+ expo * log_10(seg_o * trick_mult(int(t)) * seg_pat + 1.0)
+	return from_log10(lg * outer)
+
+
 func recalc_score() -> void:
-	score = minf(banked_pts + seg_value(), SCORE_CEIL)
+	score = from_log10(score_log10())
 
 
 func rec_table() -> Array[float]:
@@ -9774,12 +9872,13 @@ func update_sim() -> void:
 			var maxlen := 5 + int(clampf(b.height, 0.0, 1.4) * 8.0)
 			while b.trail.size() > maxlen:
 				b.trail.remove_at(0)
-	# mid-air contact. With the hard-mode toggle on (or the Close Quarters Encore), two
-	# props that visibly clack both become nearly uncatchable (see on_catch); a PERFECT
-	# pattern never collides, so this only ever punishes sloppy heights that share air.
-	# The dev --collcheck harness rides the same loop to audit the ideal geometry.
-	var clacks := set_collide
-	if clacks or _collcheck:
+	# MID-AIR CONTACT IS A DEV AUDIT NOW, not a mechanic (2026-07-29). Two props that
+	# visibly clacked used to become nearly uncatchable, behind either the Close Quarters
+	# Encore or the Hard Collisions setting; the Encore was replaced and Louis removed the
+	# setting ("it's no longer implemented"), so nothing switched it on any more. The LOOP
+	# survives because --collcheck rides it to audit the ideal pattern's clearance, which is
+	# a genuinely useful tool and the only thing left that cares where two props pass.
+	if _collcheck:
 		var fly: Array[Ball] = []
 		var fpos: Array[Vector2] = []
 		for b in balls:
@@ -9800,12 +9899,6 @@ func update_sim() -> void:
 					if d - dr < _coll_min_drawn:
 						_coll_min_drawn = d - dr
 						_coll_at_drawn = _coll_pair(fpos[i], fpos[j], fly[i], fly[j])
-				if clacks and d < rr and not (fly[i].bumped and fly[j].bumped):
-					fly[i].bumped = true
-					fly[j].bumped = true
-					var mid := (fpos[i] + fpos[j]) * 0.5
-					spawn_parts(mid, Color(1.0, 0.55, 0.4), 7, 3.0, "spark")
-					play_sfx("whiff", -14.0, 1.6)   # a soft airy knock
 	for b in lost:
 		drop_ball(b, "DROP")
 	# THE AIR BEING EMPTY ENDS THE ACT, however it emptied (2026-07-27, Louis: "if there
@@ -11606,10 +11699,23 @@ func owns_wear(piece: String, stage: int) -> bool:
 	return owned_wear.has(wear_key(piece, stage))
 
 
+# THE TAILOR'S MIRROR SHOWS WHAT THE CURSOR IS ON (2026-07-29, Louis: "i want when hovering
+# over something it to be equipped - on the left, not actually selecting it to use, just to
+# show"). Rather than thread a "pretend this is worn" argument through draw_juggler and every
+# garment it draws, the mirror sets this pair for the duration of ONE figure and worn_stage
+# answers with it. It is draw-time only and always restored, exactly like the wordmark's
+# `_cap_a`, so nothing outside that one call can see a garment the player is not wearing -
+# and in particular nothing that SCORES can, since costume_set_bonus reads wear_matches,
+# which reads worn_stage.
+var _fit_piece := ""
+var _fit_stage := -1
+
 func worn_stage(piece: String) -> int:
 	# which STAGE'S cut of this piece is on him, or -1 for none. A piece can only be worn if
 	# it is also owned - a save that loses a purchase (it cannot, but the invariant is cheap)
 	# can never leave him wearing something he does not have.
+	if piece == _fit_piece:
+		return _fit_stage
 	var s := int(worn_piece.get(piece, -1))
 	return s if s >= 0 and owns_wear(piece, s) else -1
 
@@ -11723,11 +11829,20 @@ func tailor_wear(piece: String, stage: int) -> void:
 
 
 func tailor_input(kc: int) -> void:
-	# TWO COLUMNS AND A GRID. Column 0 is the SUIT (which house's base costume to wear);
-	# column 1 is the RACK - one row per garment, one column per house - so `tailor_sel` is a
-	# row and `tailor_stage` the cut within it.
-	var suits := venue_index() + 2        # "follow the stage", then one per stage reached
-	var n := suits if tailor_col == 0 else WEAR_PIECES.size()
+	# ONE GRID, AND ONLY ONE (2026-07-29, Louis: "remove the full costumes"). There used to be
+	# a SUIT column beside the rack, choosing which house's base costume the performer wore,
+	# and it was the source of his other complaint here - "if i select for example the backyard
+	# costume, it won't let me equip special parts of other ones". It always did equip them;
+	# what it did not do was SHOW them, because the mirror was drawn in the chosen suit's
+	# colours and a waistcoat from another house is nearly invisible against the wrong palette.
+	# A control that appears to refuse is worse than one that does, so the whole column is
+	# gone: the costume follows the stage you are playing, which is what it did before the
+	# picker existed, and the rack is the screen.
+	#
+	# The garment down the side, the house across the top. Up/Down walk the garments,
+	# Left/Right the houses, Enter wears or buys whatever the cursor is on.
+	outfit_suit = -1
+	var n := WEAR_PIECES.size()
 	match kc:
 		KEY_TAB, KEY_ESCAPE:
 			tailor_open = false
@@ -11739,30 +11854,14 @@ func tailor_input(kc: int) -> void:
 			tailor_sel = (tailor_sel + 1) % n
 			play_sfx("ui", -15.0)
 		KEY_LEFT, KEY_A:
-			# inside the RACK, left/right walk the houses; at its left edge they step back to
-			# the suit column, so one axis does both and nothing needs a modifier key
-			if tailor_col == 1 and tailor_stage > 0:
-				tailor_stage -= 1
-			else:
-				tailor_col = 0
-				tailor_sel = mini(tailor_sel, suits - 1)
+			tailor_stage = maxi(tailor_stage - 1, 0)
 			play_sfx("ui", -15.0)
 		KEY_RIGHT, KEY_D:
-			if tailor_col == 0:
-				tailor_col = 1
-				tailor_sel = mini(tailor_sel, WEAR_PIECES.size() - 1)
-			else:
-				tailor_stage = mini(tailor_stage + 1, venue_index())
+			tailor_stage = mini(tailor_stage + 1, venue_index())
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
-			if tailor_col == 0:
-				# row 0 is "follow the stage"; the rest are stages in order
-				outfit_suit = -1 if tailor_sel == 0 else tailor_sel - 1
-				save_progress()
-				play_sfx("ui2", -13.0)
-			else:
-				tailor_wear(WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)],
-					clampi(tailor_stage, 0, venue_index()))
+			tailor_wear(WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)],
+				clampi(tailor_stage, 0, venue_index()))
 
 
 func glove_cloth() -> Color:
@@ -11894,8 +11993,6 @@ func draw_targets() -> void:
 		if adiff <= wp:
 			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
 			draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
-		elif b.bumped:
-			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.4, 0.3, 0.2 + 0.5 * t), 3.0, true)
 		elif adiff <= good_window():
 			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
 		elif adiff <= late_window() and dd < 0:
@@ -12269,13 +12366,7 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	# the tumble instead of orbiting the handle. Cheaper as well as truer - one glow quad
 	# on the torches instead of one disc per prop.
 	#
-	# A clacked prop's warning halo is exempt and always shows, on any prop: that one is
-	# information, not atmosphere.
-	if b.bumped:
-		# hard mode: a clacked prop glows warning-hot, so the player knows only
-		# a frame-tight catch can still save it
-		soft_disc(pos, 20.0 * sc, Color(1.0, 0.4, 0.3, 0.24 + 0.1 * sin(float(tick) * 0.5)), 14)
-	elif b.kind == PROP_TORCHES:
+	if b.kind == PROP_TORCHES:
 		var dk := stage_darkness()
 		if dk > 0.02:
 			var fl := 0.90 + 0.10 * sin(fire_clock() * 0.5 + pos.x * 0.03)
@@ -12400,9 +12491,16 @@ func draw_club(pos: Vector2, ang: float, sc: float) -> void:
 	]), body)
 	draw_circle(Vector2(0, -16.5), 6.0, body)              # rounded head
 	draw_line(Vector2(-2.8, -2.4), Vector2(2.8, -2.4), ca(Color(0.98, 0.92, 0.86, 0.8)), 2.0)   # collar
-	# a soft same-hue sheen INSIDE the head - the old pale band arc sat on the rim
-	# and read as a white chip stuck to the club (Louis), worst at shop-card size
-	draw_circle(Vector2(-1.9, -18.4), 2.3, ca(Color(1.0, 0.55, 0.56, 0.45)))
+	# THE HEAD IS FLAT, WITH A RIM (2026-07-29, Louis: the clubs "have a weird circle on
+	# them"). There was a pale pink disc inside the head, meant as a soft sheen, and it read
+	# as exactly what he called it: a circle stuck on the club. It is the same mistake the
+	# round props were rebuilt to escape two days earlier and the entry above it even says
+	# so - a painted highlight is a claim about where the light is, and this one was a
+	# 2.3-unit disc at 45% alpha sitting on a 6-unit head, which is far too big to read as a
+	# specular and far too small to read as shading. `ball_rim`'s rule instead: one flat body
+	# inside a rim that is darker THE WHOLE WAY ROUND, which has no direction, states a solid
+	# edge, and survives every palette the venues throw at it.
+	draw_arc(Vector2(0, -16.5), 5.3, 0.0, TAU, 20, ca(Color(body.r * 0.72, body.g * 0.62, body.b * 0.64)), 1.4)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -13566,13 +13664,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# exponent it is being raised to. The exponent is the part a player plans around,
 		# because it is the one thing they chose before the act started.
 		hud_card(Rect2(RX, 16, RW, 50))
-		var segv := seg_value()
-		var heat := clampf(log(maxf(segv, 1.0)) / 24.0, 0.0, 1.0)
+		# WHAT THIS STREAK IS WORTH A CATCH, which is the number a player can actually act on
+		# under the new formula. The score is linear in streak length now, so the interesting
+		# figure is no longer "what would a drop cost" but "what is each catch paying me" -
+		# the thing the load, the pattern and every trick landed so far have been buying.
+		var per := seg_per_catch()
+		var heat := clampf(log_10(maxf(per, 1.0)) / 40.0, 0.0, 1.0)
 		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
 		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if seg_x > 0.0 else 0
-		draw_string(font, Vector2(RX + 14, 52), score_text(segv), HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "THIS RUN", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(RX + RW - 150, 56), "%d catches  ^%.1f" % [int(seg_x), seg_exponent()], HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+		draw_string(font, Vector2(RX + 14, 52), score_text(per), HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
+		draw_string(font, Vector2(RX + RW - 150, 40), "A CATCH", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + RW - 150, 56), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
 		# stat points are actionable (Tab), so they get one pulsing line. Gold,
@@ -15524,7 +15626,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		if wear_matches(p2):
 			setn += 1
 	draw_string(font, Vector2(px + pw - 460.0, py + 82.0),
-		"tonight at the %s:  %d of %d pieces  ·  score x%.2f" % [suit_name(cur_venue()), setn, WEAR_PIECES.size(), setb],
+		"tonight at %s:  %d of %d pieces  ·  score x%.2f" % [suit_name(cur_venue()), setn, WEAR_PIECES.size(), setb],
 		HORIZONTAL_ALIGNMENT_RIGHT, 420.0, 13,
 		Color(0.75, 0.95, 0.70) if setn > 0 else Color(0.86, 0.62, 0.52))
 	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
@@ -15566,41 +15668,31 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var o := Vector2(mcx, mfy - PV_FLOOR * k + 3.0 * sin(t * 0.018))
 	var hl := o + Vector2(-PV_OUTER * k, 4.0 * sin(t * 0.021 + 1.2) * k)
 	var hr := o + Vector2(PV_OUTER * k, 4.0 * sin(t * 0.021) * k)
+	# HE IS WEARING WHATEVER THE CURSOR IS ON, for this one figure only. See _fit_piece: it
+	# is a draw-time override on worn_stage, set here and restored immediately, so the mirror
+	# can show a garment the player has not equipped (or even bought) without anything that
+	# scores ever seeing it. Nothing is committed until Enter.
+	var hover: String = WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)]
+	var hover_st := clampi(tailor_stage, 0, venue_index())
+	var already := worn_stage(hover) == hover_st
+	if not already:
+		_fit_piece = hover
+		_fit_stage = hover_st
 	draw_mini_juggler(o, hl, hr, 0.0, k)
-	var wornname := "the %s" % suit_name(outfit_suit) if outfit_suit >= 0 else "whatever stage you play"
-	draw_fit_string(font, Vector2(mirror.position.x, mirror.position.y + mirror.size.y - 18.0),
-		wornname, HORIZONTAL_ALIGNMENT_CENTER, mirror.size.x, 13, Color(0.82, 0.76, 0.68))
+	_fit_piece = ""
+	_fit_stage = -1
+	var wornname := "%s, %s cut" % [String(wear_piece_def(hover)["name"]), suit_name(hover_st)]
+	draw_fit_string(font, Vector2(mirror.position.x, mirror.position.y + mirror.size.y - 34.0),
+		wornname, HORIZONTAL_ALIGNMENT_CENTER, mirror.size.x, 13, Color(1.0, 0.88, 0.55))
+	draw_fit_string(font, Vector2(mirror.position.x, mirror.position.y + mirror.size.y - 16.0),
+		"worn" if already else "trying it on", HORIZONTAL_ALIGNMENT_CENTER, mirror.size.x, 11,
+		Color(0.66, 0.92, 0.66) if already else Color(0.80, 0.74, 0.66))
 
-	# ---------------- THE SUIT ----------------
-	var cx1 := px + 40.0 + mw + 40.0
-	var cx2 := cx1 + 300.0
-	var colw := 280.0
+	# ---------------- THE RACK (the SUIT column that used to sit here is gone - see
+	# tailor_input for why) ----------------
+	var cx2 := px + 40.0 + mw + 40.0
 	var hy := py + 146.0
-	draw_string(font, Vector2(cx1, hy), "THE SUIT", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
-		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 0 else Color(0.72, 0.62, 0.5, 0.8))
-	var row_h := 40.0
 	var y0 := hy + 34.0
-	# row 0 is FOLLOW THE STAGE - the behaviour that existed before this screen did, kept
-	# as an explicit choice rather than buried as "none selected"
-	for i in venue_index() + 2:
-		var ry := y0 + float(i) * row_h
-		var chosen := (outfit_suit < 0 and i == 0) or (outfit_suit >= 0 and outfit_suit == i - 1)
-		var sel := tailor_col == 0 and tailor_sel == i
-		if sel:
-			soft_card(Rect2(cx1 - 12.0, ry - 22.0, colw, 34.0), Color(1.0, 0.85, 0.45, 0.09),
-				Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
-		var nm := "Follow the stage" if i == 0 else suit_name(i - 1)
-		var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.88, 0.82, 0.70) if chosen else Color(0.66, 0.60, 0.54))
-		# a SWATCH, because a costume is a colour before it is a name and "Small Theatre"
-		# tells a player nothing about what they are about to look like
-		if i > 0:
-			var sv := venue_data(i - 1)
-			draw_rect(Rect2(cx1, ry - 12.0, 13.0, 13.0), Color(sv["suit"]))
-			draw_rect(Rect2(cx1 + 14.0, ry - 12.0, 13.0, 13.0), Color(sv["vest"]))
-		draw_fit_string(font, Vector2(cx1 + 34.0, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, colw - 80.0, 16, nc)
-		if chosen:
-			draw_string(font, Vector2(cx1 + colw - 86.0, ry), "worn", HORIZONTAL_ALIGNMENT_RIGHT, 60.0, 12, Color(0.6, 0.9, 0.62))
-
 	# ---------------- THE RACK: one row per garment, one column per house ----------------
 	# EVERY PIECE IS BOUGHT AND EVERY PIECE HAS SEVEN CUTS (2026-07-29). A list of on/off
 	# toggles cannot express that, so the rack is a GRID: the garment down the side, the house
@@ -15610,8 +15702,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var tonight := cur_venue()
 	var cellw := 26.0
 	var rowh2 := 40.0
-	draw_string(font, Vector2(cx2, hy), "THE RACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
-		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 1 else Color(0.72, 0.62, 0.5, 0.8))
+	draw_string(font, Vector2(cx2, hy), "THE RACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
 	# the house headings, with TONIGHT'S marked - the only column that pays
 	for st in venue_index() + 1:
 		var hx := cx2 + 160.0 + float(st) * cellw
@@ -15623,7 +15714,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		var piece: String = WEAR_PIECES[j2]
 		var pdef := wear_piece_def(piece)
 		var ry2 := y0 + float(j2) * rowh2
-		var rowsel := tailor_col == 1 and tailor_sel == j2
+		var rowsel := tailor_sel == j2
 		if rowsel:
 			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, 160.0 + float(venue_index() + 1) * cellw + 16.0, 34.0),
 				Color(1.0, 0.85, 0.45, 0.07), Color(1.0, 0.88, 0.5, 0.40), 1.2, 8.0, 8.0, 0.04)
@@ -15670,31 +15761,32 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 				draw_rect(Rect2(box.position.x - 3.0, box.position.y - 3.0, box.size.x + 6.0, box.size.y + 6.0),
 					Color(1.0, 0.88, 0.5, 0.95), false, 1.6)
 	# the selected cell, spelled out: what it is, what it does, and what it costs or is worth
-	if tailor_col == 1:
+	var detw := pw - 40.0 - mw - 80.0    # the rack column's own width, now that it is the only one
+	if true:
 		var pc: String = WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)]
 		var pdf := wear_piece_def(pc)
 		var stg := clampi(tailor_stage, 0, venue_index())
 		var owned3 := owns_wear(pc, stg)
 		var fy2 := y0 + float(WEAR_PIECES.size()) * rowh2 + 8.0
 		draw_string(font, Vector2(cx2, fy2), "%s  -  %s cut" % [String(pdf["name"]), suit_name(stg)],
-			HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 14, Color(1.0, 0.88, 0.55))
-		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 12,
+			HORIZONTAL_ALIGNMENT_LEFT, detw, 14, Color(1.0, 0.88, 0.55))
+		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, detw, 12,
 			Color(0.78, 0.90, 0.72))
 		if not owned3:
 			var pcost := wear_cost(pc, stg)
 			var afford2 := money >= pcost
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "buy for %s" % commafy(pcost),
-				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13,
+				HORIZONTAL_ALIGNMENT_LEFT, detw, 13,
 				Color(0.78, 0.96, 0.72) if afford2 else Color(0.90, 0.55, 0.48))
 		elif worn_stage(pc) == stg:
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "worn  -  press again to take it off",
-				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13, Color(0.80, 0.75, 0.68))
+				HORIZONTAL_ALIGNMENT_LEFT, detw, 13, Color(0.80, 0.75, 0.68))
 		else:
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "owned  -  press to wear it",
-				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13, Color(0.80, 0.75, 0.68))
+				HORIZONTAL_ALIGNMENT_LEFT, detw, 13, Color(0.80, 0.75, 0.68))
 
 	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-		[[["Up", "Down"], "choose"], [["Left", "Right"], "column"], [["Enter"], "wear it"], [["Tab"], "leave"]])
+		[[["Up", "Down"], "garment"], [["Left", "Right"], "house"], [["Enter"], "wear it"], [["Tab"], "leave"]])
 
 
 func draw_shop(font: Font, s: Vector2) -> void:
@@ -17309,7 +17401,11 @@ const CAP_S_R := 0.225        # the radius of each of the S's two loops. FIVE ba
 							   # solid ring and the two S's read as one cluster of balls
 							   # rather than as two letters. At five they very nearly touch,
 							   # which is what makes the eye follow the curve.
-const CAP_S_BALLS := 5
+const CAP_S_BALLS := 5    # ...of which the first and last are NOT drawn (Louis, 2026-07-29),
+						   # so three land on each loop. The two dropped ones are the ends of
+						   # the arcs, where an S doubles back on itself and the balls crowd:
+						   # the letter is carried by the middle of each curve and the tips
+						   # were only ever making the pair of S's read as a cluster.
 # THE KNIFE'S OWN MEASUREMENTS, so the layout never has to guess them. Local units, the
 # same ones cap_knife draws in: the point is at -26 and the butt cap ends at +16.3.
 const CAP_KNIFE_TIP := -26.0
@@ -17678,7 +17774,14 @@ func cap_flame_shape(base: Vector2, h: float, w: float, sway: float, wob: float,
 	return pts
 
 
-func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true) -> void:
+func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool = true) -> void:
+	# `flame` false draws the HANDLE ONLY. The A's two torches meet at their wicks, so both
+	# fires start from the same point and burn straight up (2026-07-29, Louis: "make sure the
+	# flames are identical: fire goes straight up and they begin at the same point, so only
+	# one flame should be drawn"). Two copies of the same flame at the same place is not a
+	# bigger fire, it is the same fire drawn twice at double alpha with double the cost, and
+	# any drift between them - a different lean, a different flicker phase - shows up as a
+	# doubled edge. So the letter draws two handles and one flame.
 	# THE TORCH, drawn from scratch: the fire is the brightest thing in the picture and
 	# it was the weakest object in it, so it is built here rather than dressed up.
 	#
@@ -17742,6 +17845,8 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true) -> void:
 	_torch_bake()
 	draw_set_transform(p, ang, Vector2.ONE * sc)
 	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _torch_idx, _torch_pts, _torch_cols)
+	if not flame:
+		return
 	# --- the fire ---------------------------------------------------------------------
 	# A FLAME'S BASE FOLLOWS THE TORCH; ITS TIP GOES UP. Both halves of that matter here.
 	# Drawing the fire in world space is physically the tidier idea and it wrecks the
@@ -17944,10 +18049,10 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				var c2 := Vector2(cxs, base - size_l * 0.46 + s_r)
 				var br := size_l * CAP_BALL_R
 				var nb := CAP_S_BALLS
-				for j in nb:
+				for j in range(1, nb - 1):
 					var a1 := lerpf(0.0, -1.5 * PI, float(j) / float(nb - 1))
 					cap_ball(c1 + Vector2(cos(a1), sin(a1)) * s_r, cap_s_color(j), br)
-				for j in nb:
+				for j in range(1, nb - 1):
 					var a2 := lerpf(-0.5 * PI, PI, float(j) / float(nb - 1))
 					cap_ball(c2 + Vector2(cos(a2), sin(a2)) * s_r, cap_s_color(j + nb), br)
 			"A":
@@ -17978,8 +18083,13 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				var bar_c := (bar_l + bar_r) * 0.5
 				var bar_ang := (bar_r - bar_l).angle() + PI * 0.5
 				var csc := bar_l.distance_to(bar_r) * CAP_CROSSBAR_OVER / CAP_CLUB_LEN
-				cap_torch(foot_l, lean, tsc)
-				cap_torch(foot_r, -lean, tsc)
+				cap_torch(foot_l, lean, tsc, true, false)
+				cap_torch(foot_r, -lean, tsc, true, false)
+				# ...and ONE fire, upright, standing on the point both wicks arrive at. It is
+				# placed by asking a torch where its own wick is rather than by repeating the
+				# arithmetic, so the flame cannot come adrift from the handles under it.
+				var wick := foot_l + Vector2(0.0, TORCH_WICK).rotated(lean) * tsc
+				cap_torch(wick - Vector2(0.0, TORCH_WICK) * tsc, 0.0, tsc, true, true)
 				# ...and the bar goes ON TOP of both shafts, which is the opposite of what the
 				# first attempt did. Behind them it was a dark club between two dark handles
 				# and it disappeared: at this size the crossbar is only 0.10 letter-heights
@@ -18200,7 +18310,6 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "slider", "name": "Sound effects", "val": set_sfx, "note": "", "col": Color(0.95, 0.6, 0.45)},
 		{"kind": "bool", "name": "Screen shake", "val": set_shake, "note": "a jolt on every drop", "col": Color(0.55, 0.85, 0.8)},
 		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
-		{"kind": "bool", "name": "Hard collisions", "val": set_collide, "note": "clacks ruin catches", "col": Color(0.9, 0.5, 0.45)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
 		{"kind": "pick", "name": "Dominant hand", "val": dominant_hand == RIGHT, "note": "holds the odd prop and starts the pattern", "col": Color(0.95, 0.7, 0.55)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
