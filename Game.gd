@@ -889,7 +889,12 @@ const ANTE_CAP := 6.0
 # seconds against clock floors of 55 and 60. The arithmetic had been wrong since it was
 # written and no simulation could have caught it, because the bot cannot juggle eleven
 # chainsaws. Run `--ladder` after touching any of these.
-const VENUE_BASE := [250.0, 1600.0, 11000.0, 62000.0, 750000.0, 4.1e6, 9.2e7]
+# RESCALED BY LADDER_BUILD's `skill` (2026-07-29). The Backyard's final goal is 300 - Louis's
+# own number - and every other rung is the flawless figure taken down by the share of flawless a
+# player at that house can hold. These are the FIRST goal; the final is 3.2x (GOAL_STEP).
+#     Backyard 300 | Street 2,300 | Theatre 19,400 | Circus 123,000
+#     Championship 1.68M | World Arena 10.2M | Midnight 250M
+const VENUE_BASE := [94.0, 720.0, 6050.0, 38400.0, 525000.0, 3.2e6, 7.8e7]
 const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
 const GOAL_BAR_GAMMA := 0.62          # goal-meter fill exponent (<1 = concave): spreads a
 									   # streak-accelerated score evenly along the bar. See goal_bar_pos
@@ -2851,14 +2856,24 @@ func goal_for(venue: int, gi: int) -> float:
 # derived from these, and until they were written down the derivation lived only in my head and
 # in prose - which is how a ladder ends up with assumptions nobody can check. `--ladder` reads
 # them and prints the arithmetic.
+# `skill` IS THE ONE I HAD BEEN LEAVING OUT, and Louis found it by naming a number: "backyard
+# final goal = 300", where the ladder said 800. Everything above is computed for a FLAWLESS act -
+# an unbroken chain, every catch a Perfect - which is what the autoplayer does and what no human
+# does, least of all at their first house. A beginner drops, takes Goods, and resets the chain
+# constantly; they score a fraction of the bot's rate. So each house carries the share of
+# flawless a player at THAT house can really be expected to hold, and it climbs as they learn.
+# 0.375 at the Backyard is his 300 exactly.
+#
+# **This is the assumption that was silently baked into every rung before, and writing it down
+# is most of the value.** A ladder derived from a perfect player is a ladder nobody can climb.
 const LADDER_BUILD := [
-	{"n": 3,  "prop": 0, "pat": 0, "set": 0, "acts": 0},   # Backyard: three balls, no tricks
-	{"n": 4,  "prop": 0, "pat": 1, "set": 2, "acts": 2},   # Street Corner
-	{"n": 5,  "prop": 3, "pat": 1, "set": 4, "acts": 2},   # Small Theatre: clubs
-	{"n": 5,  "prop": 4, "pat": 2, "set": 6, "acts": 3},   # The Circus: knives
-	{"n": 7,  "prop": 5, "pat": 2, "set": 8, "acts": 4},   # Championship: torches
-	{"n": 9,  "prop": 5, "pat": 4, "set": 8, "acts": 4},   # World Arena
-	{"n": 11, "prop": 6, "pat": 5, "set": 8, "acts": 5},   # Midnight: chainsaws, Tennis
+	{"n": 3,  "prop": 0, "pat": 0, "set": 0, "acts": 0, "skill": 0.375},  # Backyard: three balls, no tricks
+	{"n": 4,  "prop": 0, "pat": 1, "set": 2, "acts": 2, "skill": 0.45},   # Street Corner
+	{"n": 5,  "prop": 3, "pat": 1, "set": 4, "acts": 2, "skill": 0.55},   # Small Theatre: clubs
+	{"n": 5,  "prop": 4, "pat": 2, "set": 6, "acts": 3, "skill": 0.62},   # The Circus: knives
+	{"n": 7,  "prop": 5, "pat": 2, "set": 8, "acts": 4, "skill": 0.70},   # Championship: torches
+	{"n": 9,  "prop": 5, "pat": 4, "set": 8, "acts": 4, "skill": 0.78},   # World Arena
+	{"n": 11, "prop": 6, "pat": 5, "set": 8, "acts": 5, "skill": 0.85},   # Midnight: chainsaws, Tennis
 ]
 
 func print_ladder() -> void:
@@ -2872,7 +2887,7 @@ func print_ladder() -> void:
 	# It models a FLAWLESS act: an unbroken chain, the build in LADDER_BUILD, and `acts` trick
 	# activations landed. That is an upper bound on a real player, which is the right side to
 	# calibrate from - the goal should be reachable by someone playing well, not by everyone.
-	print("%-18s %-13s %-16s %7s %12s %14s %5s %7s %9s" % ["VENUE", "BUILD", "PATTERN", "rate/s", "goal 1", "final", "needs", "floor", "at-build"])
+	print("%-18s %-13s %-16s %5s %7s %12s %14s %5s %7s %9s" % ["VENUE", "BUILD", "PATTERN", "skill", "rate/s", "goal 1", "final", "needs", "floor", "at-build"])
 	for v in VENUE_BASE.size():
 		var b: Dictionary = LADDER_BUILD[v]
 		var n := int(b["n"])
@@ -2890,7 +2905,7 @@ func print_ladder() -> void:
 		var pm := float(PATTERNS[pat]["mult"]) * (1.0 + OBJ_BALL_BONUS * float(n - MIN_BALLS)) \
 			* float(PROPS[pk]["smult"]) * setb
 		var settled := 1.0 + CHAIN_GAIN * 0.82     # ~x3.5, the chain past its ramp
-		var rate := CATCH_PTS * settled * pm * cps
+		var rate := CATCH_PTS * settled * pm * cps * float(b.get("skill", 1.0))
 		# what one trick activation is worth in THIS build
 		var ctx := (1.0 + TRICK_DIFF_WEIGHT * float(int(PROPS[pk]["weight"]) - 1)) \
 			* (1.0 + TRICK_DIFF_COUNT * float(n - MIN_BALLS)) * float(PATTERNS[pat]["mult"])
@@ -2905,11 +2920,11 @@ func print_ladder() -> void:
 		var need := 0
 		while need < 40 and g3 / maxf(rate * pow(p, float(need)), 0.0001) > floor_s:
 			need += 1
-		print("%-18s %2dx %-9s %-16s %7.0f %12s %14s %5d %6.0fs %8.0fs" % [
+		print("%-18s %2dx %-9s %-16s %5.2f %7.0f %12s %14s %5d %6.0fs %8.0fs" % [
 			String(venue_data(v)["name"]), n, String(PROPS[pk]["name"]), String(PATTERNS[pat]["name"]),
-			rate, score_text(g1), score_text(g3), need, floor_s, secs])
+			float(b.get("skill", 1.0)), rate, score_text(g1), score_text(g3), need, floor_s, secs])
 	print("")
-	print("rate/s     points a second at that build with an unbroken chain and NO tricks")
+	print("rate/s     points a second at that build and skill share, with NO tricks")
 	print("needs      trick activations required to reach the final goal by its clock floor")
 	print("at-build   seconds to the final goal with the activations LADDER_BUILD assumes")
 	print("A house is calibrated when `needs` is at or just under the build's own `acts`.")
