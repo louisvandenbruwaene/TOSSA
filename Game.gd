@@ -3105,8 +3105,8 @@ func goal_for(venue: int, gi: int) -> float:
 	# Tricks are deliberately not in it: they are the player's own upside, so landing them is
 	# how you clear a goal early rather than something the house already expected of you.
 	var x := goal_catches(venue, gi)
-	var expo := float(prop_str_unit()) * float(num_balls)
-	return from_log10(log_10(x) + expo * log_10(prop_sig() * pattern_mult() + 1.0))
+	var expo := float(num_balls)
+	return from_log10(log_10(x) + expo * log_10(prop_sig() * pattern_mult() * float(prop_str_unit()) + 1.0))
 
 
 # THE BUILD EACH HOUSE EXPECTS, as data rather than as a sentence in a comment. VENUE_BASE was
@@ -3164,11 +3164,13 @@ func print_ladder() -> void:
 		var need1 := goal_catches(v, 0) / per_catch
 		var need3 := goal_catches(v, 2) / per_catch
 		# the score those runs work out to, in the SAME expression goal_for uses - one streak
-		# of that length, no tricks. (It read `mult * x^(n*sig)` until 2026-07-29 evening,
-		# which was the previous formula, and a calibration tool carrying its own copy of the
-		# scoring is exactly the drift this rewrite was supposed to have ended.)
-		var e := float(int(PROP_STR_UNIT[pk])) * float(n)
-		var base := prop_sig(pk) * float(PATTERNS[pat]["mult"]) + 1.0
+		# of that length, no tricks. (`str` moved from the exponent into the base 2026-07-30 -
+		# see score_log10 - so a calibration tool carrying its own copy of the scoring has to
+		# be kept in step by hand here, which is exactly the drift this rewrite was supposed
+		# to have ended; there is no way around it while this tool previews builds the live
+		# game state is not actually in.)
+		var e := float(n)
+		var base := prop_sig(pk) * float(PATTERNS[pat]["mult"]) * float(int(PROP_STR_UNIT[pk])) + 1.0
 		var g1 := from_log10(log_10(goal_catches(v, 0)) + e * log_10(base))
 		var g3 := from_log10(log_10(goal_catches(v, 2)) + e * log_10(base))
 		var floor_s: float = lerpf(GOAL_MIN_S_LOW[2], GOAL_MIN_S_HIGH[2], float(v) / float(maxi(MAX_VENUE, 1)))
@@ -4557,26 +4559,26 @@ func tut_lesson(id: String) -> Array:
 	out.append({"goal": "hand", "prop": PROP_BALLS, "balls": 0, "need": 0, "slow": 0.0, "say": true,
 		"text": "Let's start with one ball in your strong hand.", "next": "one ball"})
 	# ONE BALL, hand to hand. Four presses, each one named and waited for.
-	out.append(tut_do("Great! Now throw it to your other hand in an arc.", "throw", dom, TD, 1, dom, 1))
-	out.append(tut_do("Now catch it.", "catch", off, CO, 1, dom, 1))
-	out.append(tut_do("Amazing! Now throw it back.", "throw", off, TO, 1, dom, 1))
-	out.append(tut_do("Catch it.", "catch", dom, CD, 1, dom, 1))
-	out.append(tut_free("That's it! Feel free to master one ball before moving on.", 1, dom, 0, 0,
+	out.append(tut_do("Great! Now throw it to your other hand in an arc.", "throw", dom, TD, 1, 1))
+	out.append(tut_do("Now catch it.", "catch", off, CO, 1, 1))
+	out.append(tut_do("Amazing! Now throw it back.", "throw", off, TO, 1, 1))
+	out.append(tut_do("Catch it.", "catch", dom, CD, 1, 1))
+	out.append(tut_free("That's it! Feel free to master one ball before moving on.", 1, 0, 0,
 		"When you are ready, press Enter for the second ball.", 1))
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
-	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, dom, 1))
-	out.append(tut_do("Throw the second before it lands.", "throw", off, TO, 2, dom, 1))
+	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1))
+	out.append(tut_do("Throw the second before it lands.", "throw", off, TO, 2, 1))
 	out.append(tut_free("Now catch and throw on one side, %s %s, then the other, %s %s. And repeat." % [CD, TD, CO, TO],
-		2, dom, 6, 6, "Try it out. Enter when you've got it.", 1))
+		2, 6, 6, "Try it out. Enter when you've got it.", 1))
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
-	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, dom, 2))
-	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, dom, 2, true))
-	out.append(tut_do("Then catch the first.", "catch", off, CO, 3, dom, 2))
-	out.append(tut_do("Now the same on the other side. Throw.", "throw", dom, TD, 3, dom, 2))
-	out.append(tut_do("Catch.", "catch", dom, CD, 3, dom, 2))
-	out.append(tut_do("And again. Throw.", "throw", off, TO, 3, dom, 2))
-	out.append(tut_do("Catch.", "catch", off, CO, 3, dom, 2))
-	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, dom, 10, 10,
+	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, 2))
+	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, 2, true))
+	out.append(tut_do("Then catch the first.", "catch", off, CO, 3, 2))
+	out.append(tut_do("Now the same on the other side. Throw.", "throw", dom, TD, 3, 2))
+	out.append(tut_do("Catch.", "catch", dom, CD, 3, 2))
+	out.append(tut_do("And again. Throw.", "throw", off, TO, 3, 2))
+	out.append(tut_do("Catch.", "catch", off, CO, 3, 2))
+	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, 10, 10,
 		"Prove you are ready: ten throws and ten catches.", 2))
 	# THE OTHER WAY, IN ONE LINE (2026-07-29, Louis: folded in from the old standalone
 	# "advanced juggling technique" lesson - see tut_finish). Once the beginner rhythm
@@ -4605,24 +4607,34 @@ func tut_say(line: String) -> Dictionary:
 		"next": "go on", "text": line}
 
 
-func tut_do(line: String, act: String, h: int, keyname: String, n: int, dom: int, stack: int = 0,
+func tut_do(line: String, act: String, h: int, keyname: String, n: int, stack: int = 0,
 		peak: bool = false) -> Dictionary:
 	# A LINE AND ONE KEY. `goal` names the exact press, so Enter cannot skip it (see
 	# tut_advance: a `do` beat holds until the goal is met, and only then does Enter mean
 	# anything). `peak` is Louis's "pause and highlight the first ball at its peak" beat -
 	# see tut_peak_hold.
+	# "hand": RIGHT IS SYMBOLIC, NOT LITERAL (2026-07-30 fix, Louis: "if i select the left
+	# hand, the player holds the ball in the right hand and pressing F doesn't work"). Every
+	# lesson in the game - this one included - deals relative to the DOMINANT side, and
+	# RIGHT is the convention that means "dominant" (see tut_step_hand): a mirrored lesson
+	# for a left-handed player is `RIGHT` too, never `LEFT`. This used to pass the ALREADY-
+	# RESOLVED `dominant_hand` value here instead, which tut_setup_step then resolved a
+	# SECOND time - correct by coincidence for a right-handed player (whose dominant_hand
+	# already equals the RIGHT constant) and exactly backwards for a left-handed one, whose
+	# every deal came out mirrored onto the wrong hand entirely.
 	var g := ("throw_l" if h == LEFT else "throw_r") if act == "throw" else ("catch_l" if h == LEFT else "catch_r")
-	return {"goal": g, "prop": PROP_BALLS, "balls": n, "hand": dom, "stack": stack, "need": 1, "slow": 0.0,
+	return {"goal": g, "prop": PROP_BALLS, "balls": n, "hand": RIGHT, "stack": stack, "need": 1, "slow": 0.0,
 		"say": true, "key": keyname, "peak": peak, "next": "go on",
 		"text": "%s  [%s]" % [line, keyname]}
 
 
-func tut_free(line: String, n: int, dom: int, throws: int, catches: int, sub: String,
+func tut_free(line: String, n: int, throws: int, catches: int, sub: String,
 		stack: int = 0) -> Dictionary:
 	# FREE PLAY, held open until the player has actually done it - and with no goal at all
 	# (throws and catches both zero) it is simply "play with this until you press Enter",
-	# which is what "feel free to master one ball" means.
-	return {"goal": "free", "prop": PROP_BALLS, "balls": n, "hand": dom, "stack": stack, "need": maxi(catches, 0),
+	# which is what "feel free to master one ball" means. "hand": RIGHT is symbolic - see
+	# tut_do just above.
+	return {"goal": "free", "prop": PROP_BALLS, "balls": n, "hand": RIGHT, "stack": stack, "need": maxi(catches, 0),
 		"throws": throws, "slow": 0.0, "say": true, "next": "go on",
 		"text": line, "sub": sub}
 
@@ -4821,16 +4833,25 @@ func begin_tutorial(id: String) -> void:
 	tut_setup_step()
 
 
+func tut_step_hand(step: Dictionary) -> int:
+	# a step's "hand" is which hand it TEACHES FROM, and it is SYMBOLIC, not a literal
+	# side: RIGHT means the player's strong hand, so a left-handed player's lesson mirrors
+	# rather than starting every drill in their weak hand. The one and only place this
+	# gets resolved into a real hand index - every reader of step["hand"] must come
+	# through here (2026-07-30 fix: two readers used to each resolve it their own way,
+	# and one of them, tut_do/tut_free's own builder, was not resolving it at all - it
+	# passed the already-real `dominant_hand` value straight through, which a SECOND
+	# resolution here then silently mirrored again for anyone actually left-handed).
+	return dominant_hand if int(step.get("hand", RIGHT)) == RIGHT else other(dominant_hand)
+
+
 func tut_setup_step() -> void:
 	var steps := tut_lesson(tut_id)
 	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
 	mode = MODE_TRAIN
 	var want_prop := int(step["prop"])
 	var want_n := int(step["balls"])
-	# a step's "hand" is which hand it TEACHES FROM, not a literal side: RIGHT means the
-	# player's strong hand, so a left-handed player's lesson mirrors rather than starting
-	# every drill in their weak hand (the dominant-hand setting reached only start_run)
-	var start_hand := dominant_hand if int(step.get("hand", RIGHT)) == RIGHT else other(dominant_hand)
+	var start_hand := tut_step_hand(step)
 	# a met goal flows into the next step, but ANY change in the ball COUNT deals a
 	# clean, fully-held table rather than topping up mid-air (Louis): adding a ball to a
 	# hand that a live ball is already dropping into made the current one uncatchable -
@@ -5447,7 +5468,7 @@ func tut_maintain() -> void:
 	# for the drop to actually register before the ball reappears)
 	if balls.size() < num_balls and tick - last_drop_tick > 34:
 		var step := tut_step_data()
-		var teach_hand := int(step.get("hand", RIGHT))
+		var teach_hand := tut_step_hand(step)
 		for _i in (num_balls - balls.size()):
 			# only ever refill a hand with NOTHING dropping into it, so a top-up never
 			# lands on the hand a live ball still needs - that was the forced drop (Louis).
@@ -8496,10 +8517,10 @@ func act_trick_ids() -> Array:
 
 
 func score_log10() -> float:
-	# LOUIS'S FORMULA, 2026-07-29 evening, in logs. In his notation:
+	# LOUIS'S FORMULA, 2026-07-30 revision, in logs. In his notation:
 	#
 	#   ( SUM over streaks i  PROD over tricks j
-	#         (1 + m_j) * x_i * (o * t_j * p + 1) ^ (s * n_i / (T + 1))
+	#         (1 + m_j) * x_i * (o * t_j * p * s + 1) ^ (n_i / (T + 1))
 	#   ) ^ (T + 1)
 	#
 	# x_i is the streak's weighted catch count, n_i the objects in it, o the prop's
@@ -8507,26 +8528,33 @@ func score_log10() -> float:
 	# trick's multiplier, m_j how many times it landed, T how many DIFFERENT tricks the act
 	# used.
 	#
-	# **WHY IT REPLACED x^(n*p), which is the whole point of the change** (Louis: "the scores
-	# are a bit too high early on ... i just want the numbers to be smaller early game as to
-	# exaggerate the late game amounts"). The old shape had the streak as the BASE and the
-	# load as the exponent, so even three balls ran at x^3 and a first act at the Backyard
-	# was already in the millions. Here the streak is LINEAR and the load sets an exponential
-	# constant: three balls in a Cascade is 2^3 = 8 a catch, so a good Backyard night is a
-	# few hundred, while fifteen chainsaws in Tennis is 8.5^195, which is past E150. Same
-	# ladder, three orders of magnitude lower at the bottom and higher at the top.
+	# **s MOVED OUT OF THE EXPONENT AND INTO THE BASE (2026-07-30, Louis: "move one of the
+	# two factors in the exponent down to the base, both makes it scale too much, one
+	# shouldn't be the exponent but be exponentiated instead").** The exponent was s * n -
+	# TWO things compounding the same climb at once, since a heavier prop (bigger s) AND
+	# more of them (bigger n) both pushed the same power upward together, which is exactly
+	# the "weight charged for three or four times over" mistake the 2026-07-26 prop-identity
+	# pass already named and rejected once for a different system. n stays the exponent: HOW
+	# MANY objects you are holding up is the real skill axis this game is built to reward
+	# exponentially (three balls to fifteen chainsaws is the whole climb the venues are laid
+	# out on). s becomes a linear factor in the base instead, alongside o, t and p - a
+	# heavier prop still pays more, proportionally, every catch, but it no longer detonates
+	# the EXPONENT on top of already being what gates Strength and the venue ladder.
 	#
-	# **THE EXPONENT IS THE STRENGTH THE LOAD COSTS** (s * n), which is the neatest thing
-	# about it: your score grows exponentially in the muscle you are actually using, and it
-	# is bounded by construction, because s * n can never exceed the Strength stat's own cap
-	# of 195. Louis pointed that out himself when he wrote it down.
+	# **WHY THE STREAK IS LINEAR AND THE LOAD IS EXPONENTIAL** (unchanged from the shape
+	# Louis set 2026-07-29: "the scores are a bit too high early on... smaller early game as
+	# to exaggerate the late game amounts"). The streak x is LINEAR and the load sets an
+	# exponential constant: three balls in a Cascade is now roughly base^3 a catch (base
+	# folding in s instead of s multiplying the exponent), so a good Backyard night stays a
+	# few hundred while fifteen chainsaws climbs to E150+ territory - same ladder shape,
+	# just one fewer thing compounding at the top.
 	#
 	# **IT IS COMPUTED IN LOGS AND ONLY EXPONENTIATED AT THE END.** A maxed act - fifteen
-	# chainsaws, Tennis, all three tricks landed twenty times each - reaches about 10^167
-	# INSIDE the brackets, and the outer power of four takes that to 10^668. A double stops
-	# at 1.8e308, so the honest version of this arithmetic overflows to INF and poisons every
-	# comparison downstream of it. Logs cannot overflow, and the one clamp at the end is the
-	# only place a ceiling is applied.
+	# chainsaws, Tennis, all three tricks landed twenty times each - reaches deep into
+	# INF territory inside the brackets before the outer power is even applied. A double
+	# stops at 1.8e308, so the honest version of this arithmetic overflows to INF and
+	# poisons every comparison downstream of it. Logs cannot overflow, and the one clamp at
+	# the end is the only place a ceiling is applied.
 	var tricks := act_trick_ids()
 	var T := tricks.size()
 	var outer := float(T + 1)
@@ -8538,20 +8566,20 @@ func score_log10() -> float:
 		var x := float(sg["x"])
 		if x <= 0.0:
 			continue
-		var expo := float(sg["str"]) * float(sg["n"]) / outer
+		var expo := float(sg["n"]) / outer
 		var lg := 0.0
 		if T == 0:
 			# NO TRICKS IS NOT AN EMPTY PRODUCT. Taken literally the formula would collapse
 			# to (number of streaks)^1 for a trickless act, which is plainly not the intent -
 			# it is one factor with t = 1 (no flourish) and m = 0 (landed none), which leaves
-			# exactly x * (o * p + 1) ^ (s * n). Every trickless act in the game runs through
+			# exactly x * (o * p * s + 1) ^ n. Every trickless act in the game runs through
 			# this branch, so it is the shape most players will meet first.
-			lg = log_10(x) + expo * log_10(float(sg["o"]) * float(sg["pat"]) + 1.0)
+			lg = log_10(x) + expo * log_10(float(sg["o"]) * float(sg["pat"]) * float(sg["str"]) + 1.0)
 		else:
 			for t in tricks:
 				var m := float(act_tricks.get(t, 0))
 				lg += log_10(1.0 + m) + log_10(x) \
-					+ expo * log_10(float(sg["o"]) * trick_mult(int(t)) * float(sg["pat"]) + 1.0)
+					+ expo * log_10(float(sg["o"]) * trick_mult(int(t)) * float(sg["pat"]) * float(sg["str"]) + 1.0)
 		terms.append(lg)
 	if terms.is_empty():
 		return -1.0e30
