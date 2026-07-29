@@ -13331,8 +13331,8 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 		"cascade":    card_art_waterfall()
 		"rcasc":      card_art_waterfall()
 		"columns":    card_art_temple()
-		"shower":     card_art_shower(1.0)
-		"halfshower": card_art_shower(0.34)
+		"shower":     card_art_duck(false)
+		"halfshower": card_art_duck(true)
 		"tennis":     card_art_racket()
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# the arrow that says which way the water is going, drawn AFTER the flip is undone so
@@ -13351,418 +13351,519 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 
 
 func card_art_spin() -> void:
-	# SPIN = A BALLERINA (Louis). The pirouette is the joke and the tutu is the mark that
-	# makes a stick figure a ballerina - so the tutu is the biggest thing on the card and
-	# everything else is arranged to support it.
-	var skin := ca(Color(0.92, 0.72, 0.56))
-	var tulle := ca(Color(0.98, 0.62, 0.74, 0.88))
-	var tulle_lo := ca(Color(0.86, 0.42, 0.58, 0.85))
-	var bodice := ca(Color(0.94, 0.46, 0.62))
-	# the SWEEP she is turning through: three arcs behind her, widest at the tutu, which
-	# is the only cue that says this is a turn and not a pose
-	for i in 3:
-		var rr := 0.20 + float(i) * 0.055
-		var ph := float(atick()) * 0.02 + float(i) * 0.7
-		draw_arc(Vector2(0.0, 0.02), rr, ph, ph + PI * 0.75, 22,
-			ca(Color(1.0, 0.86, 0.94, 0.20 - 0.04 * float(i))), 0.016, true)
-	# the standing leg, en pointe, and the working leg lifted behind in attitude
+	# SPIN = A BALLERINA, ALONE (2026-07-29, Louis: "i want the ballerina alone (no spin
+	# animation or anything else, just a detailed ballerina)"). The sweep arcs, the airborne
+	# prop and the sparkle are all gone: they were saying "this is a spin" a second time, in a
+	# weaker voice, and the one thing a card face has to do is be a picture. Everything spent
+	# on them is spent on HER instead - a bodice with a seam, a tutu of three plates, a real
+	# arabesque line, pointe shoes with ribbons.
+	#
+	# NOTHING ON THIS CARD MOVES. That is the standing rule for the whole deck now: a still
+	# illustration reads as a printed card, and an animated one reads as a screen.
+	var skin := ca(Color(0.94, 0.76, 0.60))
+	var skin_sh := ca(Color(0.84, 0.63, 0.48))
+	var tulle := ca(Color(0.99, 0.72, 0.82))
+	var tulle_mid := ca(Color(0.96, 0.58, 0.72))
+	var tulle_lo := ca(Color(0.84, 0.40, 0.57))
+	var bodice := ca(Color(0.93, 0.44, 0.61))
+	var hair := ca(Color(0.36, 0.21, 0.14))
+	# THE SUPPORTING LEG, straight from hip to pointe, and the working leg lifted behind in
+	# arabesque. The line from her raised foot through the hip to the fingertips is what makes
+	# a ballerina drawing read; everything else is costume.
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.020, 0.02), Vector2(0.020, 0.02), Vector2(0.016, 0.32), Vector2(-0.008, 0.32)]), skin)
-	draw_colored_polygon(PackedVector2Array([   # the pointe shoe: a wedge, not a dot
-		Vector2(-0.012, 0.30), Vector2(0.020, 0.30), Vector2(0.014, 0.38), Vector2(-0.004, 0.38)]), tulle_lo)
-	# the working leg, tapering to the foot: the first pass ran it out at even width and it
-	# read as a plank stuck to her hip
+		Vector2(-0.030, 0.030), Vector2(0.026, 0.030), Vector2(0.022, 0.190),
+		Vector2(0.014, 0.300), Vector2(-0.012, 0.300), Vector2(-0.018, 0.190)]), skin)
+	draw_colored_polygon(PackedVector2Array([   # the pointe shoe, blocked at the toe
+		Vector2(-0.016, 0.294), Vector2(0.020, 0.294), Vector2(0.024, 0.352),
+		Vector2(0.010, 0.376), Vector2(-0.008, 0.372), Vector2(-0.014, 0.340)]), tulle_lo)
+	for rb: float in [-1.0, 1.0]:   # the ribbons, crossed at the ankle
+		draw_line(Vector2(rb * 0.004, 0.296), Vector2(rb * 0.052, 0.238), tulle_lo, 0.012)
+	# LIMBS ARE CAPSULES, NOT HAND-WRITTEN POLYGONS, and that is a correctness rule rather
+	# than a shortcut. The first version drew each arm and the raised leg as one eight-point
+	# outline - out along the top edge, back along the bottom - and at the shoulder the two
+	# edges CROSSED: measured, the outgoing edge sat at y -0.153 where the returning one sat
+	# at -0.136 and the order flipped by x -0.044. Godot refuses a self-intersecting polygon
+	# silently, so the arms simply did not draw and the log filled with "Invalid polygon data,
+	# triangulation failed" - one per frame, which is exactly the signature this file already
+	# records for a static shape. `draw_capsule` is a tapered quad with rounded caps built
+	# from a normal, so it cannot fold through itself at any width.
+	draw_capsule(Vector2(0.020, 0.058), Vector2(0.250, 0.166), 0.086, 0.044, skin_sh)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(0.012, 0.030), Vector2(0.040, 0.062), Vector2(0.150, 0.112),
-		Vector2(0.215, 0.128), Vector2(0.212, 0.152), Vector2(0.140, 0.150),
-		Vector2(0.034, 0.108)]), skin)
-	# THE TUTU: two flat plates, the lower one darker, which is how a real one reads
-	# side-on - one soft ellipse alone looks like a skirt
-	fill_ellipse(Vector2(0.0, 0.045), 0.235, 0.055, tulle_lo)
-	fill_ellipse(Vector2(0.0, 0.015), 0.215, 0.062, tulle)
-	# the bodice, narrow, from the tutu up to the shoulders
+		Vector2(0.246, 0.150), Vector2(0.300, 0.162), Vector2(0.306, 0.184),
+		Vector2(0.250, 0.184)]), tulle_lo)
+	# THE TUTU: three plates, darkest underneath. One soft ellipse is a skirt; the stack is
+	# what makes it stiff, and stiffness is the whole silhouette of classical ballet.
+	fill_ellipse(Vector2(0.0, 0.070), 0.250, 0.052, tulle_lo)
+	fill_ellipse(Vector2(0.0, 0.044), 0.238, 0.058, tulle_mid)
+	fill_ellipse(Vector2(0.0, 0.018), 0.216, 0.062, tulle)
+	# the bodice, boned: a narrow taper with a centre seam and a sweetheart neckline
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.048, 0.02), Vector2(0.048, 0.02), Vector2(0.040, -0.16), Vector2(-0.040, -0.16)]), bodice)
-	# arms up in a ring over the head, which is the ballet shape everybody knows. Drawn as
-	# two tapering limbs meeting, never as an arc - an arc has constant width and square
-	# ends, and at this size that reads as a coat hanger.
-	for sgn: float in [-1.0, 1.0]:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(sgn * 0.042, -0.15), Vector2(sgn * 0.135, -0.24),
-			Vector2(sgn * 0.055, -0.345), Vector2(sgn * 0.012, -0.335),
-			Vector2(sgn * 0.070, -0.245), Vector2(sgn * 0.014, -0.175)]), skin)
-	# the head, and the bun - the bun is the second-cheapest ballerina cue after the tutu
-	draw_circle(Vector2(0.0, -0.215), 0.052, skin)
-	draw_circle(Vector2(0.058, -0.250), 0.030, ca(Color(0.42, 0.26, 0.18)))
-	draw_colored_polygon(PackedVector2Array([   # the hair over the crown
-		Vector2(-0.052, -0.235), Vector2(0.0, -0.272), Vector2(0.050, -0.238),
-		Vector2(0.036, -0.208), Vector2(-0.040, -0.206)]), ca(Color(0.42, 0.26, 0.18)))
-	# ...and one prop still in the air, because she is a juggler doing this
-	draw_circle(Vector2(-0.20, -0.30), 0.040, ca(Color(1.0, 0.84, 0.42)))
-	draw_star4(Vector2(0.235, -0.235), 0.045, ca(Color(1.0, 0.95, 0.80, 0.75)))
+		Vector2(-0.056, 0.030), Vector2(0.056, 0.030), Vector2(0.046, -0.120),
+		Vector2(0.026, -0.150), Vector2(0.0, -0.136), Vector2(-0.026, -0.150),
+		Vector2(-0.046, -0.120)]), bodice)
+	draw_line(Vector2(0.0, -0.130), Vector2(0.0, 0.026), ca(Color(0.78, 0.32, 0.50)), 0.010)
+	# ARMS IN THIRD ARABESQUE: one reaching forward and up along the line of the raised leg,
+	# one held back. Tapering polygons, never arcs - an arc has constant width and square ends,
+	# which at this size is a coat hanger rather than an arm.
+	# the forward arm, in two capsules so it bends at the elbow the way an arm does
+	draw_capsule(Vector2(-0.040, -0.112), Vector2(-0.140, -0.208), 0.062, 0.048, skin)
+	draw_capsule(Vector2(-0.140, -0.208), Vector2(-0.244, -0.306), 0.048, 0.030, skin)
+	draw_circle(Vector2(-0.250, -0.312), 0.020, skin)               # the hand
+	# ...and the one held back, lower and behind, which is what makes it an arabesque rather
+	# than a shrug
+	draw_capsule(Vector2(0.044, -0.104), Vector2(0.166, -0.052), 0.058, 0.044, skin_sh)
+	draw_capsule(Vector2(0.166, -0.052), Vector2(0.268, 0.008), 0.044, 0.028, skin_sh)
+	draw_circle(Vector2(0.274, 0.014), 0.019, skin_sh)
+	# head, neck, and the bun - the second-cheapest ballerina cue after the tutu
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.020, -0.158), Vector2(0.020, -0.158), Vector2(0.018, -0.196), Vector2(-0.018, -0.196)]), skin)
+	draw_circle(Vector2(0.0, -0.236), 0.056, skin)
+	draw_colored_polygon(PackedVector2Array([   # the hair, drawn flat to the skull
+		Vector2(-0.056, -0.246), Vector2(-0.034, -0.288), Vector2(0.020, -0.294),
+		Vector2(0.054, -0.262), Vector2(0.048, -0.230), Vector2(-0.046, -0.222)]), hair)
+	draw_circle(Vector2(0.062, -0.272), 0.032, hair)
+	draw_circle(Vector2(0.070, -0.280), 0.014, ca(Color(0.46, 0.29, 0.20)))
+	# the two marks that make a face at 0.05 of a card: a lowered lash line and a small mouth
+	draw_line(Vector2(-0.030, -0.242), Vector2(-0.014, -0.240), ca(Color(0.28, 0.18, 0.14)), 0.010)
+	draw_line(Vector2(0.014, -0.240), Vector2(0.030, -0.242), ca(Color(0.28, 0.18, 0.14)), 0.010)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.012, -0.212), Vector2(0.012, -0.212), Vector2(0.0, -0.200)]), ca(Color(0.80, 0.34, 0.42)))
 
 
 func card_art_btb() -> void:
-	# BEHIND THE BACK = TWO PEOPLE TALKING BEHIND YOUR BACK (Louis). The gag needs three
-	# figures and a very specific staging or it is just a crowd: the juggler LARGE and from
-	# BEHIND at the front of the card, and the two gossips behind him, leaning in.
-	# Front-and-large against small-and-behind is what makes it "behind his back" rather
-	# than "three people standing about".
+	# BEHIND THE BACK = A HAND OF CARDS HELD BEHIND THE BACK (2026-07-29, Louis: "design
+	# something else for behind the back, i don't like this one (entirely different concept)").
 	#
-	# REWORKED after seeing it. The gossips were half hidden behind his shoulders and small
-	# enough to read as two purple lollipops, and the three whisper dots sat so close to
-	# their heads that they merged into the same blob. They are BIGGER now, pushed out past
-	# his silhouette so both are wholly visible, and the whisper is a proper little cloud up
-	# between their heads where nothing else is drawn. The scale gap survives because HE got
-	# bigger too - the relationship is what carries the joke, not the absolute sizes.
-	var dark := ca(Color(0.30, 0.22, 0.30))
-	var mid := ca(Color(0.52, 0.41, 0.55))
-	var mid_lo := ca(Color(0.38, 0.30, 0.42))
-	# the two gossips, clear of his shoulders, heads tipped toward each other
-	for sgn: float in [-1.0, 1.0]:
-		var gx: float = sgn * 0.290
-		var lean: float = -sgn * 0.042
-		draw_colored_polygon(PackedVector2Array([   # body, shoulders sloped inward
-			Vector2(gx - 0.082, 0.075), Vector2(gx + 0.082, 0.075),
-			Vector2(gx + 0.058, -0.190), Vector2(gx - 0.058, -0.190)]), mid)
-		draw_colored_polygon(PackedVector2Array([   # the near arm, raised to the mouth
-			Vector2(gx + lean * 0.3, -0.150), Vector2(gx + lean * 1.5, -0.235),
-			Vector2(gx + lean * 2.4, -0.212), Vector2(gx + lean * 1.0, -0.118)]), mid_lo)
-		draw_circle(Vector2(gx + lean, -0.245), 0.070, mid)
-		draw_colored_polygon(PackedVector2Array([   # hair, so a head is a head and not a dot
-			Vector2(gx + lean - 0.070, -0.240), Vector2(gx + lean - 0.052, -0.300),
-			Vector2(gx + lean + 0.030, -0.318), Vector2(gx + lean + 0.070, -0.262)]), mid_lo)
-	# THE WHISPER, up between them where nothing else is: a cloud of three, largest in the
-	# middle. A speech bubble would need words in it; muttering has none.
-	for i in 3:
-		var t := float(i) / 2.0
-		draw_circle(Vector2(lerpf(-0.115, 0.115, t), -0.345 - 0.045 * sin(t * PI)),
-			0.028 + 0.016 * sin(t * PI), ca(Color(1.0, 0.94, 0.78, 0.58)))
-	# HIM, from behind: shoulders wide across the bottom, the back of his head, and no face
-	# anywhere - the whole point is that he cannot see them
+	# The gossip version was three figures and a whisper cloud, and it needed all three to say
+	# one thing. This is the same idiom - something kept behind your back - with nothing in the
+	# picture but the gesture: a torso from behind, one arm round it, and a fan of playing
+	# cards in the hidden hand. It reads at a glance, it is funny in the dry way a card up the
+	# sleeve is funny, and it belongs to a card GAME, which the deck this sits in already is.
+	var coat := ca(Color(0.34, 0.26, 0.36))
+	var coat_lo := ca(Color(0.24, 0.18, 0.27))
+	var skin := ca(Color(0.90, 0.72, 0.56))
+	var card_face := ca(Color(0.96, 0.94, 0.88))
+	var card_edge := ca(Color(0.62, 0.58, 0.54))
+	# the back of him: shoulders, a nape, and a centre seam so it reads as a coat from behind
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.315, 0.50), Vector2(-0.250, 0.150), Vector2(-0.095, 0.075),
-		Vector2(0.095, 0.075), Vector2(0.250, 0.150), Vector2(0.315, 0.50)]), dark)
-	draw_circle(Vector2(0.0, 0.030), 0.125, dark)
-	draw_colored_polygon(PackedVector2Array([   # the hair, all of it: this is a nape
-		Vector2(-0.125, 0.040), Vector2(-0.106, -0.058), Vector2(0.0, -0.102),
-		Vector2(0.106, -0.058), Vector2(0.125, 0.040)]), ca(Color(0.20, 0.14, 0.11)))
-	# ...and a prop looping round behind him, low, the throw the trick is named for
-	var pt := float(atick()) * 0.012
-	draw_circle(Vector2(sin(pt) * 0.255, 0.205 - 0.035 * cos(pt)), 0.042, ca(Color(1.0, 0.84, 0.42)))
+		Vector2(-0.300, 0.470), Vector2(-0.246, 0.070), Vector2(-0.120, -0.030),
+		Vector2(0.120, -0.030), Vector2(0.246, 0.070), Vector2(0.300, 0.470)]), coat)
+	draw_line(Vector2(0.0, -0.020), Vector2(0.0, 0.460), coat_lo, 0.016)
+	draw_colored_polygon(PackedVector2Array([   # the collar
+		Vector2(-0.104, -0.026), Vector2(0.104, -0.026), Vector2(0.086, 0.026), Vector2(-0.086, 0.026)]), coat_lo)
+	draw_circle(Vector2(0.0, -0.118), 0.108, skin)
+	draw_colored_polygon(PackedVector2Array([   # all hair: this is the back of a head
+		Vector2(-0.110, -0.106), Vector2(-0.092, -0.208), Vector2(0.0, -0.242),
+		Vector2(0.092, -0.208), Vector2(0.110, -0.106), Vector2(0.0, -0.076)]), ca(Color(0.22, 0.15, 0.11)))
+	# THE ARM ROUND THE BACK - the whole gesture, so it gets the biggest shape on the card
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.248, 0.096), Vector2(-0.300, 0.180), Vector2(-0.268, 0.286),
+		Vector2(-0.148, 0.324), Vector2(-0.040, 0.320), Vector2(-0.036, 0.264),
+		Vector2(-0.150, 0.264), Vector2(-0.226, 0.234), Vector2(-0.238, 0.166)]), coat_lo)
+	draw_circle(Vector2(-0.014, 0.292), 0.050, skin)
+	# THE FAN OF CARDS in that hand, splayed. Drawn last so it sits clear of the body, and
+	# angled outward so the fan reads as a fan rather than as a stack.
+	for k in 5:
+		var a := -0.72 + float(k) * 0.30
+		var d := Vector2(sin(a), -cos(a))
+		var s := Vector2(cos(a), sin(a))
+		var root := Vector2(0.006, 0.300)
+		draw_colored_polygon(PackedVector2Array([
+			root + s * 0.030, root - s * 0.030,
+			root - s * 0.044 + d * 0.210, root + s * 0.044 + d * 0.210]), card_face)
+		draw_line(root - s * 0.030, root - s * 0.044 + d * 0.210, card_edge, 0.008)
+	# one pip on the nearest card, which is what stops the fan reading as a hand of blank paper
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0.086, 0.176), Vector2(0.114, 0.208), Vector2(0.086, 0.240), Vector2(0.058, 0.208)]),
+		ca(Color(0.78, 0.22, 0.26)))
 
 
 func card_art_high() -> void:
-	# HIGH TOSS = SOMETHING TALL (Louis). Height on a card is a composition problem, not a
-	# drawing one: a tall thing drawn inside the frame is just a thing. What sells it is
-	# that the throw LEAVES the card - the arc runs off the top edge and is never resolved -
-	# with the juggler tiny at the very bottom, a cloud on the way, and a bird that has
-	# noticed. The scale gap between the man and the frame is the joke.
-	# the trail, dashed, from his hand off the top of the picture
-	for i in 13:
-		var t := float(i) / 12.0
-		var y := 0.24 - t * 0.80
-		var x := -0.10 + t * 0.055 + sin(t * 2.4) * 0.020
-		draw_circle(Vector2(x, y), 0.012 - 0.004 * t, ca(Color(1.0, 0.92, 0.62, 0.55 - 0.28 * t)))
-	# the cloud it went through, at two thirds height, and a wisp above it
-	for e in [[-0.055, -0.20, 0.085], [0.030, -0.215, 0.070], [0.100, -0.185, 0.052], [-0.135, -0.170, 0.055]]:
-		draw_circle(Vector2(float(e[0]), float(e[1])), float(e[2]), ca(Color(0.86, 0.88, 0.94, 0.30)))
-	# the bird, watching it go past. Two tapering wings from one point: a "v" of even
-	# width is a tick mark, and a bird at this size is entirely its silhouette.
-	var bp := Vector2(0.235, -0.325)
-	for sgn: float in [-1.0, 1.0]:
-		draw_colored_polygon(PackedVector2Array([
-			bp, bp + Vector2(sgn * 0.075, -0.048), bp + Vector2(sgn * 0.080, -0.028)]),
-			ca(Color(0.22, 0.18, 0.22, 0.9)))
-	# ...and the prop itself, at the very top, half out of the frame
-	draw_circle(Vector2(0.115, -0.475), 0.055, ca(Color(1.0, 0.84, 0.42)))
-	draw_glow(Vector2(0.115, -0.475), 0.16, ca(Color(1.0, 0.84, 0.42, 0.30)))
-	# HIM, small, at the bottom, looking up - arms up, head tipped back
-	var g := ca(Color(0.34, 0.26, 0.32))
+	# HIGH TOSS = A VERY TALL BUILDING (2026-07-29, Louis: "For high toss, i want a big
+	# building: eg: the eiffel tower or tower of pisa"). A leaning tower is the better of his
+	# two for one reason: it is unmistakable in silhouette at any size, where a lattice tower
+	# needs its lattice to be legible or it is a triangle. It also happens to be funny beside a
+	# trick about throwing things badly high.
+	#
+	# NOTHING MOVES AND THERE IS NO PROP ON IT. The old version had a dotted trail, a cloud, a
+	# bird and a ball drifting at the top; the brief is a building.
+	var stone := ca(Color(0.90, 0.86, 0.76))
+	var stone_sh := ca(Color(0.72, 0.68, 0.58))
+	var stone_dk := ca(Color(0.52, 0.49, 0.42))
+	var sky_lo := ca(Color(0.36, 0.30, 0.40, 0.30))
+	# a hint of sky behind it, so the tower has something to be tall against
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.150, 0.430), Vector2(-0.120, 0.300), Vector2(-0.060, 0.300), Vector2(-0.030, 0.430)]), g)
-	draw_circle(Vector2(-0.090, 0.268), 0.036, g)
-	for sgn2: float in [-1.0, 1.0]:
+		Vector2(-0.50, -0.50), Vector2(0.50, -0.50), Vector2(0.50, 0.30), Vector2(-0.50, 0.30)]), sky_lo)
+	# THE LEAN is the whole joke, so it is generous: about 9 degrees, which reads instantly
+	# and still leaves the tower standing on its own base.
+	var lean := 0.155
+	# EIGHT STOREYS OF COLONNADE. The arcade is what makes it Pisa rather than a chimney, and
+	# it is drawn as real columns - a filled band with gaps - not as scored lines, because at
+	# this size a line is a scratch and a gap is architecture.
+	for st in 8:
+		var t := float(st) / 7.0
+		var y0 := 0.300 - t * 0.680
+		var y1 := y0 - 0.086
+		var dx := lean * t
+		var w := 0.148 - t * 0.012
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(-0.090 + sgn2 * 0.022, 0.300), Vector2(-0.090 + sgn2 * 0.085, 0.225),
-			Vector2(-0.090 + sgn2 * 0.055, 0.212), Vector2(-0.090 - sgn2 * 0.002, 0.288)]), g)
-	# the boards under him, so "the bottom of the card" reads as "the ground"
-	draw_rect(Rect2(-0.50, 0.430, 1.0, 0.070), ca(Color(0.26, 0.18, 0.14, 0.85)))
+			Vector2(-w + dx, y0), Vector2(w + dx, y0), Vector2(w + dx, y1), Vector2(-w + dx, y1)]), stone)
+		# the shaded right face, so the drum is a cylinder
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(w * 0.48 + dx, y0), Vector2(w + dx, y0), Vector2(w + dx, y1), Vector2(w * 0.48 + dx, y1)]), stone_sh)
+		# the columns of the arcade, cut out of the middle of the band
+		if st > 0:
+			for cix in 5:
+				var cxp := -w * 0.78 + float(cix) * (w * 1.56 / 4.0) + dx
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(cxp - 0.010, y0 - 0.014), Vector2(cxp + 0.010, y0 - 0.014),
+					Vector2(cxp + 0.010, y1 + 0.014), Vector2(cxp - 0.010, y1 + 0.014)]), stone_dk)
+		# the cornice between storeys - a thin lighter lip, which is what separates them
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-w - 0.014 + dx, y1), Vector2(w + 0.014 + dx, y1),
+			Vector2(w + 0.010 + dx, y1 - 0.016), Vector2(-w - 0.010 + dx, y1 - 0.016)]), stone_sh)
+	# the belfry: narrower, open, with its bell
+	var by := 0.300 - 0.680 - 0.086
+	var bdx := lean
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.104 + bdx, by), Vector2(0.104 + bdx, by),
+		Vector2(0.092 + bdx, by - 0.092), Vector2(-0.092 + bdx, by - 0.092)]), stone)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.040 + bdx, by - 0.006), Vector2(0.040 + bdx, by - 0.006),
+		Vector2(0.034 + bdx, by - 0.074), Vector2(-0.034 + bdx, by - 0.074)]), stone_dk)
+	draw_colored_polygon(PackedVector2Array([   # the bell, hanging in the opening
+		Vector2(-0.020 + bdx, by - 0.062), Vector2(0.020 + bdx, by - 0.062),
+		Vector2(0.014 + bdx, by - 0.026), Vector2(-0.014 + bdx, by - 0.026)]), ca(Color(0.72, 0.58, 0.28)))
+	# the base, which stays put while the rest leans - that contrast is what sells the tilt
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.196, 0.300), Vector2(0.196, 0.300), Vector2(0.216, 0.372), Vector2(-0.216, 0.372)]), stone_sh)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.30, 0.372), Vector2(0.30, 0.372), Vector2(0.32, 0.428), Vector2(-0.32, 0.428)]), stone_dk)
+	# ...and the ground it stands on, so the lean has a vertical to be measured against
+	draw_rect(Rect2(-0.50, 0.428, 1.0, 0.072), ca(Color(0.30, 0.26, 0.22)))
 
 
 func card_art_waterfall() -> void:
-	# CASCADE = A WATERFALL (Louis), and Reverse Cascade is this exact drawing flipped (see
-	# the dispatcher). Two things had to be true for it to read as a cascade rather than as
-	# any old waterfall: the streams CROSS - that is what the pattern is - and there are
-	# three of them, the beginner count.
+	# CASCADE = A WATERFALL, and Reverse Cascade is this drawing flipped (see the dispatcher).
+	# THIRD ATTEMPT (2026-07-29, Louis: "The waterfalls look horrible, try again with more
+	# attention to detail"), and the two failures were the same failure: I kept drawing the
+	# WATER and treating the rock as a container for it. A waterfall is a landscape. What makes
+	# one look like a photograph is depth - a far wall, a near wall, and the fall between them -
+	# and layered strata, because rock at a cliff face is visibly bedded in horizontal courses.
+	# Neither of those is about the water at all.
 	#
-	# REWORKED after seeing it on screen. Three faults, all of them the same fault: FLAT
-	# SLABS. The cliff was one brown rectangle across the top third, the pool was one blue
-	# rectangle across the bottom, and the middle stream was tinted so close to its
-	# neighbours that only two of the three read - so the card was two ribbons between two
-	# bars, and the thing it most resembled was a swimming pool. The lip is jagged and
-	# fissured now, the pool has a curved SURFACE with darker water under it, and the three
-	# streams are three distinct tones spread wide enough to show all three crossings.
-	# ALL THREE STREAMS ARE LIGHT, and the third one being dark was the last fault here.
-	# `water_lo` at 0.30/0.56/0.82 is almost exactly the pool's own tone, so the middle
-	# stream vanished into the water it was falling into and the card read as two falls.
-	# Falling water is the BRIGHTEST thing in a waterfall - it is full of air - so the three
-	# tones are three brightnesses of white-blue, and the darkest thing on the card is the
-	# rock. That also fixes the cliff, which was too light and competing with the water.
-	var rock := ca(Color(0.26, 0.22, 0.20))
-	var rock_lo := ca(Color(0.15, 0.13, 0.13))
-	var rock_hi := ca(Color(0.35, 0.30, 0.26))
-	var water := ca(Color(0.62, 0.84, 0.99, 0.90))
-	var water_hi := ca(Color(0.84, 0.95, 1.0, 0.92))
-	var water_lo := ca(Color(0.46, 0.72, 0.94, 0.90))
-	var pool_dk := ca(Color(0.16, 0.34, 0.56))
-	var foam := ca(Color(0.92, 0.97, 1.0, 0.80))
-	# THE CLIFF, with a broken lip. The jag is what makes it stone: a straight edge across
-	# the picture is a shelf, and no amount of colour fixes that.
-	# ...and the lip is DEEPLY broken rather than lightly nicked. The first jag varied by
-	# 0.05 of the card, which at this size is two small notches in a straight edge - and a
-	# straight edge with notches in it is a plank, which is exactly what it looked like. The
-	# variation is 0.13 now, on an irregular rhythm, and the flat highlight strip across the
-	# top is gone: that bar was doing more than anything else to make it read as sawn timber.
-	var lip := PackedVector2Array([Vector2(-0.50, -0.50), Vector2(0.50, -0.50)])
-	var jag := [[0.50, -0.36], [0.37, -0.27], [0.25, -0.38], [0.11, -0.29], [-0.02, -0.40],
-		[-0.17, -0.28], [-0.30, -0.37], [-0.41, -0.30], [-0.50, -0.39]]
-	for e in jag:
-		lip.append(Vector2(float(e[0]), float(e[1])))
-	draw_colored_polygon(lip, rock)
-	# facets down the face instead of drawn lines: a stroke on rock reads as a crack in
-	# paint, a shaded plane reads as stone
-	for fx in [-0.34, 0.30]:
+	# So: a lit sky slot at the back, a shadowed gorge, bedded strata on both walls, ONE fall
+	# with a real lip and a spreading curtain, mist where it lands, and two foreground boulders
+	# to close the frame. Nothing moves.
+	var sky := ca(Color(0.44, 0.52, 0.58))
+	var far := ca(Color(0.30, 0.32, 0.33))
+	var rock := ca(Color(0.26, 0.24, 0.23))
+	var rock_lo := ca(Color(0.17, 0.16, 0.16))
+	var rock_hi := ca(Color(0.38, 0.35, 0.31))
+	var moss := ca(Color(0.24, 0.34, 0.22))
+	var water := ca(Color(0.72, 0.86, 0.94, 0.92))
+	var water_hi := ca(Color(0.93, 0.97, 1.0, 0.95))
+	var water_lo := ca(Color(0.48, 0.68, 0.84, 0.92))
+	var pool := ca(Color(0.20, 0.40, 0.54))
+	var mist := ca(Color(0.90, 0.95, 1.0, 0.16))
+	# the slot of sky the gorge opens onto - the brightest thing on the card, so everything
+	# else reads as being in shadow
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.50, -0.50), Vector2(0.50, -0.50), Vector2(0.50, -0.34), Vector2(-0.50, -0.34)]), sky)
+	# the FAR wall, lighter and less contrasty: aerial perspective, which is what puts it behind
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.50, -0.34), Vector2(0.50, -0.34), Vector2(0.50, 0.10), Vector2(-0.50, 0.10)]), far)
+	for b in 4:
+		var by := -0.30 + float(b) * 0.100
+		draw_line(Vector2(-0.50, by), Vector2(0.50, by + 0.012), ca(Color(0.22, 0.24, 0.25)), 0.014)
+	# THE TWO NEAR WALLS, bedded. Each course is a filled band with a slightly different tone
+	# and an irregular lower edge - strata, not stripes.
+	for side: float in [-1.0, 1.0]:
+		var inner := 0.150
+		var outer := 0.50
+		for c in 6:
+			var y0 := -0.34 + float(c) * 0.098
+			var y1 := y0 + 0.098
+			var jag := 0.026 * (1.0 if c % 2 == 0 else -1.0)
+			var tone := rock if c % 2 == 0 else rock_lo
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(side * outer, y0), Vector2(side * (inner + jag), y0 + 0.014),
+				Vector2(side * (inner - jag * 0.6), y1), Vector2(side * outer, y1)]), tone)
+			# a lit top edge on every other course - the light comes from the sky slot above
+			if c % 2 == 0:
+				draw_line(Vector2(side * outer, y0 + 0.004), Vector2(side * (inner + jag), y0 + 0.018),
+					rock_hi, 0.012)
+		# moss on the wet inner lip, which is the one colour note that says these rocks are wet
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(fx - 0.075, -0.50), Vector2(fx + 0.055, -0.50),
-			Vector2(fx + 0.020, -0.325), Vector2(fx - 0.048, -0.345)]), rock_lo)
-	for fx2 in [-0.10, 0.42]:
+			Vector2(side * inner, -0.20), Vector2(side * (inner + 0.052), -0.16),
+			Vector2(side * (inner + 0.040), 0.10), Vector2(side * inner, 0.06)]), moss)
+	# THE LIP: the ledge the water leaves from, drawn as a solid overhanging slab so the fall
+	# has somewhere to come out of rather than starting in mid-air
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.20, -0.34), Vector2(0.20, -0.34), Vector2(0.19, -0.28), Vector2(-0.19, -0.28)]), rock_hi)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.19, -0.28), Vector2(0.19, -0.28), Vector2(0.17, -0.245), Vector2(-0.17, -0.245)]), rock_lo)
+	# THE FALL, spreading as it drops: a curtain, with vertical striations of three brightnesses
+	# because falling water separates into ropes rather than staying a sheet
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.168, -0.252), Vector2(0.168, -0.252), Vector2(0.212, 0.232), Vector2(-0.212, 0.232)]), water)
+	for r in 7:
+		var u := (float(r) / 6.0) * 2.0 - 1.0
+		var xt := u * 0.150
+		var xb := u * 0.192
+		var wdt := (0.020 if r % 2 == 0 else 0.012)
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(fx2 - 0.045, -0.50), Vector2(fx2 + 0.040, -0.50),
-			Vector2(fx2 + 0.030, -0.355), Vector2(fx2 - 0.036, -0.365)]), rock_hi)
-	# the overhang's shadow, which is what makes the water come from BEHIND the lip
-	var shade := PackedVector2Array()
-	for e2 in jag:
-		shade.append(Vector2(float(e2[0]), float(e2[1])))
-	for i in range(jag.size() - 1, -1, -1):
-		shade.append(Vector2(float(jag[i][0]), float(jag[i][1]) + 0.035))
-	draw_colored_polygon(shade, rock_lo)
-	# THREE STREAMS THAT CROSS, in three tones so every crossing is visible. Each is a
-	# ribbon: a polygon whose two sides are the same sine, offset - a plain polyline would
-	# give a hose of even width, and falling water narrows as it accelerates.
-	var tones := [water, water_hi, water_lo]
-	for i in 3:
-		var x0 := -0.235 + float(i) * 0.235
-		var sway := 0.155 * (1.0 if i % 2 == 0 else -1.0)
-		var left := PackedVector2Array()
-		var right := PackedVector2Array()
-		for sg in 13:
-			var u := float(sg) / 12.0
-			var y := lerpf(-0.30, 0.235, u)
-			var x := x0 + sin(u * PI * 0.92) * sway
-			var wid := lerpf(0.055, 0.026, u)
-			left.append(Vector2(x - wid, y))
-			right.append(Vector2(x + wid, y))
-		right.reverse()
-		var band := left
-		band.append_array(right)
-		draw_colored_polygon(band, tones[i])
-	# THE POOL, with a real surface. A curved top edge and a darker body under it: the
-	# curve is what separates "water seen at an angle" from "a blue rectangle".
+			Vector2(xt - wdt, -0.250), Vector2(xt + wdt, -0.250),
+			Vector2(xb + wdt * 1.3, 0.230), Vector2(xb - wdt * 1.3, 0.230)]),
+			water_hi if r % 3 == 0 else water_lo)
+	# the crest, where the sheet is still glassy before it breaks up
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.170, -0.256), Vector2(0.170, -0.256), Vector2(0.176, -0.212), Vector2(-0.176, -0.212)]), water_hi)
+	# THE POOL, with a curved surface, and the mist where the fall lands - that white haze is
+	# the single mark that makes water look like it is arriving with force
 	var surf := PackedVector2Array()
-	for sg2 in 17:
-		var u2 := float(sg2) / 16.0
-		surf.append(Vector2(lerpf(-0.50, 0.50, u2), 0.235 - 0.035 * sin(u2 * PI)))
+	for s in 17:
+		var t := float(s) / 16.0
+		surf.append(Vector2(lerpf(-0.50, 0.50, t), 0.232 - 0.030 * sin(t * PI)))
 	surf.append(Vector2(0.50, 0.50))
 	surf.append(Vector2(-0.50, 0.50))
-	draw_colored_polygon(surf, pool_dk)
-	fill_ellipse(Vector2(0.0, 0.245), 0.40, 0.055, water_lo)
-	# the foam where it lands - without it the streams simply stop, and stopping water does
-	# not read as falling water
-	for i2 in 9:
-		var fx2 := -0.34 + float(i2) * 0.085 + sin(float(atick()) * 0.02 + float(i2)) * 0.014
-		draw_circle(Vector2(fx2, 0.222 + 0.018 * sin(float(atick()) * 0.03 + float(i2) * 1.7)),
-			0.036 - 0.009 * float(i2 % 3), foam)
-	# spray, thrown up off the pool
-	for i3 in 6:
-		var t := fposmod(float(atick()) * 0.008 + float(i3) * 0.17, 1.0)
-		draw_circle(Vector2(-0.26 + float(i3) * 0.105, 0.22 - t * 0.15),
-			0.016 * (1.0 - t), ca(Color(0.92, 0.97, 1.0, 0.55 * (1.0 - t))))
+	draw_colored_polygon(surf, pool)
+	for mz in 5:
+		fill_ellipse(Vector2(0.0, 0.222 - float(mz) * 0.020), 0.30 - float(mz) * 0.030,
+			0.070 - float(mz) * 0.009, mist)
+	for f in 9:
+		var fx := -0.30 + float(f) * 0.075
+		draw_circle(Vector2(fx, 0.226 + 0.014 * sin(float(f) * 1.9)),
+			0.030 - 0.008 * float(f % 3), ca(Color(0.95, 0.98, 1.0, 0.75)))
+	# the ripple rings spreading out from the impact
+	for rr in 3:
+		var ryv := 0.290 + float(rr) * 0.052
+		draw_line(Vector2(-0.20 - float(rr) * 0.08, ryv), Vector2(0.20 + float(rr) * 0.08, ryv),
+			ca(Color(0.70, 0.88, 1.0, 0.26)), 0.010)
+	# FOREGROUND BOULDERS, darkest of all, closing the bottom corners. They are what turn a
+	# flat elevation into a view of somewhere.
+	for side2: float in [-1.0, 1.0]:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(side2 * 0.50, 0.500), Vector2(side2 * 0.50, 0.330),
+			Vector2(side2 * 0.360, 0.300), Vector2(side2 * 0.250, 0.360),
+			Vector2(side2 * 0.230, 0.500)]), rock_lo)
+		draw_line(Vector2(side2 * 0.480, 0.340), Vector2(side2 * 0.350, 0.316), rock, 0.014)
 
 
 func card_art_temple() -> void:
-	# COLUMNS = A GREEK TEMPLE WITH LARGE PILLARS (Louis). Everything about the pattern is
-	# in that picture already: fixed vertical lanes, evenly spaced, nothing crossing. The
-	# pillars are deliberately FAT - "large pillars" is his word, and a temple drawn with
-	# thin ones reads as a fence.
-	var stone := ca(Color(0.86, 0.82, 0.72))
-	var stone_lo := ca(Color(0.62, 0.58, 0.50))
+	# COLUMNS = A GREEK TEMPLE (Louis kept this one and asked only for it to be still: "i want
+	# the greek temple without balls or moving parts"). The four props that used to bob on top
+	# are gone; what was spent on them goes into the architecture instead - real entasis on the
+	# shafts, a proper three-band entablature, and steps that are steps.
+	var stone := ca(Color(0.89, 0.85, 0.75))
+	var stone_lo := ca(Color(0.68, 0.64, 0.55))
 	var shade := ca(Color(0.44, 0.41, 0.36))
-	# the stylobate: two steps, wider than the temple, or it looks like it is floating
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.46, 0.30), Vector2(0.46, 0.30), Vector2(0.46, 0.365), Vector2(-0.46, 0.365)]), stone_lo)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.50, 0.365), Vector2(0.50, 0.365), Vector2(0.50, 0.43), Vector2(-0.50, 0.43)]), shade)
-	# FOUR PILLARS, fluted. The flutes are what make a rectangle a column, and they are
-	# drawn as filled bands rather than lines so they survive at card-back size.
-	for i in 4:
-		var x := -0.315 + float(i) * 0.21
-		var w := 0.072
-		draw_colored_polygon(PackedVector2Array([   # the shaft, tapering very slightly
-			Vector2(x - w, 0.30), Vector2(x + w, 0.30),
-			Vector2(x + w * 0.90, -0.17), Vector2(x - w * 0.90, -0.17)]), stone)
-		for f in 2:
-			var fx := x - w * 0.42 + float(f) * w * 0.84
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(fx - w * 0.12, 0.29), Vector2(fx + w * 0.12, 0.29),
-				Vector2(fx + w * 0.11, -0.16), Vector2(fx - w * 0.11, -0.16)]), stone_lo)
-		# the capital and the base: the two blocks that stop a shaft looking cut off
+	var deep := ca(Color(0.28, 0.26, 0.24))
+	# the crepidoma: three steps, each wider than the one above, which is what a temple stands
+	# on and what a single slab never reads as
+	for k in 3:
+		var t := float(k)
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(x - w * 1.32, -0.17), Vector2(x + w * 1.32, -0.17),
-			Vector2(x + w * 1.18, -0.225), Vector2(x - w * 1.18, -0.225)]), stone)
-		draw_rect(Rect2(x - w * 1.20, 0.276, w * 2.40, 0.028), stone_lo)
-	# the architrave, then the pediment - a real one has both, and the flat band between
-	# the columns and the triangle is what makes the roof sit ON something
+			Vector2(-0.40 - t * 0.038, 0.286 + t * 0.052), Vector2(0.40 + t * 0.038, 0.286 + t * 0.052),
+			Vector2(0.40 + t * 0.038, 0.338 + t * 0.052), Vector2(-0.40 - t * 0.038, 0.338 + t * 0.052)]),
+			stone_lo if k % 2 == 0 else stone)
+	# the cella wall behind the colonnade, so the gaps between columns are DARK rather than
+	# transparent - that shadow is most of what makes a portico read as deep
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.44, -0.225), Vector2(0.44, -0.225), Vector2(0.44, -0.295), Vector2(-0.44, -0.295)]), stone)
+		Vector2(-0.34, -0.170), Vector2(0.34, -0.170), Vector2(0.34, 0.286), Vector2(-0.34, 0.286)]), deep)
+	# SIX COLUMNS with entasis - a real one swells slightly at a third of its height. Drawn as
+	# a profile polygon rather than a rectangle, because the swell is the difference between a
+	# column and a post.
+	for i2 in 6:
+		var x := -0.315 + float(i2) * 0.126
+		var prof := [[0.286, 0.052], [0.160, 0.055], [0.010, 0.053], [-0.110, 0.047], [-0.170, 0.043]]
+		var pts := PackedVector2Array()
+		for e in prof:
+			pts.append(Vector2(x - float(e[1]), float(e[0])))
+		for k2 in range(prof.size() - 1, -1, -1):
+			pts.append(Vector2(x + float(prof[k2][1]), float(prof[k2][0])))
+		draw_colored_polygon(pts, stone)
+		# two flutes, filled bands rather than lines so they survive at card-back size
+		for f in 2:
+			var fx := x - 0.024 + float(f) * 0.048
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(fx - 0.008, 0.280), Vector2(fx + 0.008, 0.280),
+				Vector2(fx + 0.008, -0.164), Vector2(fx - 0.008, -0.164)]), stone_lo)
+		# the capital - an echinus and an abacus, the two blocks that stop a shaft looking cut
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x - 0.046, -0.170), Vector2(x + 0.046, -0.170),
+			Vector2(x + 0.062, -0.196), Vector2(x - 0.062, -0.196)]), stone)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x - 0.066, -0.196), Vector2(x + 0.066, -0.196),
+			Vector2(x + 0.066, -0.222), Vector2(x - 0.066, -0.222)]), stone_lo)
+	# THE ENTABLATURE in its three real bands - architrave, frieze with triglyphs, cornice.
+	# The triglyphs are the mark that says "Doric" and they cost three rectangles.
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.47, -0.295), Vector2(0.47, -0.295), Vector2(0.0, -0.475)]), stone_lo)
-	draw_colored_polygon(PackedVector2Array([   # the tympanum, sunk into it
-		Vector2(-0.33, -0.315), Vector2(0.33, -0.315), Vector2(0.0, -0.425)]), shade)
-	# ...and one prop standing on each column, straight up and down, which is the pattern
-	for i in 4:
-		var x2 := -0.315 + float(i) * 0.21
-		var bob := 0.030 * sin(float(atick()) * 0.03 + float(i) * 1.6)
-		draw_circle(Vector2(x2, -0.285 + bob), 0.042, ca(Color(0.82, 0.70, 0.98)))
+		Vector2(-0.400, -0.222), Vector2(0.400, -0.222), Vector2(0.400, -0.268), Vector2(-0.400, -0.268)]), stone)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.400, -0.268), Vector2(0.400, -0.268), Vector2(0.400, -0.322), Vector2(-0.400, -0.322)]), stone_lo)
+	for tg in 7:
+		var tx2 := -0.336 + float(tg) * 0.112
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(tx2 - 0.020, -0.272), Vector2(tx2 + 0.020, -0.272),
+			Vector2(tx2 + 0.020, -0.318), Vector2(tx2 - 0.020, -0.318)]), shade)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.430, -0.322), Vector2(0.430, -0.322), Vector2(0.430, -0.362), Vector2(-0.430, -0.362)]), stone)
+	# the pediment, with its tympanum sunk into it
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.452, -0.362), Vector2(0.452, -0.362), Vector2(0.0, -0.478)]), stone_lo)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.330, -0.378), Vector2(0.330, -0.378), Vector2(0.0, -0.462)]), shade)
+	draw_colored_polygon(PackedVector2Array([   # the raking cornice, a lighter lip along the rake
+		Vector2(-0.452, -0.362), Vector2(0.0, -0.478), Vector2(0.0, -0.496), Vector2(-0.470, -0.372)]), stone)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(0.452, -0.362), Vector2(0.0, -0.478), Vector2(0.0, -0.496), Vector2(0.470, -0.372)]), stone)
 
 
-func card_art_shower(sc: float) -> void:
-	# SHOWER = A SHOWER, and HALF SHOWER = A VERY SMALL SHOWER (Louis, and the joke is
-	# entirely in `sc`). One drawing at two scales, which is the only way the gag lands:
-	# the small one has to be recognisably the SAME shower, so the card reads as "that, but
-	# tiny" rather than as a different bathroom.
-	var chrome := ca(Color(0.80, 0.84, 0.88))
-	var chrome_lo := ca(Color(0.50, 0.55, 0.60))
-	var water := ca(Color(0.55, 0.80, 0.96, 0.72))
-	var tile := ca(Color(0.30, 0.34, 0.40))
-	# the tiled wall behind it stays FULL SIZE on both cards - it is the frame the joke is
-	# measured against, and shrinking it too would just be the same picture again
-	for row in 4:
-		for col in 4:
-			draw_rect(Rect2(-0.48 + float(col) * 0.245, -0.48 + float(row) * 0.245, 0.230, 0.230),
-				ca(Color(tile.r, tile.g, tile.b, 0.30)))
-	var top := -0.40 * sc
-	# the riser and the gooseneck: a vertical pipe with an elbow, drawn as filled bars
-	draw_rect(Rect2(-0.028 * sc + 0.16, top, 0.056 * sc, 0.30 * sc), chrome_lo)
+func card_art_duck(baby: bool) -> void:
+	# SHOWER = A DUCK, HALF SHOWER = A BABY DUCK (2026-07-29, Louis: "i want a baby duck for
+	# half shower and a adult duck for shower, nothing else on the images"). The bathroom is
+	# gone entirely - the tiles, the plumbing, the spray - and the duck he liked is now the
+	# whole picture on both cards, at two ages.
+	#
+	# THE JOKE IS THE PROPORTIONS, NOT THE SIZE. Drawing the same duck at 0.5 scale would give
+	# a distant duck, not a young one: a duckling has a BIGGER head against its body, a
+	# shorter neck, a stubbier bill and no tail to speak of. Those four numbers are what `baby`
+	# changes, so the pair reads as parent and chick rather than as near and far.
+	var body_w := 0.300 if not baby else 0.230
+	var body_h := 0.215 if not baby else 0.180
+	var head_r := 0.115 if not baby else 0.118      # the same head on a smaller bird
+	var neck := 0.150 if not baby else 0.060
+	var bill_l := 0.135 if not baby else 0.092
+	var yolk := ca(Color(1.0, 0.83, 0.26))
+	var yolk_lo := ca(Color(0.90, 0.68, 0.16))
+	var yolk_hi := ca(Color(1.0, 0.93, 0.58))
+	var bill := ca(Color(0.98, 0.58, 0.14))
+	var bill_lo := ca(Color(0.86, 0.44, 0.10))
+	var cy := 0.130 if not baby else 0.165
+	# THE BODY, an egg lying down rather than a circle: a duck's back is long and its breast
+	# is deep, and a round body reads as a chick toy at any age.
+	fill_ellipse(Vector2(0.0, cy), body_w, body_h, yolk)
+	fill_ellipse(Vector2(-body_w * 0.18, cy - body_h * 0.22), body_w * 0.70, body_h * 0.58, yolk_hi)
+	# the folded wing - one shape, and the only mark that says the body has feathers on it
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(0.16 + 0.028 * sc, top), Vector2(0.16 + 0.028 * sc, top + 0.055 * sc),
-		Vector2(-0.02, top + 0.075 * sc), Vector2(-0.02, top + 0.015 * sc)]), chrome)
-	# THE HEAD: a trapezoid with a face plate, and the holes drawn as a row of dots. At
-	# small scale the dots merge into one dark band, which still reads as a rose - so the
-	# shape survives the shrink without a special case.
+		Vector2(-body_w * 0.36, cy - body_h * 0.10), Vector2(body_w * 0.10, cy - body_h * 0.34),
+		Vector2(body_w * 0.52, cy + body_h * 0.06), Vector2(body_w * 0.06, cy + body_h * 0.30),
+		Vector2(-body_w * 0.30, cy + body_h * 0.18)]), yolk_lo)
+	draw_line(Vector2(-body_w * 0.20, cy + body_h * 0.10), Vector2(body_w * 0.34, cy + body_h * 0.02),
+		ca(Color(0.80, 0.58, 0.12, 0.55)), 0.010)
+	# the tail, which an adult has and a duckling barely does
+	if not baby:
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(body_w * 0.82, cy - 0.030), Vector2(body_w * 1.10, cy - 0.086),
+			Vector2(body_w * 1.06, cy + 0.020), Vector2(body_w * 0.80, cy + 0.036)]), yolk_lo)
+	# the neck and head, up and to the left
+	var hc := Vector2(-body_w * 0.62, cy - neck - head_r * 0.55)
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.115 * sc - 0.02, top + 0.020 * sc), Vector2(0.045 * sc - 0.02, top + 0.020 * sc),
-		Vector2(0.075 * sc - 0.02, top + 0.095 * sc), Vector2(-0.145 * sc - 0.02, top + 0.095 * sc)]), chrome)
-	draw_rect(Rect2(-0.145 * sc - 0.02, top + 0.088 * sc, 0.220 * sc, 0.026 * sc), chrome_lo)
-	for i in 5:
-		draw_circle(Vector2(-0.125 * sc - 0.02 + float(i) * 0.048 * sc, top + 0.101 * sc),
-			0.009 * sc, ca(Color(0.20, 0.24, 0.28)))
-	# the water: a fan of falling lines from under the rose, each on its own phase so the
-	# spray moves. Lines, not a filled cone - a cone of water reads as a lampshade.
-	for i in 7:
-		var u := float(i) / 6.0
-		var x0 := lerpf(-0.130 * sc - 0.02, 0.060 * sc - 0.02, u)
-		var spread := (u - 0.5) * 0.22 * sc
-		var ph := fposmod(float(atick()) * 0.02 + float(i) * 0.37, 1.0)
-		var y0 := top + 0.115 * sc + ph * 0.06 * sc
-		var y1 := y0 + 0.36 * sc
-		draw_line(Vector2(x0, y0), Vector2(x0 + spread, y1), water, 0.018 * sc)
-	# the tray it lands in, and the puddle spreading - the mark that says the water arrives
-	var tray_y := top + 0.52 * sc
+		Vector2(-body_w * 0.30, cy - body_h * 0.52), Vector2(-body_w * 0.86, hc.y + head_r * 0.60),
+		Vector2(-body_w * 0.36, hc.y + head_r * 0.66), Vector2(-body_w * 0.02, cy - body_h * 0.44)]), yolk)
+	draw_circle(hc, head_r, yolk)
+	draw_circle(hc + Vector2(-head_r * 0.24, -head_r * 0.28), head_r * 0.62, yolk_hi)
+	# THE BILL: a wedge with a shorter lower mandible under it. A single triangle is a beak
+	# and belongs on a sparrow; the two-part flat bill is the whole species.
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.22 * sc - 0.02, tray_y), Vector2(0.18 * sc - 0.02, tray_y),
-		Vector2(0.24 * sc - 0.02, tray_y + 0.055 * sc), Vector2(-0.28 * sc - 0.02, tray_y + 0.055 * sc)]), chrome_lo)
-	fill_ellipse(Vector2(-0.02, tray_y + 0.010 * sc), 0.17 * sc, 0.030 * sc, water)
-	# ...and, on the SMALL one only, a rubber duck for scale. A tiny shower on its own is
-	# just a shower drawn small; something ordinary beside it is what makes it tiny.
-	if sc < 0.6:
-		# ...and it is SMALLER than the shower head, or the gag inverts: a duck bigger than
-		# the plumbing makes the duck the subject and the shower merely distant
-		var dp := Vector2(0.235, 0.315)
-		fill_ellipse(dp, 0.062, 0.044, ca(Color(1.0, 0.84, 0.28)))
-		draw_circle(dp + Vector2(0.042, -0.038), 0.034, ca(Color(1.0, 0.84, 0.28)))
-		draw_colored_polygon(PackedVector2Array([   # the bill
-			dp + Vector2(0.068, -0.038), dp + Vector2(0.112, -0.028), dp + Vector2(0.068, -0.020)]),
-			ca(Color(0.98, 0.55, 0.16)))
-		draw_circle(dp + Vector2(0.051, -0.046), 0.008, ca(Color(0.16, 0.12, 0.10)))
+		hc + Vector2(-head_r * 0.62, -0.014), hc + Vector2(-head_r * 0.62 - bill_l, 0.006),
+		hc + Vector2(-head_r * 0.62 - bill_l * 0.92, 0.036), hc + Vector2(-head_r * 0.50, 0.036)]), bill)
+	draw_colored_polygon(PackedVector2Array([
+		hc + Vector2(-head_r * 0.62, 0.030), hc + Vector2(-head_r * 0.62 - bill_l * 0.80, 0.034),
+		hc + Vector2(-head_r * 0.62 - bill_l * 0.74, 0.052), hc + Vector2(-head_r * 0.52, 0.050)]), bill_lo)
+	draw_circle(hc + Vector2(-head_r * 0.30, -head_r * 0.16), head_r * 0.155, ca(Color(0.16, 0.12, 0.10)))
+	draw_circle(hc + Vector2(-head_r * 0.34, -head_r * 0.22), head_r * 0.058, ca(Color(1, 1, 1, 0.85)))
+	# ...and the water it sits on, which is one flat band and the only thing on the card that
+	# is not the duck. Without it the bird is floating in the middle of a rectangle.
+	var wl := cy + body_h * 0.52
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.50, wl), Vector2(0.50, wl), Vector2(0.50, 0.50), Vector2(-0.50, 0.50)]),
+		ca(Color(0.34, 0.58, 0.78, 0.75)))
+	draw_line(Vector2(-0.50, wl), Vector2(0.50, wl), ca(Color(0.70, 0.88, 1.0, 0.60)), 0.014)
+	for rp in 3:
+		var rr := 0.10 + float(rp) * 0.085
+		draw_line(Vector2(-rr - 0.10, wl + 0.040 + float(rp) * 0.036),
+			Vector2(rr + 0.10, wl + 0.040 + float(rp) * 0.036), ca(Color(0.70, 0.88, 1.0, 0.22)), 0.010)
 
 
 func card_art_racket() -> void:
-	# TENNIS = A TENNIS RACKET (Louis). Drawn big and on the diagonal: a racket square-on
-	# fills a portrait card badly, and the diagonal is also how one is held.
-	var frame := ca(Color(0.95, 0.86, 0.36))
-	var frame_lo := ca(Color(0.66, 0.56, 0.20))
-	var grip := ca(Color(0.24, 0.20, 0.22))
-	var grip_hi := ca(Color(0.40, 0.34, 0.36))
-	var strung := ca(Color(0.94, 0.94, 0.90, 0.75))
-	# THE HANDLE GOES DOWN, and the first pass had it up: `ay` was the +90 perpendicular, so
-	# every `- ay` offset - throat, grip, butt cap - ran up and to the LEFT, and the racket
-	# came out held upside down with its grip clipped by the top edge of the card. One sign
-	# flip fixes all six of them at once, which is the reason they are all expressed off one
-	# axis vector rather than written out.
-	var ang := -0.62
-	var head := Vector2(-0.09, -0.20)
-	var ax := Vector2(cos(ang), sin(ang))
-	var ay := Vector2(ax.y, -ax.x)
-	# the head: an oval ring. Two filled ellipses rather than a stroked one, because a
-	# stroked ellipse at an angle is not something Godot draws - draw_arc's radius is
-	# circular, the trap the money hat's brim already paid for.
+	# TENNIS = A TENNIS RACKET (2026-07-29, Louis: "your tennis racket looks ugly and the ball
+	# shouldn't move (and also looks bad)"). Rebuilt upright rather than on the diagonal, which
+	# fixes most of what was ugly about it: the angled version had to be built out of two
+	# rotated basis vectors, so its throat, grip and butt cap were all approximations of shapes
+	# that are trivially drawn square-on, and the strings crossed the frame wherever the
+	# arithmetic drifted. Upright, the stringbed is a real grid inside a real oval, the throat
+	# is a genuine Y, and every edge is exact.
+	#
+	# The ball is STILL and off to one side, at rest on the ground with the racket - it was
+	# bobbing with a motion streak behind it, which is the animation this deck no longer has.
+	var frame := ca(Color(0.94, 0.84, 0.32))
+	var frame_lo := ca(Color(0.64, 0.54, 0.18))
+	var grip := ca(Color(0.26, 0.22, 0.24))
+	var grip_hi := ca(Color(0.42, 0.36, 0.38))
+	var strung := ca(Color(0.95, 0.95, 0.91, 0.80))
+	var hx := -0.06
+	var hy := -0.185
+	var rx := 0.190
+	var ry := 0.245
+	# THE HEAD, as a ring: the outer oval filled, then the stringbed, then the inner rim over
+	# the strings - so no string can ever cross the frame, which is what a stringbed drawn on
+	# top always ends up doing.
 	var ring := PackedVector2Array()
-	var hole := PackedVector2Array()
-	for i in 33:
-		var t := TAU * float(i) / 32.0
-		ring.append(head + ax * cos(t) * 0.175 + ay * sin(t) * 0.235)
-	for i in 33:
-		var t2 := TAU * float(-i) / 32.0
-		hole.append(head + ax * cos(t2) * 0.145 + ay * sin(t2) * 0.205)
+	for i2 in 41:
+		var t := TAU * float(i2) / 40.0
+		ring.append(Vector2(hx + cos(t) * rx, hy + sin(t) * ry))
 	draw_colored_polygon(ring, frame)
-	# the strings, drawn INSIDE the hole and then the hole's rim over them, so no string
-	# ever crosses the frame - which is what a stringbed drawn on top always does
-	for i in 5:
-		var u := -0.72 + float(i) * 0.36
-		draw_line(head + ax * (u * 0.145) - ay * 0.19, head + ax * (u * 0.145) + ay * 0.19, strung, 0.011)
-	for i in 6:
-		var v := -0.80 + float(i) * 0.32
-		draw_line(head - ax * 0.13 + ay * (v * 0.205), head + ax * 0.13 + ay * (v * 0.205), strung, 0.011)
-	draw_polyline(hole, frame_lo, 0.020)
-	# the throat: two arms out of the grip to the bottom of the head, with the gap between
-	# them left open. A solid triangle there reads as a frying pan.
+	var hole := PackedVector2Array()
+	for i3 in 41:
+		var t2 := TAU * float(i3) / 40.0
+		hole.append(Vector2(hx + cos(t2) * (rx - 0.028), hy + sin(t2) * (ry - 0.030)))
+	draw_colored_polygon(hole, ca(Color(0.13, 0.11, 0.16)))
+	# the strings: mains and crosses, clipped by eye to the oval so none pokes out
+	for m in 7:
+		var u := (float(m) / 6.0) * 2.0 - 1.0
+		var sx := hx + u * (rx - 0.040)
+		var h := sqrt(maxf(1.0 - u * u, 0.0)) * (ry - 0.036)
+		draw_line(Vector2(sx, hy - h), Vector2(sx, hy + h), strung, 0.009)
+	for n in 9:
+		var v := (float(n) / 8.0) * 2.0 - 1.0
+		var sy := hy + v * (ry - 0.036)
+		var w := sqrt(maxf(1.0 - v * v, 0.0)) * (rx - 0.040)
+		draw_line(Vector2(hx - w, sy), Vector2(hx + w, sy), strung, 0.009)
+	var rim := PackedVector2Array()
+	for i4 in 41:
+		var t3 := TAU * float(i4) / 40.0
+		rim.append(Vector2(hx + cos(t3) * (rx - 0.014), hy + sin(t3) * (ry - 0.015)))
+	draw_polyline(rim, frame_lo, 0.020)
+	# THE THROAT: two arms out of the grip to the bottom of the head, with the gap between them
+	# left open. A solid triangle there is a frying pan.
 	for sgn: float in [-1.0, 1.0]:
 		draw_colored_polygon(PackedVector2Array([
-			head - ay * 0.20 + ax * sgn * 0.030, head - ay * 0.20 + ax * sgn * 0.135,
-			head - ay * 0.33 + ax * sgn * 0.055, head - ay * 0.33 + ax * sgn * 0.020]), frame)
-	# the handle, wrapped: the wrap is drawn as slanted bands, which is what an overgrip is
-	var g0 := head - ay * 0.30
-	var g1 := head - ay * 0.58
+			Vector2(hx + sgn * 0.030, hy + ry + 0.150), Vector2(hx + sgn * 0.062, hy + ry + 0.150),
+			Vector2(hx + sgn * 0.150, hy + ry - 0.010), Vector2(hx + sgn * 0.104, hy + ry - 0.020)]), frame)
+	# the handle, wrapped in slanted bands, with a butt cap
+	var g0 := Vector2(hx, hy + ry + 0.140)
+	var g1 := Vector2(hx, hy + ry + 0.430)
 	draw_colored_polygon(PackedVector2Array([
-		g0 + ax * 0.050, g0 - ax * 0.050, g1 - ax * 0.062, g1 + ax * 0.062]), grip)
-	for i in 6:
-		var t3 := float(i) / 5.0
-		var p := g0.lerp(g1, t3)
-		draw_line(p - ax * 0.055 - ay * 0.012, p + ax * 0.055 + ay * 0.012, grip_hi, 0.010)
-	draw_colored_polygon(PackedVector2Array([   # the butt cap
-		g1 + ax * 0.070, g1 - ax * 0.070, g1 - ay * 0.030 - ax * 0.060, g1 - ay * 0.030 + ax * 0.060]), frame_lo)
-	# ...and the ball, mid-flight, with its own seam
-	# ...and the ball moves with it: up-RIGHT now, clear of the grip that has just swung
-	# down into the bottom-right corner
-	var bp := Vector2(0.30, -0.30) + Vector2(0.0, 0.030 * sin(float(atick()) * 0.035))
-	draw_circle(bp, 0.088, ca(Color(0.80, 0.94, 0.32)))
-	draw_arc(bp + Vector2(0.070, 0.0), 0.085, PI * 0.62, PI * 1.38, 16, ca(Color(0.98, 1.0, 0.90, 0.85)), 0.013, true)
-	draw_arc(bp - Vector2(0.070, 0.0), 0.085, -PI * 0.38, PI * 0.38, 16, ca(Color(0.98, 1.0, 0.90, 0.85)), 0.013, true)
-	# the streak behind it, so the ball is crossing rather than parked
-	for i in 3:
-		draw_circle(bp - Vector2(0.055 + float(i) * 0.045, -0.030 * float(i)), 0.070 - float(i) * 0.016,
-			ca(Color(0.80, 0.94, 0.32, 0.22 - 0.06 * float(i))))
+		g0 + Vector2(0.050, 0.0), g0 - Vector2(0.050, 0.0),
+		g1 - Vector2(0.062, 0.0), g1 + Vector2(0.062, 0.0)]), grip)
+	for i5 in 7:
+		var t4 := float(i5) / 6.0
+		var p := g0.lerp(g1, t4)
+		draw_line(p - Vector2(0.056, 0.014), p + Vector2(0.056, -0.014), grip_hi, 0.010)
+	draw_colored_polygon(PackedVector2Array([
+		g1 + Vector2(0.072, -0.004), g1 - Vector2(0.072, 0.004),
+		g1 + Vector2(-0.066, 0.034), g1 + Vector2(0.066, 0.034)]), frame_lo)
+	# THE BALL, at rest beside it: a felt sphere with the seam that makes it a tennis ball and
+	# not an orange. Two arcs, and the nap along the top edge.
+	var bp := Vector2(0.300, 0.318)
+	draw_circle(bp, 0.112, ca(Color(0.78, 0.92, 0.30)))
+	draw_circle(bp + Vector2(-0.026, -0.030), 0.082, ca(Color(0.86, 0.96, 0.44)))
+	draw_arc(bp + Vector2(0.098, 0.0), 0.108, PI * 0.60, PI * 1.40, 18, ca(Color(0.99, 1.0, 0.94)), 0.016, true)
+	draw_arc(bp - Vector2(0.098, 0.0), 0.108, -PI * 0.40, PI * 0.40, 18, ca(Color(0.99, 1.0, 0.94)), 0.016, true)
+
+
 #endregion
 
 
