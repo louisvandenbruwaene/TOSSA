@@ -505,7 +505,9 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   looks now, and their OFF branches were **deleted**, not left stranded - along with
   `draw_money_hat`, `draw_coin` and `_hat_vessel`, which were what the flower economy
   replaced. `flowers_on()` is gone and `coin_word()` returns "flowers" unconditionally.
-  The panel keeps ONE entry, `face_v2`, and one new rule to stop the bug the old
+  The panel was left with ONE entry, `face_v2` - since shipped, and the list has turned over
+  again: as of 2026-07-30 it carries `fire_motion`, `club_v2`, `card_v2` and `shop_v2`. It also
+  left one new rule behind, to stop the bug the old
   dictionary invited: **every experiment is read through `exp_on(id)` and nowhere else**,
   because a reader with its own hand-written fallback can disagree with the declaration
   (`flowers_on` said `false` against a declaration of `true` for a while), and one
@@ -596,6 +598,112 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
   act resolved, which made the one path only a perfect act can reach impossible to test
   or screenshot at all.
+- **THE CLUB IS ONE PROFILE TABLE** (2026-07-30, F9 `club_v2`, ON. Louis asked for the club,
+  the trick/pattern cards and the shop to be improved, with the originals kept behind F9).
+  Three functions draw a club - `draw_club` on stage and as the wordmark's crossbar, `cap_club`
+  on the shop card, `glow_silhouette` in the dark - and each carried its own copy of the shape.
+  So each carried the same leftover mark: `draw_circle(Vector2(0, -16.5), 6.0)`, a disc as wide
+  as the whole body. **In `cap_club` it sat 2 units PROUD of the tapered bulb whose own comment
+  says it replaced the old cone, so the careful profile underneath was never the silhouette
+  anybody saw** - what read was a fat head on a stick, i.e. the mallet. Deleting a duplicated
+  mark in one of three copies fixes one picture in three, so the shape is a table (`CLUB_PROF`)
+  and the three are one. Every mark on a club now comes out of `club_shape(y_hi, y_lo, inset,
+  x0f, x1f)`, a closed polygon between two heights and two FRACTIONS of the club's own
+  half-width: the silhouette is (-1, 1), the shop's shaded side (0.30, 1), its lacquer stripe
+  (-0.80, -0.42). None of them can cross the outline because all of them are measured off it,
+  and since a half-width is a function of height the polygon is simple by construction - it
+  cannot self-intersect, the failure this file has now paid for three times.
+  **The numbers that make it a club:** the body runs collar (+2) to nose (-22.5), 24.5 long by
+  4.1 half-width, so 3:1 - the old bulb was 2.5:1 with the disc on top. The width HOLDS from
+  -14 to -17 instead of peaking, because the first pass at the table peaked at -15 and fell
+  away over four units and came out a bullet: what makes the top of a club read is a dome, i.e.
+  full width and then a quick round-off. 4.1 is also a deliberate 0.7 clear of the knife's 3.4,
+  since the two heavy props are told apart in the air by mass as much as by shape.
+  **The ends carry the rest:** a knob is a bulb with a WAIST under it, and the nose is a
+  rounded point. The stage version is flat per the round-props rule (one body inside a rim dark
+  all the way round, `inset`), but the club gets what a ball cannot: a two-tone silhouette. A
+  pale handle against a coloured body says "club" before any shading, and survives every venue
+  palette because neither tone pretends to be light. **The handle takes no rim** - at 1.42
+  half-width a rim thick enough not to shimmer eats it from both sides - and the decorated band
+  is scale-gated like `draw_coin`'s milling.
+  **CAP_CLUB_KNOB / CAP_CLUB_TIP ARE UNCHANGED ON PURPOSE**: they place the A's crossbar in the
+  wordmark, so holding the length and balance point exactly lets the shape change without
+  moving the logo. Verified on the capsule.
+  **AND INTERPRETED GEOMETRY MUST BE BAKED.** Measured, seven clubs at the World Arena, same
+  seeded act, back to back on a quiet machine: the old club **4.5ms** a frame, this one
+  **4.7ms with the `_club_cache` and 7.8ms without it**. Five slices per club at ~186 `club_hw`
+  samples each is ~12,000 GDScript loop iterations a frame. The chainsaw's `_saw_bake` is the
+  same lesson from the hard side, where the geometry changes every tick and must be rebuilt. A
+  club's never changes at all, so the first club of the session pays for all of them. The cache is keyed on
+  the arguments, bounded at 64 entries, and **hands back the stored array, not a copy** - no
+  caller may mutate it.
+- **THE TRICK AND PATTERN CARDS** (2026-07-30, F9 `card_v2`, ON). Four things, and the first is
+  the one that was doing the damage. (1) **THE PICTURE HANGS IN A FRAME.** The illustration was
+  drawn straight onto the paper, so the art had no edge to be read against and the empty
+  corners of the art box looked like unfinished card rather than deliberate margin. It sits in a
+  recessed plate now (`draw_card_art_window`) with a pool of the kind's colour behind it - and
+  no drop shadow, because the plate is sunk INTO the card and a shadow would claim it was lying
+  on top. The art is drawn INSIDE that window (`box = r.grow(-5.5%)`), since a framed rect has
+  rounded corners and the Shower's water and the Temple's floor are full-width blocks that ran
+  visibly through the curve of the bottom two. (2) **A CARD HAS AN INDEX IN ITS CORNERS** - a
+  four-point sparkle for a trick, a ring for a pattern, the same marks the backs are built
+  round, so nothing is given away. That is the mark the eye uses to decide it is holding a card
+  rather than looking at a panel with a picture on it. `CARD_PIP_KEEP` is a named constant
+  because the Skills screen prints the skill's name across the foot of its card and "REVERSE
+  CASCADE" at full width ran into the bottom-right pip. Pips are skipped below `r.size.x <
+  r.size.y * 0.45`, or the unlock card's flip would collide them over the middle of the card.
+  (3) **A CARD IS MOSTLY PICTURE.** The art was 250 of 520 (48%) and the words needed ~100,
+  leaving a THIRD of the card empty in the worst place - bare paper between the description and
+  the footer. 292 (56%), and the description is CENTRED in what is left, measured with the same
+  `_wrap_lines` that draws it, so a one-line skill and a three-line one both sit in the middle
+  of the same block. (4) **A BEAM STARTS BEHIND THE CARD AND DIES TO NOTHING.** The old rays
+  were twelve `draw_line`s of CONSTANT width 6 from radius 0.42cw to 0.92cw - the card's own
+  half-width is 0.5cw, so at the sides every ray BEGAN in mid-air, and a constant-width line
+  with square ends that starts nowhere and never dims is a stick. Twelve brown sticks scattered
+  round a card was the ugliest thing in the frame. Each is now one `draw_polygon` wedge from the
+  card's CENTRE (so its base is hidden behind the thing emitting it) with per-vertex alpha to
+  zero at the tip. **The first pass overshot and that is worth keeping**: 18 wedges at 0.17
+  alpha, 1.1cw long, stopped being backlight and became a cartoon explosion, drawing the eye
+  off the picture the card exists to show. Twelve at 0.10.
+  **The backs got the same materials** (`draw_skill_card_back_v2`): the field is that same
+  recessed plate, and the rosette is struck three times down it, big in the middle and small
+  above and below - one mark at three sizes, which is how an ornamental back has always filled
+  its height. **And the lattice was leaving the card**: its odd rows sat at
+  `x = -0.315 + col * 0.21 + 0.105` in units of min(w, h), reaching 0.52 of a card whose
+  half-width is 0.5 - measured 7px out through the right border. Rows come off the PLATE now.
+  They were also nine-point polylines with square ends alternating up and down, meeting at
+  visible kinks, so what read was five rows of wavy line with chevrons punched in them rather
+  than a weave. One continuous sine per row with the phase flipped row to row gives the
+  interlock honestly and has no joints to show. The plate's two ends are inset by DIFFERENT
+  amounts, because the kind pill rides the top edge and "press any key to turn it over" sits at
+  the foot, and a symmetric inset put the prompt down on the field.
+- **THE SHOP IS A GRID** (2026-07-30, F9 `shop_v2`, ON). What was wrong was the ROOM, not the
+  card. `shop_gear()` returns an empty array permanently now (the clothes went to the tailor,
+  the glow tape became per-prop stock), so the panel's whole lower half was dead **by
+  construction**: seven cards squeezed across the top, ~300px of nothing, then the detail strip.
+  Seven cards in 1,040px gives each 141, so the object you are buying was drawn at about 60px in
+  the top fifth of a tall card - the smallest thing on a screen whose entire job is to make you
+  want it. Two rows of four make that 251 and turn the dead band into goods. At that width the
+  card reads ACROSS: a big portrait NICHE on the left (the same recessed plate the skill cards
+  hang their picture in, because a prop drawn on bare card has no edge and no reason to be where
+  it is), the numbers in a column beside it, the price along the foot. Every fact that was on it
+  is still on it. A short last row is CENTRED - three cards left-aligned under four reads as a
+  card having failed to draw.
+  **`shop_grid_on()` requires the gear row to be EMPTY**, so if gear ever returns (prop
+  CATEGORIES is the accepted next piece and `shop_gear` is the seam it reopens at) the old
+  single row draws exactly as it did rather than a grid quietly stealing the space gear needs.
+  `shop_grid_cols()` is read by the drawing AND by `shop_input`'s up/down, because a grid whose
+  cursor disagrees with its layout is precisely the failure this file already records for the
+  seventh prop's buy keys. **Up/down is the one input change**, and it fixes a dead key: with
+  gear empty the old branch computed `7 + sel * 1 / 7` = 7 for every prop and clamped it to 6,
+  so both arrows simply jumped to the last card from anywhere.
+  **A NICHE DOES NOT CLIP, SO IT HAS TO BE GIVEN HEADROOM.** The torch is drawn with its halo
+  and rising embers, and those are placed relative to the PROP, which knows nothing about the
+  window it stands in: at the first centring its embers came up out of the niche and printed
+  themselves across the "own 15" above it. The stock line moved into the right-hand column and
+  the air above the niche is now deliberately empty and belongs to whatever a prop throws off -
+  which also looks right, a lit thing in a case ought to spill. Anything added to a prop that
+  reaches higher than a torch's embers has to be checked here again.
 - **EXPERIMENTS panel** (2026-07-25): F9, from anywhere, opens a small
   debug-only overlay (`debug_panel_open`, `draw_debug_panel`) listing named toggles
   (`experiments`, a `Dictionary`, defined in `EXPERIMENT_DEFS`) that switch an

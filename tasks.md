@@ -369,3 +369,49 @@ moves or recolours per venue, which is most of the stage. A tablet (Procreate or
 matching the existing palette would drop straight in as PNGs; the current code-drawn versions
 make perfectly good briefs to hand over. The falling-bucket title animation depends on that
 same answer, so it belongs after it.
+
+---
+
+## 16. The club, the cards and the shop (2026-07-30)
+
+Louis: "improve the visuals in my game, in particular the club and the trick cards / pattern
+cards, and the shop looks. Save the originals and let me compare with F9."
+
+All three are behind F9 toggles, all three default ON, and every OFF branch is the original
+code untouched (verified by rendering all four screens with the defaults flipped: they come
+back pixel-identical to the committed version). The three toggles are `club_v2`, `card_v2` and
+`shop_v2`, and each entry in the panel says what it switches and why.
+
+**The club.** Its shape lived in three copies and all three carried the same leftover disc at
+the head, which in the shop's version sat 2 units wider than the tapered body underneath it -
+so the good profile that version's own comment describes was never the silhouette on screen.
+One `CLUB_PROF` table now, one `club_shape()` that every mark is a slice of, a 3:1 body that
+domes rather than points, a knob with a waist, and a pale handle against a coloured body. The
+length and balance point are unchanged to the decimal, because they place the A's crossbar in
+the wordmark. Cached, and the numbers are in CLAUDE.md: without the cache the new club would
+have cost 3.3ms a frame at seven clubs.
+
+**The cards.** The illustration hangs in a recessed window instead of floating on bare paper,
+there is a kind index in two corners, the art is 56% of the card instead of 48% with the
+description centred in what is left, and the backlight is tapered beams from behind the card
+rather than twelve constant-width sticks that began in mid-air at the card's sides. The backs
+got the same plate, the rosette struck three times down it, and a lattice that no longer draws
+7px out through the right-hand border.
+
+**The shop.** Two rows of four big cards instead of seven squeezed into one, which fills the
+~300px the panel has had empty ever since the gear row emptied out, and gives each prop a real
+lit niche at 251px of card instead of 141. Up/down walks the rows, which also fixes a key that
+did nothing useful: with gear empty the old branch jumped to the last card from anywhere.
+
+**Not done, and worth a look when Louis has seen these:** the eggs and the rings are small in
+their niches next to the balls and the torch (PROP_ICON_MAG normalises by prop, and the niche
+is portrait, so a short round prop does not use its height); and the shop still has no prop
+CATEGORIES, which the grid postpones rather than answers - it buys room for eight or twelve,
+not for thirty.
+
+**One thing found on the machine rather than in the code:** a headless `--demo --tutorial balls`
+run from an earlier session had been going for 5h49m and was burning a core, which is the hang
+CLAUDE.md's verification section already warns about ("a `--demo` lesson run never quits by
+itself, so give it a `--shotat`"). It was killed. It also polluted the first round of
+performance numbers here, which is a good argument for checking `pgrep godot` before measuring
+anything.
