@@ -1487,12 +1487,18 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # What is here is what still has two real sides and wants Louis's eye on it. The
 # dictionary IS the shipped default for each - keep every reader's fallback equal to the
 # value here, or a missing key silently ships the other look.
-var experiments := {"fire_motion": true}
+var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop_v2": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
 	{"id": "fire_motion", "name": "Fire moves",
 	 "desc": "The flames flicker, lean and shed embers. OFF freezes every fire in the game to a still shape - the torches on stage, the two burning torches in the wordmark, the shop card. It changes nothing about the fire's SIZE or COLOUR, so a frozen torch is still plainly a lit torch; it just stops rebuilding seven polygons per prop per frame. Try it if a heavy set of torches ever feels less than smooth."},
+	{"id": "club_v2", "name": "The club, reshaped",
+	 "desc": "ON draws every club from one profile table: a knob with a waist under it, a slim handle, and a body three times as long as it is wide that domes off to a nose. OFF is the old club, whose tapered body still had a 6-unit disc left on top of it - the fat red head that made it read as a mallet. Stage, shop card, wordmark and the dark silhouette all follow the switch. Same length, same balance, same hitbox."},
+	{"id": "card_v2", "name": "Trick / pattern cards",
+	 "desc": "ON frames the illustration in a recessed window, puts a kind index in two corners, balances the words in the room left under the picture, and turns the backlight into tapered beams that start behind the card. OFF is the old card: the picture floating on bare paper, a third of the card empty under the text, and twelve constant-width lines beginning in mid-air round the edge. Affects the unlock card, both card backs and the Skills screen's YOUR CARD."},
+	{"id": "shop_v2", "name": "Shop, laid out as a grid",
+	 "desc": "ON deals the props as a two-row grid of big cards with a real lit niche for the goods, filling the panel instead of leaving 300px of it empty under one squeezed row - and up/down walks between the rows. OFF is the single row of seven narrow cards, which is what the panel looked like once the gear row emptied out. Same cards, same numbers, same buy keys either way."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -4030,6 +4036,27 @@ func shop_gear() -> Array[Dictionary]:
 	return g
 
 
+func shop_grid_on() -> bool:
+	# THE GRID ONLY OPENS WHEN THE GEAR ROW IS SHUT (2026-07-30, F9 `shop_v2`). With gear empty -
+	# which it now permanently is, the clothes having gone to the tailor and the glow tape having
+	# become per-prop stock - the panel's whole lower half is dead by construction: seven squeezed
+	# cards across the top, 300px of nothing, then the detail strip. So the props take the room.
+	# Should gear ever come back (prop CATEGORIES is the accepted next piece and shop_gear is the
+	# seam it reopens at), this returns false and the old single row draws exactly as it did,
+	# rather than a grid quietly stealing the space the gear row needs.
+	return exp_on("shop_v2") and shop_gear().size() == 0
+
+
+func shop_grid_cols() -> int:
+	# how many prop cards to a row, read by the DRAWING and by shop_input's up/down. One
+	# function, because a grid whose cursor disagrees with its layout is the exact failure this
+	# file already records for the seventh prop and the printed buy keys.
+	var np := shop_props().size()
+	if not shop_grid_on() or np <= 4:
+		return maxi(np, 1)
+	return int(ceil(float(np) / 2.0))
+
+
 func shop_gear0() -> int:
 	return shop_props().size()          # the index the gear row starts at
 
@@ -4090,13 +4117,26 @@ func shop_input(kc: int) -> void:
 			shop_sel = (shop_sel + 1) % shop_cards()
 			play_sfx("ui", -15.0)
 		KEY_DOWN, KEY_UP:
-			var g0 := shop_gear0()
-			var gn := maxi(1, shop_gear().size())
-			if shop_sel < g0:
-				shop_sel = g0 + shop_sel * gn / maxi(g0, 1)   # prop column -> nearest gear card
+			if shop_grid_on():
+				# UP/DOWN WALKS THE GRID'S COLUMNS, which is the one input change the grid needs
+				# and cannot do without: with the gear row empty the old branch below computed
+				# `7 + sel * 1 / 7` = 7 for every prop and then clamped it to 6, so up and down
+				# both simply jumped to the last card wherever you were. A card stays lit if its
+				# column is short (7 cards over 4 columns leaves the fourth with one), because
+				# moving the cursor to a different column would be a worse surprise than not
+				# moving it at all.
+				var cols := shop_grid_cols()
+				var to := shop_sel + (cols if kc == KEY_DOWN else -cols)
+				if to >= 0 and to < shop_cards():
+					shop_sel = to
 			else:
-				shop_sel = (shop_sel - g0) * maxi(g0, 1) / gn   # ...and back again
-			shop_sel = clampi(shop_sel, 0, shop_cards() - 1)
+				var g0 := shop_gear0()
+				var gn := maxi(1, shop_gear().size())
+				if shop_sel < g0:
+					shop_sel = g0 + shop_sel * gn / maxi(g0, 1)   # prop column -> nearest gear card
+				else:
+					shop_sel = (shop_sel - g0) * maxi(g0, 1) / gn   # ...and back again
+				shop_sel = clampi(shop_sel, 0, shop_cards() - 1)
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
@@ -12911,10 +12951,18 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 			ovoid(pos, 9.0 * sc, 12.0 * sc, col)
 		PROP_CLUBS:
 			draw_set_transform(pos, ang, Vector2.ONE * sc)
-			draw_line(Vector2(0, 14), Vector2(0, -4), col, 3.6)
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16)]), col)
-			draw_circle(Vector2(0, -16.5), 6.0, col)
+			if exp_on("club_v2"):
+				# ONE polygon for the whole club, which is both cheaper than the old three
+				# shapes and the only version that matches what the lit stage draws. This
+				# function's contract is the prop's OUTLINE in one phosphor tone, so a
+				# silhouette that disagrees with the lit one is the one bug it can have:
+				# in the dark the outline is all a player has to tell a club from a ring.
+				draw_colored_polygon(club_shape(CLUB_BUTT_Y, CLUB_NOSE_Y, 0.0, -1.0, 1.0), col)
+			else:
+				draw_line(Vector2(0, 14), Vector2(0, -4), col, 3.6)
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16)]), col)
+				draw_circle(Vector2(0, -16.5), 6.0, col)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		PROP_KNIVES:
 			draw_set_transform(pos, ang, Vector2.ONE * sc)
@@ -13098,7 +13146,182 @@ func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
 	draw_arc(pos, r - w * 0.30, 0.0, TAU, 32, col.lightened(0.38), w * 0.22, true)
 
 
+# THE CLUB IS ONE PROFILE TABLE (2026-07-30, F9 `club_v2`; Louis: the clubs want improving).
+# Three functions draw a club - draw_club on stage and as the wordmark's crossbar, cap_club on
+# the shop card, glow_silhouette in the dark - and each carried its own copy of the shape. That
+# is how all three came to keep the same leftover mark: `draw_circle(Vector2(0, -16.5), 6.0)`,
+# a disc as wide as the whole body. In cap_club it sits 2 units PROUD of the tapered bulb whose
+# own comment says it replaced the old cone, so the careful profile underneath was never the
+# silhouette anybody saw - what read was a fat head on a stick, which is the mallet Louis is
+# looking at. Deleting a duplicated mark in one of three copies fixes one picture out of three,
+# so the shape moves into a table and the three become one.
+#
+# Half-widths up the club, butt first, in the same local units every club drawer already uses.
+# THE RATIO IS THE READ: the body runs from the collar at +2 to the nose at -22.5 (24.5 long)
+# and never passes 4.1 half-width, so it is 3:1, which is a real club. The old bulb was 21 long
+# by 4.2 (2.5:1) with that 6-unit disc on top of it - an onion, however carefully the rest was
+# drawn. The width holds from -14 to -17 rather than peaking at a point, because the first pass
+# at this table peaked at -15 and fell away over four units, which came out a bullet: what makes
+# the top of a club read is a DOME, i.e. a stretch at full width and then a quick round-off. The
+# 4.1 is also a deliberate 0.7 clear of the knife's 3.4 - the two heavy props are told apart in
+# the air by mass as much as by shape, and at 3.7 the club was the same width as the knife.
+# The two ENDS carry the rest: a club has a KNOB (a bulb with a waist under it, so
+# the hand has something to hold against) and a NOSE (a rounded point, not a flat cap and not
+# a ball). Because a half-width is a function of height, the outline is a simple polygon at
+# every slice by construction - it cannot self-intersect, which is the failure mode this file
+# has now paid for three times.
+#
+# THE FIRST AND LAST ENTRIES ARE CAP_CLUB_KNOB AND CAP_CLUB_TIP, and they are typed here as
+# literals on purpose: those two constants place the A's crossbar in the wordmark, so keeping
+# the club's overall length and balance point EXACTLY as they were is what lets the shape
+# change without moving the logo. Change an end here and change it there in the same edit.
+const CLUB_PROF := [
+	[17.8, 0.0], [17.1, 1.75], [15.6, 2.80], [14.1, 2.45], [13.0, 1.50],   # the knob, and its waist
+	[10.5, 1.42], [6.0, 1.56], [2.0, 1.86],                                # the handle, barely flaring
+	[-1.5, 2.45], [-5.0, 3.15], [-8.5, 3.72], [-11.5, 4.02],               # ...swelling into the body
+	[-14.0, 4.10], [-17.0, 4.02], [-19.0, 3.74],                           # widest at -14, held to -17
+	[-20.6, 3.20], [-21.7, 2.40], [-22.3, 1.40], [-22.5, 0.0],             # then the dome
+]
+const CLUB_BUTT_Y := 17.8     # = CAP_CLUB_KNOB
+const CLUB_NOSE_Y := -22.5    # = CAP_CLUB_TIP
+const CLUB_COLLAR_Y := 2.0    # where the pale handle gives way to the coloured body
+const CLUB_BAND_Y := -11.0    # the decorated band round the body, the mark that says "juggling club"
+
+
+func club_hw(y: float) -> float:
+	# the club's half-width at a height, interpolated from CLUB_PROF. Sampling one table is
+	# what lets the pale handle, the coloured body, the shop's shaded side and its lacquer
+	# stripe all be slices of the SAME object rather than four sets of hand-picked numbers
+	# that agree until one of them is edited.
+	var n := CLUB_PROF.size()
+	if y >= float(CLUB_PROF[0][0]) or y <= float(CLUB_PROF[n - 1][0]):
+		return 0.0
+	for i in n - 1:
+		var y0 := float(CLUB_PROF[i][0])
+		var y1 := float(CLUB_PROF[i + 1][0])
+		if y <= y0 and y >= y1:
+			var t := 0.0 if is_equal_approx(y0, y1) else (y0 - y) / (y0 - y1)
+			return lerpf(float(CLUB_PROF[i][1]), float(CLUB_PROF[i + 1][1]), t)
+	return 0.0
+
+
+var _club_cache := {}
+
+func club_shape(y_hi: float, y_lo: float, inset: float, x0f: float, x1f: float,
+		cut_hi := false, cut_lo := false) -> PackedVector2Array:
+	# EVERY MARK ON A CLUB COMES OUT OF THIS ONE FUNCTION, which is what stops the shop's club
+	# and the stage's club from drifting into two different objects again. It returns a closed
+	# polygon bounded between two heights (`y_hi` toward the knob, `y_lo` toward the nose) and
+	# between two FRACTIONS of the club's own half-width at each height. So the full silhouette
+	# is (-1, 1), the shop's shaded side is (0.30, 1) and its lacquer stripe is (-0.80, -0.42) -
+	# and not one of them can cross the outline, because all three are measured off it.
+	#
+	# `inset` pulls the whole thing inward from the silhouette, which is how the flat version
+	# gets a rim that is dark THE WHOLE WAY ROUND without claiming a light direction (the round-
+	# props rule): fill the outline dark, then fill an inset copy in the prop's own colour.
+	# Offsetting a finished polygon is fiddly and can fold it through itself; offsetting a
+	# PROFILE cannot, because a half-width is one number and an end is another.
+	#
+	# `cut_hi` / `cut_lo` mark an end that BUTTS against a neighbouring slice rather than being
+	# a real end of the club. A cut is never pulled in - the pale handle and the red body have
+	# to keep meeting exactly however thick the rim gets, or a gap opens at the collar.
+	# BAKED ONCE, because a club's geometry does not depend on the tick. This is the chainsaw's
+	# lesson (`_saw_bake`) met from the easy side: there, every saw is the same local geometry AT
+	# A GIVEN TICK and the bake has to be redone each frame; here it never changes at all, so the
+	# first club of the session pays for every club afterwards.
+	#
+	# MEASURED, seven clubs at the World Arena, same seeded act, back to back on a quiet machine:
+	# the old club 4.5ms a frame, this one 4.7ms WITH the cache and 7.8ms WITHOUT it. So the cache
+	# is not a tidiness argument, it is the difference between a 4% cost for the new shape and a
+	# 72% one. Five slices per club at ~186 club_hw samples each, every sample scanning the
+	# profile, is about 12,000 GDScript loop iterations a frame - which is what interpreted
+	# geometry costs, and exactly why the chainsaw's numbers are written down too.
+	#
+	# The cache is keyed on the arguments and the callers all pass constants, so it settles at a
+	# handful of entries. It is bounded anyway: `inset` is derived from the draw scale in the flat
+	# version, and a scale that varied continuously would otherwise mint a key per frame forever.
+	# NOTHING MAY MUTATE WHAT THIS HANDS BACK - it is the cached array itself, not a copy.
+	var key := "%.2f|%.2f|%.2f|%.2f|%.2f|%d%d" % [y_hi, y_lo, inset, x0f, x1f,
+		1 if cut_hi else 0, 1 if cut_lo else 0]
+	if _club_cache.has(key):
+		return _club_cache[key]
+	if _club_cache.size() > 64:
+		_club_cache.clear()
+	var top := y_lo + (0.0 if cut_lo else inset)
+	var bot := y_hi - (0.0 if cut_hi else inset)
+	if bot - top < 0.05:
+		_club_cache[key] = PackedVector2Array()
+		return _club_cache[key]
+	var steps := clampi(int((bot - top) / 1.1), 6, 30)
+	var pts := PackedVector2Array()
+	for i in steps + 1:                            # up the outer edge...
+		var y := lerpf(bot, top, float(i) / float(steps))
+		_club_push(pts, Vector2(maxf(club_hw(y) - inset, 0.0) * x1f, y))
+	for i in range(steps, -1, -1):                 # ...and back down the inner one
+		var y2 := lerpf(bot, top, float(i) / float(steps))
+		_club_push(pts, Vector2(maxf(club_hw(y2) - inset, 0.0) * x0f, y2))
+	if pts.size() > 2 and pts[0].distance_to(pts[pts.size() - 1]) < 0.04:
+		pts.remove_at(pts.size() - 1)
+	_club_cache[key] = pts
+	return pts
+
+
+func _club_push(pts: PackedVector2Array, p: Vector2) -> void:
+	# append unless it lands on the previous point. Both ends of the club taper to a half-width
+	# of zero, so the outer and inner walks meet there and would otherwise hand the triangulator
+	# a duplicated vertex at the nose and another at the knob.
+	if pts.size() > 0 and pts[pts.size() - 1].distance_to(p) < 0.04:
+		return
+	pts.append(p)
+
+
+func draw_club_v2(pos: Vector2, ang: float, sc: float) -> void:
+	# THE STAGE CLUB, flat, four fills. Same rule the round props were rebuilt on: one flat
+	# body inside a rim that is darker all the way round, because a painted highlight is a
+	# claim about where the light is and this stage's light genuinely moves. The club gets
+	# something the balls cannot have, though, and it does most of the work here: a two-tone
+	# SILHOUETTE. A pale handle against a coloured body says "club" before any of the shading
+	# an earlier pass tried to put on it, and it survives every venue palette because neither
+	# tone is pretending to be light.
+	draw_set_transform(pos, ang, Vector2.ONE * sc)
+	var body_raw := Color(0.90, 0.35, 0.38)
+	var band_raw := Color(0.96, 0.92, 0.85)
+	# THE RIM IS 1.6px ON SCREEN, converted into local units, and CAPPED. `ball_rim`'s floor
+	# stops it thinning into the band where a 1px feature shimmers on a moving object; the cap
+	# is the other end of the same problem - at a small `sc` the conversion asks for 3 local
+	# units, which is wider than the handle's own half-width, and the club would come out as
+	# solid rim with a thread of colour in it.
+	var rim := clampf(1.6 / maxf(sc, 0.05), 0.30, 1.15)
+	draw_colored_polygon(club_shape(CLUB_COLLAR_Y, CLUB_NOSE_Y, 0.0, -1.0, 1.0, true),
+		ca(Color(body_raw.r * 0.50, body_raw.g * 0.30, body_raw.b * 0.34)))
+	draw_colored_polygon(club_shape(CLUB_COLLAR_Y, CLUB_NOSE_Y, rim, -1.0, 1.0, true),
+		ca(body_raw))
+	# THE HANDLE TAKES NO RIM OF ITS OWN, deliberately. Its half-width is 1.42 units at the
+	# waist, so a rim thick enough not to shimmer eats it from both sides at once - and it does
+	# not need one: the rim exists to give a ROUND prop an edge where it has no other, and a
+	# cream handle already has an edge against both the red body it butts into and every stage
+	# this game has. Fewer marks, and none of them in the shimmering band.
+	draw_colored_polygon(club_shape(CLUB_BUTT_Y, CLUB_COLLAR_Y, 0.0, -1.0, 1.0, false, true),
+		ca(band_raw))
+	# the ferrule at the collar, a little proud of the profile: the join between two materials
+	# is a real feature of a real club and it is also what hides the seam between two fills
+	var cw := club_hw(CLUB_COLLAR_Y)
+	draw_line(Vector2(-cw - 0.5, CLUB_COLLAR_Y), Vector2(cw + 0.5, CLUB_COLLAR_Y),
+		ca(Color(band_raw.r * 0.88, band_raw.g * 0.85, band_raw.b * 0.80)), 2.2)
+	# ...and the decorated band, DETAIL AS A FUNCTION OF SCALE the way draw_coin's milling is:
+	# at a small sc it is under 2px of paint across a moving object, which is the shimmer this
+	# file keeps paying for, so below that it simply is not there.
+	if sc >= 0.85:
+		var bw := maxf(club_hw(CLUB_BAND_Y) - rim, 0.0)
+		draw_line(Vector2(-bw, CLUB_BAND_Y), Vector2(bw, CLUB_BAND_Y),
+			ca(Color(band_raw.r, band_raw.g, band_raw.b, 0.92)), 2.4)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func draw_club(pos: Vector2, ang: float, sc: float) -> void:
+	if exp_on("club_v2"):
+		draw_club_v2(pos, ang, sc)
+		return
 	# EVERY COLOUR PASSES THROUGH ca() (2026-07-29), because the club is now the A's
 	# crossbar in the wordmark and the mark fades in and out as one thing. `ca` is the
 	# identity outside a mark, so the stage pays nothing for this - and drawing a SECOND
@@ -14705,7 +14928,77 @@ func card_field(is_trick: bool) -> Color:
 	return Color(0.16, 0.11, 0.06) if is_trick else Color(0.12, 0.10, 0.18)
 
 
+# WHERE THE CORNER INDEX SITS, as named numbers, because a neighbour has to be placed off them.
+# The Skills screen prints the skill's name across the foot of its card, and "REVERSE CASCADE"
+# at full width runs straight into the bottom-right pip - so that name's width is measured off
+# CARD_PIP_KEEP rather than off a number somebody once eyeballed. Same rule the goal stem's
+# bloom established: the amount by which a mark claims space belongs next to the mark.
+const CARD_PIP_PAD := 19.0
+const CARD_PIP_R := 5.6
+const CARD_PIP_KEEP := (CARD_PIP_PAD + CARD_PIP_R) * 2.0   # width both indices take off a row
+
+func draw_card_pip(c: Vector2, is_trick: bool, r: float, col: Color) -> void:
+	# THE INDEX MARK, the same one its own back is built round: a trick is a flourish, so its
+	# mark is the four-point sparkle this file already uses to mean exactly that; a pattern is
+	# a shape that repeats, so its mark is a closed ring. Nothing here names the SKILL - a
+	# face-down card still gives nothing away, which is the whole point of the flip.
+	if is_trick:
+		draw_star4(c, r, col)
+	else:
+		draw_arc(c, r * 0.80, 0.0, TAU, 18, col, maxf(1.0, r * 0.32), true)
+
+
+func draw_card_frame_v2(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
+	# THE CARD, with the one thing it was missing: AN INDEX IN ITS CORNERS. The old frame was a
+	# rounded body, a keyline and an inset second line, which is a well-made PANEL - and a panel
+	# is what it read as, because the corners were empty. Every printed card in the world puts a
+	# small mark in two opposite corners, and it is what the eye uses to decide it is holding a
+	# card rather than looking at a box with a picture in it. Two marks, diagonally opposite,
+	# the way a real index is placed so either end of the card can be read.
+	var kc := card_kind_col(is_trick)
+	var f := card_field(is_trick)
+	soft_card(r, Color(f.r, f.g, f.b, 0.99 * a), Color(kc.r, kc.g, kc.b, 0.85 * a),
+		2.5 * lift, 14.0 * lift, 22.0)
+	var inset := 7.0 * lift
+	draw_rect(Rect2(r.position.x + inset, r.position.y + inset,
+		r.size.x - inset * 2.0, r.size.y - inset * 2.0), Color(kc.r, kc.g, kc.b, 0.22 * a),
+		false, maxf(1.0, lift))
+	# A SQUASHED CARD GETS NO INDEX. The unlock card's flip is drawn by narrowing the rect, so
+	# mid-turn the two corners are a few pixels apart and two marks that belong at the edges
+	# would collide over the middle of the card. 0.45 is comfortably under a card at rest
+	# (344/520 = 0.66) and comfortably over the 0.34 squash the face is drawn from at all.
+	if r.size.x < r.size.y * 0.45:
+		return
+	var pr := CARD_PIP_R * lift
+	var pad := CARD_PIP_PAD * lift
+	var pc := Color(kc.r, kc.g, kc.b, 0.62 * a)
+	draw_card_pip(Vector2(r.position.x + pad, r.position.y + pad), is_trick, pr, pc)
+	draw_card_pip(Vector2(r.position.x + r.size.x - pad, r.position.y + r.size.y - pad),
+		is_trick, pr, pc)
+
+
+func draw_card_art_window(r: Rect2, is_trick: bool, a: float, lift := 1.0) -> void:
+	# THE PICTURE HANGS IN A FRAME, and that is the mark that was doing the most damage by its
+	# absence. The illustration was drawn straight onto the paper, so the art had no edge for the
+	# eye to read it against and the empty corners of the art box looked like unfinished card
+	# rather than deliberate margin - which is most of why the face read as three quarters of a
+	# card. A recessed plate, one shade off the paper, a hairline round it, and a pool of the
+	# kind's own colour behind the subject so it sits IN something.
+	#
+	# No drop shadow: this plate is sunk INTO the card, and a shadow under it would claim it was
+	# lying on top - the same wrong claim the money hat's cutaway interior had to avoid.
+	var kc := card_kind_col(is_trick)
+	var f := card_field(is_trick)
+	soft_card(r, Color(f.r * 0.52, f.g * 0.52, f.b * 0.60, 0.96 * a),
+		Color(kc.r, kc.g, kc.b, 0.34 * a), 1.0 * lift, 10.0 * lift, 0.0)
+	draw_glow(r.get_center() + Vector2(0.0, r.size.y * 0.06), minf(r.size.x, r.size.y) * 0.60,
+		Color(kc.r, kc.g, kc.b, 0.13 * a))
+
+
 func draw_card_frame(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
+	if exp_on("card_v2"):
+		draw_card_frame_v2(r, is_trick, a, lift)
+		return
 	# THE CARD ITSELF, shared by every face and both backs so the deck looks like a deck.
 	# Rounded body in the kind's own paper, a bright keyline, and an inset second line -
 	# which is the mark that makes a rectangle read as a printed card rather than a panel.
@@ -14717,7 +15010,97 @@ func draw_card_frame(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> v
 		r.size.x - inset * 2.0, r.size.y - inset * 2.0), Color(kc.r, kc.g, kc.b, 0.22 * a), false, maxf(1.0, lift))
 
 
+func _card_rosette(c: Vector2, k: float, kc: Color, amul: float, spin: float) -> void:
+	# the trick back's mark: two rings of rays on opposite spins. Split out of the back so the
+	# same rosette can be struck three times down the card at three sizes - which is how an
+	# ornamental card back fills its height without inventing a second motif for the job.
+	draw_set_transform(c, spin, Vector2.ONE * k)
+	for ring in 2:
+		var n := 12 if ring == 0 else 8
+		var r0 := 0.14 + 0.13 * float(ring)
+		var r1 := 0.26 + 0.15 * float(ring)
+		for i in n:
+			var ang := TAU * float(i) / float(n) + (0.0 if ring == 0 else 0.22)
+			var dir := Vector2(cos(ang), sin(ang))
+			var wid := 0.030 if ring == 0 else 0.020
+			var perp := Vector2(-dir.y, dir.x) * wid
+			draw_colored_polygon(PackedVector2Array([dir * r0 + perp, dir * r1, dir * r0 - perp]),
+				ca(Color(kc.r, kc.g, kc.b, (0.30 if ring == 0 else 0.20) * amul)))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func draw_skill_card_back_v2(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
+	# THE BACK, on the same materials as the face (2026-07-30). Its contract is unchanged and it
+	# is the whole reason the card exists: you have earned A TRICK, or A PATTERN, and nothing on
+	# it may hint at which one - no prop, no silhouette, no arc belonging to any single skill.
+	#
+	# What was wrong was composition, not concept. One motif sat in the middle of 520px of bare
+	# paper, so the back was a medallion floating in a void where the face is a framed picture,
+	# and the two sides did not look like one card. Now the field is the SAME recessed plate the
+	# picture hangs in, and the motif fills it: the rosette struck three times down the card, big
+	# in the middle and small above and below, which is how an ornamental back has always filled
+	# its height - one mark, three sizes, rather than a second idea.
+	#
+	# AND THE LATTICE WAS LEAVING THE CARD. Its odd rows were laid out at
+	# `x = -0.315 + col * 0.21 + 0.105` in units of min(w, h), so the far arc reached 0.52 of a
+	# card whose half-width is 0.5 - measured 7px out through the right-hand border, on a screen
+	# whose standing rule is that nothing leaves its container. Rows are computed off the PLATE
+	# now and cannot reach past it. The old rows were also nine-point polylines with square ends
+	# alternating up and down, which met at visible kinks: what read on screen was five rows of
+	# wavy line with chevrons punched into them, not a weave. One continuous sine per row, phase
+	# flipped row to row, gives the interlock honestly and has no joints to show.
+	draw_card_frame(r, is_trick, a, lift)
+	var kc := card_kind_col(is_trick)
+	var f := card_field(is_trick)
+	# THE PLATE LEAVES ROOM FOR THE TWO THINGS THAT ARE NOT THE FIELD: the kind pill rides the
+	# card's top edge and "press any key to turn it over" sits at its foot, and both are drawn
+	# after this. A plate run to a symmetric inset put the prompt down ON the field instead of on
+	# the paper margin where it belongs, so the two ends are inset by different amounts on purpose.
+	var plate := Rect2(r.position.x + 17.0 * lift, r.position.y + 40.0 * lift,
+		r.size.x - 34.0 * lift, r.size.y - 70.0 * lift)
+	if plate.size.x < 8.0 or plate.size.y < 8.0:
+		return
+	soft_card(plate, Color(f.r * 0.52, f.g * 0.52, f.b * 0.60, 0.96 * a),
+		Color(kc.r, kc.g, kc.b, 0.30 * a), 1.0 * lift, 9.0 * lift, 0.0)
+	var c := plate.get_center()
+	var k := minf(plate.size.x, plate.size.y)
+	_cap_a = a
+	if is_trick:
+		var t := float(atick()) * 0.006
+		_card_rosette(c, k, kc, 1.0, t)
+		for sgn: float in [-1.0, 1.0]:
+			_card_rosette(c + Vector2(0.0, sgn * plate.size.y * 0.335), k * 0.42, kc, 0.72, -t * 0.7)
+		draw_circle(c, k * 0.105, ca(Color(kc.r, kc.g, kc.b, 0.30)))
+		draw_circle(c, k * 0.075, ca(Color(f.r * 1.6, f.g * 1.6, f.b * 1.6, 0.95)))
+		draw_star4(c, k * 0.062, ca(Color(kc.r, kc.g, kc.b, 0.85)))
+	else:
+		# the weave: continuous waves, every other row in antiphase, so consecutive rows bow
+		# toward and away from each other and the eye reads the interlock. No single wave here
+		# is any pattern's road - which is the constraint the whole back is built under.
+		var rows := 7
+		var pad := 14.0 * lift
+		var x0 := plate.position.x + pad
+		var x1 := plate.position.x + plate.size.x - pad
+		var step := plate.size.y / float(rows + 1)
+		for row in rows:
+			var y := plate.position.y + step * float(row + 1)
+			var phase := 0.0 if row % 2 == 0 else PI
+			var pts := PackedVector2Array()
+			for sg in 33:
+				var u := float(sg) / 32.0
+				pts.append(Vector2(lerpf(x0, x1, u), y + sin(u * TAU * 1.75 + phase) * step * 0.40))
+			draw_polyline(pts, ca(Color(kc.r, kc.g, kc.b, 0.24)), maxf(1.0, 1.7 * lift))
+		draw_circle(c, k * 0.095, ca(Color(f.r * 1.35, f.g * 1.35, f.b * 1.45, 0.98)))
+		draw_circle(c, k * 0.085, ca(Color(kc.r, kc.g, kc.b, 0.22)))
+		draw_arc(c, k * 0.062, 0.0, TAU, 28, ca(Color(kc.r, kc.g, kc.b, 0.75)), maxf(1.0, 1.5 * lift), true)
+		draw_circle(c, k * 0.026, ca(Color(kc.r, kc.g, kc.b, 0.8)))
+	_cap_a = 1.0
+
+
 func draw_skill_card_back(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
+	if exp_on("card_v2"):
+		draw_skill_card_back_v2(r, is_trick, a, lift)
+		return
 	# THE BACK. This is the whole of what the player is told when the card is dealt: you
 	# have earned A TRICK, or A PATTERN. Nothing on it may hint at which one - so no prop,
 	# no arc, no silhouette that belongs to any single skill.
@@ -14781,18 +15164,30 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 	# the fragility that had the shop drawing a helmet for the chainsaw and the seventh
 	# prop buying glasses. Removing Overthrow on the very day these were drawn is exactly
 	# the event an index-keyed table gets wrong.
+	# the window goes down BEFORE the range check, so a card whose skill has been removed from
+	# the table still shows an empty frame rather than a hole where its picture should be
+	var box := r
+	if exp_on("card_v2"):
+		draw_card_art_window(r, is_trick, a)
+		# ...AND THE PICTURE IS DRAWN INSIDE THE WINDOW, not up against it. A framed rect has
+		# ROUNDED corners; the Shower's water is a full-width block and the Temple's floor
+		# another, so both ran flush into the frame and clipped visibly across the curve of the
+		# bottom two corners. Shrinking the box the art is measured in fixes every card at once
+		# and needs no card to know it is in a frame - which matters, because the same nine
+		# illustrations are also drawn without one when the experiment is off.
+		box = r.grow(-minf(r.size.x, r.size.y) * 0.055)
 	var tab: Array = TRICKS if is_trick else PATTERNS
 	if idx < 0 or idx >= tab.size():
 		return
 	var id := String((tab[idx] as Dictionary)["id"])
-	var k := minf(r.size.x, r.size.y)
+	var k := minf(box.size.x, box.size.y)
 	# REVERSE CASCADE IS CASCADE, UPSIDE DOWN, and it is drawn that way rather than
 	# redrawn (Louis: "the upside down waterfall picture"). A negative y scale is the whole
 	# implementation, which also guarantees the two cards are the same joke told twice -
 	# if the waterfall is ever improved, its reflection improves with it.
 	var flip := -1.0 if id == "rcasc" else 1.0
 	_cap_a = a
-	draw_set_transform(r.get_center(), 0.0, Vector2(k, k * flip))
+	draw_set_transform(box.get_center(), 0.0, Vector2(k, k * flip))
 	match id:
 		"spin":       card_art_spin()
 		"btb":        card_art_btb()
@@ -14810,7 +15205,7 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 		# smaller and pushed out to the margin: at its first size it was as wide as a
 		# stream and sat on top of one, so the card read as four falls and an arrow rather
 		# than three and a note
-		var up := r.get_center() + Vector2(k * 0.425, k * 0.03)
+		var up := box.get_center() + Vector2(k * 0.425, k * 0.03)
 		draw_colored_polygon(PackedVector2Array([
 			up + Vector2(0.0, -k * 0.15), up + Vector2(k * 0.033, -k * 0.095),
 			up + Vector2(k * 0.012, -k * 0.095), up + Vector2(k * 0.012, k * 0.13),
@@ -15416,12 +15811,48 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 	draw_glow(Vector2(cx, cy), cw * 1.25, Color(kindcol.r, kindcol.g, kindcol.b, 0.20 * a))
 	draw_glow(Vector2(cx, cy), cw * (0.85 + 0.06 * br), Color(kindcol.r, kindcol.g, kindcol.b, 0.16 * a))
 	# rays, because a dealt card in a game like this arrives lit from behind
-	for i in 12:
-		var ang := atick() * 0.004 + TAU * float(i) / 12.0
-		var dir := Vector2(cos(ang), sin(ang))
-		var p0 := Vector2(cx, cy) + dir * cw * 0.42
-		var p1 := Vector2(cx, cy) + dir * cw * (0.92 + 0.10 * sin(atick() * 0.03 + float(i)))
-		draw_line(p0, p1, Color(kindcol.r, kindcol.g, kindcol.b, 0.10 * a), 6.0 * grow)
+	if exp_on("card_v2"):
+		# A BEAM STARTS BEHIND THE CARD AND DIES TO NOTHING (2026-07-30). The old rays were
+		# twelve draw_lines of CONSTANT width 6 running from radius 0.42cw out to 0.92cw. The
+		# card's own half-width is 0.5cw, so at the sides every ray BEGAN in mid-air, 25px clear
+		# of the card - and a constant-width line with square ends that starts nowhere, ends
+		# nowhere and never changes brightness is a stick. Twelve brown sticks scattered round a
+		# card is what was actually on screen, and it was the ugliest thing in the frame.
+		#
+		# Two fixes, both about what light is. Every wedge now starts at the card's CENTRE, so
+		# the whole base of it is hidden and only the part that escapes the card is ever seen -
+		# a beam cannot have a visible beginning if its beginning is behind the thing emitting
+		# it. And it TAPERS TO ZERO ALPHA at the tip via per-vertex colour, so it has no end
+		# either. One draw_polygon each, which matters: the draw_glow note in CLAUDE.md measured
+		# stacking low-alpha shapes to fake a gradient at 30% slower, and banding once thinned.
+		#
+		# The lengths are deliberately uneven. A rectangular card is 0.5cw to its sides but
+		# 0.756cw to its top and bottom, so one length makes the vertical rays stubs while the
+		# horizontal ones run long; spreading them keeps each one longer than it is wide.
+		#
+		# AND THE FIRST PASS AT THIS OVERSHOT, which is worth writing down because it is the
+		# obvious failure of fixing an underlit thing: 18 wedges at 0.17 alpha and 1.1cw long
+		# stopped being backlight and became a cartoon explosion - a hard spiky star bigger than
+		# the card, drawing the eye away from the picture the card exists to show. Twelve, at
+		# 0.10, reaching about the card's own diagonal. The job of this light is to lift the card
+		# off the stage behind it, not to be looked at.
+		var warm := Color(kindcol.r, kindcol.g, kindcol.b, 0.10 * a)
+		var gone := Color(kindcol.r, kindcol.g, kindcol.b, 0.0)
+		var cols := PackedColorArray([warm, warm, gone])
+		var mid := Vector2(cx, cy)
+		for i in 12:
+			var ang := atick() * 0.0022 + TAU * float(i) / 12.0
+			var dir := Vector2(cos(ang), sin(ang))
+			var perp := Vector2(-dir.y, dir.x) * cw * 0.080
+			var len := cw * (0.88 + 0.13 * sin(atick() * 0.021 + float(i) * 1.7))
+			draw_polygon(PackedVector2Array([mid + perp, mid - perp, mid + dir * len]), cols)
+	else:
+		for i in 12:
+			var ang := atick() * 0.004 + TAU * float(i) / 12.0
+			var dir := Vector2(cos(ang), sin(ang))
+			var p0 := Vector2(cx, cy) + dir * cw * 0.42
+			var p1 := Vector2(cx, cy) + dir * cw * (0.92 + 0.10 * sin(atick() * 0.03 + float(i)))
+			draw_line(p0, p1, Color(kindcol.r, kindcol.g, kindcol.b, 0.10 * a), 6.0 * grow)
 	var vw := cw * squash
 	var r := Rect2(cx - vw * 0.5, cy - ch * 0.5, vw, ch)
 	if not showing_face:
@@ -15432,8 +15863,17 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 		# about edge-on and a third open there is no room for art, and drawing it into a
 		# 20px slot is not a card turning, it is a smear.
 		if squash > 0.34:
-			var art := Rect2(r.position.x + 14.0 * grow, r.position.y + 44.0 * grow,
-				vw - 28.0 * grow, 250.0 * grow)
+			# A CARD IS MOSTLY PICTURE (2026-07-30). At 250 of 520 the art took 48% of the face
+			# and the words under it needed about 100, which left a THIRD of the card empty -
+			# and empty in the worst place, a band of bare paper between the description and
+			# the footer. Every real card in this genre spends its height on the illustration
+			# and gives the text exactly the strip it needs. 292 is 56%, and the description
+			# is then CENTRED in what is left rather than pinned to the top of it, so a
+			# one-line skill (the Shower's) and a three-line one (the Spin's) both sit in the
+			# middle of the same block instead of one of them leaving a hole under itself.
+			var v2 := exp_on("card_v2")
+			var art := Rect2(r.position.x + 14.0 * grow, r.position.y + (42.0 if v2 else 44.0) * grow,
+				vw - 28.0 * grow, (292.0 if v2 else 250.0) * grow)
 			draw_skill_card_art(art, is_trick, ucard_idx, a)
 			# the name, sized to fit whatever it is called
 			var namew := vw - 30.0 * grow
@@ -15444,9 +15884,20 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 			draw_ornament(cx, art.position.y + art.size.y + 46.0 * grow, vw * 0.52,
 				Color(kindcol.r, kindcol.g, kindcol.b, 0.7 * a))
 			# what it actually does, wrapped into the room that is left above the footer
-			var dbox := Rect2(r.position.x + 18.0 * grow, art.position.y + art.size.y + 58.0 * grow,
-				vw - 36.0 * grow, r.position.y + ch - 34.0 * grow - (art.position.y + art.size.y + 58.0 * grow))
-			draw_wrap_fit(font, String(d["desc"]), dbox, int(maxf(8.0, 12.0 * grow)), Color(0.88, 0.83, 0.75, 0.95 * a))
+			var dtop := art.position.y + art.size.y + 58.0 * grow
+			var dbox := Rect2(r.position.x + 18.0 * grow, dtop, vw - 36.0 * grow,
+				r.position.y + ch - (46.0 if v2 else 34.0) * grow - dtop)
+			var dsz := int(maxf(8.0, 12.0 * grow))
+			if v2:
+				# centred in its own block, measured with the same wrapper that will draw it -
+				# never with a guess at how many lines a description runs to
+				var nlines := _wrap_lines(font, String(d["desc"]), dbox.size.x, dsz).size()
+				var used := float(nlines) * (float(dsz) + 4.0)
+				var slack := maxf((dbox.size.y - used) * 0.5, 0.0)
+				dbox.position.y += slack
+				dbox.size.y -= slack
+			draw_wrap_fit(font, String(d["desc"]), dbox, dsz, Color(0.88, 0.83, 0.75, 0.95 * a),
+				HORIZONTAL_ALIGNMENT_CENTER if v2 else HORIZONTAL_ALIGNMENT_LEFT)
 			draw_string(font, Vector2(r.position.x, r.position.y + ch - 30.0 * grow),
 				"SKILLS shows you how" if is_trick else "P switches patterns in training",
 				HORIZONTAL_ALIGNMENT_CENTER, vw, int(maxf(8.0, 11.0 * grow)), Color(0.72, 0.68, 0.62, 0.9 * a))
@@ -16485,6 +16936,143 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		Color(0.95, 0.72, 0.55) if shop_room == SHOP_ROOM_BACK else Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 
+	# ---------------- PROPS ----------------
+	if shop_grid_on():
+		draw_shop_grid(font, tx, py, innerw, strip_y_for(py, ph))
+	else:
+		draw_shop_row(font, tx, py, innerw)
+	draw_shop_tail(font, px, py, pw, ph, tx, innerw)
+
+
+# the single row's own two numbers, named because draw_shop_tail places the gear row off them
+const SHOP_ROW_TOP := 110.0
+const SHOP_ROW_H := 282.0
+
+func strip_y_for(py: float, ph: float) -> float:
+	return py + ph - 92.0    # where the detail strip starts; the goods have to stop above it
+
+
+func draw_shop_grid(font: Font, tx: float, py: float, innerw: float, strip_y: float) -> void:
+	# THE GOODS, DEALT AS A GRID (2026-07-30, F9 `shop_v2`; Louis asked for the shop to look
+	# better). What was wrong was not the card, it was the ROOM. Seven cards in one row across
+	# 1,040px gives each one 141px, so the object you are buying was drawn at about 60px in the
+	# top fifth of a tall card - the smallest thing on a screen whose entire job is to make you
+	# want it - while the panel's whole lower half sat empty because the gear row it was sized
+	# for no longer has anything in it.
+	#
+	# Two rows of four turn 141px into 251 and the dead band into goods. And at that width the
+	# card reads ACROSS rather than down: a big PORTRAIT niche on the left with the prop shown
+	# properly, its numbers in a column beside it, the price along the foot. That is the template
+	# the file already worked out for wide gear cards, applied to the props now that they have
+	# the width for it. Everything on it is what was on it before - own, ready, Str per object,
+	# the count you could field, the exponent, the set meter, the buy key - so nothing has to be
+	# relearned; the same facts are simply legible.
+	var room_props := shop_props()
+	var np := room_props.size()
+	var cols := shop_grid_cols()
+	var rows := int(ceil(float(np) / float(cols)))
+	var gap := 12.0
+	var band_top := py + 112.0
+	var band_h := (strip_y - 20.0) - band_top
+	var ch := minf((band_h - gap * float(rows - 1)) / float(rows), 300.0)
+	var cw := minf((innerw - gap * float(cols - 1)) / float(cols), 300.0)
+	draw_string(font, Vector2(tx, py + 96.0), "PROPS",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+	for ci in np:
+		var i: int = room_props[ci]
+		var row := ci / cols
+		var col := ci % cols
+		# A SHORT LAST ROW IS CENTRED. Seven over four leaves three, and three cards left-aligned
+		# under four reads as a card having failed to draw rather than as a row of three.
+		var in_row := mini(cols, np - row * cols)
+		var row_w := cw * float(in_row) + gap * float(in_row - 1)
+		var cx0 := tx + (innerw - row_w) * 0.5 + float(col) * (cw + gap)
+		var cy0 := band_top + float(row) * (ch + gap) - (6.0 if ci == shop_sel else 0.0)
+		draw_shop_prop_card(font, i, ci, Rect2(cx0, cy0, cw, ch), ci == shop_sel)
+
+
+func draw_shop_prop_card(font: Font, i: int, ci: int, r: Rect2, sel: bool) -> void:
+	# one prop's card at grid size. Same facts, same order of reading (what you own, the object,
+	# what it asks of your arms, what it pays, whether tonight's set is fielded, what it costs).
+	var pcol := prop_color(i)
+	var cost := int(PROPS[i]["cost"])
+	var afford := money >= cost
+	var cw := r.size.x
+	var own := prop_count[i]
+	if sel:
+		soft_card(r, Color(pcol.r * 0.17, pcol.g * 0.17, pcol.b * 0.17, 0.96),
+			Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
+	else:
+		hud_card(r, Color(pcol.r, pcol.g, pcol.b, 0.45))
+	# THE NICHE: the goods in a recessed, lit window, which is the same plate the skill cards
+	# hang their picture in. A prop drawn on the bare card had no edge to be read against and
+	# no reason to be where it was; in a window it is being SHOWN to you.
+	var niche := Rect2(r.position.x + 10.0, r.position.y + 34.0, cw * 0.455, r.size.y - 82.0)
+	soft_card(niche, Color(pcol.r * 0.10, pcol.g * 0.09, pcol.b * 0.11, 0.92),
+		Color(pcol.r, pcol.g, pcol.b, 0.30), 1.0, 9.0, 0.0)
+	# A NICHE DOES NOT CLIP, SO IT HAS TO BE GIVEN HEADROOM. The torch is drawn with its halo and
+	# its rising embers, and those are placed relative to the PROP, which knows nothing about the
+	# window it is standing in - at the first size and centring, its embers came up out of the
+	# niche and printed themselves across the "own 15" above it. Sitting the object a tenth of the
+	# niche low and taking the magnification down a notch keeps the whole of the tallest, liveliest
+	# prop in the game inside its case. Anything added to a prop that reaches further UP than a
+	# torch's embers has to be checked here again.
+	draw_prop_icon(i, niche.get_center() + Vector2(0.0, niche.size.y * 0.10), 1.33, sel)
+	# ...and the numbers in a column beside it, one fact to a line. At 102px a line has room for
+	# about eighteen characters at 11pt, which is why the arms' two numbers are two lines here
+	# where the narrow card had to jam them onto one with a middle dot between them.
+	var lx := niche.position.x + niche.size.x + 14.0
+	var lw := r.position.x + cw - 12.0 - lx
+	# THE STOCK LINE LIVES IN THIS COLUMN, NOT ACROSS THE CARD'S TOP, and that is the niche's
+	# fault in a way worth recording. A torch's embers rise out of the case (which looks right -
+	# a lit thing in a glass case ought to spill), but they are placed relative to the PROP, so
+	# with "own 15" sitting above the niche they were printing themselves through the digits. The
+	# air above the niche is now deliberately empty and belongs to whatever a prop throws off.
+	var oc := Color(0.75, 0.9, 0.72) if own > 0 else Color(0.6, 0.55, 0.5, 0.8)
+	draw_string(font, Vector2(lx, r.position.y + 26.0), "own %d" % own,
+		HORIZONTAL_ALIGNMENT_LEFT, lw * 0.6, 12, oc)
+	if available(i):
+		draw_string(font, Vector2(lx, r.position.y + 26.0), "ready",
+			HORIZONTAL_ALIGNMENT_RIGHT, lw, 12, Color(0.6, 0.9, 0.62))
+	var nm := String(PROPS[i]["name"])
+	draw_string(font, Vector2(lx, r.position.y + 60.0), nm, HORIZONTAL_ALIGNMENT_CENTER, lw,
+		fit_size(font, nm, lw - 4.0, 20, 12), Color(1.0, 0.88, 0.6))
+	var can := max_count(i)
+	var reqcol := Color(0.75, 0.68, 0.6)
+	var l1 := "Str %d each" % prop_str_unit(i)
+	var l2 := "max %d" % can
+	if i == PROP_EGGS:
+		l2 = "fragile"
+	if can < MIN_BALLS:
+		# not strong enough for a routine: say so in red, before any money changes hands
+		reqcol = Color(0.95, 0.6, 0.45)
+		l1 = "needs Str %d" % prop_req(i, MIN_BALLS)
+		l2 = "for three"
+	draw_fit_string(font, Vector2(lx, r.position.y + 86.0), l1, HORIZONTAL_ALIGNMENT_CENTER, lw, 12, reqcol)
+	draw_fit_string(font, Vector2(lx, r.position.y + 103.0), l2, HORIZONTAL_ALIGNMENT_CENTER, lw, 12, reqcol)
+	# the REWARD, quantified: this prop's signature is an EXPONENT, so the honest thing to print
+	# is what it does to the exponent at the count in hand, not a multiplier
+	var sig := "score ^%.1f at %d" % [float(num_balls) * prop_sig(i), num_balls]
+	draw_fit_string(font, Vector2(lx, r.position.y + 128.0), sig, HORIZONTAL_ALIGNMENT_CENTER, lw,
+		fit_size(font, sig, lw - 2.0, 12, 10), Color(1.0, 0.82, 0.45))
+	# THE SET, against YOUR count rather than the raw number owned: you need one prop per object
+	# you juggle, so what matters at the counter is whether tonight's routine is fielded.
+	var need := num_balls
+	var setf := clampf(float(own) / float(maxi(need, 1)), 0.0, 1.0)
+	var setc := Color(0.55, 0.85, 0.55) if own >= need else Color(0.95, 0.68, 0.35)
+	draw_meter(lx, r.position.y + 140.0, lw, 7.0, setf, setc)
+	# ...and it keeps the row's own wording. "3 short of 3" saved eight characters and cost the
+	# sentence: the second number is the SET, so dropping the words between them leaves a line
+	# that reads as three short of three. It SHRINKS to fit instead, the rule for any phrase
+	# whose last word carries the sense.
+	var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
+	draw_fit_string(font, Vector2(lx, r.position.y + 168.0), setline, HORIZONTAL_ALIGNMENT_CENTER, lw,
+		fit_size(font, setline, lw - 2.0, 11, 8), setc)
+	draw_price_plate(font, Rect2(r.position.x + 10.0, r.position.y + r.size.y - 44.0, cw - 20.0, 38.0),
+		shop_key_label(ci), commafy(cost), afford)
+
+
+func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
 	# ---------------- PROPS: one card per prop, in one row ----------------
 	# THE ROW FITS WHATEVER PROPS HOLDS. It was `(innerw - gap * 5) / 6`, so the seventh
 	# prop (the chainsaw) was laid out at a sixth of the width and drew its whole card
@@ -16497,8 +17085,8 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var np := room_props.size()
 	var gap := 14.0 if np <= 6 else 10.0
 	var cw := (innerw - gap * float(np - 1)) / float(np)
-	var ch := 282.0
-	var y0 := py + 110.0
+	var ch := SHOP_ROW_H
+	var y0 := py + SHOP_ROW_TOP
 	for ci in np:
 		var i: int = room_props[ci]   # balls included: every prop is bought stock now (Louis)
 		var sel := ci == shop_sel
@@ -16566,6 +17154,15 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0),
 			shop_key_label(ci), commafy(cost), afford)
 
+
+func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: float, innerw: float) -> void:
+	# GEAR, the detail strip and the key row: everything below the goods, and identical whether
+	# the props were dealt as a grid or as the old single row. Split out when the grid arrived so
+	# the two layouts cannot drift apart in the parts they share - which is most of the screen.
+	# The gear row's own top is computed from the single row's numbers because a non-empty gear
+	# row is exactly the case shop_grid_on() refuses (see there), so the row is what is above it.
+	var y0 := py + SHOP_ROW_TOP
+	var ch := SHOP_ROW_H
 	# ---------------- GEAR: one card per row of shop_gear(), laid out to fit ----------
 	# TWO TEMPLATES, chosen by how many there are. Up to four, a gear card is wide and
 	# short and reads ACROSS - object left in a lit disc, words right, price along the
@@ -17295,9 +17892,12 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		draw_skill_card_art(Rect2(card_r.position.x + 12.0, card_r.position.y + 26.0,
 			card_w - 24.0, card_h - 74.0), is_tr, sidx, 1.0)
 		var cnm := ename.to_upper()
-		draw_string(title_font(), Vector2(card_r.position.x + 10.0, card_r.position.y + card_h - 20.0),
-			cnm, HORIZONTAL_ALIGNMENT_CENTER, card_w - 20.0,
-			fit_size(title_font(), cnm, card_w - 26.0, 20, 10), Color(1.0, 0.96, 0.86))
+		# the name gives the two corner indices their room (CARD_PIP_KEEP) and SHRINKS into what
+		# is left rather than trimming, since a skill's name is the one thing this card says
+		var nmw := card_w - 20.0 - (CARD_PIP_KEEP if exp_on("card_v2") else 0.0)
+		draw_string(title_font(), Vector2(card_r.position.x + 10.0 + (card_w - 20.0 - nmw) * 0.5,
+			card_r.position.y + card_h - 20.0), cnm, HORIZONTAL_ALIGNMENT_CENTER, nmw,
+			fit_size(title_font(), cnm, nmw - 6.0, 20, 10), Color(1.0, 0.96, 0.86))
 		draw_string(font, Vector2(prev_box.position.x, header_y), "HOW IT MOVES",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
 		draw_skill_preview(font, prev_box, is_tr, sidx, ename)
@@ -18272,7 +18872,47 @@ func cap_egg(p: Vector2, col_in: Color, sc: float) -> void:
 	fill_ellipse(p + Vector2(-w * 0.24, -h * 0.30), w * 0.42, h * 0.26, ca(Color(1, 1, 1, 0.13)))
 
 
+func cap_club_v2(p: Vector2, ang: float, sc: float) -> void:
+	# THE SHOP CLUB (2026-07-30): the same silhouette the stage draws, out of the same table,
+	# with the modelling a still object in a lit niche is allowed and a flying one is not. Every
+	# mark is a slice of `club_shape`, so none of them can wander off the outline - which is the
+	# specific way the old one broke. It had a correct tapered profile AND a 6-unit disc left on
+	# top of it, and the disc won, because it was drawn last and 2 units wider on both sides.
+	draw_set_transform(p, ang, Vector2.ONE * sc)
+	var body := ca(Color(0.90, 0.35, 0.38))
+	var body_dk := ca(Color(0.56, 0.18, 0.22))
+	var band := ca(Color(0.96, 0.92, 0.85))
+	var band_dk := ca(Color(0.70, 0.66, 0.60))
+	# the handle, its shaded side taken as a fraction of the profile rather than as a second
+	# tapered quad written out by hand
+	draw_colored_polygon(club_shape(CLUB_BUTT_Y, CLUB_COLLAR_Y, 0.0, -1.0, 1.0, false, true), band)
+	draw_colored_polygon(club_shape(CLUB_BUTT_Y, CLUB_COLLAR_Y, 0.0, 0.30, 1.0, false, true), band_dk)
+	for gy: float in [4.4, 6.8, 9.2, 11.6]:      # the grip wrap
+		var gw := club_hw(gy)
+		draw_line(Vector2(-gw, gy), Vector2(gw, gy + 0.5), ca(Color(0.62, 0.58, 0.52, 0.55)), 0.7)
+	draw_circle(Vector2(-0.7, 15.9), 1.4, ca(Color(1, 1, 1, 0.5)))   # the knob's own highlight
+	# the body, then its shaded side down the same profile
+	draw_colored_polygon(club_shape(CLUB_COLLAR_Y, CLUB_NOSE_Y, 0.0, -1.0, 1.0, true), body)
+	draw_colored_polygon(club_shape(CLUB_COLLAR_Y, CLUB_NOSE_Y, 0.0, 0.34, 1.0, true), body_dk)
+	# the lacquer stripe: a slice, so it follows the swell instead of running straight past it
+	draw_colored_polygon(club_shape(-1.0, -19.0, 0.35, -0.80, -0.40, true, true),
+		ca(Color(1, 1, 1, 0.22)))
+	# THE DECORATED BAND, which is what a juggling club has where a bowling pin does not. Two
+	# rings rather than one, close together: a single stripe reads as a defect in the paint and
+	# a pair reads as decoration. Both are slices, so they end exactly at the silhouette.
+	for by: float in [CLUB_BAND_Y, CLUB_BAND_Y - 3.2]:
+		var w := club_hw(by)
+		draw_line(Vector2(-w, by), Vector2(w, by), band, 2.1 if is_equal_approx(by, CLUB_BAND_Y) else 1.1)
+	var cw := club_hw(CLUB_COLLAR_Y)
+	draw_line(Vector2(-cw - 0.6, CLUB_COLLAR_Y), Vector2(cw + 0.6, CLUB_COLLAR_Y), band, 2.2)
+	draw_line(Vector2(-cw - 0.4, CLUB_COLLAR_Y + 1.1), Vector2(cw + 0.4, CLUB_COLLAR_Y + 1.1), band_dk, 0.7)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
 func cap_club(p: Vector2, ang: float, sc: float) -> void:
+	if exp_on("club_v2"):
+		cap_club_v2(p, ang, sc)
+		return
 	# the club with a real body: the taper shaded down one side, a lacquered highlight
 	# running the length of it, a wrapped grip and a knob that is a knob rather than a
 	# disc. Same silhouette and the same proportions as the stage club - roughly three
