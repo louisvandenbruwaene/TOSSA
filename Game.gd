@@ -19843,9 +19843,17 @@ func _demo_step() -> void:
 		spin_scored = false
 		trick_ready = tick + TRICK_COOLDOWN
 	# a pinned TOGGLE switches on once (one mimed Space press) and stays running
+	# THE AUTOPLAYER MUST PRESS THE KEY, NOT SET THE FLAG (2026-07-29). It assigned
+	# `toggle_on` directly, which was harmless while a toggle's only effect was to reshape
+	# throws - and became a silent lie the moment a trick's PRESS is what multiplies the run.
+	# Measured: `--trick btb` at five clubs scored 20,900, byte for byte what the same run
+	# scored with no trick at all, because `apply_trick_mult` lives in on_trick and on_trick
+	# was never reached. **A dev flag that quietly does something else is worse than one that
+	# errors** - the same finding `dev_meet_req` produced the day before, in a different
+	# disguise. It goes through the real handler now, so the flag exercises the real path.
 	if _demo_trick and pin_kind == "toggle" and toggle_on != _demo_trick_pin and tick >= 24:
-		toggle_on = _demo_trick_pin
-		toggle_scored = false
+		trick_sel = _demo_trick_pin
+		on_trick()
 	# a tutorial's "switch it OFF" step needs the mime to let go again - outside a
 	# lesson the point is showing the trick run, so this only fires once the lesson
 	# has actually reached that step (never mid-drill, never in a bare --trick demo)

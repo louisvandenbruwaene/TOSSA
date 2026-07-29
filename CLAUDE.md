@@ -1818,11 +1818,24 @@ taste.
   chooses, bounded by attention and risk. Score inside a run is then (linear in time) x (a
   multiplier you built), which is Balatro's shape exactly.
 - **MEASURED, first act, ante 0, frame-perfect bot:**
-      Backyard, 3 balls, no tricks      803 points, all three goals, 38.6s
-      Theatre, 5 clubs, no tricks       20,900, TWO of three goals, 372s
-  The second line is the design working rather than failing: the top rung of a house is not
-  reachable by playing longer, only by bringing more. A trickless act should stall at the second
-  goal and cash in.
+      Backyard, 3 balls, no tricks             803, all three goals, 38.6s
+      Theatre, 5 clubs, no tricks           20,900, TWO of three goals, 372s
+      Theatre, 5 clubs, ONE Behind the Back 35,212, all three goals, 206s
+  The middle line is the design working rather than failing: the top rung of a house is not
+  reachable by playing longer, only by bringing more, so a trickless act stalls at the second
+  goal and cashes in. The third line is the same act with a single trick activation, and it
+  clears the final goal (35,200) almost to the point. **The bot only ever activates a toggle
+  once**, so 206s is the ONE-activation figure and a floor, not a ceiling: three activations is
+  2.46^3 = x14.9 and lands the same act near 42 seconds, which is where the clock floor for
+  that house sits (40s). That is the intended shape - build, and the clock becomes the wall.
+- **AND THE MEASUREMENT ONLY BECAME POSSIBLE AFTER FIXING THE HARNESS, which is the same
+  finding as `dev_meet_req` the day before wearing a different disguise.** `--trick btb` scored
+  20,900 - byte for byte the trickless number - because `_demo_step` assigned `toggle_on`
+  DIRECTLY. That was harmless while a toggle's only effect was to reshape throws, and became a
+  silent lie the moment the PRESS is what multiplies the run, since `apply_trick_mult` lives in
+  `on_trick` and `on_trick` was never reached. It calls the real handler now. **A dev flag that
+  quietly does something else is worse than one that errors** - and when a measurement comes
+  back suspiciously equal to its control, suspect the harness before the model.
 - **THE ANTE IS GENTLER THAN THE RUNGS.** 1.25^n capped at 6, so four acts at a venue make it
   2.4x and eight make it 6x. At my first guess (1.45 capped at 12) the SECOND act at a house was
   already harder than the house above it, which does not push a player up the ladder, it strands
