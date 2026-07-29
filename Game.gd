@@ -192,6 +192,10 @@ const ST_DEMO_WALL := 13  # a scoped free demo's own "that's everything" card, s
 const ST_PURIST_LEGEND := 14  # the post-win chase's own payoff card (Still open, cheap
 							   # version): shown once a Purist record stands at every
 							   # venue - see purist_legend_complete() and resolve_act()
+const ST_MENUTOUR := 15  # a short "how the hub works" card (2026-07-29), shown exactly
+						   # once: right after the new player's own first Backyard show
+						   # (see post_lesson_show) resolves, before the day hub is ever
+						   # shown at all - see draw_menutour
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -1587,6 +1591,9 @@ var aid_meal_used := false         # the once-per-career stamina rescue has been
 									  # (an unlock happens mid-set; the lesson must wait)
 
 # --- interactive tutorial (runs on the REAL sim, guided step by step) ---------
+var post_lesson_show := false   # true for exactly one real act: the Backyard show the
+								  # basics congrats card hands straight into (see the
+								  # ST_TUTDONE key handler and ST_MENUTOUR)
 var tut_active := false   # a hands-on lesson is running inside ST_PLAY
 var tut_id := ""          # "balls" (the 1->2->3 progression) or "prop_<n>"
 var tut_step := 0         # index into tut_lesson(tut_id)
@@ -1597,7 +1604,9 @@ var tut_caught_l := false # ...and the same for catches, since the basics name o
 var tut_caught_r := false # a time and a catch in the wrong hand must not clear the beat
 var tut_throws := 0       # throws banked this step (the `free` beats want both)
 var tut_hand_picked := false  # the dominant-hand question has been answered
-var tut_speech_tick := 0  # when the live line started arriving, for the letter-by-letter
+var tut_speech_tick := 0.0  # when the live line started arriving, in atick() units so a
+							  # frozen "do" beat still lets the line type itself out (tick
+							  # alone does not move then; atick() = tick + cine_tick does)
 var tut_speech_said := 0  # ...and how many of its characters have already blipped
 var tut_advance_at := -1  # tick to move on (a beat after the goal, so the throw lands)
 var tut_tricks := 0       # reward_trick calls banked this step (arm/live trick goals)
@@ -2097,10 +2106,13 @@ func _ready() -> void:
 		game_state = ST_CAPSULE
 		if capi + 1 < ua.size() and not ua[capi + 1].begins_with("--"):
 			_capsule_variant = clampi(int(ua[capi + 1]), 0, 5)
-	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls
-	if ti != -1:
+	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls,
+	if ti != -1:                     # optionally --tutorial balls <step> to land on step N
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
 		begin_tutorial(id)
+		if ti + 2 < ua.size() and not ua[ti + 2].begins_with("--"):
+			tut_step = clampi(int(ua[ti + 2]), 0, tut_lesson(tut_id).size() - 1)
+			tut_setup_step()
 	var ei := ua.find("--establish")  # dev: screenshot a venue exterior card, e.g. --establish 3.
 	if ei != -1:                      # add --booking (and optionally --encore) to show the
 		establish_venue = int(ua[ei + 1]) if ei + 1 < ua.size() else 2   # act's goals/challenge panel
@@ -2136,12 +2148,17 @@ func _ready() -> void:
 	if ua.has("--tutdone"):           # dev: the basics-lesson congrats card, for a screenshot
 		game_state = ST_TUTDONE
 		cine_tick = 0
+	if ua.has("--menutour"):          # dev: the post-first-show "how the hub works" card
+		game_state = ST_MENUTOUR
+		cine_tick = 0
 	var dyi := ua.find("--day")       # dev: jump straight to the day hub for a screenshot,
-	if dyi != -1:                     # optionally --day <work|rest|prep> with that drawer open
-		enter_day()
+	if dyi != -1:                     # optionally --day <work|rest|prep> with that drawer open,
+		enter_day()                   # and a further <sel> to move the cursor onto row N
 		if dyi + 1 < ua.size() and not ua[dyi + 1].begins_with("--"):
 			day_group = ua[dyi + 1]
 			day_sel = 0
+			if dyi + 2 < ua.size() and not ua[dyi + 2].begins_with("--"):
+				day_sel = int(ua[dyi + 2])
 	var ssi := ua.find("--skills")    # dev: open the Skills reference for a screenshot,
 	if ssi != -1:                     # optionally --skills <N> to select entry N directly
 		level = maxi(level, 7)        # enough unlocked that both ready and locked show
@@ -2154,9 +2171,16 @@ func _ready() -> void:
 		print_ladder()
 		get_tree().quit()
 		return
-	if ua.has("--tailor"):            # dev: open the dressing room for a screenshot
-		enter_day()
+	var tli := ua.find("--tailor")    # dev: open the dressing room for a screenshot,
+	if tli != -1:                     # optionally --tailor <sel> [<stage>] with the
+		enter_day()                   # cursor already on that row/house
 		tailor_open = true
+		if tli + 1 < ua.size() and not ua[tli + 1].begins_with("--"):
+			tailor_sel = clampi(int(ua[tli + 1]), 0, WEAR_PIECES.size() - 1)
+			if tli + 2 < ua.size() and not ua[tli + 2].begins_with("--"):
+				tailor_stage = clampi(int(ua[tli + 2]), 0, venue_index())
+		if ua.has("--outfitnow"):    # dev: exercise "B" (try_outfit_tonight) headlessly
+			try_outfit_tonight()
 	if ua.has("--eggbreak"):          # dev: exercise the egg-break effect on the stage
 		_eggdemo = true
 		prop_type = PROP_EGGS
@@ -2314,6 +2338,16 @@ func _physics_process(delta: float) -> void:
 			cine_tick += 1
 			if _demo:
 				tut_hold_autoplay()
+			else:
+				_read_inputs()
+			update_hands()
+			return
+		# THE BASICS' OWN "do" BEATS (see the region comment above tut_do_step): the
+		# same stopped-world trick, for the conversational script's single-key steps.
+		if tut_do_step() and tut_do_ready():
+			cine_tick += 1
+			if _demo:
+				tut_do_autoplay()
 			else:
 				_read_inputs()
 			update_hands()
@@ -2531,10 +2565,19 @@ func _input(event: InputEvent) -> void:
 				play_sfx("ui", -12.0)
 			return
 		ST_TUTDONE:
-			# the congrats card reads itself out for a beat, then any key begins the day
+			# the congrats card reads itself out for a beat, then STRAIGHT INTO A REAL
+			# SHOW (2026-07-29, Louis: "immediately put in the backyard for the next
+			# performance tutorial"). It used to hand straight to the day hub; now it
+			# hands to the very same "perform" action the hub itself offers, at the
+			# Backyard, so the first thing a player does with a finished cascade is
+			# stand on a real stage. Once THAT act resolves, the results-dismiss hook
+			# below (post_lesson_show) shows a short menu tour before the hub is ever
+			# shown at all.
 			if cine_tick > 40 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
-				enter_day()
-				set_day_msg("your first day begins  -  the stage is yours")
+				post_lesson_show = true
+				seg_used += 1
+				save_progress()
+				begin_performance(num_balls)
 				play_sfx("ui2", -11.0)
 			return
 		ST_DEMO_WALL:
@@ -2550,6 +2593,14 @@ func _input(event: InputEvent) -> void:
 			# key back into the day, the career playing on same as after the real win
 			if cine_tick > 60 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
 				enter_day()
+				play_sfx("ui2", -11.0)
+			return
+		ST_MENUTOUR:
+			# the short "how the hub works" card - same shape again: a beat, then any
+			# key finally opens the day hub for the first time
+			if cine_tick > 40 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
+				enter_day()
+				set_day_msg("your first day begins  -  the stage is yours")
 				play_sfx("ui2", -11.0)
 			return
 		ST_ESTABLISH:
@@ -2643,6 +2694,13 @@ func _input(event: InputEvent) -> void:
 				elif pending_purist_legend:
 					pending_purist_legend = false
 					game_state = ST_PURIST_LEGEND
+					cine_tick = 0
+				elif post_lesson_show:
+					# the tutorial's own first show, just resolved: a short menu tour
+					# before the hub is ever shown, never straight back into it (see
+					# ST_TUTDONE and ST_MENUTOUR)
+					post_lesson_show = false
+					game_state = ST_MENUTOUR
 					cine_tick = 0
 				else:
 					enter_day()
@@ -3547,6 +3605,15 @@ func day_actions() -> Array[Dictionary]:
 	out.append({"id": "tailor", "grp": "prep", "icon": "hanger", "name": "TAILOR",
 		"cost": "", "ok": true, "why": "",
 		"sub": "dress for the stage: a suit from any house you have played, and every piece you own."})
+	# STATS, REACHABLE FROM THE HUB (2026-07-29, Louis: "i can't reach it at the moment
+	# without being in training or performance"). The character sheet (Tab) has always
+	# opened over a live act, which is exactly where it is least useful to read - you
+	# cannot spend a point mid-throw. `sheet_open` already works as a PREPARE-style
+	# overlay over the day hub (day_input handles it first, same as shop/skills/tailor;
+	# draw_day's own ST_DAY branch already draws it), so this is one row, not new plumbing.
+	out.append({"id": "stats", "grp": "prep", "icon": "star", "name": "STATS",
+		"cost": "", "ok": true, "why": "",
+		"sub": "your sheet: Accuracy, Strength, Endurance, Speed, and any points waiting to spend."})
 	return out
 
 
@@ -3771,6 +3838,12 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			tailor_open = true
 			tailor_sel = 0
 			tailor_col = 0
+			play_sfx("ui2", -13.0)
+		"stats":
+			# same shape again: a reference screen, no cost, no vignette. `sheet_open` is
+			# the same overlay Tab opens mid-act (draw_sheet_screen/sheet_input), so the hub
+			# and a live performance can never show two different ideas of "the sheet".
+			sheet_open = true
 			play_sfx("ui2", -13.0)
 		"learn":
 			# drain one queued lesson and teach it now. Marked seen BEFORE teaching, and
@@ -4505,6 +4578,10 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_do("Catch.", "catch", off, CO, 3, dom, 2))
 	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, dom, 10, 10,
 		"Prove you are ready: ten throws and ten catches.", 2))
+	# THE OTHER WAY, IN ONE LINE (2026-07-29, Louis: folded in from the old standalone
+	# "advanced juggling technique" lesson - see tut_finish). Once the beginner rhythm
+	# is in the hands, this is the whole difference worth naming, not a second drill.
+	out.append(tut_say("There's another way to hold it: throw all three up first, then keep your hands empty - catch, then throw, every time. Same keys, opposite order. Try it once you're ready."))
 	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
 		"next": "finish the lesson", "say": true,
 		"text": "Tangled? %s starts you over, any time you are practising." % String(k_restart()[0])})
@@ -4702,6 +4779,17 @@ func begin_tutorial(id: String) -> void:
 	tut_id = id
 	tut_step = 0
 	tut_active = true
+	# EVERY LESSON OPENS IN THE BACKYARD, PLAIN (2026-07-29, Louis: "a tutorial should be
+	# in the backyard outfit (which is free for the player), without any special things
+	# or props"). A lesson is a controlled space (see the block below, "nothing primed
+	# walks in from the last session") and the costume/backdrop were the one thing still
+	# leaking the player's real career in: `wearing()` gates every piece of the wardrobe
+	# unconditionally, so a bought top hat or glow suit was drawn straight into a first-
+	# timer's very first lesson. `view_venue` is the existing preview override built for
+	# exactly this ("which venue palette to draw", regardless of real progression) - see
+	# tut_finish for the matching restore. `wearing()` itself now also refuses while
+	# tut_active, which is the other half: see its own comment.
+	view_venue = 0
 	tut_hold.clear()      # no beat from a previous lesson is still waiting on a press
 	tut_last_throw = LEFT
 	game_state = ST_PLAY
@@ -4835,7 +4923,7 @@ func tut_setup_step() -> void:
 	# asked for is a throw from the hand the step deals into.
 	tut_hold.clear()
 	tut_hold_end = tick + TUT_STEP_READ
-	tut_speech_tick = tick    # the line starts arriving now, a letter at a time
+	tut_speech_tick = atick()    # the line starts arriving now, a letter at a time
 	tut_speech_said = 0
 	tut_last_throw = other(start_hand)
 	if _demo:
@@ -4882,6 +4970,16 @@ func tut_guided() -> bool:
 
 func tut_holding() -> bool:
 	return tut_active and not tut_hold.is_empty()
+
+
+func tut_frozen() -> bool:
+	# true while EITHER stopped-world mechanism has the clock - the older lessons'
+	# tut_hold list, or the basics' own "do" beat. Kept separate from tut_holding()
+	# on purpose: that function also gates what on_catch/on_throw_press are allowed to
+	# DO (a frozen beat's catch must always land), and its own tut_hold_names check
+	# would silently swallow every press during a "do" freeze, since tut_hold is empty
+	# for it. This is purely for drawing "is the world visibly stopped right now".
+	return tut_holding() or (tut_active and tut_do_step() and tut_do_ready())
 
 
 func tut_style() -> String:
@@ -5111,6 +5209,51 @@ func tut_hold_autoplay() -> void:
 		return
 
 
+# -----------------------------------------------------------------------------
+# THE STOPPED WORLD, FOR A "do" BEAT (2026-07-29 evening, Louis: "you are not pausing
+# the game enough for the player to learn... pause the game at the perfect frame for
+# catching (show them the best timing) and wait for the player to hit [the key]").
+# THE BASICS above (tut_do) already name one exact key and refuse Enter until it is
+# pressed - what they never did is stop the WORLD while they wait, so a slow player
+# could watch the very thing being taught fall past its own window. This holds the
+# clock exactly the way tut_hold does for the older lesson types (same trick: skip the
+# tick advance, keep polling input, let cine_tick breathe) but the gate is simpler,
+# because a `do` beat already knows the one action it wants with no derivation needed.
+# A THROW has no timing of its own, so it holds from the moment the line finishes; a
+# CATCH lets the world run at real speed until the ball reaches ITS OWN land_tick - the
+# centre of every catch window - and holds there, so the beat always shows the true
+# perfect frame rather than an arbitrary pause. The three FREE checkpoints (1/2/3 balls)
+# and the "hand"/"read" beats are deliberately not `do` beats, so they are untouched:
+# free play is exactly where this must not apply.
+# -----------------------------------------------------------------------------
+func tut_do_step() -> bool:
+	if not tut_active or tut_advance_at >= 0 or collapsing or results_open:
+		return false
+	var g := String(tut_step_data().get("goal", ""))
+	return g == "throw_l" or g == "throw_r" or g == "catch_l" or g == "catch_r"
+
+
+func tut_do_ready() -> bool:
+	# should the world actually be held right now, this frame?
+	var g := String(tut_step_data().get("goal", ""))
+	if g == "throw_l" or g == "throw_r":
+		return true
+	var h := LEFT if g == "catch_l" else RIGHT
+	for b in balls:
+		if b.state == STATE_FLIGHT and b.to_hand == h:
+			return tick >= b.land_tick
+	return false
+
+
+func tut_do_autoplay() -> void:
+	# --demo still has no hands: it presses the one key the beat is holding for
+	match String(tut_step_data()["goal"]):
+		"throw_l": on_throw_press(LEFT)
+		"throw_r": on_throw_press(RIGHT)
+		"catch_l": on_catch(LEFT)
+		"catch_r": on_catch(RIGHT)
+
+
 func tut_incoming(h: int) -> bool:
 	# is any ball in flight dropping toward hand h right now? (the odd-count middle ball
 	# either hand may take, so it counts for both). Used to keep a top-up off a busy hand.
@@ -5337,13 +5480,21 @@ func tut_finish() -> void:
 	tut_active = false
 	tut_id = ""
 	mode = MODE_TRAIN
+	view_venue = -1   # hand the venue palette back to the player's real progression -
+					   # see begin_tutorial, which pinned it to the Backyard for the lesson
 	play_sfx("coin", -6.0)   # a bright flourish on finishing a lesson
 	if was_basics:
 		prop_type = PROP_BALLS   # ONLY the basics lesson forces balls back; a trick or
 								 # count lesson taught with the owned prop leaves it be
-		# ...and the OTHER way of holding a pattern is queued right behind it, so the
-		# two styles are met one after the other while the first is still in the hands
-		queue_lesson(TUT_ADVANCED)
+		# THE ADVANCED (empty-hands) STYLE IS NO LONGER ITS OWN LESSON (2026-07-29,
+		# Louis: "you should have explained that quickly in text during the real
+		# tutorial... remove that 'advanced juggling technique' tutorial from the 'new
+		# ideas' menu"). It used to be queued here and taken later, as a full second
+		# drill, from the hub's LEARN row - now the basics' own closing line covers it
+		# in one sentence (see the "Tangled?" step in tut_lesson) and nothing queues
+		# it any more. advanced_lesson_steps() and TUT_ADVANCED are left in place for
+		# `--tutorial advanced`, since the drill itself still works; it is simply never
+		# offered on its own again.
 		# the FIRST lesson earns a small congrats card - the starting kit and a
 		# breath - instead of a hard cut into the day hub (Louis)
 		game_state = ST_TUTDONE
@@ -5445,6 +5596,39 @@ func draw_tut_tally(font: Font, s: Vector2, step: Dictionary) -> void:
 			Color(0.72, 0.95, 0.70) if doneR else Color(1.0, 0.90, 0.62))
 
 
+func draw_speech_line(font: Font, pos: Vector2, line: String, take: int, size: int, base_col: Color) -> void:
+	# A BRACKETED KEY - "[J]" - GETS ITS OWN LOOK (2026-07-29, Louis: "give J the same
+	# look as below: yellow and slightly larger than the rest of the text"), matching
+	# the bare key floating over the hand. draw_string has no rich-text span of its own,
+	# so the line is split around the brackets and drawn as up to three runs, each
+	# measured so the next one picks up exactly where the last left off. `take` still
+	# reveals the line a character at a time (see tut_speech_chars), split across all
+	# three runs, so the highlighted key types in with the rest of the sentence rather
+	# than popping in whole.
+	var lb := line.find("[")
+	var rb := line.find("]", lb + 1) if lb >= 0 else -1
+	if lb < 0 or rb < 0:
+		draw_string(font, pos, line.substr(0, clampi(take, 0, line.length())), HORIZONTAL_ALIGNMENT_LEFT, -1, size, base_col)
+		return
+	var pre := line.substr(0, lb)
+	var key := line.substr(lb, rb - lb + 1)
+	var post := line.substr(rb + 1)
+	var key_size := size + 3
+	var key_col := Color(1.0, 0.88, 0.32)
+	var x := pos.x
+	var r0 := clampi(take, 0, pre.length())
+	if r0 > 0:
+		draw_string(font, Vector2(x, pos.y), pre.substr(0, r0), HORIZONTAL_ALIGNMENT_LEFT, -1, size, base_col)
+	x += font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var r1 := clampi(take - pre.length(), 0, key.length())
+	if r1 > 0:
+		draw_string(font, Vector2(x, pos.y), key.substr(0, r1), HORIZONTAL_ALIGNMENT_LEFT, -1, key_size, key_col)
+	x += font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, key_size).x
+	var r2 := clampi(take - pre.length() - key.length(), 0, post.length())
+	if r2 > 0:
+		draw_string(font, Vector2(x, pos.y), post.substr(0, r2), HORIZONTAL_ALIGNMENT_LEFT, -1, size, base_col)
+
+
 func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
 	# SOMEBODY IS TALKING TO YOU (2026-07-29, Louis: "create another window that looks
 	# better and like a person talking"). A head in a lit disc on the left, the line beside
@@ -5492,7 +5676,7 @@ func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
 		var lt := String(l)
 		var take := clampi(shown - used, 0, lt.length())
 		if take > 0:
-			draw_string(font, Vector2(bx + 96.0, ty), lt.substr(0, take), HORIZONTAL_ALIGNMENT_LEFT, inner, 17, Color(1.0, 0.94, 0.80))
+			draw_speech_line(font, Vector2(bx + 96.0, ty), lt, take, 17, Color(1.0, 0.94, 0.80))
 		used += lt.length()
 		ty += 24.0
 	if subl.size() > 0 and shown >= _tut_line_len(lines):
@@ -5517,7 +5701,7 @@ func tut_speech_chars() -> int:
 	# how much of the line has arrived. Reset at every step (tut_speech_tick) and paced by
 	# TUT_SPEECH_CPS, with the blip fired from update_sim rather than here - a draw pass can
 	# run more than once for a tick and would stutter the sound.
-	return int(float(maxi(0, tick - tut_speech_tick)) * TUT_SPEECH_CPS / 120.0)
+	return int(maxf(0.0, atick() - tut_speech_tick) * TUT_SPEECH_CPS / 120.0)
 
 
 func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
@@ -5529,12 +5713,17 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 	var by := s.y * TUT_SIDE_Y
 	soft_card(Rect2(bx, by, bw, 150.0), Color(0.10, 0.07, 0.09, 0.96), Color(1.0, 0.86, 0.55, 0.5), 1.6, 12.0, 16.0, 0.05)
 	draw_string(font, Vector2(bx, by + 28.0), "which hand is your strong one?", HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.92, 0.88, 0.78))
+	# SIDE BY SIDE (2026-07-29, Louis: "left and right on the left and on the right side
+	# of each other instead of on top of each other") - the layout is now the answer, not
+	# just the label: the LEFT card sits on the left, the RIGHT card on the right, so the
+	# choice reads before either word is even parsed.
+	var gap := 14.0
+	var cw := (bw - 48.0 - gap) * 0.5
+	var cy := by + 44.0
 	for i in 2:
 		var h := LEFT if i == 0 else RIGHT
 		var sel := dominant_hand == h
-		var cw := bw - 48.0
-		var cx := bx + 24.0
-		var cy := by + 44.0 + float(i) * 46.0
+		var cx := bx + 24.0 + float(i) * (cw + gap)
 		soft_card(Rect2(cx, cy, cw, 38.0), Color(1.0, 0.86, 0.45, 0.12) if sel else Color(0.14, 0.10, 0.11, 0.9),
 			Color(1.0, 0.88, 0.5, 0.9) if sel else Color(0.6, 0.55, 0.5, 0.4), 1.6 if sel else 1.0, 9.0, 10.0)
 		draw_string(font, Vector2(cx, cy + 25.0), "LEFT" if h == LEFT else "RIGHT", HORIZONTAL_ALIGNMENT_CENTER, cw, 16,
@@ -5546,7 +5735,7 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var step := tut_step_data()
 	var steps := tut_lesson(tut_id)
-	if tut_holding():
+	if tut_frozen():
 		# a breath of dark over the STAGE while a beat has the world frozen: the picture
 		# stays readable, but the world visibly stops, which is the whole message. Laid
 		# down first, so everything the lesson draws to explain itself sits on top of it
@@ -5887,7 +6076,7 @@ func draw_timing_ring(at: Vector2, d: int) -> void:
 
 
 func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: float) -> void:
-	# a single BARE key letter floating over a hand - outlined, no box - so the handed
+	# a single BARE key letter floating beside a hand - outlined, no box - so the handed
 	# press (which hand, which key) is guided at the point of action without a text
 	# rectangle in the middle of the stage (Louis: keep the centre clear).
 	var u := clampf(urgency, 0.0, 1.0)
@@ -5896,6 +6085,12 @@ func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: flo
 		sc *= 1.0 + 0.06 * sin(atick() * 0.18) * (u - 0.6) / 0.4
 	var fs := int(round(19.0 * sc))
 	var a := lerpf(0.78, 1.0, u)   # never faint: a calm key must still read at a glance
+	# A SMALL PULSING AURA (2026-07-29, Louis: "a small aura around it to emphasize (make
+	# it pulsate slightly)"). One soft glow breathing behind the letter - draw_glow is a
+	# single textured quad, so this costs nothing - is what turns a bare outlined letter
+	# into something the eye keeps coming back to rather than reads once and forgets.
+	var pulse := 0.5 + 0.5 * sin(atick() * 0.05)
+	draw_glow(at, 20.0 + 5.0 * pulse, Color(col.r, col.g, col.b, (0.22 + 0.12 * pulse) * a))
 	draw_text_shout(font, at - Vector2(80.0, 0.0), key, HORIZONTAL_ALIGNMENT_CENTER, 160.0, fs, Color(col.r, col.g, col.b, a))
 
 
@@ -5946,7 +6141,9 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		var hp: Vector2 = hpos[h]
 		draw_timing_ring(hp, soonest[h])
 		var urg := 1.0 - float(soonest[h]) / float(lead)
-		draw_tut_key(font, hp + Vector2(0.0, -60.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
+		# OUTWARD, NOT OVERHEAD (2026-07-29, Louis: the key should sit to the side of
+		# the hand, clear of the juggler's own body, rather than floating above it).
+		draw_tut_key(font, hp + Vector2((62.0 if h == RIGHT else -62.0), -18.0), String(kc[h]), Color(0.7, 0.88, 1.0), urg)
 	# throw: the bare throw key over EVERY hand still holding a ball, all lesson long
 	# (Louis: the keys are shown every single time, never assumed learned). It
 	# brightens when the step's whole point is that throw, stays calm otherwise.
@@ -5965,7 +6162,8 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		# the follow-up throw read as optional there too.
 		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT) \
 			or bool(step.get("guide", false)) or String(step.get("prompt", "")) == "trick"
-		draw_tut_key(font, hpos[hh] + Vector2(0.0, -60.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
+		# OUTWARD, NOT OVERHEAD - see the catch ring just above for the same move.
+		draw_tut_key(font, hpos[hh] + Vector2((62.0 if hh == RIGHT else -62.0), -18.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
 #endregion
@@ -7308,6 +7506,14 @@ func on_catch(h: int) -> void:
 		# the prop's own arrival, so the timing is already Perfect, and being failed by
 		# a stamina bar or a chance roll on a press the script demanded teaches nothing.
 		sure = true
+	elif tut_do_step() and tut_do_ready():
+		# THE BASICS' OWN "do" BEAT, held at the ball's own land_tick (tut_do_ready): the
+		# same guarantee as the older tut_hold catch just above, and the same reason - the
+		# beat paused the world at the perfect instant itself, so a stamina bar or a chance
+		# roll must not be allowed to fail a press the script froze the game to demonstrate.
+		if String(tut_step_data()["goal"]) != ("catch_l" if h == LEFT else "catch_r"):
+			return   # not the hand this beat is holding for
+		sure = true
 	# a hand that already HOLDS a ball may still catch (Louis): the stack takes
 	# another. The old "hand occupied, no catch" traffic rule is gone - traffic
 	# is now the player's own problem, and holding two is a legitimate rescue.
@@ -7572,6 +7778,13 @@ func on_throw_press(h: int) -> void:
 		if tut_hold_names("throw", h):
 			do_throw(h, 0)   # do_throw calls tut_on_throw, which banks it on the beat
 		return
+	if tut_do_step() and tut_do_ready():
+		# THE BASICS' OWN "do" BEAT: same snappy-tap-on-press guarantee, for the one
+		# hand this beat is actually holding for - anything else is swallowed, same
+		# contract as the tut_hold branch just above.
+		if String(tut_step_data()["goal"]) == ("throw_l" if h == LEFT else "throw_r"):
+			do_throw(h, 0)
+		return
 	charging[h] = true
 	charge_start[h] = tick
 
@@ -7756,6 +7969,16 @@ func do_throw(h: int, hold: int) -> void:
 	# each hand its own ball at an even one (the role Fountain used to play, before
 	# it was folded into Cascade, 2026-07-19).
 	var cross := (pattern == CASCADE and num_balls % 2 == 1) or pattern in [HALFSHOWER, SHOWER, RCASC, TENNIS]
+	# THE TUTORIAL'S OWN TWO BALLS CROSS TOO (2026-07-29, Louis: "it is 3 ball arcade
+	# with only two balls and not 2 ball arcade which would throw the balls straight up
+	# and to the same hand - we are teaching how to juggle 3 balls!"). Cascade's own
+	# parity rule keeps an even count same-handed, which is a real Cascade face on its
+	# own (see the 2026-07-19 Fountain fold) and exactly wrong for the basics' two-ball
+	# STEP: the whole point of it is to rehearse the odd-count cross before the third
+	# ball arrives. Scoped to the basics lesson only, so an ordinary two-ball act
+	# anywhere else in the game keeps Cascade's real parity rule.
+	if tut_active and tut_id == "balls" and num_balls == 2:
+		cross = true
 	if over_top:
 		cross = true
 	# an over-the-top throw never joins the lane bookkeeping (it is the breakout,
@@ -10367,6 +10590,9 @@ func _draw_screen() -> void:
 		ST_PURIST_LEGEND:
 			draw_purist_legend(font, s)
 			return
+		ST_MENUTOUR:
+			draw_menutour(font, s)
+			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
 			return
@@ -11211,13 +11437,18 @@ func draw_juggler(s: Vector2) -> void:
 	if spin_on:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_head(head, head_r, hair, skin, facing_back)
+	if wearing("glasses") and not facing_back:
+		draw_worn_glasses(head, head_r, accent)
 	# WARDROBE: the TOP HAT goes on after the head and OUTSIDE the body's width-scale,
 	# for the same reason the head is - a hat reads round from every angle, and squashed
 	# to the profile's 0.14 it would be a vertical bar balanced on his skull. It is the
 	# last thing drawn on the figure's upper half, so it sits over the hair rather than
-	# under the fringe.
+	# under the fringe. THE HELMET SHARES THE SAME SPOT (2026-07-29): a head only wears
+	# one crown, so a player who owns both simply sees whichever he actually put on.
 	if wearing("hat"):
 		draw_top_hat(head, head_r, suit_dk, vest, accent)
+	elif wearing("helmet"):
+		draw_worn_helmet(head, head_r, vest, accent)
 	if spin_on:                                                            # back to the body width-scale for the arms
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
@@ -11514,6 +11745,60 @@ func draw_top_hat(head: Vector2, r: float, silk: Color, band: Color, accent: Col
 	fill_ellipse(Vector2(head.x, brim_y + r * 0.12), r * 1.52, r * 0.26, dark)
 	fill_ellipse(Vector2(head.x, brim_y + r * 0.04), r * 1.50, r * 0.24, silk)
 	fill_ellipse(Vector2(head.x, brim_y - r * 0.02), r * 1.34, r * 0.14, lit)
+
+
+func draw_worn_glasses(head: Vector2, r: float, accent: Color) -> void:
+	# WARDROBE: GLASSES (2026-07-29). The only piece in the rack that never went on the
+	# man - `wearing("glasses")` gated a catch bonus and nothing else, so trying them on
+	# in the tailor's mirror changed nothing to look at, which is exactly what Louis's
+	# "it doesn't register on the juggler" was seeing. Same shape language as the shop's
+	# own glasses card (two glazed lenses in a real frame), in units of head radius
+	# instead of the card's fixed pixels, so it reads at either figure's size. Frame is
+	# a neutral tortoiseshell - a real accessory's own material, not a venue tint - and
+	# the lens catches a sliver of the venue's accent the way the hat's band pin does.
+	var frame := Color(0.16, 0.12, 0.09)
+	var lr := r * 0.30
+	var w := maxf(1.1, r * 0.075)
+	for sgn in [-1.0, 1.0]:
+		var lc := head + Vector2(sgn * r * 0.40, -r * 0.04)
+		draw_circle(lc, lr, Color(accent.r, accent.g, accent.b, 0.22))
+		draw_arc(lc, lr, 0.0, TAU, 14, frame, w, true)
+		draw_line(lc + Vector2(-lr * 0.35, -lr * 0.30), lc + Vector2(lr * 0.10, lr * 0.15),
+			Color(1.0, 1.0, 1.0, 0.30), maxf(0.8, r * 0.05))
+		draw_line(lc + Vector2(sgn * lr, -r * 0.05), head + Vector2(sgn * r * 0.85, -r * 0.10), frame, w)
+	draw_line(head + Vector2(-r * 0.10, -r * 0.04), head + Vector2(r * 0.10, -r * 0.04), frame, w)
+
+
+func draw_worn_helmet(head: Vector2, r: float, cap_c: Color, accent: Color) -> void:
+	# WARDROBE: THE ENERGY HELMET, ON HIS HEAD (2026-07-29) - the same reasoning as the
+	# glasses above and the same fix. It is the shop card's own object (a cap, a can
+	# either side, a straw running to the mouth), scaled off head radius the way the
+	# top hat is. Mutually exclusive with the Top Hat at the call site - a player owns
+	# both crowns but a head only wears one - so this never fights it for the same space.
+	var cap := head + Vector2(0.0, -r * 0.60)
+	var can_w := r * 0.34
+	var can_h := r * 1.10
+	for sgn in [-1.0, 1.0]:
+		var can := cap + Vector2(sgn * r * 1.25, r * 0.05)
+		var body := Color(0.86, 0.33, 0.24)
+		draw_rect(Rect2(can.x - can_w, can.y - can_h * 0.5, can_w * 2.0, can_h), body)
+		draw_rect(Rect2(can.x - can_w, can.y - can_h * 0.5, can_w * 0.5, can_h), Color(1.0, 0.58, 0.48, 0.55))
+		draw_rect(Rect2(can.x + can_w * 0.6, can.y - can_h * 0.5, can_w * 0.4, can_h), Color(0.0, 0.0, 0.0, 0.26))
+		fill_ellipse(Vector2(can.x, can.y - can_h * 0.5), can_w, can_w * 0.36, Color(0.84, 0.86, 0.90))
+		draw_rect(Rect2(can.x - can_w, can.y - r * 0.10, can_w * 2.0, r * 0.10), Color(1.0, 0.85, 0.4, 0.85))
+		var s0 := can + Vector2(-sgn * can_w * 0.4, -can_h * 0.5)
+		var s1 := head + Vector2(sgn * r * 0.35, r * 0.55)
+		draw_line(s0, s1, Color(0.92, 0.94, 0.98, 0.9), maxf(1.2, r * 0.09))
+		var bead := fposmod(atick() * 0.012 + (0.5 if sgn > 0.0 else 0.0), 1.0)
+		draw_circle(s1.lerp(s0, bead), r * 0.09, Color(1.0, 0.86, 0.42, 0.9))
+	var dome := PackedVector2Array()
+	for k in 13:
+		var a := lerpf(PI, TAU, float(k) / 12.0)
+		dome.append(cap + Vector2(cos(a), sin(a)) * (r * 0.95))
+	draw_colored_polygon(dome, cap_c)
+	draw_arc(cap, r * 0.7, PI * 1.12, PI * 1.62, 10, Color(1.0, 1.0, 1.0, 0.22), r * 0.28, true)
+	fill_ellipse(cap + Vector2(0.0, r * 0.02), r * 1.05, r * 0.18, Color(cap_c.r * 0.7, cap_c.g * 0.7, cap_c.b * 0.7))
+	draw_circle(cap + Vector2(0.0, -r * 0.92), r * 0.12, accent)   # the crown's own button, its one bright mark
 
 
 func draw_stage_boot(at: Vector2, H: float, side: float, leather: Color, spat: Color,
@@ -11974,6 +12259,13 @@ func worn_stage(piece: String) -> int:
 func wearing(id: String) -> bool:
 	# IS IT ON HIM. Every drawing asks this and every BUFF asks it too, now that the tailor is
 	# a real loadout (Louis: "I'd rather the tailor be a real loadout: buffs follow wearing").
+	# A LESSON IS PLAIN, ALWAYS (2026-07-29, Louis: "without any special things or props").
+	# Every wardrobe piece and its buff route through this one function, so refusing here
+	# is the whole fix: nothing bought with a real career's flowers should ever show up
+	# (or help) in a first-timer's tutorial, and a returning player's own lesson (a new
+	# prop, a new trick) should look and play the same for everyone taking it.
+	if tut_active:
+		return false
 	return worn_stage(id) >= 0
 
 
@@ -12079,6 +12371,56 @@ func tailor_wear(piece: String, stage: int) -> void:
 	play_sfx("ui2", -13.0)
 
 
+func try_outfit_tonight() -> void:
+	# THE WHOLE SET, IN ONE PRESS (2026-07-29): the rack's own version of the shop's "B
+	# buys the whole shortfall" (try_top_up). Buying one piece at a time, one Enter each,
+	# is fine for trying things on but a poor way to dress for a house you already know
+	# you want fully kitted - and unlike props, a set is eight DIFFERENT prices, so this
+	# buys cheapest first, stopping the moment the purse cannot take the next one, rather
+	# than either refusing outright or leaving the purse a strange amount short of a
+	# piece it could have covered by skipping to the next-cheapest one instead. Anything
+	# already owned for tonight but not yet worn (a cut bought on an earlier visit) is
+	# put on too, at no cost - the same as pressing Enter on it directly.
+	var st := cur_venue()
+	var order := WEAR_PIECES.duplicate()
+	order.sort_custom(func(a, b): return wear_cost(a, st) < wear_cost(b, st))
+	var to_buy: Array = []
+	var spent := 0
+	for p in order:
+		if owns_wear(p, st):
+			continue
+		var cost := wear_cost(p, st)
+		if spent + cost > money:
+			continue
+		to_buy.append(p)
+		spent += cost
+	var to_wear: Array = []
+	for p2 in WEAR_PIECES:
+		if owns_wear(p2, st) and worn_stage(p2) != st:
+			to_wear.append(p2)
+	if to_buy.is_empty() and to_wear.is_empty():
+		set_day_msg("already dressed for %s tonight" % suit_name(st))
+		play_sfx("whiff", -10.0)
+		return
+	if not to_buy.is_empty():
+		if not confirm_spend("outfit_%d" % st, spent, true):
+			return
+		money -= spent
+		for p3 in to_buy:
+			owned_wear.append(wear_key(p3, st))
+			worn_piece[p3] = st
+	for p4 in to_wear:
+		worn_piece[p4] = st
+	save_progress()
+	if to_buy.is_empty():
+		set_day_msg("the rest of tonight's set is on")
+		play_sfx("ui2", -13.0)
+	else:
+		set_day_msg("%d piece%s for %s  -  %s %s" % [to_buy.size(), "" if to_buy.size() == 1 else "s",
+			suit_name(st), commafy(spent), coin_word()])
+		play_sfx("money", -6.0)
+
+
 func tailor_input(kc: int) -> void:
 	# ONE GRID, AND ONLY ONE (2026-07-29, Louis: "remove the full costumes"). There used to be
 	# a SUIT column beside the rack, choosing which house's base costume the performer wore,
@@ -12113,6 +12455,11 @@ func tailor_input(kc: int) -> void:
 		KEY_ENTER, KEY_KP_ENTER:
 			tailor_wear(WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)],
 				clampi(tailor_stage, 0, venue_index()))
+		KEY_B, KEY_SPACE:
+			# OUTFIT THE WHOLE SET FOR TONIGHT, in one press - the rack's own version of
+			# the shop's "B buys the whole shortfall". KEY_SPACE for the pad, same reason
+			# the shop takes it: X routes to Space outside live play.
+			try_outfit_tonight()
 
 
 func glove_cloth() -> Color:
@@ -13235,11 +13582,21 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 				var t := TAU * float(k) / 8.0
 				lv.append(Vector2(x + dir * 10.0, ly) + Vector2(cos(t) * 10.0, sin(t) * 4.4).rotated(dir * -0.35))
 			draw_colored_polygon(lv, Color(stem.r, stem.g, stem.b, 0.9))
-	for m in marks:
+	for mi in marks.size():
+		var m: float = marks[mi]
 		var my := base - box.size.y * clampf(m, 0.0, 1.0)
 		var passed := frac >= m
 		draw_line(Vector2(x - 10.0, my), Vector2(x + 10.0, my),
 			Color(1.0, 0.90, 0.55, 0.95) if passed else Color(0.62, 0.56, 0.50, 0.7), 2.2)
+		# A SUBGOAL SPROUTS ITS OWN LITTLE FLOWER (2026-07-29, Louis: "the first subgoal
+		# to sprout a little flower on the side and the second subgoal ... on the other
+		# side"). Same convention the leaves already use just above - even index to one
+		# side, odd to the other - so the stem reads as one consistent plant rather than
+		# two different decorations sharing it. It blooms once, the moment the goal is
+		# banked, and stays: `frac` only climbs during a live act, so there is no flicker.
+		if passed:
+			var fdir := 1.0 if mi % 2 == 0 else -1.0
+			draw_flower(Vector2(x + fdir * 10.0, my), 0, 0.85, atick() * 0.01 + fdir, 0.95)
 	# THE BUD OPENS as the goal comes in, and the bloom is deliberately much BIGGER than
 	# the bud was (2026-07-27, Louis: "a bigger flower when done, making it more clear
 	# that you have reached the desired score"). A bud at 7px quietly becoming a flower
@@ -16011,6 +16368,42 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 			if rowsel and tailor_stage == st2:
 				draw_rect(Rect2(box.position.x - 3.0, box.position.y - 3.0, box.size.x + 6.0, box.size.y + 6.0),
 					Color(1.0, 0.88, 0.5, 0.95), false, 1.6)
+	# ---------------- TOTAL BONUSES, on the right of the rack (2026-07-29, Louis: "show
+	# total gained stats from the outfit on the right side of the rack"). The rack itself
+	# only ever spells out ONE row at a time - whichever the cursor is sitting on; this is
+	# the other half, everything actually ON him right now, all at once, so a player never
+	# has to walk every row just to remember what their own outfit is doing for them.
+	# Fixed past the rack's own MAXIMUM extent (seven house columns), so it never has to
+	# shuffle sideways as Reputation opens more houses and the rack grows under it.
+	var sumx := cx2 + 160.0 + 7.0 * cellw + 40.0
+	var sumw := px + pw - 40.0 - sumx
+	if sumw > 130.0:
+		var worn_list: Array = []
+		for p3 in WEAR_PIECES:
+			if wearing(p3):
+				worn_list.append(p3)
+		var sumh := 34.0 + maxf(1.0, float(worn_list.size())) * 32.0
+		soft_card(Rect2(sumx, hy - 12.0, sumw, sumh), Color(0.08, 0.06, 0.07, 0.92), Color(0.9, 0.6, 0.35, 0.30), 1.0, 10.0, 10.0)
+		draw_wrap_fit(font, "WHAT IT'S DOING FOR YOU", Rect2(sumx + 14.0, hy - 2.0, sumw - 28.0, 30.0), 12,
+			Color(0.95, 0.8, 0.55, 0.9))
+		if worn_list.is_empty():
+			draw_wrap_fit(font, "nothing worn yet - buy a piece from the rack and wear it",
+				Rect2(sumx + 14.0, hy + 20.0, sumw - 28.0, 40.0), 12, Color(0.70, 0.65, 0.60))
+		else:
+			var sy := hy + 24.0
+			for p4 in worn_list:
+				var d4 := wear_piece_def(p4)
+				# a piece cut for tonight's house is highlighted the same gold the set-bonus
+				# line above uses; one cut for another house still pays its OWN buff (every
+				# wearing() check below is unconditional on the venue - see the buff call
+				# sites), so it is dimmed rather than greyed out entirely
+				var match4 := wear_matches(p4)
+				var nc4 := Color(1.0, 0.9, 0.6) if match4 else Color(0.80, 0.76, 0.68)
+				draw_fit_string(font, Vector2(sumx + 14.0, sy), String(d4["name"]), HORIZONTAL_ALIGNMENT_LEFT, sumw - 28.0, 13, nc4)
+				draw_fit_string(font, Vector2(sumx + 14.0, sy + 16.0), String(d4["note"]), HORIZONTAL_ALIGNMENT_LEFT, sumw - 28.0, 11,
+					Color(0.78, 0.90, 0.72) if match4 else Color(0.60, 0.64, 0.58))
+				sy += 32.0
+
 	# the selected cell, spelled out: what it is, what it does, and what it costs or is worth
 	var detw := pw - 40.0 - mw - 80.0    # the rack column's own width, now that it is the only one
 	if true:
@@ -16037,7 +16430,8 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 				HORIZONTAL_ALIGNMENT_LEFT, detw, 13, Color(0.80, 0.75, 0.68))
 
 	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
-		[[["Up", "Down"], "garment"], [["Left", "Right"], "house"], [["Enter"], "wear it"], [["Tab"], "leave"]])
+		[[["Up", "Down"], "garment"], [["Left", "Right"], "house"], [["Enter"], "wear it"],
+		 [["B"], "outfit tonight's set"], [["Tab"], "leave"]])
 
 
 func draw_shop(font: Font, s: Vector2) -> void:
@@ -16576,8 +16970,12 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# the mood. draw_head scales everything off r and drops the finest marks below their
 	# own thresholds, so one call covers both sizes.
 	draw_head(head, head_r, hair, skin, facing_back)
+	if wearing("glasses") and not facing_back:
+		draw_worn_glasses(head, head_r, accent)
 	if wearing("hat"):
 		draw_top_hat(head, head_r, suit_dk, vest, accent)
+	elif wearing("helmet"):
+		draw_worn_helmet(head, head_r, vest, accent)
 	if turn > 0.0:
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit, k)
@@ -18772,7 +19170,55 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.8, 0.74, 0.64, ka))
 	if cine_tick > 40:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.78), "Enter  -  begin your first day", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
+		draw_string(font, Vector2(0, s.y * 0.78), "Enter  -  take the stage for your first show", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
+	draw_vignette(s, 0.6)
+
+
+func draw_menutour(font: Font, s: Vector2) -> void:
+	# THE HUB, EXPLAINED ONCE (2026-07-29, Louis: "a quick tutorial of the buttons in
+	# the main menu and how to get around"), shown exactly once - right after the new
+	# player's own first Backyard show (post_lesson_show) resolves, and before the day
+	# hub is ever shown at all. Same card shape as ST_TUTDONE, on the same Backyard
+	# exterior, so the three post-lesson beats (learn it, play it, find your way
+	# around) read as one continuous morning rather than three different screens.
+	ext_center = true
+	draw_venue_exterior(s, 0)
+	ext_center = false
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.6))
+	var fin := clampf(float(cine_tick) / 50.0, 0.0, 1.0)
+	draw_title_glow(font, s.y * 0.14, "FINDING YOUR WAY AROUND", 34, Color(1.0, 0.88, 0.5, fin), s)
+	draw_ornament(s.x * 0.5, s.y * 0.14 + 56.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
+
+	var pw := 560.0
+	var px := s.x * 0.5 - pw * 0.5
+	var py := s.y * 0.28
+	var rows := [
+		["star", "TONIGHT", "perform, practice, or take on the daily challenge"],
+		["moon", "REST", "a hot meal, the inn, or anything else that gets stamina back"],
+		["bag", "PREPARE", "the shop, your skills, the tailor, and your stats"],
+	]
+	var ka := clampf(float(cine_tick - 20) / 40.0, 0.0, 1.0)
+	if ka > 0.0:
+		var ph := 40.0 + float(rows.size()) * 56.0
+		draw_rect(Rect2(px, py, pw, ph), Color(0.05, 0.03, 0.05, 0.9 * ka))
+		hud_panel(Rect2(px, py, pw, ph))
+		draw_string(font, Vector2(px, py + 24.0), "THE DAY HUB HOLDS THREE DRAWERS", HORIZONTAL_ALIGNMENT_CENTER, pw, 13,
+			Color(0.85, 0.72, 0.55, ka))
+		for i in rows.size():
+			var r: Array = rows[i]
+			var ry := py + 52.0 + float(i) * 56.0
+			day_icon(String(r[0]), Vector2(px + 34.0, ry + 8.0), Color(1.0, 0.9, 0.68, ka))
+			draw_string(font, Vector2(px + 62.0, ry), String(r[1]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, 16,
+				Color(1.0, 0.92, 0.62, ka))
+			draw_string(font, Vector2(px + 62.0, ry + 20.0), String(r[2]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, 13,
+				Color(0.85, 0.80, 0.72, ka * 0.9))
+	draw_string(font, Vector2(0, py + float(rows.size()) * 56.0 + 66.0),
+		"Tab opens your stats sheet any time, on stage or in the hub. Esc always steps back one level.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.8, 0.74, 0.64, ka))
+	if cine_tick > 40:
+		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
+		draw_string(font, Vector2(0, s.y * 0.86), "Enter  -  the day is yours", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16,
+			Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.6)
 
 
@@ -20835,6 +21281,19 @@ func _demo_step() -> void:
 	# basics. Reading tut_due_actions here means the harness always plays in whatever
 	# style the step is teaching, which is also the only way it can verify one.
 	if tut_active:
+		# THE BASICS' OWN "do" BEATS MUST NOT BE FED (2026-07-29). Once a step is met,
+		# tut_advance_at holds it open for TUT_HOLD_GAP-ish ticks before auto-advancing
+		# (see tut_maintain) - and during that dead gap the world runs unfrozen, which is
+		# exactly when this generic feeder used to sneak in an extra throw the script
+		# never asked for (tut_due_actions has no notion of "one step, one key"; it just
+		# keeps the pattern going). That stray throw left the NEXT do-step's hand empty
+		# before it even began - the ball was already back in the air - so the next
+		# beat's own freeze (tut_do_step/tut_do_ready) held forever waiting for a throw
+		# that could never come, since nothing was left to throw. Scoped to the basics
+		# lesson only: the older paced lessons want this feeder running right through
+		# their own dead gaps, and always have.
+		if tut_id == "balls" and tut_advance_at >= 0:
+			return
 		var due := tut_due_actions()
 		for e in due:
 			if int(e["rank"]) != tut_hold_rank_of(due):
