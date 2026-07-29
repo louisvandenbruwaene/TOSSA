@@ -272,3 +272,38 @@ Two levers, either alone or together:
 
 Recommendation: lever 1 alone. It caps the spam by construction rather than by tuning, and
 it leaves `ti` as the flat, readable number Louis wrote down.
+
+
+---
+
+## 14. Where this stands, end of 2026-07-29
+
+**Built and verified on screen or end to end:** the logo, drift and jitter, the whole
+Strength rule, the frame ladder, Accuracy's two stages, the level curve, the height
+penalty and the 90/70 odds, Speed, the segment score, the goals-as-run-length ladder, the
+prop rewrite, tomatoes, glowing props as stock, Blackout's true invisibility, the four
+Purists, the two crowd tastes and the two Critics.
+
+**Verified how:** `--ladder` prints the whole goal ladder from the live constants; a full
+Backyard act runs end to end (3 of 3 goals, pay, reputation, a record and an ovation); the
+title screen, the key art, the credits, capsule 1, the shop, the play HUD, the character
+sheet, the results card and the establishing card were all looked at.
+
+**Two bugs found on the way, both fixed, both worth knowing about:**
+1. `--demo` kept playing after the results card, and a throw restarts the act, so it
+   re-armed the ovation every time it was about to end and hung forever. It only started
+   firing on every run because the new goals make a flawless act normal rather than rare.
+2. The establishing card printed all three goals and the record through `commafy`, whose
+   argument is an integer, so every one of them read 9,223,372,036,854,775,807 and ran off
+   the panel. Anything that came out of the scoring goes through `score_text`.
+
+**Still open, and needing Louis:**
+- **The balance numbers.** `GOAL_CATCHES` is set so a house's final goal is about one clean
+  run of half the act's clock floor. That is arithmetic, not play. It is one array.
+- **The Shower's `s`** is assumed at 1.8.
+- **Trick spam** is unnerfed by design, suggestion at section 13.
+- **The T of the logo** still reads as a dagger with a knife across it rather than as a T.
+  Louis did not raise it, so it was left alone.
+- **`docs/mechanics.html` and `TOSSA_mechanics_reference.pdf` are now stale** in every
+  section that touches scoring, stats or Encores. They are generated, so they want a
+  regeneration pass rather than an edit.
