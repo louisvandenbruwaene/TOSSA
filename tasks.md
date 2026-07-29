@@ -307,3 +307,65 @@ sheet, the results card and the establishing card were all looked at.
 - **`docs/mechanics.html` and `TOSSA_mechanics_reference.pdf` are now stale** in every
   section that touches scoring, stats or Encores. They are generated, so they want a
   regeneration pass rather than an edit.
+
+
+
+
+
+
+
+
+%%%%%%%%%% EDITS MADE BY LOUIS %%%%%%%%
+
+Hi it's me, louis, i'm here to give you instructions and ideas for the game. 
+
+idea: create bot jugglers in game to beat: 3 per stage. & also compare with your steam friend list records etc. 
+
+idea: create a small overworld like in mario; the player just goes from stage to stage: can go back or forwards from node to node. (the input is binary: back or forward, so the movement commands etc should be simple to implement.)
+
+idea: Is it possible to hire an artist that makes custom drawings? which parts of the game could be hand drawn? which would profit the most by not looking AI made? How would that go: drawings on paper or some kind of tablet? 
+
+idea: make the title screen after loading show a "bucket" of juggle props fall over and out comes the juggle props that make up the TOSSA name in the props. It should be cleanly animated / perhaps drawn by the artist (which would need an example such as ai drawings). 
+
+idea: I'd like to rework the tutorial. Please follow my instructions closely:
+Remove all unnecesairy text from the current tutorial, the player only needs the buttons that are on the bottom of the screen: FJ throw, DK catch, R restart and esc escape. The rest of text: the basics window and the pause window should be removed. Instead i'd like you to create another window that looks better and like a person talking (also create a small noise for that: in balatro they have some kind of explanation sound which i like). Remove all slowmo from the tutorial. now the text: "Hello, this is a game about juggling. If you want to learn it, you've come to the right place!" ENTER (show a small enter button icon) "Let's start with one ball in our dominant hand." Make them choose their dominant hand with an interactive window; make sure non of this: the talking window nor the choosing window ever overlap with the juggler, which should be visible at all times. "Great! Now throw it to your other hand in an arc by pressing J" i will take J as dominant hand, make sure it flips everywhere if they took left hand instead; " ENTER. Now catch it with D ENTER." here the enter means wait for the correct button to be pressed, enter shouldn't actually work here, please think for yourself what are the correct or wrong actions by the player. "Amazing! Now throw it back with F ENTER Catch it with K ENTER That's it! Feel free to master one ball, before moving on. When you are ready, press enter for the second ball. ENTER " Here ENTER is actually enter; Place on ball in each hand. " Throw the first ball: J ENTER Throw the second before it lands: F ENTER Now catch and throw on the RIGHT KJ KJ and on the LEFT DF DF. And repeat. KJ KJ DF DF Try it out! Enter when you've got it." make sure the inputs and text are aligned and correct. ; give the player 3 balls, 2 in the dominant hand. "Throw the first ball J ENTER Now you can throw all other balls one at a time right behind it and try to catch and throw them all as soon as they land or you take the easier way for now: wait for the ball to reach its peak before throwing the next one" meanwhile pause the highlight the first ball at its peak and prompt the second throw; "F ENTER Then catch it with D ENTER Now repeat on the other side: J ENTER K ENTER F ENTER D ENTER J ENTER K ENTER F ENTER D ENTER Try it out until you feel comfortable. Prove that you are ready by juggling for 10 throws and 10 catches." (show a window that just counts to 10 catches and 10 throws. ). I hope you are smart enough to fix any mistakes i made and to make it all feel smooth and logical. The player moves on when they get it. Else they juggle for free (no stamina). 
+
+--> backyard performance. (still tutorial). "Let's test out your skills with an actual audience. The goal is to receive as many flowers as you can. This flower here "highlight the flower meter" shows your current score. When it blooms you have reached the goal and can stop juggling by catching everything or just pressing enter. "show the symbol enter" Small subflowers give partial rewards so lock them in if you're not sure. On the other hand, don't get overconfident. you lose a standing ovation bonus if you drop. The flower will grow depending on how many flowers you get from the audience, so keep them happy ("highlight the green and yellow part of the meter). Reaction afterwards depends: well done, keep going / not bad, but there's room for improvement / that was pretty bad, but at least you can eat those tomatoes. Then guide them through the rest of the menus with similar helpful text windows, like someone is explaining it all. Maybe i'll even add a little juggle prop that can talk to explain it all XD. 
+
+
+---
+
+## 15. Answering Louis's block of 2026-07-29 evening
+
+**Done now: the basics tutorial, rewritten to his script.** It is a conversation rather than
+a drill ladder. The three-passes-at-50%-25%-full structure is gone, all slow motion with it,
+and so are the top banner and the full-screen intro card. What is left on screen is the
+speech window, the key row he asked to keep, and a side panel for the two things that need
+one. Every line is spoken a letter at a time with a soft blip, from a face in a lit disc.
+The dominant hand is chosen in the lesson and every key name in every line is built from
+that choice, so a left-hander is taught their own hands. `tut_do` beats wait for the ONE key
+they name and Enter cannot skip them; `tut_free` beats hold until the player has really done
+it, with the ten-throws-ten-catches tally in the side panel. Verified: all nineteen steps
+walk end to end under `--demo --tutorial balls` with no errors and no slow motion.
+
+**Nothing sits on the performer.** The first attempt put the hand question under him and it
+crossed his legs. There is no room down there - his boots are at 0.80 of the height and the
+key row owns the last 60px - so the lesson's panels live in the empty third of the stage to
+his right (`TUT_SIDE_X`). The speech box is clamped above `TUT_SPEECH_BOT`.
+
+**Still to build from his brief, in order:**
+1. The **peak hold** on the three-ball beat: "pause and highlight the first ball at its peak
+   and prompt the second throw". The step carries a `peak` flag already and nothing reads it.
+2. The **backyard performance** guide: the flower meter explained, the sub-goals, the
+   standing ovation warning, and the three closing reactions.
+3. The **menu guides** after it, in the same speech window.
+
+**On the ideas, briefly.** Bot jugglers to beat and a Mario-style node overworld are both
+real features rather than tweaks, and both want their own session. The **artist** question is
+the one worth answering properly: the parts that would gain most from a human hand are the
+things a player looks AT rather than through - the venue exteriors, the title art, the prop
+icons and the performer's face - and the parts that must stay code-drawn are anything that
+moves or recolours per venue, which is most of the stage. A tablet (Procreate or Photoshop)
+matching the existing palette would drop straight in as PNGs; the current code-drawn versions
+make perfectly good briefs to hand over. The falling-bucket title animation depends on that
+same answer, so it belongs after it.
