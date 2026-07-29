@@ -13307,7 +13307,13 @@ func mult_text(v: float) -> String:
 
 
 func commafy(n: int) -> String:
-	# a thousands separator for the big booking numbers, so 34000 reads at a glance
+	# A THOUSANDS SEPARATOR FOR MONEY AND COUNTS, and for nothing that could be a SCORE
+	# (2026-07-29). Its argument is an int, and a score is a float that routinely passes
+	# 1e30 now, so handing it one silently saturates at 9,223,372,036,854,775,807 - which is
+	# exactly what the establish card printed for all three of its goals and for the record
+	# to beat, three times over, in a panel it also overflowed. `score_text` is the function
+	# for anything that came out of the scoring: it commafies while a number is small enough
+	# to read and switches to E notation when it is not.
 	var raw := str(absi(n))
 	var out := ""
 	var c := 0
@@ -16835,7 +16841,7 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		var vi := play_venue()
 		var chase := "no record here yet  -  set one"
 		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
-			chase = "record to beat   %s" % commafy(rec_table()[vi])
+			chase = "record to beat   %s" % score_text(rec_table()[vi])
 		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, Color(0.96, 0.83, 0.52, 0.92))
 		var nxt := next_venue_rep()
 		if nxt > 0:
@@ -18938,7 +18944,7 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	hud_panel(Rect2(rx, ry, rw, rh))
 	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
-		draw_string(font, Vector2(rx + 16.0, ry + 54.0), commafy(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.96, 0.83, 0.52, tagA))
+		draw_fit_string(font, Vector2(rx + 16.0, ry + 54.0), score_text(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, rw - 32.0, 24, Color(0.96, 0.83, 0.52, tagA))
 	else:
 		draw_string(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.82, 0.6, 0.85 * tagA))
 	if purist:
@@ -18956,8 +18962,8 @@ func draw_establish(font: Font, s: Vector2) -> void:
 		hud_panel(Rect2(bx, by2, bw, bh))
 		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
 		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
-			commafy(goal_for(establish_venue, 0)), commafy(goal_for(establish_venue, 1)), commafy(goal_for(establish_venue, 2))],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.5, tagA))
+			score_text(goal_for(establish_venue, 0)), score_text(goal_for(establish_venue, 1)), score_text(goal_for(establish_venue, 2))],
+			HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 19, Color(1.0, 0.88, 0.5, tagA))
 		if has_enc:
 			var ec := Color(1.0, 0.55, 0.4)
 			var ey := by2 + 82.0
