@@ -11,7 +11,7 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 1. The logo
 
-- [ ] **The mark reads as props, not as the word TOSSA.** Louis: "it seems a bit
+- [x] **The mark reads as props, not as the word TOSSA.** Louis: "it seems a bit
   disconnected, and it might be hard for people to see the word tossa, especially with
   the torches not coming together to form the top of the A."
 - Current state: `capsule_mark` (Game.gd ~17321) draws the whole name in props and no
@@ -30,7 +30,7 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 2. Landing drift and arrival jitter
 
-- [ ] **Explain both to Louis in plain words, then cut what is not earning its place.**
+- [x] **Explain both to Louis in plain words, then cut what is not earning its place.**
   He believes they are "excessive and unneeded".
 - Current state, both set in `do_throw` (Game.gd ~7194):
   - `JITTER_MAX` 5 ticks. A random shift of the moment the prop arrives, up to about
@@ -47,9 +47,9 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 3. Strength
 
-- [ ] **Strength no longer touches the catch at all.** Remove `strength_catch_mod` from
+- [x] **Strength no longer touches the catch at all.** Remove `strength_catch_mod` from
   `catch_chance`. Strength's only job is unlocking what you can throw.
-- [ ] **New requirement rule.** Per prop, the Strength cost of ONE object:
+- [x] **New requirement rule.** Per prop, the Strength cost of ONE object:
 
   | prop | balls | eggs | rings | clubs | knives | torches | chainsaws |
   |------|-------|------|-------|-------|--------|---------|-----------|
@@ -57,13 +57,13 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
   To throw `n` of a prop you need `n x cost`. So 15 chainsaws needs 195 Strength, 7
   torches needs 56, 5 clubs needs 20, 3 balls needs 3.
-- [ ] The same wall applies to **starting a pattern that requires n props, and to making
+- [x] The same wall applies to **starting a pattern that requires n props, and to making
   any throw under it**. Not just to the act's opening.
-- [ ] This replaces `BALL_GATES` (the flat 4:16, 5:33 ... 15:200 table) and the `req`
+- [x] This replaces `BALL_GATES` (the flat 4:16, 5:33 ... 15:200 table) and the `req`
   field in `PROPS`, both of which go.
-- [ ] **The final 5 points of Strength give one extra Perfect frame** (196 to 200, so the
+- [x] **The final 5 points of Strength give one extra Perfect frame** (196 to 200, so the
   top of the track is not dead once every count is open).
-- [ ] **Adding a Perfect frame shifts the Good, Late and whiff frames by the same one, and
+- [x] **Adding a Perfect frame shifts the Good, Late and whiff frames by the same one, and
   removing one shifts them back.** The bands keep their widths, the whole ladder moves.
   Currently `W_PERFECT` 7, `W_GOOD` 10, `W_LATE` 28, and only the Perfect band moves,
   which eats the Good band. That is wrong and is being fixed everywhere a frame is added
@@ -73,19 +73,19 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 4. Accuracy
 
-- [ ] **1 to 100: catch odds**, as now, minus the Strength term (see item 3).
-- [ ] **101 to 150 is Focus.** Cuts stamina cost linearly from full to a quarter, with a
+- [x] **1 to 100: catch odds**, as now, minus the Strength term (see item 3).
+- [x] **101 to 150 is Focus.** Cuts stamina cost linearly from full to a quarter, with a
   floor of 1 stamina per throw. Currently that ramp runs 100 to 200, so it is compressed
   into half the space.
-- [ ] **151 to 200 gives one Perfect frame per 10 points, five in total.**
-- [ ] **Accuracy caps at 200.** `ACC_CAP` comes down from 250.
-- [ ] Frames granted here obey the band-shifting rule in item 3.
+- [x] **151 to 200 gives one Perfect frame per 10 points, five in total.**
+- [x] **Accuracy caps at 200.** `ACC_CAP` comes down from 250.
+- [x] Frames granted here obey the band-shifting rule in item 3.
 
 ---
 
 ## 5. Levels
 
-- [ ] **Levels arrive twice as fast, and everything is unlocked at about level 100, which
+- [x] **Levels arrive twice as fast, and everything is unlocked at about level 100, which
   is today's level 50.** Target: 10 to 20 hours of play to that point.
 - Current state: `xp_to_next(lv) = 60 * lv^1.4 + 40 * lv`, and a level pays
   `POINTS_PER_LEVEL + level / 12` stat points. Reaching every stat wall costs about 250
@@ -98,13 +98,13 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 6. Height penalty and the catch odds
 
-- [ ] **Answer Louis's question: is the penalty zero at tap height?** Yes at 3 and 4
+- [x] **Answer Louis's question: is the penalty zero at tap height?** Yes at 3 and 4
   objects, and no beyond that. `count_air_scale` lifts the tap floor from 5 objects up, so
   a tap already reads as height 0.60 at 7 objects and past 1.4 at 12 or more. At the top
   counts every throw, tap or hold, is already taking the maximum height penalty.
-- [ ] **Extend the penalty to 1.8**, which a held High Toss really reaches, instead of
+- [x] **Extend the penalty to 1.8**, which a held High Toss really reaches, instead of
   clamping at 1.4. Add roughly 0.5 total penalty at the top.
-- [ ] **Retune the base odds so that, with no glasses and no gloves, at Accuracy 100 and
+- [x] **Retune the base odds so that, with no glasses and no gloves, at Accuracy 100 and
   no height penalty, a Good catch is 90% and a Late catch is 70%.** Today the same case
   gives 80% and 60%, so `GOOD_BASE` and `LATE_BASE` each rise by 0.10.
 - Note for Louis: because of the tap-floor finding above, the 90/70 promise is only true
@@ -115,21 +115,21 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 7. Speed
 
-- [ ] **Speed gives 20% slow motion at most, 10 points per 1%.** Today it is 8 points per
+- [x] **Speed gives 20% slow motion at most, 10 points per 1%.** Today it is 8 points per
   1%, so 25% at the cap.
-- [ ] **Every other slow source gives 10%, not 15%**: Uncle Dan's Pie, the Amazing! burst,
+- [x] **Every other slow source gives 10%, not 15%**: Uncle Dan's Pie, the Amazing! burst,
   the fifty-Perfect burst.
-- [ ] Total stays capped at **50%**, the hard ceiling, which the four sources now sum to
+- [x] Total stays capped at **50%**, the hard ceiling, which the four sources now sum to
   exactly.
 
 ---
 
 ## 8. The score system, replaced entirely
 
-- [ ] **The score is the sum of segments.** A segment is a stretch of consecutive catches
+- [x] **The score is the sum of segments.** A segment is a stretch of consecutive catches
   with no drop. Good and Late catches do NOT end a segment. Only a drop does, and only a
   challenge that explicitly says so may also end one.
-- [ ] **One segment is worth**
+- [x] **One segment is worth**
 
   ```
   s * PRODUCT over tricks i of (ti ^ mi) * x ^ (n * p)
@@ -142,28 +142,28 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   - `s` is the pattern multiplier
   - `ti` is trick i's multiplier and `mi` is how many times it landed in this segment
 
-- [ ] **Prop signature `p`:**
+- [x] **Prop signature `p`:**
 
   | balls | eggs | rings | clubs | knives | torches | chainsaws |
   |-------|------|-------|-------|--------|---------|-----------|
   | 1     | 1.2  | 1.4   | 1.6   | 2      | 3       | 5         |
 
-- [ ] **Pattern multiplier `s`:** Cascade 1, Columns 1.2, Half Shower 2, Reverse Cascade
+- [x] **Pattern multiplier `s`:** Cascade 1, Columns 1.2, Half Shower 2, Reverse Cascade
   1.5, Tennis 1.5. (Shower is not in Louis's list and needs a value, see the decisions.)
-- [ ] **Trick multipliers `ti`:** Spin 2, High Toss 1.1, Behind the Back 1.2.
-- [ ] **There is no Perfect-catch streak any more.** The whole idea of a Perfect chain is
+- [x] **Trick multipliers `ti`:** Spin 2, High Toss 1.1, Behind the Back 1.2.
+- [x] **There is no Perfect-catch streak any more.** The whole idea of a Perfect chain is
   gone, replaced by Perfect simply being worth three of the weighted catches.
 
 ### What comes out with it
 
-- [ ] `chain_mult()` and the whole chain, `CHAIN_GAIN`, `CHAIN_HALF`, the on-screen chain
+- [x] `chain_mult()` and the whole chain, `CHAIN_GAIN`, `CHAIN_HALF`, the on-screen chain
   readout.
-- [ ] `CATCH_PTS` / `CATCH_PTS_GOOD` per-catch points, `object_mult`, `OBJ_BALL_BONUS`,
+- [x] `CATCH_PTS` / `CATCH_PTS_GOOD` per-catch points, `object_mult`, `OBJ_BALL_BONUS`,
   `prop_score_mult`, the `smult` field in `PROPS`.
-- [ ] `DARK_PROP_BONUS` (torches score more in the dark) and `PICKY_PROP_BONUS` (knives
+- [x] `DARK_PROP_BONUS` (torches score more in the dark) and `PICKY_PROP_BONUS` (knives
   score more before a hard crowd). Both are score multipliers and neither fits the new
   scheme. Torches keep glowing and knives keep buying patience, as flat prop character.
-- [ ] `trick_difficulty`'s context scaling (weight, count and pattern inflating a trick's
+- [x] `trick_difficulty`'s context scaling (weight, count and pattern inflating a trick's
   base) and `apply_trick_mult`'s running `run_mult`, replaced by the per-segment product.
 - [ ] The fifty-Perfect slow-motion burst is keyed on `perfect_chain`, which no longer
   exists as a concept. It needs a new trigger or it goes.
@@ -177,20 +177,20 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 9. Prop character, rewritten
 
-- [ ] **Clubs:** one extra Perfect frame. Nothing else.
-- [ ] **Knives:** the crowd is more patient. Nothing else.
-- [ ] **Torches:** more patience, and they glow in the dark. No multiplier.
-- [ ] **Chainsaw:** one fewer Perfect frame.
-- [ ] **Balls, eggs, rings:** no special lever beyond their `p` value and their stamina
+- [x] **Clubs:** one extra Perfect frame. Nothing else.
+- [x] **Knives:** the crowd is more patient. Nothing else.
+- [x] **Torches:** more patience, and they glow in the dark. No multiplier.
+- [x] **Chainsaw:** one fewer Perfect frame.
+- [x] **Balls, eggs, rings:** no special lever beyond their `p` value and their stamina
   cost. Eggs keep shattering on a drop.
-- [ ] The `fgive` field (clubs' forgiving catch) and the graded `pwin` ladder both go,
+- [x] The `fgive` field (clubs' forgiving catch) and the graded `pwin` ladder both go,
   replaced by the plus-one and minus-one above.
 
 ---
 
 ## 10. Tomatoes
 
-- [ ] **The crowd may only throw tomatoes if the performer never got the room into the
+- [x] **The crowd may only throw tomatoes if the performer never got the room into the
   green.** Louis: if they did get there, "the people already got what they came for and
   are happy enough not to throw tomatoes."
 - Current state: tomatoes fly whenever `applause <= TOMATO_RED` (0.30). Green begins at
@@ -201,21 +201,21 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## 11. Encores
 
-- [ ] **Blackout.** Ordinary props go completely invisible, so juggling is possible but
+- [x] **Blackout.** Ordinary props go completely invisible, so juggling is possible but
   brutally hard. A torch's HANDLE is invisible but its flame and the flame's glow are
   visible. Glow-in-the-dark props are visible, and a glow-in-the-dark torch's handle is
   visible too.
-- [ ] **Blackout may not be rolled before the player owns the props to survive it**: at
+- [x] **Blackout may not be rolled before the player owns the props to survive it**: at
   least 3 glow-in-the-dark balls or torches. Same shape as the existing "For the Danger"
   ownership gate in `encore_pool`.
-- [ ] **Cold Hands** removes one Perfect frame, not two.
-- [ ] **The Purist's Night splits into four**, one per stat, and they combine in the late
+- [x] **Cold Hands** removes one Perfect frame, not two.
+- [x] **The Purist's Night splits into four**, one per stat, and they combine in the late
   stages: 4 at once only at the Midnight Show, 3 at the stage before it, 2 the stage
   before that, 1 the stage before that. The first one must not land early.
-- [ ] **Close Quarters ("props that clip mid-air") is replaced** by two crowd-taste
+- [x] **Close Quarters ("props that clip mid-air") is replaced** by two crowd-taste
   challenges: **Scared Audience** (dangerous props do not score) and **Fancy Audience**
   (eggs do not score). Confirm this reading, see the decisions.
-- [ ] **The Critic splits into easy and hard.**
+- [x] **The Critic splits into easy and hard.**
   - Easy: a Late catch resets the segment. It must feel like a drop does to the score, but
     hurt nothing else: `x` resets, the object count and everything else carry on as if the
     performance were starting over for scoring purposes only.
