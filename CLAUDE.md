@@ -1828,7 +1828,20 @@ taste.
   once**, so 206s is the ONE-activation figure and a floor, not a ceiling: three activations is
   2.46^3 = x14.9 and lands the same act near 42 seconds, which is where the clock floor for
   that house sits (40s). That is the intended shape - build, and the clock becomes the wall.
-- **AND THE MEASUREMENT ONLY BECAME POSSIBLE AFTER FIXING THE HARNESS, which is the same
+- **THE BOT CANNOT MEASURE ABOVE THE THEATRE, AND THE REASON IS ARITHMETIC RATHER THAN A
+  BALANCE FAULT.** `--demo --trick spin` at seven torches scored ZERO and took no goals in 338
+  seconds, which looks like a broken ladder and is not. At seven objects the tap airtime is 134
+  ticks, so a catch arrives every 19; a Spin blocks catching for 44 and `demo_spin_room` wants
+  52 clear. **There is never a 52-tick gap at that count**, so the autoplayer lands no
+  activations at all, and with `p^0 = 1` the run never leaves its base rate (~200/s against a
+  750,000 first goal). A HUMAN buys the gap - a High Toss first, then Spin - which is precisely
+  the interaction the lockout exists to create. The bot only ever throws taps, so it cannot.
+  **Consequence to remember: every rung above the Small Theatre is calibrated by arithmetic and
+  has never been measured.** The assumed activation counts are 2-3 at the middle houses and 4+
+  at the top, and the ladder is very sensitive to that guess - each activation is worth about
+  x4 at the Championship, so being wrong by two activations is a 16x error. This is the first
+  thing to check with a controller in hand.
+- **AND THE THEATRE MEASUREMENT ONLY BECAME POSSIBLE AFTER FIXING THE HARNESS, which is the same
   finding as `dev_meet_req` the day before wearing a different disguise.** `--trick btb` scored
   20,900 - byte for byte the trickless number - because `_demo_step` assigned `toggle_on`
   DIRECTLY. That was harmless while a toggle's only effect was to reshape throws, and became a
