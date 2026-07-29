@@ -67,6 +67,11 @@ extends Node2D
 
 #region TUNABLES & GAME STATE
 # --- catch timing (ticks; 120 per second) -------------------------------------
+# THESE THREE ARE THE BASE LADDER, NOT THE LIVE ONE (2026-07-29). Never compare a press
+# against them directly: read perfect_window() / good_window() / late_window(), which add
+# the SAME frame_bonus() to all three so the bands slide together and keep their widths.
+# Frames come from Focus (Accuracy 151-200), the last five points of Strength, the prop in
+# hand (clubs +1, chainsaw -1) and Cold Hands (-1).
 const W_PERFECT := 7      # within ~58 ms of arrival
 const W_GOOD := 10        # ~83 ms (tightened 30% from 15: Good must be earned)
 const W_LATE := 28        # ~233 ms, still a catch but sloppy
@@ -90,16 +95,18 @@ const ACC_FULL := 100.0           # Accuracy at which off-Perfect catches are re
 								   # 55 the catch benefit SATURATED at accuracy 55 and points 55-100
 								   # did nothing for catching (a dead band before Focus at 100). At
 								   # 100 the whole 0-100 range pays out, spreading the benefit evenly
-const GOOD_BASE := 0.50           # base chance to secure a Good-timed catch
-const LATE_BASE := 0.30           # base chance to secure a Late-timed catch
-const ACC_CATCH_BONUS := 0.30     # added to the chance at full Accuracy. Capped so a
-								  # bare-handed Good catch tops out at 80%, not 100%:
-								  # only Glasses' flat bonus below can reach 100%.
+const GOOD_BASE := 0.60           # base chance to secure a Good-timed catch
+const LATE_BASE := 0.40           # base chance to secure a Late-timed catch
+const ACC_CATCH_BONUS := 0.30     # added to the chance at full Accuracy.
+# THE TWO NUMBERS LOUIS ASKED FOR, 2026-07-29: "without glasses or gloves, a good catch
+# should have 90% chance and a late catch 70% chance at 100 accuracy without height
+# penalty". That is exactly GOOD_BASE + ACC_CATCH_BONUS and LATE_BASE + ACC_CATCH_BONUS,
+# both of which rose by 0.10 to meet it. The bases are now the whole story of an
+# off-Perfect catch beside Accuracy, height and the two bought comforts: Strength was
+# taken out of this sum entirely in the same pass (it gates what you may THROW now and
+# nothing else), and with it went the last reason a heavy prop was harder to CATCH than a
+# ball once you could lift it at all.
 const MIN_CATCH_P := 0.06         # a wild ball is never quite hopeless
-const STRENGTH_CATCH := 0.05      # per weight-step, how much Strength eases (or, when
-								  # under-strength, hurts) the catch of a HEAVY prop
-const STRENGTH_LOFT := 0.4        # at double a heavy prop's required Strength, up to
-								  # this much extra height per held tick (times weight)
 
 # --- throw height by hold (variable 0..1.4) -----------------------------------
 # A tap throws the LOWEST, snappiest height (BASE_AIR airtime); holding THROW lifts
@@ -128,18 +135,39 @@ const BLACKOUT_UNLIT := 0.34  # how brightly an UNCHARGED prop glows through a B
 							  # Just past the apex, so the throw and the top of the arc
 							  # are always seen and only the descent is dark.
 
-# how much height hurts a catch, and the under-Strength penalties (ideas.rtf rule)
-const HEIGHT_CATCH_PENALTY := 0.35  # subtracted from the off-Perfect chance at max height
-const DEFICIT_HEIGHT := 0.5         # a full Strength deficit halves the HELD (extra) height
-const DEFICIT_BASE := 0.4           # a full Strength deficit drags the TAP floor down this much,
-									# so a too-heavy prop goes lower even on a plain throw
-const DEFICIT_INACC := 1.1          # a full Strength deficit roughly doubles inaccuracy
-const DEFICIT_FLOOR := 0.85         # under-strength: minimum inaccuracy "as if" this much height,
-									# so even a low throw of a too-heavy prop is unsteady
+# HOW MUCH HEIGHT HURTS A CATCH, rewritten 2026-07-29 on two of Louis's notes.
+# (1) IT RUNS TO 1.8 NOW, not 1.4. A held High Toss genuinely reaches 1.8 and the penalty
+#     used to clamp at 1.4, so the last third of the throw's range was free. One straight
+#     line from 0 to HEIGHT_PEN_MAX at HEIGHT_PEN_TOP, which also makes 1.4 a shade harsher
+#     than the old 0.35 (0.389) - correct, since it is no longer the top of the range.
+# (2) IT IS MEASURED FROM THIS COUNT'S OWN TAP FLOOR, which is the answer to "is this 0 for
+#     a tap height?". It was zero at three and four objects and nowhere else: count_air_scale
+#     lifts the tap floor from five objects up so a big load has air to weave in, so a TAP
+#     already read as height 0.60 at seven objects and past the old 1.4 clamp at twelve. Every
+#     throw at the top counts was therefore taking the maximum penalty, tap or full hold,
+#     which quietly made the 90%/70% promise above false for exactly the players who had
+#     worked hardest to get there. The penalty now measures the CHOICE to throw higher than
+#     the pattern needed, which is the risk it was always meant to price.
+const HEIGHT_PEN_MAX := 0.50   # subtracted from the off-Perfect chance at the very top
+const HEIGHT_PEN_TOP := 1.8    # ...which only a held High Toss reaches
 
-# --- inaccuracy scale (the risk half of the risk/reward) ----------------------
-const DRIFT_MAX := 26.0   # px lateral landing drift at max height
-const JITTER_MAX := 5     # ticks of arrival uncertainty at max height
+# --- inaccuracy scale --------------------------------------------------------
+# BOTH GONE, 2026-07-29 (Louis: "landing drift and arrival jitter ... seem excessive and
+# unneeded", and he is right on both counts, for different reasons).
+#   DRIFT moved the LANDING POINT sideways by up to 26px. A catch in this game is decided
+#   purely by WHEN the key is pressed against the prop's arrival tick - on_catch never looks
+#   at where the hand is - so drift could not make a catch harder or easier. All it did was
+#   land props off the middle of the palm, which reads as sloppy drawing rather than as
+#   difficulty.
+#   JITTER moved the ARRIVAL TICK by up to 5, against a Perfect window of 7. That is most of
+#   a Perfect band decided by dice on every high throw. It was defensible while it was the
+#   only way Accuracy touched placement, but Accuracy now lives entirely in the catch odds,
+#   where the player can read what it is doing to them.
+# What went with them, and this is the part worth remembering: the whole UNDER-STRENGTH
+# family (DEFICIT_HEIGHT / _BASE / _INACC / _FLOOR, prop_deficit, STRENGTH_LOFT, the sagging
+# throw) is unreachable under the new Strength rule, which is a hard wall rather than a
+# penalty - you cannot throw a prop you are not strong enough for at all, so there is no
+# such thing as a throw made while under-strength for it.
 
 # --- game flow: the app boots to a menu, not straight into a run ---------------
 const ST_MENU := 0        # title / main menu
@@ -200,8 +228,13 @@ const NUM_SLOTS := 3
 const SAVE_PATH_DEBUG := "user://tossa_debug.cfg"  # debug build: separate progress
 const SAVE_PATH_DEMO := "user://tossa_demo.cfg"     # --demo/--shot autoplay: never a real career save
 const SETTINGS_PATH := "user://tossa_settings.cfg" # global options, shared by slots
-const POINTS_PER_LEVEL := 3   # base stat points per level-up; level_up() adds +level/12
-							  # on top (CLAUDE.md's "3 + level/12"), so this is only the floor
+const POINTS_PER_LEVEL := 2   # base stat points per level-up; add_xp adds +level/50 on top.
+							  # HALVED WITH THE XP CURVE (2026-07-29): levels come twice as
+							  # fast now, so a level has to be worth about half as much or the
+							  # same hours would buy twice the build. 2 + level/50 sums to
+							  # ~252 points by level 100 - which is what every stat wall in the
+							  # game costs, i.e. "everything unlocked at about level 100" -
+							  # and to ~884 by level 230, where the four caps are finished.
 const ACC_MIN_FACTOR := 0.35  # inaccuracy floor at Accuracy 100: never zero, so a
 							  # max-height throw always still demands a real catch
 const STAM_DRAIN_CATCH := 0.4 # flat stamina price of a catch, scaled by energy_mult()
@@ -239,19 +272,25 @@ const PURIST_BONUS := 1.4     # Purist pay and reputation both get this multipli
 							   # assisted set. High risk should mean high reward.
 const START_GOLD := 100       # a fresh juggler starts with a small purse (ideas.rtf)
 
-# --- Focus: Accuracy trained past 100 (GDD "Focus"). The overflow eases the
-# grind without touching the timing floor: stage 1 lowers stamina cost, and once
-# that bottoms out, stage 2 widens the Perfect window a little. Both are capped.
-const ACC_CAP := 250              # Accuracy trains to 250, so Focus reaches 150
+# --- Focus: Accuracy trained past 100. THE TWO STAGES NO LONGER OVERLAP (2026-07-29,
+# Louis). 101 to 150 is the stamina discount and nothing else; 151 to 200 is the timing
+# and nothing else; the track stops at 200. Before this the discount ran 101 to 200 and
+# the frames started at 101 too, so the two stages sat on top of each other for a hundred
+# points and the last fifty of a 250 cap did almost nothing.
+const ACC_CAP := 200              # Accuracy trains to 200 (was 250)
 const STR_CAP := 200              # Strength and Endurance climb to 200 now (Louis: the
 const END_CAP := 200              # late game runs deep) - same per-point effects, just
-								  # a longer road; the 8-15 ball gates live up here (see
-								  # BALL_GATES, HAND GEOMETRY & BALL SLOTTING region)
+								  # a longer road
 const MASTERY_GOLD := 250         # once EVERY stat is capped, each level-up point turns
 								  # to gold instead: the crowd pays for mastery itself
-const FOCUS_STAM_FLOOR := 0.25    # stamina-cost multiplier once Focus hits 100
-const FOCUS_WINDOW_PER := 10.0    # +1 Perfect tick per this much Focus above 100
-const FOCUS_WINDOW_MAX := 6       # hard cap on the widening (skill-first guardrail)
+const FOCUS_STAM_FLOOR := 0.25    # stamina-cost multiplier once stage one is complete
+const FOCUS_STAM_SPAN := 50.0     # ...which takes this much Focus, i.e. Accuracy 150
+const FOCUS_WINDOW_PER := 10.0    # +1 frame per this much Focus above FOCUS_STAM_SPAN
+const FOCUS_WINDOW_MAX := 5       # five frames in all, reached exactly at the 200 cap
+const STR_FRAME_LAST := 5         # the last N points of Strength buy one Perfect frame:
+								  # every count of every prop is open at 195 (fifteen
+								  # chainsaws), so the top of the track had nothing left
+								  # to sell until this
 
 const LEFT := 0
 const RIGHT := 1
@@ -263,7 +302,11 @@ const RCASC := 4
 const TENNIS := 5
 # --- patterns as learnable content (GDD economy: harder base pays more, so one
 # tamed routine is never optimal). P cycles the unlocked patterns in training.
-# "mult" scales every catch's score, the reward for the pattern's base difficulty.
+# "mult" is `s` in the segment formula: it multiplies a WHOLE clean stretch, not a
+# catch. Louis's values, 2026-07-29: Cascade 1, Columns 1.2, Half Shower 2, Reverse
+# Cascade 1.5, Tennis 1.5. The Shower is the one he did not name and is taken at 1.8,
+# above the two 1.5s and below the Half Shower, which is the order the old table already
+# had - say if it should be otherwise.
 # EXACTLY ONE pattern is active at a time (Louis): Reverse Cascade and Tennis live
 # HERE now, not as Space toggles, so switching patterns always switches the whole
 # routine and Columns can never run "on top of" anything.
@@ -292,13 +335,13 @@ const TENNIS := 5
 const PATTERNS := [
 	{"id": "cascade",    "name": "Cascade",     "lvl": 1, "mult": 1.0, "room": 0.65,
 	 "desc": "The weave. Odd counts cross to the other hand; even counts keep each hand's own circle."},
-	{"id": "columns",    "name": "Columns",     "lvl": 6, "acc": 50, "perf": 14, "mult": 1.15, "room": 1.0,
+	{"id": "columns",    "name": "Columns",     "lvl": 6, "acc": 50, "perf": 14, "mult": 1.2, "room": 1.0,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
-	{"id": "halfshower", "name": "Half Shower", "lvl": 10, "acc": 150, "ven": 1, "perf": 24, "mult": 1.25, "room": 0.05,
+	{"id": "halfshower", "name": "Half Shower", "lvl": 10, "acc": 150, "ven": 1, "perf": 24, "mult": 2.0, "room": 0.05,
 	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
-	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.4, "room": 0.7,
+	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 1.8, "room": 0.7,
 	 "desc": "The full circle. Right throws high, left feeds fast and low."},
-	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.45, "room": 1.0,
+	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.5, "room": 1.0,
 	 "desc": "BOTH hands throw over the top, the weave runs backward."},
 	{"id": "tennis",     "name": "Tennis",      "lvl": 1, "ven": 5, "mult": 1.5, "room": 0.05,
 	 "desc": "One marked ball sails over the top, back and forth across the weave."},
@@ -454,44 +497,21 @@ const COL_LANE_STEP := 44.0   # ...and the widest two lanes on one side ever sit
 							   # so a low count keeps the tidy spread it always had
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
 							   # lanes' running height (0 = pure hold-timing, 1 = locked)
-# --- object load (ideas.rtf comments): more balls in the air and heavier props
-# both raise the score multiplier, ON TOP OF the pattern's own "mult" above, so
-# climbing to five clubs or three torches always outpays grinding an easy three-
-# ball routine forever, however long the streak. See object_mult(). The WEIGHT half
-# is now per-prop ("smult" in PROPS, read via prop_score_mult) so each class pays its
-# own rate and can carry a context bonus, replacing the old flat per-weight-step const.
-const OBJ_BALL_BONUS := 0.12    # per ball above MIN_BALLS
-# --- THE EXPONENTIAL SCORE (2026-07-29). See the note on `score` for the shape; these are
-# the numbers that decide how steep it is.
-# A CATCH IS WORTH ONE POINT (2026-07-29, Louis: "the scoring should feel normal and not
-# exponential in the beginning ... The backyard should stay below 1000 as final score"). It was
-# 100, which put a first act in the tens of thousands before anything interesting had happened
-# and started the ladder where it ought to end. At 1 point a catch a flawless thirty-second
-# Backyard act with three balls totals about 550 - a number a player reads as a NUMBER - and
-# every zero after that is earned by a heavier prop, a bigger count, a harder pattern or a trick.
-# DERIVED, NOT GUESSED. A flawless three-ball Backyard act runs at 4.29 catches a second
-# (num_balls / the tap airtime), so thirty seconds is 129 catches; averaged over the chain's
-# ramp that is about 2.3x each, i.e. ~297 chain-weighted catches. Louis wants that act to
-# finish under a thousand, so a catch is worth 2.5 and the act lands near 740.
-const CATCH_PTS := 2.5          # raw points a Perfect catch puts into the run...
-const CATCH_PTS_GOOD := 0.6     # ...and a Good one, which also resets the chain
-# THE CHAIN MULTIPLIER SATURATES, AND IT HAS TO (2026-07-29). `1 + 0.05 x chain` was shallow
-# and uncapped, which sounded like the answer to "no maximum multiplier" and was arithmetically
-# wrong: summed over k catches it gives ~0.025k^2, so the score is QUADRATIC IN TIME. A sixty
-# second act scored four times a thirty second one, which makes "each stage has linear scoring"
-# impossible however the constants are tuned - and it is why my first calibration was, in
-# Louis's words, out of whack.
+# --- THE EXPONENTIAL SCORE, rebuilt 2026-07-29. The shape lives in the big comment above
+# seg_open; these are the constants left over once the rebuild had taken everything else.
 #
-# A saturating curve fixes it without reintroducing a hard ceiling: the multiplier climbs fast
-# at first, then flattens toward CHAIN_GAIN + 1, so after the first forty-odd catches every
-# further catch is worth about the same and the TOTAL is linear in time. A long clean run still
-# pays much better per catch than a broken one - which is the whole point of the chain - it
-# just stops compounding.
-const CHAIN_GAIN := 3.0         # the most the chain can add: x1 cold, approaching x4 held
-const CHAIN_HALF := 40.0        # ...and the chain length at which it is halfway there
-const TRICK_DIFF_WEIGHT := 0.20 # how much each step of prop weight scales a trick's
-							     # difficulty: a chainsaw is worth twice a ball
-const TRICK_DIFF_COUNT := 0.08  # ...and each object past three: fifteen nearly doubles it
+# SEVEN CONSTANTS DIED HERE and the list is worth keeping, because each of them was a real
+# attempt to make "harder should pay more" work as a MULTIPLIER, and the whole point of the
+# new model is that difficulty belongs in the EXPONENT instead:
+#   CATCH_PTS / CATCH_PTS_GOOD  a Perfect was 2.5 points and a Good 0.6. A catch has no
+#                               points now, it has a WEIGHT (CATCH_WEIGHT), and the weights
+#                               are 3 / 2 / 1 - the same idea with the arithmetic moved.
+#   CHAIN_GAIN / CHAIN_HALF     a saturating chain multiplier, added because an unsaturated
+#                               one made the score quadratic in time. There is no chain.
+#   OBJ_BALL_BONUS              +12% a prop above three. The count is `n` in the exponent.
+#   TRICK_DIFF_WEIGHT / _COUNT  scaled a trick by weight and count, so a Spin was worth x2
+#                               on three balls and x6.9 on fifteen chainsaws. The load is in
+#                               the exponent now, so this was charging for it twice.
 const SCORE_CEIL := 1.0e300     # the hard ceiling (Louis: "E notation up to E300"). Well
 							     # inside a double's 1.8e308, so no arithmetic can overflow to
 							     # INF and print as "inf" on a results card. Realistic top
@@ -525,44 +545,59 @@ const PROPS := [
 	# balls are REAL STOCK too (Louis: they don't appear out of thin air): a fresh
 	# juggler starts with three, and the fourth ball onward is bought like any prop.
 	#
-	# PER-PROP CHARACTER (2026-07-26): every class is a real CHOICE, not just a heavier
-	# ball, across four levers - so a matched choice is rewarded and a mismatched one is
-	# punished (the balance goal). "pwin" tightens the Perfect window (difficulty; clubs
-	# stay forgiving for their weight); "smult" is the prop's own score multiplier
-	# (reward, on top of object_mult's ball-count term); "stam" is the throw's flat
-	# stamina price (the early limiter - rings are deliberately cheap for their weight);
-	# "fgive" nudges the off-Perfect catch odds (clubs are forgiving). Signature
-	# advantages that depend on CONTEXT live in code, never a flat field: torches score
-	# more where the stage is dark (is_dark_context), knives before a hard-to-please crowd
-	# (is_picky_crowd), eggs are a near-free gamble that shatters on any drop. See
-	# prop_score_mult / prop_thrill / perfect_window / catch_chance for where each is read.
-	{"name": "Balls",   "weight": 1, "req": 0,  "cost": 20,   "stam": 1, "spins": false, "pwin": 0,  "smult": 1.00, "fgive": 0.0,  "trait": "the honest baseline - cheapest, steadiest, easiest to catch clean"},
-	{"name": "Eggs",    "weight": 1, "req": 0,  "cost": 1,    "stam": 2, "spins": false, "pwin": 0,  "smult": 1.10, "fgive": 0.0,  "trait": "a gamble - nearly free and worth a touch more, but ONE drop and it is gone for good"},
-	{"name": "Rings",   "weight": 2, "req": 12, "cost": 200,  "stam": 2, "spins": false, "pwin": 0,  "smult": 1.15, "fgive": 0.0,  "trait": "low stamina for their weight - the endurance prop, built for the longest sets"},
-	{"name": "Clubs",   "weight": 3, "req": 22, "cost": 500,  "stam": 4, "spins": true,  "pwin": -1, "smult": 1.32, "fgive": 0.12, "trait": "forgiving - a wider catch than their weight asks (still shy of balls and rings)"},
-	{"name": "Knives",  "weight": 4, "req": 34, "cost": 1000, "stam": 5, "spins": true,  "pwin": -2, "smult": 1.55, "fgive": 0.0,  "trait": "high score, high danger - a demanding crowd pays extra for the risk"},
-	{"name": "Torches", "weight": 5, "req": 48, "cost": 2000, "stam": 6, "spins": true,  "pwin": -3, "smult": 1.70, "fgive": 0.0,  "trait": "self-lit - they shine when the stage goes dark, where any other prop is a guess"},
+	# PER-PROP CHARACTER, REWRITTEN 2026-07-29 (Louis: "clubs just give 1 extra perfect
+	# frame, knives just give the crowd more patience, torches give more patience and glow
+	# in the dark (so no multipliers or whatever), the chainsaw has one fewer perfect
+	# frames"). A prop is four flat facts and no curves now:
+	#   what it costs to THROW    - PROP_STR_UNIT, per object, times the count
+	#   what it costs in STAMINA  - "stam", the early limiter (rings stay cheap for their
+	#                               weight, which is their whole signature)
+	#   what it is worth in SCORE - PROP_SIG, the exponent's `p`
+	#   what it does to the TIMING - "pwin", now only ever +1 (clubs), 0 or -1 (chainsaw),
+	#                                and it moves ALL the bands, not just Perfect
+	# plus two things that are not numbers at all: knives and torches buy crowd patience
+	# (prop_thrill), and torches glow.
+	#
+	# THREE LEVERS CAME OUT and it is worth knowing why, because each was a real idea that
+	# stopped fitting. "smult", the per-prop score multiplier, is replaced by PROP_SIG doing
+	# the same job in the exponent, where it is worth vastly more. "fgive", clubs' kinder
+	# off-Perfect odds, is replaced by their +1 frame, which is the same generosity stated in
+	# the currency the whole catch model now uses. And the graded pwin ladder (-1, -2, -3, -4
+	# by weight) said "heavier is harder to CATCH", which is no longer true of anything: a
+	# prop you are strong enough to throw catches like any other. Heaviness is priced once,
+	# at the arms, and it is not charged twice.
+	{"name": "Balls",   "weight": 1, "cost": 20,   "stam": 1, "spins": false, "pwin": 0,  "trait": "the honest baseline - cheapest, lightest on the arms, and the count is all yours"},
+	{"name": "Eggs",    "weight": 1, "cost": 1,    "stam": 2, "spins": false, "pwin": 0,  "trait": "a gamble - nearly free and worth a touch more, but ONE drop and it is gone for good"},
+	{"name": "Rings",   "weight": 2, "cost": 200,  "stam": 2, "spins": false, "pwin": 0,  "trait": "low stamina for their weight - the endurance prop, built for the longest sets"},
+	{"name": "Clubs",   "weight": 3, "cost": 500,  "stam": 4, "spins": true,  "pwin": 1,  "trait": "one extra frame on every catch - the forgiving prop, and the only one that gives timing back"},
+	{"name": "Knives",  "weight": 4, "cost": 1000, "stam": 5, "spins": true,  "pwin": 0,  "trait": "danger the room can see - a knife act holds a crowd's patience far longer"},
+	{"name": "Torches", "weight": 5, "cost": 2000, "stam": 6, "spins": true,  "pwin": 0,  "trait": "self-lit and thrilling - they hold a crowd like knives AND they shine when the stage goes dark"},
 	# THE CHAINSAW (2026-07-28, Louis: "a new object: the chainsaw. make it actually move
 	# around and work"). The top of the ladder and deliberately the end of it: heaviest,
-	# dearest, tightest window, and the only prop that is RUNNING while it flies - the
-	# chain really travels round the bar, on its own clock, and the engine note rides
-	# with it. It is the prop a career builds toward, so its Strength wall sits above
-	# every other and its multiplier is the largest in the game.
-	{"name": "Chainsaw", "weight": 6, "req": 70, "cost": 9000, "stam": 8, "spins": true, "pwin": -4, "smult": 2.10, "fgive": 0.0, "trait": "running the whole time - the hardest catch and the biggest payday, and the room knows it"},
+	# dearest, and the only prop that is RUNNING while it flies - the chain really travels
+	# round the bar, on its own clock, and the engine note rides with it. It is the prop a
+	# career builds toward: 13 Strength per object, so a full fifteen of them is 195 and
+	# very nearly the whole stat.
+	{"name": "Chainsaw", "weight": 6, "cost": 9000, "stam": 8, "spins": true, "pwin": -1, "trait": "one frame less on every catch - the hardest timing in the game, and the biggest number"},
 ]
-# "stam" is a throw's FLAT stamina price (Louis): every throw costs at least 1,
-# heavier props cost their own rate (balls 1, eggs 2, rings 2, clubs 4, knives 5,
-# torches 6 - rings cut to 2 as their signature low-stamina edge), and Focus shaves
-# one point per 20 Focus, never below 1. See do_throw - the old percent drain is gone.
+# THE SCORE SIGNATURE, `p` in the segment formula (2026-07-29, Louis's own values). It is an
+# EXPONENT, not a multiplier: a segment is worth x^(n*p), so seven torches (p 3) run at an
+# exponent of 21 where seven balls run at 7. That is why the old flat "smult" could go - a
+# tenth of an exponent is worth more than any multiplier the table used to carry.
+const PROP_SIG := [1.0, 1.2, 1.4, 1.6, 2.0, 3.0, 5.0]
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of a CATCH's stamina cost
 const PWIN_FLOOR := 3          # the Perfect window never tightens below this many ticks, whatever
 							   # the prop, the Cold Hands encore, or their sum - always hittable
-const DARK_PROP_BONUS := 0.30  # torches score this much more where the stage is dark (Blackout,
-							   # Stage Fright, the Midnight Show): the right tool for bad light
-const PICKY_PROP_BONUS := 0.30 # knives score this much more before a hard-to-please crowd (The
-							   # Critic, The Hecklers): a demanding room pays for the danger
-const THRILL_PERFECT := 0.010  # a heavy prop's Perfect catch feeds the crowd extra patience,
-							   # scaled by weight (knives doubled before a picky crowd) - danger thrills
+# BOTH CONTEXT SCORE BONUSES ARE GONE (2026-07-29): DARK_PROP_BONUS paid torches more where
+# the stage was dark and PICKY_PROP_BONUS paid knives more before a hard crowd. They were
+# score MULTIPLIERS, and the new segment formula has no multiplier for a prop to ride - a
+# prop's whole score identity is its exponent signature (PROP_SIG). The situations they
+# rewarded are still real and both props still answer them: a torch is the only thing you
+# can SEE in the dark, and knives hold a restless room. That is the reward now, and it is a
+# better one, because it is a thing the player watches happen rather than a number.
+const THRILL_PERFECT := 0.014  # what a Perfect catch with knives or torches feeds the crowd's
+							   # patience (knives doubled before a picky crowd). Flat per prop
+							   # now, not scaled by weight - see prop_thrill
 
 # --- shop: spend gold on props and gear ---------------------------------------
 const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling: priced
@@ -570,13 +605,15 @@ const GLASSES_COST := 8000     # the only route to a 100%/80% catch ceiling: pri
 								# not a minor bonus on an already-full curve
 const GLASSES_CATCH_BONUS := 0.20  # ideas.rtf: glasses raise the catch chance
 
-# the Glow-in-the-Dark Kit (2026-07-18, late-game gold sink - Louis: nothing left
-# to spend an "immense" late purse on): a cosmetic that is also a genuine mercy on
-# Blackout, so it is worth the price rather than a pure vanity flex. Priced well
-# past Glasses (the previous capstone) - a build with real gold to spare late is
-# exactly who this is for.
-const GLOW_KIT_COST := 60000   # ...the whole set at once, cheaper than its two halves
-const GLOW_TAPE_COST := 34000  # the props alone
+# GLOW IN THE DARK, 2026-07-29. The old 60,000 Kit (props + suit) and its 34,000 halves are
+# gone from the props side: phosphor on an OBJECT is now stock you buy per prop, priced as a
+# multiple of that prop's own cost, so a glowing set of balls is cheap and a glowing set of
+# chainsaws is a project. The SUIT is untouched and still a garment in the tailor - it is
+# about the performer being legible, not the props.
+const GLOW_PROP_MULT := 7.0    # what a glowing copy of a prop costs against a plain one. A
+							   # glowing ball is 140 and a glowing torch 14,000, so the cheap
+							   # answer to a Blackout exists from very early and the
+							   # spectacular one stays a late-game purchase.
 const GLOW_SUIT_COST := 34000  # the costume alone
 # THE COSTUME, and what each piece is worth (2026-07-28, Louis picked the set). Prices
 # climb with how much the piece changes a night: gloves are a small mercy on every catch,
@@ -719,9 +756,9 @@ const TR_SPIN := 2
 # that: Behind the Back under Columns clears -13.6px, because a column comes down where it
 # left and a behind-the-back throw releases from across the body.
 const TRICKS := [
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "diff": 1.90, "cascade_only": true, "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "diff": 1.20, "cascade_only": true, "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Cascade only - no other pattern survives it. Every catch under it multiplies the run."},
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "diff": 1.25, "cascade_only": false, "shout": "HIGH TOSS!",
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "diff": 1.10, "cascade_only": false, "shout": "HIGH TOSS!",
 	 "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
 	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!",
 	 "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
@@ -742,16 +779,21 @@ const TRICK_COOLDOWN := 0          # NO COOLDOWN (2026-07-29, Louis: "change the
 # Amazing! frame-perfect catch and a run of ten straight Perfects are earned
 # bursts. Slow motion stretches the catch windows in REAL time, which is what
 # makes five clubs and seven torches humanly possible.
-# NERFED 2026-07-16 (Louis): slow motion was too easy to stack. The Speed stat
-# now costs 8 points per 1% (200 points to reach the full 25%), the Pie and the
-# earned bursts each give 15% instead of 25%, the bursts run shorter, and the
-# TOTAL slow is capped at 50% - above that the 120Hz sim visibly steps ("jitters
-# on balls"), and 50% is the intended ceiling for a five-object load anyway.
-const SPEED_CAP := 200         # the Speed stat's permanent ceiling (points, not percent:
-								# 8 points per 1% slow motion, so the cap is still 25%)
+# NERFED 2026-07-16 and RE-CUT 2026-07-29 (Louis: "change the speed stat: up to 20% max:
+# 10 points = 1%. also all other forms now give 10% instead of 15%, which makes the total
+# sum max 50%, which is the hard ceiling").
+# THE FOUR SOURCES NOW ADD UP TO EXACTLY THE CAP, which is the point of the new numbers:
+# 20 from a maxed Speed stat, 10 from the Pie, 10 from an Amazing!, 10 from the fifty-catch
+# burst = 50, and 50 is where the 120Hz sim starts visibly stepping. Before this they
+# summed to 70 against a cap of 50, so a fifth of a maxed Speed stat was unreachable
+# whenever anything else was running, and the cap did the balancing that the numbers should
+# have been doing. A ceiling nothing can reach is a ceiling nobody has to think about.
+const SPEED_CAP := 200         # the Speed stat's permanent ceiling, in points
+const SPEED_PER_PCT := 10      # ...and how many of them buy 1% of slow motion, so the
+								# capped stat is worth 20%
 const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
-const PIE_SLOW := 0.15         # the slice's share of slow motion (was a quarter)
-const BURST_SLOW := 0.15       # each earned burst's share (Amazing!, the chain)
+const PIE_SLOW := 0.10         # the slice's share of slow motion
+const BURST_SLOW := 0.10       # each earned burst's share (Amazing!, the chain)
 const SLOW_TOTAL_CAP := 0.5    # the stack's hard ceiling, jitter-free and earned
 const AMAZING_FRAMES := 360    # the frame-perfect reward burst (three seconds)
 const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
@@ -876,6 +918,13 @@ const GOAL_MIN_S_HIGH := [15.0, 32.0, 60.0]  # ...and at the last house
 # after four acts and 6x after eight - a venue that quietly stops being worth farming.
 const ANTE_GROWTH := 1.25
 const ANTE_CAP := 6.0
+# ...AND THE SAME IDEA IN CATCHES (2026-07-29), which is what the ante actually scales now
+# that a goal is a run length. It has to be far gentler than the score-space version above:
+# a goal is raised to the power of the load, so asking for 25% more CATCHES at seven torches
+# already asks for about a thousand times the score. Twelve percent a repeat, capped at
+# doubling, is a venue that quietly stops being worth farming without ever walling anyone in.
+const ANTE_CATCH_GROWTH := 1.12
+const ANTE_CATCH_CAP := 2.0
 # THE LADDER IS DERIVED FROM WHAT A BUILD CAN REACH, not from a ceiling - and getting that
 # backwards is what Louis called out as "out of whack" (2026-07-29). My first attempt set the
 # top rung at E48 because he had named E50 as an upper BOUND, then divided down: 152x a rung,
@@ -905,20 +954,19 @@ const ANTE_CAP := 6.0
 # the goal is what you must clear, the number you leave on the board is the flex. Both sit far
 # inside the E50 Louis named.
 #
-# These are the FIRST goal; the final is 3.2x it (GOAL_STEP).
-# THE TOP TWO RUNGS CAME DOWN AFTER `--ladder` WAS BUILT, which is the whole argument for
-# building it: at 1.25e7 and 3.1e8 the World Arena and the Midnight Show each needed ONE MORE
-# trick activation than the build they were supposedly derived from, and took 162 and 201
-# seconds against clock floors of 55 and 60. The arithmetic had been wrong since it was
-# written and no simulation could have caught it, because the bot cannot juggle eleven
-# chainsaws. Run `--ladder` after touching any of these.
-# RESCALED BY LADDER_BUILD's `skill` (2026-07-29). The Backyard's final goal is 300 - Louis's
-# own number - and every other rung is the flawless figure taken down by the share of flawless a
-# player at that house can hold. These are the FIRST goal; the final is 3.2x (GOAL_STEP).
-#     Backyard 300 | Street 2,300 | Theatre 19,400 | Circus 123,000
-#     Championship 1.68M | World Arena 10.2M | Midnight 250M
-const VENUE_BASE := [94.0, 720.0, 6050.0, 38400.0, 525000.0, 3.2e6, 7.8e7]
-const GOAL_STEP := [1.0, 1.9, 3.2]    # first, second, final goal: each a taller bar
+# **AND THEN THE WHOLE TABLE WAS DELETED, 2026-07-29.** VENUE_BASE and GOAL_STEP were a
+# score per house - 94 at the Backyard up to 7.8e7 at the Midnight Show - derived, painfully
+# and twice, from a model of what a good player could earn there. Everything above this line
+# is the record of that derivation and is kept because the REASONING still applies to the
+# ladder that replaced it, even though the numbers do not.
+#
+# The new segment score is x^(n*p), so the load a player walks on with moves the result by
+# thirty-odd orders of magnitude. No single number per venue can survive that: the same 6050
+# is unreachable with three balls and already banked in four catches with seven torches. So
+# the ladder is expressed in CATCHES now (GOAL_CATCHES, beside goal_for) and the score is
+# computed from the load in hand. The lesson the old table taught the hard way still holds
+# and is the reason the new one is shaped this way: **calibrate against what a real player
+# can do, not against a ceiling** - and `--ladder` still exists to check it.
 const GOAL_BAR_GAMMA := 0.62          # goal-meter fill exponent (<1 = concave): spreads a
 									   # streak-accelerated score evenly along the bar. See goal_bar_pos
 # the crowd's patience bleeds this much per tick, per venue (120 ticks a second),
@@ -1043,19 +1091,40 @@ const CROWD_LEAVE_BAND := 0.55   # draw_crowd: only seats below this applause le
 # were designed months ago as "cosmetic" or "optional" (the glow-in-the-dark prop is
 # Blackout, the Purist toggle is The Purist's Night, Hard Mode's clacks are Close
 # Quarters): boss blinds that finally have somewhere to live.
+# THE ENCORES, reworked 2026-07-29. Three changes, all Louis's:
+#   * The Purist's Night became FOUR challenges, one per stat, and they COMBINE - see
+#     purist_slots for how many a house may ask for at once. "purist" as a single
+#     all-or-nothing night is gone from the deck (the Purist BOOKING, with its own record
+#     board, is untouched and is a different thing entirely).
+#   * Close Quarters (props clipping mid-air) is replaced by two crowd tastes that mirror
+#     For the Danger: a Scared Audience will not watch anything sharp or burning, a Fancy
+#     Audience will not be paid in eggs. The mid-air clack mechanic it drove survives under
+#     the hard-mode SETTING, which is where it always really belonged.
+#   * The Critic split in two. Both end the segment on a bad catch, which is a far heavier
+#     thing than the old "it simply does not score" now that a segment is an exponential.
 const ENCORES := [
 	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
 	{"id": "gale",      "name": "The Gale",           "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "The house lights are out. In the air a prop is only the glow it carries, from throw to catch. A torch keeps its flame."},
-	{"id": "cold",      "name": "Cold Hands",         "desc": "The Perfect window is two ticks tighter."},
-	{"id": "long",      "name": "The Long Set",       "desc": "The final goal is doubled, but the crowd is patient. An endurance test."},
+	{"id": "blackout",  "name": "Blackout",           "desc": "The house lights are out. An ordinary prop is INVISIBLE in the air. Glow-in-the-dark props shine, and a torch is a flame with no handle under it."},
+	{"id": "cold",      "name": "Cold Hands",         "desc": "Every catch window is one tick tighter."},
+	{"id": "long",      "name": "The Long Set",       "desc": "The final goal asks for a longer run, but the crowd is patient. An endurance test."},
 	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
-	{"id": "purist",    "name": "The Purist's Night", "desc": "No gear, no stats, no help. Only your hands."},
-	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives and torches score."},
-	{"id": "tight",     "name": "Close Quarters",     "desc": "The stage is cramped. Props that clip mid-air turn treacherous."},
-	{"id": "critic",    "name": "The Critic",         "desc": "This crowd applauds nothing short of flawless. Only a Perfect catch pays."},
+	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives, torches and chainsaws score."},
+	{"id": "scared",    "name": "A Scared Audience",  "desc": "Blades and flames frighten this room. Only balls, eggs and rings score."},
+	{"id": "fancy",     "name": "A Fancy Audience",   "desc": "A dress-circle crowd, and eggs are a busker's gag. Eggs score nothing tonight."},
+	{"id": "critic",    "name": "The Critic",         "desc": "A late catch breaks the spell: your run starts over from nothing. It costs you nothing else."},
+	{"id": "critic_hard","name": "The Critic, Twice", "desc": "Anything short of a Perfect breaks the spell and your run starts over from nothing."},
+	{"id": "purist_acc","name": "Purist: Hands",      "desc": "Your trained Accuracy counts for nothing tonight. Raw hands."},
+	{"id": "purist_str","name": "Purist: Arms",       "desc": "Your Strength counts for nothing tonight: three of the lightest thing you own."},
+	{"id": "purist_end","name": "Purist: Wind",       "desc": "Your Endurance counts for nothing tonight. A beginner's stamina."},
+	{"id": "purist_spd","name": "Purist: Nerve",      "desc": "Your Speed counts for nothing tonight. No slow motion at all."},
 ]
+const PURIST_IDS := ["purist_acc", "purist_str", "purist_end", "purist_spd"]
+const PURIST_NIGHT_CHANCE := 0.22   # how often a house that allows Purists asks for one
+									 # instead of an ordinary challenge. Low, because a
+									 # Purist night takes a stat the player has spent the
+									 # whole career buying, and that has to stay an event
 
 
 class Ball:
@@ -1066,7 +1135,11 @@ class Ball:
 	var launch_tick := 0
 	var land_tick := 0
 	var arc := 120.0
-	var height := 0.0         # normalized throw height 0..~1.4; higher lowers catch odds
+	var height := 0.0         # normalized throw height 0..~1.8, absolute: what the crowd,
+							  # the trail and the arc all read
+	var over_tap := 0.0       # ...and how much of that was a CHOICE, i.e. the height above
+							  # the floor this count taps at. The catch penalty prices this
+							  # one, never `height` - see HEIGHT_PEN_MAX
 	var color := Color.WHITE
 	var kind := 0             # which prop (index into PROPS); sets look and weight
 	var spin_dir := 1.0       # tumble direction for spinning props (clubs/knives/torches)
@@ -1148,12 +1221,17 @@ var peak_applause := 0.7  # the crowd's high point this run, for the reputation 
 # 2^53, which is correct and even desirable here: past that point the number is scenery and
 # is printed in E notation anyway (see score_text).
 var score := 0.0
-var banked_pts := 0.0   # runs already closed by a drop, at the multiplier they reached
-var run_pts := 0.0      # raw points in the CURRENT run - since the last drop
-var run_mult := 1.0     # ...and what the tricks in it have multiplied that run by
-var chain := 0          # consecutive PERFECT catches. Good and Late both reset it (Louis:
-					     # "good catches reset the counter and that weighs hard"), which is
-					     # what makes an all-Perfect act worth so much more than a clean one.
+var banked_pts := 0.0   # segments already closed, at what they were worth
+# THE LIVE SEGMENT. n, p and s are held rather than read live because they are factors of
+# the WHOLE segment - see seg_open for why a mid-segment switch has to close it instead.
+var seg_x := 0.0                    # weighted catches: Perfect 3, Good 2, Late 1
+var seg_tricks: Dictionary = {}     # trick index -> how many times it landed (the mi)
+var seg_n := MIN_BALLS              # objects this segment is being juggled with
+var seg_p := 1.0                    # ...their signature
+var seg_s := 1.0                    # ...and the pattern multiplier
+var seg_reason := ""                # what closed the last one, for the readout
+var won_the_room := false           # the crowd meter has been GREEN at some point tonight,
+									 # which switches the tomatoes off for good - see warm_room
 var streak := 0
 var best_streak := 0
 var dropped := 0
@@ -1180,7 +1258,11 @@ var exhausted := false        # the collapse was caused by empty stamina: on ret
 # target on purpose). fail_text() turns it into words. Reset per SET, so the reason the
 # card shows is the one that actually ended the night.
 var fail_reason := ""
-var encore := -1              # index into ENCORES for this booking's third set, or -1
+# THE ACT'S CHALLENGES, a LIST since 2026-07-29 and no longer one index. Louis asked for the
+# four Purists to be combinable ("4 at a time can happen in midnight stage, 3 at a time the
+# stage before that..."), and one integer cannot hold four things. Everything reads it
+# through encore_on(), which never cared how many there were.
+var encores: Array[int] = []
 var daily_active := false     # true from begin_daily_challenge until the NEXT real booking
 							  # (begin_performance) clears it - practice never resolves through
 							  # resolve_act, so it never needs to touch this flag
@@ -1221,7 +1303,14 @@ var has_backroom := false # paid the 16+ fee at the curtain, so the back of the 
 # wearing one price tag: the phosphor on the PROPS is what lets you read the pattern in
 # the dark, the phosphor on the SUIT is what stops the performer being a hole in it. The
 # Kit survives as a discounted bundle that simply sets both.
-var has_glow_tape := false   # the props carry phosphor
+# GLOW-IN-THE-DARK PROPS ARE STOCK, NOT A SWITCH (2026-07-29, Louis, alongside the Blackout
+# rewrite). It used to be one 34,000 purchase that lit every prop you would ever own, which
+# made Blackout either impossible (before) or free (after) with nothing in between and no
+# decision anywhere. Phosphor is a property of the OBJECT, so it is counted like objects:
+# glow_count[kind] beside prop_count[kind], bought a set at a time, and your props glow only
+# while you own enough glowing ones for the count you are actually fielding. That turns
+# Blackout into a question - what did you bring tonight - which is what an Encore should be.
+var glow_count: Array[int] = [0, 0, 0, 0, 0, 0, 0]
 # THE COSTUME (2026-07-28, Louis picked this set). Every piece is drawn on the performer
 # and every buff is on the COMFORT/REWARD axis - none of them touches the catch timing,
 # which is the guardrail that keeps the stats from playing the game for you.
@@ -1831,7 +1920,7 @@ func _ready() -> void:
 		var start_n := 3
 		var bi := ua.find("--balls")   # dev: force the ball count (audit even-count Cascade, e.g. 4/6)
 		if bi != -1 and bi + 1 < ua.size():
-			strength = maxi(strength, int(BALL_GATES[MAX_BALLS_HARD]))   # every count open
+			strength = maxi(strength, prop_req(PROP_CHAINSAW, MAX_BALLS_HARD))   # every count of everything open
 			prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], MAX_BALLS_HARD)   # balls are stock now
 			start_n = clampi(int(ua[bi + 1]), MIN_BALLS, MAX_BALLS_HARD)
 		var vfi := ua.find("--venue")   # dev: play at venue N (0..6), so booking targets and
@@ -1846,7 +1935,7 @@ func _ready() -> void:
 			var pn := clampi(int(ua[pfi + 1]), 0, PROPS.size() - 1)
 			prop_type = pn
 			prop_count[pn] = maxi(prop_count[pn], MAX_BALLS_HARD)
-			strength = maxi(strength, int(PROPS[pn]["req"]))
+			strength = maxi(strength, prop_req(pn, MAX_BALLS_HARD))
 		if ua.has("--daily"):   # dev: today's seeded venue (overrides a plain --venue),
 			venue_pick = daily_venue()   # so run_venue below comes out through play_venue() as usual
 		start_run(start_n)
@@ -1857,19 +1946,23 @@ func _ready() -> void:
 			# --encore <id> pins the condition.
 			booking_active = true
 			goals_hit = 0
-			encore = roll_encore(run_venue)
+			encores = roll_encore(run_venue)
 			var eni := ua.find("--encore")
 			if eni != -1 and eni + 1 < ua.size():
-				for ek in ENCORES.size():
-					if String(ENCORES[ek]["id"]) == ua[eni + 1]:
-						encore = ek
+				# --encore takes a comma-separated list now, so a Purist combination can be
+				# pinned for a shot: --encore purist_acc,purist_spd
+				encores = []
+				for want in String(ua[eni + 1]).split(","):
+					var ek := encore_index(want)
+					if ek >= 0:
+						encores.append(ek)
 		if ua.has("--daily"):   # dev: today's seeded venue/Encore instead of --booking's
 			booking_active = true   # random roll - see begin_daily_challenge. A --demo run
 			goals_hit = 0            # prints the shareable line on resolve, same as --booking's ACT line
 			daily_active = true
-			encore = daily_encore(run_venue, daily_seed())
+			encores = daily_encore(run_venue, daily_seed())
 		var ci := ua.find("--calib")   # dev: print the autoplayer's score at N ticks, then quit,
-		if ci != -1:                   # to tune VENUE_BASE against real strong-player numbers
+		if ci != -1:                   # to check the ladder against real strong-player numbers
 			_calib = true
 			if ci + 1 < ua.size() and not ua[ci + 1].begins_with("--"):
 				_calib_ticks = maxi(120, int(ua[ci + 1]))
@@ -1936,8 +2029,9 @@ func _ready() -> void:
 			_demo_hold = clampi(int(ua[hoi + 1]), 0, HOLD_MAX)
 		if ua.has("--collide"):     # dev: force the hard-collisions toggle ON this session
 			set_collide = true
-		if ua.has("--glow"):        # dev: own the whole Glow Kit this session, for Blackout shots
-			has_glow_tape = true
+		if ua.has("--glow"):        # dev: a full glowing set of everything, for Blackout shots
+			for gk in glow_count.size():
+				glow_count[gk] = MAX_BALLS_HARD
 		if ua.has("--wardrobe"):
 			# dev: buy and wear THIS STAGE'S cut of every garment. A full wardrobe now costs
 			# 28,500 per house and there are seven houses, so without this the dressed figure
@@ -1950,9 +2044,9 @@ func _ready() -> void:
 				worn_piece[_p] = cur_venue()
 		if ua.has("--boo"):         # dev: pin the room in the red, so the tomato path
 			_boo = true             # can be seen at all - see the note in update_sim
-		if ua.has("--nokit"):       # dev: the mirror of --glow. The demo save OWNS the
-			has_glow_tape = false   # Glow Kit (glow_kit=true), so every --demo capture of
-									# a dark stage was silently the charged version and the
+		if ua.has("--nokit"):       # dev: the mirror of --glow. The demo save owns glowing
+			for gk2 in glow_count.size():   # props, so every --demo capture of a dark stage
+				glow_count[gk2] = 0          # was silently the charged version and the
 									# un-charged one had no capture path at all
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
 			points = maxi(points, 6)
@@ -1996,12 +2090,12 @@ func _ready() -> void:
 			booking_active = true
 			run_venue = establish_venue
 			goals_hit = 0
-			encore = roll_encore(run_venue)
+			encores = roll_encore(run_venue)
 			var eei := ua.find("--encore")
 			if eei != -1 and eei + 1 < ua.size():
 				for ek2 in ENCORES.size():
 					if String(ENCORES[ek2]["id"]) == ua[eei + 1]:
-						encore = ek2
+						encores = [ek2]
 		game_state = ST_ESTABLISH
 		cine_tick = 0
 	if ua.has("--f9"):                # dev: open the EXPERIMENTS overlay for a screenshot
@@ -2800,7 +2894,7 @@ func begin_performance(n: int) -> void:
 	# one challenge for the WHOLE act (Louis: never a different condition per phase),
 	# rolled with the global randi (never the sim rng, so the deterministic catch
 	# sequence is untouched). The Backyard stays pure: no conditions on stage one.
-	encore = roll_encore(play_venue())
+	encores = roll_encore(play_venue())
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -2823,13 +2917,21 @@ func daily_venue() -> int:
 	return daily_seed() % (cap + 1)
 
 
-func daily_encore(venue: int, seed_val: int) -> int:
-	# the seeded twin of roll_encore: same pool, same exclusion rules, just a picked
-	# index instead of a rolled one, so the pool and the pick can never disagree
+func daily_encore(venue: int, seed_val: int) -> Array[int]:
+	# the seeded twin of roll_encore: same pools, same exclusion rules, just a picked index
+	# instead of a rolled one, so the pool and the pick can never disagree. The Purist branch
+	# is seeded the same way - every player on the same date faces the same stripped stats.
+	var slots := purist_slots(venue)
+	if slots > 0 and (seed_val % 100) < int(PURIST_NIGHT_CHANCE * 100.0):
+		var out: Array[int] = []
+		var howmany := 1 + ((seed_val / 100) % slots)
+		for i in mini(howmany, PURIST_IDS.size()):
+			out.append(encore_index(String(PURIST_IDS[(seed_val / 7 + i) % PURIST_IDS.size()])))
+		return out
 	var pool := encore_pool(venue)
 	if pool.is_empty():
-		return -1
-	return int(pool[seed_val % pool.size()])
+		return []
+	return [int(pool[seed_val % pool.size()])]
 
 
 func begin_daily_challenge() -> void:
@@ -2848,7 +2950,7 @@ func begin_daily_challenge() -> void:
 	booking_active = true
 	goals_hit = 0
 	daily_active = true
-	encore = daily_encore(dv, daily_seed())
+	encores = daily_encore(dv, daily_seed())
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -2863,16 +2965,55 @@ func establish_key() -> void:
 #endregion
 
 #region ACT GOALS & ENCORES
-func goal_for(venue: int, gi: int) -> float:
-	# goal number gi (0 first, 1 second, 2 final), scaling off the VENUE and the
-	# standing ante, never off the player's own record (scaling off your best would
-	# punish you for improving). A challenge that stretches the night (The Long Set)
-	# stretches only the FINAL goal - the hardest number is the one it makes harder.
-	var base := float(VENUE_BASE[clampi(venue, 0, VENUE_BASE.size() - 1)])
-	var step := float(GOAL_STEP[clampi(gi, 0, GOAL_STEP.size() - 1)])
-	var a := minf(pow(ANTE_GROWTH, float(ante[clampi(venue, 0, ante.size() - 1)])), ANTE_CAP)
-	var enc := encore_target_mult() if gi == NUM_GOALS - 1 else 1.0
+# WHAT A HOUSE ASKS FOR, IN CATCHES (2026-07-29). Under the segment formula a score is
+# x^(n*p), so the same act is worth 10^5 with three balls and 10^37 with seven torches -
+# thirty-two orders of magnitude apart. A goal that is one flat number per venue therefore
+# stops being a goal: whatever you bring makes the night either impossible or already won
+# before you have started, and the choice of prop quietly replaces the performance.
+#
+# So a goal is a RUN LENGTH now, and the number on the bar is computed from the load in
+# hand. "The World Arena wants about seventy clean catches" means the same thing whatever
+# you walk on with, which puts the prop choice back where it belongs - it is a score and
+# record play, and a heavy load is its own punishment because seventy catches of seven
+# chainsaws is a different night from seventy catches of three balls.
+#
+# The three goals are still the same shape (first, second, final), only measured in catches
+# rather than points, and the ante and The Long Set still stretch them.
+# The FINAL goal per venue, in PERFECT catches (goal_catches converts to the weighted units
+# the segment actually counts in, so a scrappier act simply needs more of them).
+#
+# CALIBRATED AGAINST `--ladder`, and the first pass was ten times too small: 18 at the
+# Backyard cleared the final goal in seven seconds against a thirty-second clock floor, so
+# the timer, not the juggling, would have ended every act.
+#
+# THE ONE THING TO UNDERSTAND BEFORE RETUNING THESE. The score is a sum of segments, but a
+# sum of exponentials is dominated by its largest term to the point where the others are not
+# really there: at the Arena's exponent of 21, a segment 20% shorter than your best
+# contributes about a hundredth of it. So the practical meaning of a goal is **one clean run
+# of this many catches**, not a total, and these are set at roughly half the act's clock
+# floor for exactly that reason - a night has room for a drop or two and still a real run
+# left in it.
+const GOAL_CATCHES := [40.0, 60.0, 80.0, 100.0, 130.0, 165.0, 200.0]
+const GOAL_CATCH_STEP := [0.50, 0.72, 1.0]   # first, second, final, as a share of the above
+
+
+func goal_catches(venue: int, gi: int) -> float:
+	# the weighted catch count this goal is asking for, before it is turned into a score.
+	# Weighted: a Perfect is worth three of these, so a flawless act reaches the number in a
+	# third of the catches - which is exactly the reward a Perfect is supposed to carry.
+	var base := float(GOAL_CATCHES[clampi(venue, 0, GOAL_CATCHES.size() - 1)]) * CATCH_WEIGHT[0]
+	var step := float(GOAL_CATCH_STEP[clampi(gi, 0, GOAL_CATCH_STEP.size() - 1)])
+	var a := minf(pow(ANTE_CATCH_GROWTH, float(ante[clampi(venue, 0, ante.size() - 1)])), ANTE_CATCH_CAP)
+	var enc := 1.3 if (encore_on("long") and gi == NUM_GOALS - 1) else 1.0
 	return base * step * a * enc
+
+
+func goal_for(venue: int, gi: int) -> float:
+	# ...and the score that run length is worth at the CURRENT load, which is the number the
+	# bar and the results card compare against. Tricks are deliberately not in it: they are
+	# the player's own upside, so landing them is how you clear a goal early rather than
+	# something the house already expected of you.
+	return pattern_mult() * safe_pow(goal_catches(venue, gi), float(num_balls) * prop_sig())
 
 
 # THE BUILD EACH HOUSE EXPECTS, as data rather than as a sentence in a comment. VENUE_BASE was
@@ -2900,57 +3041,48 @@ const LADDER_BUILD := [
 ]
 
 func print_ladder() -> void:
-	# dev (--ladder): THE WHOLE SCORE LADDER, computed from the live constants and printed in
+	# dev (--ladder): THE WHOLE GOAL LADDER, computed from the live constants and printed in
 	# one second. It exists because the autoplayer cannot measure the upper houses - at seven
 	# objects in a plain Cascade a catch arrives every 19 ticks and a Spin needs 52 clear, and
 	# at eleven chainsaws the bot simply drops everything - so every rung above the Small
-	# Theatre was arithmetic hiding in a comment. Arithmetic in a comment rots; arithmetic in a
-	# tool gets re-run.
+	# Theatre was arithmetic hiding in a comment. Arithmetic in a comment rots; arithmetic in
+	# a tool gets re-run.
 	#
-	# It models a FLAWLESS act: an unbroken chain, the build in LADDER_BUILD, and `acts` trick
-	# activations landed. That is an upper bound on a real player, which is the right side to
-	# calibrate from - the goal should be reachable by someone playing well, not by everyone.
-	print("%-18s %-13s %-16s %5s %7s %12s %14s %5s %7s %9s" % ["VENUE", "BUILD", "PATTERN", "skill", "rate/s", "goal 1", "final", "needs", "floor", "at-build"])
-	for v in VENUE_BASE.size():
+	# **IT GOT SHORTER ON 2026-07-29 AND THAT IS THE HEADLINE.** It used to reconstruct the
+	# whole per-catch score model out here - catch rate x chain x pattern x object x costume
+	# x trick context - a second implementation of the scoring that could and did drift from
+	# the real one. A goal is a run length now, so the only question left is how long that
+	# run takes, and the score it works out to is one call to the same goal_for the game
+	# itself uses. A calibration tool that shares the formula cannot disagree with the game.
+	print("%-18s %-13s %-16s %5s %8s %9s %14s %9s" % ["VENUE", "BUILD", "PATTERN", "skill", "catch/s", "goal 1", "final (score)", "at-build"])
+	for v in GOAL_CATCHES.size():
 		var b: Dictionary = LADDER_BUILD[v]
 		var n := int(b["n"])
 		var pk := int(b["prop"])
 		var pat := int(b["pat"])
-		var acts := int(b["acts"])
 		# the catch rate: one catch per prop per cycle, and the cycle is the tap airtime
 		var scale := 1.0 if n < 5 else 1.3 + 0.15 * float(n - 5)
-		var air_s := BASE_AIR * scale / 120.0
-		var cps := float(n) / air_s
-		# the per-catch multiplier, at the chain's settled value rather than its ramp
-		var setb := 1.0 + SET_PIECE_BONUS * float(b["set"])
-		if int(b["set"]) >= WEAR_PIECES.size():
-			setb *= SET_FULL_BONUS
-		var pm := float(PATTERNS[pat]["mult"]) * (1.0 + OBJ_BALL_BONUS * float(n - MIN_BALLS)) \
-			* float(PROPS[pk]["smult"]) * setb
-		var settled := 1.0 + CHAIN_GAIN * 0.82     # ~x3.5, the chain past its ramp
-		var rate := CATCH_PTS * settled * pm * cps * float(b.get("skill", 1.0))
-		# what one trick activation is worth in THIS build
-		var ctx := (1.0 + TRICK_DIFF_WEIGHT * float(int(PROPS[pk]["weight"]) - 1)) \
-			* (1.0 + TRICK_DIFF_COUNT * float(n - MIN_BALLS)) * float(PATTERNS[pat]["mult"])
-		var p := 1.0 + (2.0 - 1.0) * ctx           # a Spin, the strongest
-		var mult := pow(p, float(acts))
-		var g1 := float(VENUE_BASE[v]) * float(GOAL_STEP[0])
-		var g3 := float(VENUE_BASE[v]) * float(GOAL_STEP[2])
-		# seconds to the FINAL goal at this build, and the clock floor it must also clear
-		var secs := g3 / maxf(rate * mult, 0.0001)
+		var cps := float(n) / (BASE_AIR * scale / 120.0)
+		# ...times the share of catches a player at this house lands cleanly, and how much
+		# each is worth to `x` at that standard: a flawless act weights 3 a catch, a scrappy
+		# one nearer 2, which is why `skill` still belongs here.
+		var skill := float(b.get("skill", 1.0))
+		var per_catch: float = lerpf(CATCH_WEIGHT[2], CATCH_WEIGHT[0], skill)
+		var need1 := goal_catches(v, 0) / per_catch
+		var need3 := goal_catches(v, 2) / per_catch
+		# the score those runs work out to, through the game's own function
+		var e := float(n) * prop_sig(pk)
+		var g1 := float(PATTERNS[pat]["mult"]) * safe_pow(goal_catches(v, 0), e)
+		var g3 := float(PATTERNS[pat]["mult"]) * safe_pow(goal_catches(v, 2), e)
 		var floor_s: float = lerpf(GOAL_MIN_S_LOW[2], GOAL_MIN_S_HIGH[2], float(v) / float(maxi(MAX_VENUE, 1)))
-		# ...and how many activations it would actually take to meet that floor
-		var need := 0
-		while need < 40 and g3 / maxf(rate * pow(p, float(need)), 0.0001) > floor_s:
-			need += 1
-		print("%-18s %2dx %-9s %-16s %5.2f %7.0f %12s %14s %5d %6.0fs %8.0fs" % [
+		print("%-18s %2dx %-9s %-16s %5.2f %8.2f %9s %14s %8.0fs  (clock floor %.0fs, %.0f catches)" % [
 			String(venue_data(v)["name"]), n, String(PROPS[pk]["name"]), String(PATTERNS[pat]["name"]),
-			float(b.get("skill", 1.0)), rate, score_text(g1), score_text(g3), need, floor_s, secs])
+			skill, cps, score_text(g1), score_text(g3), need3 / maxf(cps, 0.001), floor_s, need1])
 	print("")
-	print("rate/s     points a second at that build and skill share, with NO tricks")
-	print("needs      trick activations required to reach the final goal by its clock floor")
-	print("at-build   seconds to the final goal with the activations LADDER_BUILD assumes")
-	print("A house is calibrated when `needs` is at or just under the build's own `acts`.")
+	print("catch/s    catches a second at that count, from the tap airtime")
+	print("at-build   seconds of unbroken juggling to the FINAL goal at that skill share")
+	print("A house is calibrated when at-build sits a little above its clock floor: the goal")
+	print("should be the thing that ends the act, not the timer.")
 
 
 func goal_seconds(gi: int) -> float:
@@ -2995,41 +3127,92 @@ func goal_bar_pos(v: float, final: float) -> float:
 
 
 func encore_pool(venue: int) -> Array[int]:
-	# every Encore this venue and this save's own props currently allow - the shared
-	# gate behind both a random roll (roll_encore) and a seeded pick (daily_encore),
-	# so the two can never drift apart. Never on the Backyard (venue 0), the one pure
-	# lesson stage - and otherwise fair game, EXCEPT "For the Danger" (only clubs/
-	# knives/torches score), which needs a floor of its own (2026-07-18, Louis: it
-	# rolled before he could even afford a club, so the act was unscoreable start to
-	# finish). It is excluded from the pool below The Circus (venue 3) AND unless the
-	# player owns ENOUGH of a qualifying prop to actually field the smallest real
-	# routine - MIN_BALLS (3), not just one (Louis caught this: owning a single club
-	# is not enough to switch to and juggle it at all, let alone score with it).
+	# every ORDINARY Encore this venue and this save's own props currently allow - the shared
+	# gate behind both a random roll (roll_encore) and a seeded pick (daily_encore), so the
+	# two can never drift apart. Never on the Backyard (venue 0), the one pure lesson stage.
+	# The four Purists are NOT in here: they roll as a set of their own, see purist_slots.
+	#
+	# THREE CHALLENGES CARRY AN OWNERSHIP FLOOR, and they exist because a challenge nobody
+	# can satisfy is not a challenge, it is an unscoreable night:
+	#   For the Danger  - only dangerous props score, so the player has to own MIN_BALLS of
+	#                     one (2026-07-18, Louis: it rolled before he could afford a club,
+	#                     and owning a SINGLE club is not enough to field a routine with).
+	#   Scared Audience - the mirror image, and the mirror is free: everyone owns balls.
+	#   Blackout        - ordinary props are now genuinely INVISIBLE in it (2026-07-29), not
+	#                     merely dim, so it needs three glow-in-the-dark balls or torches or
+	#                     it is not hard, it is impossible. Same shape of gate, same reason.
 	var pool: Array[int] = []
 	if venue < 1:
 		return pool
+	var has_danger := have(PROP_CLUBS) >= MIN_BALLS or have(PROP_KNIVES) >= MIN_BALLS \
+		or have(PROP_TORCHES) >= MIN_BALLS or have(PROP_CHAINSAW) >= MIN_BALLS
 	for i in ENCORES.size():
-		if String(ENCORES[i]["id"]) == "fire" and (venue < 3 \
-				or (have(PROP_CLUBS) < MIN_BALLS and have(PROP_KNIVES) < MIN_BALLS and have(PROP_TORCHES) < MIN_BALLS)):
+		var id := String(ENCORES[i]["id"])
+		if id.begins_with("purist_"):
 			continue
+		if id == "fire" and (venue < 3 or not has_danger):
+			continue
+		if id == "blackout" and not can_juggle_glowing():
+			continue
+		if id == "critic_hard" and venue < 4:
+			continue   # a Good catch ending the run is the hardest rule in the deck
 		pool.append(i)
 	return pool
 
 
-func roll_encore(venue: int) -> int:
-	# a random challenge for the whole act - see encore_pool for what is eligible
-	var pool := encore_pool(venue)
-	if pool.is_empty():
-		return -1
-	return int(pool[randi() % pool.size()])
+func purist_slots(venue: int) -> int:
+	# HOW MANY STATS A HOUSE MAY STRIP AT ONCE (2026-07-29, Louis: "4 at a time can happen in
+	# midnight stage, 3 at a time the stage before that, 2 the stage before that and 1 the
+	# stage before that - make sure that isn't too early"). Counting back from MAX_VENUE puts
+	# the first single-stat Purist at the Circus, which is the fourth house and well past the
+	# point where a player has stats worth stripping. Nothing below that.
+	return maxi(0, 4 - (MAX_VENUE - venue))
+
+
+func roll_encore(venue: int) -> Array[int]:
+	# tonight's challenges: either ONE ordinary Encore, or a Purist night of one to four
+	# stats. They do not mix - a night that took your Accuracy away and set the stage on fire
+	# is two ideas competing for the same attention, and the Purist nights are already the
+	# deck's hardest.
+	var slots := purist_slots(venue)
+	if slots > 0 and randf() < PURIST_NIGHT_CHANCE:
+		var pool := PURIST_IDS.duplicate()
+		pool.shuffle()
+		var out: Array[int] = []
+		for i in mini(1 + (randi() % slots), pool.size()):
+			out.append(encore_index(String(pool[i])))
+		return out
+	var norm := encore_pool(venue)
+	if norm.is_empty():
+		return []
+	return [int(norm[randi() % norm.size()])]
 
 
 func encore_on(id: String) -> bool:
-	# is THIS act's challenge the named one? A challenge colours the WHOLE act - one
-	# condition from the first throw to the bow (Louis). -1 means a clean night, which
-	# is every Backyard night and any venue the roll spared.
-	return booking_active and mode == MODE_PERFORM \
-		and encore >= 0 and encore < ENCORES.size() and String(ENCORES[encore]["id"]) == id
+	# is the named challenge among tonight's? A challenge colours the WHOLE act - one
+	# condition from the first throw to the bow (Louis). An empty list is a clean night,
+	# which is every Backyard night and any venue the roll spared.
+	if not booking_active or mode != MODE_PERFORM:
+		return false
+	for e in encores:
+		if e >= 0 and e < ENCORES.size() and String(ENCORES[e]["id"]) == id:
+			return true
+	return false
+
+
+func encore_names() -> String:
+	var out: Array[String] = []
+	for e in encores:
+		if e >= 0 and e < ENCORES.size():
+			out.append(String(ENCORES[e]["name"]))
+	return "  +  ".join(out)
+
+
+func encore_index(id: String) -> int:
+	for i in ENCORES.size():
+		if String(ENCORES[i]["id"]) == id:
+			return i
+	return -1
 
 
 func encore_decay_mult() -> float:
@@ -3046,13 +3229,38 @@ func encore_target_mult() -> float:
 	return 2.0 if encore_on("long") else 1.0
 
 
-func encore_score_mult() -> float:
-	# For the Danger: only heavy props (clubs and up) score, so a crowd that came for
-	# danger cannot be satisfied with balls. A run uses one prop, so the current prop's
-	# weight decides the whole set.
-	if encore_on("fire") and prop_weight() < 3:
-		return 0.0
-	return 1.0
+func dangerous_prop(kind: int = -1) -> bool:
+	# a prop with an edge, a flame or a motor on it: clubs and heavier. The one place the
+	# game asks "would this frighten somebody", asked once so three Encores cannot disagree.
+	return prop_weight(kind) >= 3
+
+
+func encore_scores_prop() -> bool:
+	# WHETHER TONIGHT'S CROWD WILL BE PAID BY THIS PROP AT ALL. Three houses have an opinion
+	# and they are mirror images of each other, which is why they share one function:
+	#   For the Danger  - a crowd that came for danger will not be fobbed off with balls
+	#   Scared Audience - ...and a nervous one will not watch knives at all
+	#   Fancy Audience  - eggs are a busker's gag, not an act, whatever you do with them
+	# A run uses one prop, so the prop in hand decides the whole set either way.
+	if encore_on("fire") and not dangerous_prop():
+		return false
+	if encore_on("scared") and dangerous_prop():
+		return false
+	if encore_on("fancy") and prop_type == PROP_EGGS:
+		return false
+	return true
+
+
+func critic_easy() -> bool:
+	# THE CRITIC, easy: a Late catch ends the segment. It has to FEEL like a drop to the
+	# score and cost nothing else - no lost prop, no lost patience, no lost streak - so it
+	# calls seg_open and stops there. See on_catch.
+	return encore_on("critic")
+
+
+func critic_hard() -> bool:
+	# ...and hard: a Good one ends it too, so only Perfects keep an exponential alive.
+	return encore_on("critic_hard")
 
 
 func drop_limit() -> int:
@@ -3699,9 +3907,12 @@ func shop_gear() -> Array[Dictionary]:
 	# is also what let the two rooms and the 16+ curtain go, since they existed to solve a
 	# layout problem (seven prop cards would not fit beside eleven gear ones) that no longer
 	# exists.
+	# ...AND THE GEAR ROW IS EMPTY NOW (2026-07-29). Its one card was the Glow Tape, and
+	# phosphor became a property of each prop rather than a switch over all of them, so it is
+	# bought on the prop's own card (G) like any other stock. Kept as a function rather than
+	# deleted: it is the seam prop CATEGORIES will reopen, and every caller already handles
+	# an empty row.
 	var g: Array[Dictionary] = []
-	g.append({"id": "glow_tape", "name": "Glow Tape", "cost": GLOW_TAPE_COST, "owned": has_glow_tape,
-		"col": Color(0.65, 0.95, 0.55), "desc": "the PROPS carry phosphor: you can read the pattern on any dark stage"})
 	return g
 
 
@@ -3742,18 +3953,9 @@ func shop_buy_sel() -> void:
 	try_buy_gear(String(g[gi]["id"]))
 
 
-func try_buy_gear(id: String) -> void:
-	# the shop's gear row is one item now - the glow TAPE, which is about the props. Every
-	# other piece of gear became clothing and is bought in the tailor, per house.
-	if id != "glow_tape" or has_glow_tape or money < GLOW_TAPE_COST:
-		return
-	if not confirm_spend("glow_tape", GLOW_TAPE_COST, true):
-		return
-	money -= GLOW_TAPE_COST
-	has_glow_tape = true
-	shop_buy_ms = int(Time.get_ticks_msec())
-	save_progress()
-	play_sfx("money", -6.0)
+func try_buy_gear(_id: String) -> void:
+	# nothing left in the shop's gear row - see shop_gear
+	return
 
 
 func shop_input(kc: int) -> void:
@@ -3793,6 +3995,13 @@ func shop_input(kc: int) -> void:
 				try_top_up(shop_props()[shop_sel])
 			else:
 				shop_buy_sel()
+		KEY_G:
+			# BUY THE GLOWING SET of the lit prop, the same one-press basket B buys the plain
+			# one with. Its own key rather than a mode on B, because the two are very different
+			# amounts of money and a player should never find out which one they bought after
+			# the fact.
+			if shop_sel < shop_gear0():
+				try_top_up_glow(shop_props()[shop_sel])
 		# THE NUMBER KEYS ADDRESS THE ROOM YOU ARE STANDING IN, in card order, which is
 		# the only scheme that survives the goods being split across two rooms - and it
 		# is what the printed key on each card already says (see SHOP_KEYS).
@@ -3915,6 +4124,10 @@ func cycle_prop_live(dir: int) -> void:
 		play_sfx("late", -12.0)
 		return
 	prop_type = found
+	# A SWITCH CLOSES THE SEGMENT (2026-07-29). The prop's signature is an exponent over the
+	# WHOLE segment, so carrying one across a switch would let a player build a long run on
+	# three balls and then rescore every catch of it as chainsaws. See seg_open.
+	seg_sync_load()
 	var i := 0
 	for b in balls:
 		b.kind = prop_type
@@ -3972,6 +4185,7 @@ func set_count_live(n: int) -> void:
 		var gone: Ball = stack(from_h).pop_back()
 		balls.erase(gone)
 	num_balls = balls.size()
+	seg_sync_load()   # n is an exponent over the whole segment - see seg_open
 	# the lane bookkeeping re-seeds for the new count (a middle lane may appear
 	# or vanish); Tennis keeps its mark unless that very ball just left the stage
 	col_air_ref = -1.0
@@ -3997,6 +4211,7 @@ func cycle_pattern_live(dir: int) -> void:
 	var idx := un.find(pattern_sel)
 	pattern_sel = int(un[(idx + dir + un.size()) % un.size()]) if idx >= 0 else int(un[0])
 	pattern = pattern_sel
+	seg_sync_load()   # s multiplies the whole segment - see seg_open
 	col_air_ref = -1.0
 	col_mid_ball = null
 	tennis_ball = null   # Tennis re-marks its ball on the first throw under it
@@ -4042,6 +4257,40 @@ func try_buy(kind: int) -> void:
 		play_sfx("money", -6.0)
 		if not was and available(kind):
 			offer_prop_tutorial(kind)   # first time you can juggle these: explain them
+
+
+func glow_cost(kind: int) -> int:
+	# a glowing copy of one object - see GLOW_PROP_MULT
+	return int(round(float(PROPS[kind]["cost"]) * GLOW_PROP_MULT))
+
+
+func try_top_up_glow(kind: int) -> void:
+	# BUY THE GLOWING SET, the same one-press basket try_top_up already established for plain
+	# stock and for the same reason: what a player wants at this counter is "enough of these
+	# to juggle in the dark", not fifteen separate confirmations. Glowing props are a straight
+	# parallel stock - they are not a different prop, they are the same prop that shines - so
+	# nothing else in the game has to know about them beyond prop_glows().
+	var cost := glow_cost(kind)
+	var want := maxi(num_balls - glow_count[kind], 0)
+	if want <= 0:
+		want = num_balls   # already a full glowing set: buy spares for the drops to come
+	var can := clampi(int(floor(float(money) / float(maxi(cost, 1)))), 0, want)
+	if can <= 0:
+		shop_msg = "a glowing %s is %s" % [String(PROPS[kind]["name"]).to_lower(), commafy(cost)]
+		shop_msg_ms = int(Time.get_ticks_msec())
+		shop_msg_warn = true
+		play_sfx("whiff", -10.0)
+		return
+	if not confirm_spend("glowset%d" % kind, cost * can, true):
+		return
+	money -= cost * can
+	glow_count[kind] += can
+	shop_msg = "%d glowing %s" % [can, String(PROPS[kind]["name"]).to_lower()]
+	shop_msg_ms = int(Time.get_ticks_msec())
+	shop_msg_warn = false
+	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -6.0)
 
 
 func try_top_up(kind: int) -> void:
@@ -5671,7 +5920,7 @@ func reset_new_game() -> void:
 	prop_count = [3, 0, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
 	sync_props()
 	prop_type = PROP_BALLS
-	has_glow_tape = false
+	glow_count = [0, 0, 0, 0, 0, 0, 0]
 	has_backroom = false
 	energy_drinks = 0
 	level = 1
@@ -6555,38 +6804,60 @@ func ball_color(i: int) -> Color:
 # Start: balls begin held, and the run begins on the player's first throw.
 # -----------------------------------------------------------------------------
 
-# the Strength each ball count asks for, indexed by count (3 is free). The first
-# rungs sit in the old 0..100 band; 8-15 climb the raised band toward the 200 cap,
-# so the late game keeps earning new loads long after the World Arena. 12-15 added
-# 2026-07-18 (Louis, after the throw-height clamp made room for more objects):
-# the last few rungs close in tight on STR_CAP, so 15 objects is earned at almost
-# exactly a maxed Strength stat, not before it.
-# EVENLY SPACED (2026-07-27, Louis: "strength's nr of props that unlock isn't evenly
-# spread... right now it looks bad on the stat menu"). It ran 9, 15, 23, 33, 60, 90,
-# 125, 165, 175, 183, 191, 200 - four gates crammed into the bottom fifth, a canyon
-# through the middle, then four more crammed into the top - which as a row of pips was
-# unreadable and as a curve was three different games. Twelve counts across 200 points
-# is one step of 16.7, so every count is the same distance of work from the last, and
-# the track finally says what it means: this is how far another prop costs, always.
-const BALL_GATES := {4: 16, 5: 33, 6: 50, 7: 66, 8: 83, 9: 100, 10: 116, 11: 133, 12: 150, 13: 166, 14: 183, 15: 200}
+# STRENGTH IS ONE RULE NOW (2026-07-29, Louis): "1 1 3 4 6 8 13 are the values to throw
+# one of each prop kind ... to throw n of these (or to start a pattern that requires n and
+# making any of these throws) you need n times that value". So fifteen chainsaws asks 195,
+# seven torches 56, five clubs 20, three balls 3.
+#
+# THIS REPLACES TWO SEPARATE SYSTEMS, and that is most of what it buys. There used to be a
+# BALL_GATES table (4 at Strength 16, 5 at 33, ... 15 at 200) that decided HOW MANY of
+# anything you could field, and a `req` field per prop that decided WHICH props you could
+# lift at all, and the two never had anything to say to each other: fifteen torches and
+# fifteen balls asked for the identical 200, while a single torch asked 48 whether you meant
+# to juggle three of them or none. One multiplication answers both questions and answers
+# them consistently - a prop's weight is priced once, per object, and the count is simply
+# how many of them you are asking your arms to keep up.
+#
+# What it costs, and Louis chose this knowingly: the count ladder for LIGHT props is gone.
+# Fifteen balls now asks 15 Strength, which a player passes in their first hour, so nothing
+# but skill stands between them and a fifteen-ball cascade. That is the skill-first pillar
+# taken at its word.
+const PROP_STR_UNIT := [1, 1, 3, 4, 6, 8, 13]   # one object, in PROPS order
+
+
+func prop_str_unit(kind: int = -1) -> int:
+	var k := prop_type if kind < 0 else kind
+	return int(PROP_STR_UNIT[k]) if k < PROP_STR_UNIT.size() else 1
+
+
+func prop_req(kind: int = -1, n: int = -1) -> int:
+	# the Strength to throw `n` of this prop (defaulting to the count in play)
+	return prop_str_unit(kind) * (num_balls if n < 0 else n)
+
+
+func eff_strength() -> int:
+	# a STRENGTH PURIST plays on a fresh juggler's arms, which under this rule means the
+	# lightest possible load and nothing else - the stat is a gate now, so stripping it can
+	# only ever mean "you may not lift that tonight"
+	return MIN_BALLS if purist_stat("str") else strength
+
+
+func max_count(kind: int = -1) -> int:
+	# how many of this prop the arms can throw at all, floored at nothing and capped at the
+	# hard ceiling. Below MIN_BALLS it is not a juggling load, so a prop you cannot field
+	# three of is simply unavailable (see `available`).
+	return clampi(int(eff_strength() / maxi(1, prop_str_unit(kind))), 0, MAX_BALLS_HARD)
 
 
 func max_balls() -> int:
-	# THREE to start; every larger load is earned through Strength, each landing a bit
-	# before the stage that leans on it (Louis). Four is the first unlock now, not free.
-	var m := 3
-	for n in range(4, MAX_BALLS_HARD + 1):
-		if strength >= int(BALL_GATES[n]):
-			m = n
-	return m
+	return maxi(MIN_BALLS, max_count())
 
 
 func next_ball_strength() -> int:
-	# Strength needed for the next ball unlock, or 0 if already at the cap
-	for n in range(4, MAX_BALLS_HARD + 1):
-		if strength < int(BALL_GATES[n]):
-			return int(BALL_GATES[n])
-	return 0
+	# Strength for one more of what is in hand, or 0 at the ceiling
+	if max_count() >= MAX_BALLS_HARD:
+		return 0
+	return prop_req(-1, max_count() + 1)
 
 
 func count_air_scale() -> float:
@@ -6604,9 +6875,13 @@ func count_air_scale() -> float:
 #region ROUND START, CATCHING, GOALS
 func start_run(n: int) -> void:
 	if not available(prop_type):
-		prop_type = PROP_BALLS   # not enough of that prop owned: fall back to balls
-	# you cannot juggle more of a prop than you own (balls are unlimited)
-	var cap := mini(max_balls(), have(prop_type))
+		prop_type = PROP_BALLS   # not enough of that prop owned, or not strong enough for
+								  # three of it: fall back to balls
+	# TWO CEILINGS, and they are different questions: how many of this prop you OWN, and how
+	# many your ARMS can throw (max_count, one rule since 2026-07-29). Balls used to be
+	# exempt from the second because the ball-count ladder was the Strength stat's whole job;
+	# now every prop is priced per object and the two ceilings read the same way.
+	var cap := mini(max_count(), have(prop_type))
 	num_balls = clampi(n, MIN_BALLS, maxi(MIN_BALLS, cap))
 	# the chosen pattern, snapped to what this level owns. Cascade needs no ball-
 	# count match any more (it crosses odd, keeps each hand its own ball even, so
@@ -6625,11 +6900,15 @@ func start_run(n: int) -> void:
 	charging = [false, false]
 	applause = 0.7
 	peak_applause = 0.7
+	won_the_room = false
 	score = 0.0
 	banked_pts = 0.0
-	run_pts = 0.0
-	run_mult = 1.0
-	chain = 0
+	seg_x = 0.0
+	seg_tricks = {}
+	seg_n = num_balls
+	seg_p = prop_sig()
+	seg_s = pattern_mult()
+	seg_reason = ""
 	streak = 0
 	best_streak = 0
 	dropped = 0
@@ -6641,7 +6920,9 @@ func start_run(n: int) -> void:
 	fail_reason = ""   # a fresh act has not failed yet
 	running = false
 	started = false
-	stamina_max = 100.0 + 9.0 * float(endurance)
+	# a WIND PURIST plays on a beginner's lungs: the stat is stripped for this act only, so
+	# the pool is what a fresh juggler carries and every throw costs the same as it always did
+	stamina_max = 100.0 + 9.0 * float(0 if purist_stat("end") else endurance)
 	# stamina PERSISTS through the day now: only sleep (or a meal) restores it, so
 	# a third booking in one evening is genuinely tired work. Dev auto-runs top up
 	# so screenshots stay comparable.
@@ -6792,7 +7073,7 @@ func on_catch(h: int) -> void:
 		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
 		play_sfx("whiff", -12.0)
 		return
-	if best_d > W_LATE and not sure:
+	if best_d > late_window() and not sure:
 		# way off the arrival: a genuine mistime, the ball drops
 		drop_ball(best, "MISTIME")
 		return
@@ -6820,21 +7101,21 @@ func on_catch(h: int) -> void:
 		if encore_on("gale"):
 			drop_ball(best, "gale")
 			return
-		var quality := 1 if best_d <= W_GOOD else 2
-		if rng.randf() > catch_chance(quality, best.height):
+		var quality := 1 if best_d <= good_window() else 2
+		if rng.randf() > catch_chance(quality, best.over_tap):
 			drop_ball(best, "slip")
 			return
 	# secured. Was the act actually RUNNING as this landed, or did the air just empty?
 	# (Louis: juggling is at least one prop airborne at all times; anything else is
 	# throwing one thing and catching it). Asked here, before the ball is put away.
 	var juggled := juggling_catch(best)
-	# harder patterns AND harder loads pay more per catch (their base difficulty is the
-	# reward), so grinding the tamest routine is never the best. encore_score_mult zeroes
-	# light props on a "For the Danger" night.
-	# COSTUME_SET_BONUS joins the multiplier here rather than anywhere else, because this is
-	# the one place every scoring path already passes through - and because dressing for the
-	# house is exactly the kind of preparation that should pay per catch rather than once.
-	var pm := pattern_mult() * object_mult() * encore_score_mult() * costume_set_bonus()
+	# DOES THIS CATCH COUNT TOWARDS THE SEGMENT AT ALL? The load's own reward (pattern,
+	# count, prop) is not here any more - it is the segment's s and its exponent, applied
+	# once to the whole stretch rather than per catch. What survives at this choke point is
+	# the question of whether the crowd is willing to be paid by THIS prop tonight, which is
+	# a yes or a no: "For the Danger" wants danger, a Scared Audience will not have it, a
+	# Fancy Audience will not have eggs. Everything else about the catch happens regardless.
+	var scores := encore_scores_prop()
 	best.state = STATE_HAND
 	stack(h).append(best)
 	catch_flash[h] = tick
@@ -6876,7 +7157,7 @@ func on_catch(h: int) -> void:
 			# a sound is not a score, so it costs the anti-farm rule nothing.
 			if best_d <= wperf:
 				play_sfx("perfect", -5.0)
-			elif best_d <= W_GOOD:
+			elif best_d <= good_window():
 				play_sfx("good", -8.0)
 			else:
 				play_sfx("late", -11.0)
@@ -6887,8 +7168,8 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		chain += 1
-		add_run_pts(CATCH_PTS * chain_mult() * pm)
+		if scores:
+			seg_add_catch(0)   # a Perfect is worth three catches to the segment
 		warm_room(APPL_PERFECT + prop_thrill())   # danger thrills the room
 		add_xp(3)
 		# the slow-motion earn, only when a REAL pattern is up (three props or
@@ -6929,21 +7210,20 @@ func on_catch(h: int) -> void:
 				play_sfx("cheer", -11.0)
 		elif streak % 5 == 0:
 			play_sfx("streak", -7.0)   # a rising flourish at every fifth in a row
-	elif best_d <= W_GOOD:
+	elif best_d <= good_window():
 		perfect_chain = 0
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		# The Critic: nothing short of a Perfect pays - everything else about a
-		# Good/Late catch (streak, applause, XP, the popup itself) is untouched,
-		# only the score line is gated, same choke point "fire"/For the Danger uses
-		# A GOOD CATCH RESETS THE CHAIN (Louis: "good catches reset the counter and that
-		# weighs hard"). It still scores - it was a catch - but at a quarter rate and with the
-		# linear multiplier back to nothing, which is what makes an all-Perfect act worth so
-		# many times a merely clean one.
-		chain = 0
-		if not encore_on("critic"):
-			add_run_pts(CATCH_PTS_GOOD * pm)
+		# A GOOD CATCH IS WORTH TWO, AND ENDS NOTHING (2026-07-29, Louis). It used to reset
+		# the Perfect chain outright, so one Good catch in fifty cost a player everything
+		# the chain had accumulated. Now it costs exactly one catch of credit against a
+		# Perfect's three, which is a slope rather than a cliff - and the segment, the thing
+		# that really carries the score, runs straight through it.
+		if critic_hard():
+			seg_open("critic")   # ...unless the house says otherwise: see critic_hard
+		if scores:
+			seg_add_catch(1)
 		warm_room(APPL_GOOD)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
@@ -6954,9 +7234,10 @@ func on_catch(h: int) -> void:
 	else:
 		streak = 0
 		perfect_chain = 0
-		chain = 0
-		if not encore_on("critic"):
-			add_run_pts(10.0 * pm)
+		if critic_hard() or critic_easy():
+			seg_open("critic")
+		if scores:
+			seg_add_catch(2)   # a Late still counts. It is worth one.
 		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
@@ -6977,7 +7258,7 @@ func on_catch(h: int) -> void:
 	# exponential exponential. Doubling catches on top would have been the same bonus paid
 	# twice, and it is the mechanic the lockout replaced.)
 	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
-	if best.trick >= 0 and best_d <= W_GOOD:
+	if best.trick >= 0 and best_d <= good_window():
 		reward_trick(best.trick, outer_pos(h), best.height)
 	# THE ACT: this catch (with any trick bonus above) may carry the score across the
 	# next goal, which arms - or re-arms - the cash-in
@@ -7063,24 +7344,20 @@ func do_throw(h: int, hold: int) -> void:
 					   # run, and its next HIGH throw would come out as a flat one
 	b.thrown_from = h
 	var weight := prop_weight()
-	var deficit := prop_deficit()   # >0 when too weak for this prop: lower and wilder
 	# A tap is the LOWEST, snappiest throw; each tick of hold adds airtime. Height is set by
 	# how long you hold, NOT by Strength: raw muscle must never loft a throw higher (a higher
 	# throw is a wilder throw, so tying Strength to height wrongly punished the strong).
-	# Strength ONLY matters when you are UNDER a prop's Required Strength: then the whole
-	# throw sags (the ideas.rtf rule) with a lower tap floor (DEFICIT_BASE) AND a lower
-	# ceiling (DEFICIT_HEIGHT), so a too-heavy prop never gets up to a clean height.
+	# STRENGTH NO LONGER TOUCHES A THROW AT ALL (2026-07-29). It used to work both ways -
+	# under a prop's requirement the whole throw sagged, over it a heavy prop lofted further -
+	# and both are gone with the deficit itself: Strength is a hard wall now, so a throw made
+	# while under-strength for its prop cannot happen, and a throw made over-strength is just
+	# a throw. What is left is exactly the sentence above, with nothing arguing against it.
 	# higher loads must fly HIGHER just to have time to weave (Louis): a 5/6/7 fountain
 	# thrown at the 3-ball tap height comes back down before the hand can clear its other
 	# props, so everything drops at once and it felt unthrowable. Airtime rises with the
 	# count, so the tap FLOOR does too - a tap already lofts a big load enough to juggle.
-	var base_air := float(BASE_AIR) * count_air_scale() * (1.0 - DEFICIT_BASE * deficit)
-	var gain_mult := 1.0 - DEFICIT_HEIGHT * deficit
-	# SURPLUS Strength over a heavy prop's requirement lofts it HIGHER per held
-	# tick, scaled by weight (Louis: five clubs need real height to fit in the
-	# air). Balls and eggs are untouched, and being under-strength still sags.
-	if prop_req() > 0 and weight > 1 and deficit <= 0.0:
-		gain_mult *= 1.0 + STRENGTH_LOFT * strength_surplus() * float(weight - 1) / 4.0
+	var base_air := float(BASE_AIR) * count_air_scale()
+	var gain_mult := 1.0
 	var air := int(round(base_air + HOLD_GAIN * gain_mult * float(hold)))
 
 	# a primed one-shot (Overthrow) reshapes this ONE throw; consuming the prime here
@@ -7122,13 +7399,13 @@ func do_throw(h: int, hold: int) -> void:
 			# a TAP already powers the toss sky high; HOLDING the throw powers it
 			# further, up to 1.8 at a full hold - high enough to leave the frame for
 			# a beat (a top-edge marker tracks it, see draw_balls_in_flight). The
-			# extra height keeps its honest cost: the landing spreads wider and the
-			# arrival gets less certain (height feeds drift/wobble/jitter below),
-			# while the catch-chance penalty saturates at the 1.4 cap.
+			# extra height keeps its honest cost: the catch-chance penalty runs all the
+			# way to 1.8 now (HEIGHT_PEN_TOP), so the top of a held High Toss is the
+			# most expensive throw in the game rather than a free one above 1.4.
 			tfrac = 1.35 + 0.45 * minf(tfrac, 1.0)
 		else:
 			tfrac = clampf(tfrac + 0.12, 0.0, 1.4)   # a touch higher to clear the arc behind the back
-		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX) * (1.0 - DEFICIT_HEIGHT * deficit)))
+		air = int(round(base_air + tfrac * HOLD_GAIN * float(HOLD_MAX)))
 	# the pattern shapes the throw: a shower's feed hand snaps a fast low pass no
 	# matter the hold. An ARMED ONE-SHOT (this_trick >= 0 here) always wins its
 	# one throw: the player paid a press for it, so no pattern may flatten it
@@ -7190,43 +7467,22 @@ func do_throw(h: int, hold: int) -> void:
 		else:
 			air = int(round(lerp(float(air), col_air_ref, COLUMNS_SYNC)))
 		col_air_ref = lerp(col_air_ref, float(air), 0.5)
-	# frac is the height ACTUALLY reached (measured off the full-strength tap floor), so a
-	# sagging under-strength throw reads as the low throw it is: easier to catch, worth less
-	# Applause, and it clamps to 0 when the prop is too heavy to loft at all. The ceiling is
+	# frac is the height ACTUALLY reached, measured off the bare tap floor. The ceiling is
 	# 1.8, reserved for a TRICK (only a held High Toss actually reaches it) - plain throws
-	# clamp at 1.4. This clamp is EXPLICIT now (2026-07-18): count_air_scale (high ball
-	# counts fly higher) and the Strength-surplus loft bonus (a heavy prop you're well
-	# over-strength for flies higher too) both push air time up independently, and at
-	# their extreme - maxed Strength, the heaviest prop, the highest count - they used to
-	# stack past 1.4 on an ordinary throw with no trick at all (measured: a PLAIN full-hold
-	# torch throw at 7 objects and max Strength hit 1.8, the trick-only ceiling, and even a
-	# bare TAP already reached 0.6). Louis noticed this as "why do Behind the Back throws
-	# with 7 torches go so high" - BTB was not the actual cause, just the visible symptom;
-	# every plain throw at that combination was already pinned near the ceiling.
+	# clamp at 1.4. This clamp is EXPLICIT (2026-07-18) because count_air_scale pushes
+	# airtime up on its own: a bare TAP at seven objects already reaches 0.6.
 	var frac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.8 if this_trick >= 0 else 1.4)
 	b.height = frac
+	# ...AND HOW MUCH OF THAT WAS A CHOICE. `over_tap` is the height above the floor this
+	# count taps at, which is what the catch penalty is priced on - see HEIGHT_PEN_MAX for
+	# why the absolute height is the wrong measure there. `height` itself stays absolute,
+	# because the crowd, the trail and the arc all care how high the thing really went.
+	b.over_tap = maxf(0.0, frac - float(base_air - float(BASE_AIR)) / (HOLD_GAIN * float(HOLD_MAX)))
 	b.trick = this_trick
-
-	# Accuracy (dampened by low stamina) sets the base inaccuracy; being UNDER a prop's
-	# Required Strength widens it. Weight alone does NOT: a heavy prop you are strong enough
-	# for throws just as cleanly as a ball (only low Strength makes a heavy prop wild).
-	# Inaccuracy normally scales with the throw's HEIGHT, so a low throw is placed cleanly.
-	# But an under-strength RELEASE is itself unsteady, so a "spread floor" keyed to the
-	# deficit keeps even a low under-strength throw drifting and wobbling, otherwise a weak
-	# juggler could just tap heavy rings low and place them perfectly, which felt wrong.
-	var inacc := inacc_factor() * (1.0 + DEFICIT_INACC * deficit)
-	var spread := maxf(frac, deficit * DEFICIT_FLOOR)
-	var jitter := int(round(rng.randf_range(-1.0, 1.0) * float(JITTER_MAX) * spread * inacc))
-	var drift := rng.randf_range(-1.0, 1.0) * DRIFT_MAX * spread * inacc
-	if _collcheck:
-		# the overlap audit judges the IDEAL pattern: geometry must be clean
-		# before inaccuracy gets a say, so the noise terms are zeroed here
-		jitter = 0
-		drift = 0.0
 
 	b.state = STATE_FLIGHT
 	b.launch_tick = tick
-	b.land_tick = tick + air + jitter
+	b.land_tick = tick + air
 	b.arc = ARC_PER_AIR * float(air)
 	if b.flat:
 		b.arc *= SHOWER_FEED_ARC   # a horizontal pass: almost no rise, same time in the air
@@ -7321,9 +7577,10 @@ func do_throw(h: int, hold: int) -> void:
 		# they landed"). Two things used to break it:
 		#   - `drift`, the inaccuracy term, moved the LANDING sideways, so a ball came
 		#     down a few px off its own column and was then thrown from the column again.
-		#     It is dropped here (and only here): drift is purely cosmetic anyway, since
-		#     on_catch judges a catch on TIMING, so a crooked column bought no difficulty.
-		#     Accuracy still lands on this throw through `jitter`, which is timing.
+		#     It was dropped here first, on the reasoning that drift is purely cosmetic
+		#     anyway - on_catch judges a catch on TIMING - and that same sentence is why
+		#     the whole term was deleted from the game on 2026-07-29. This bullet stays
+		#     because it is the argument that retired it.
 		#   - the centre column, on an odd count, was a diagonal: it launched from the
 		#     HAND and landed at centre. Measured with --collcheck at 3 torches, that
 		#     diagonal was a real overlap (-29.8px) with the ball in the neighbouring
@@ -7345,7 +7602,7 @@ func do_throw(h: int, hold: int) -> void:
 		# nudge below - shifting either end toward the middle only pulls it closer
 		# to whatever road it is crossing, worse not better. Left exactly as it was.
 		b.from_pos = outer_pos(h)
-		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
+		b.to_pos = slot_pos(b.to_hand, land_slot)
 	else:
 		# a plain cascade throw: inner launch, outer catch - ALWAYS these same two
 		# points, whichever hand it lands in, and now including the even-count
@@ -7367,7 +7624,7 @@ func do_throw(h: int, hold: int) -> void:
 		# what sets hand_catch_rest, so hard-coding the landing here meant a change to one
 		# silently did not move the other.
 		b.from_pos = inner_pos(h)
-		b.to_pos = slot_pos(b.to_hand, land_slot) + Vector2(drift, 0.0)
+		b.to_pos = slot_pos(b.to_hand, land_slot)
 	if this_trick == TR_BTB:
 		# BEHIND THE BACK actually goes behind now (Louis: it never read as
 		# behind): the arm wraps and the ball RELEASES from behind the opposite
@@ -7388,15 +7645,15 @@ func do_throw(h: int, hold: int) -> void:
 		# on the first-ever throw), so misses stopped being cleaned up and the lesson
 		# froze with no move able to recover it.
 		running = true
-	# a clean, controlled (low) throw earns a little Applause; an under-strength throw
-	# is low but sloppy, so the deficit strips most of that reward: a sagging heavy
-	# prop should not read to the crowd as tidy control.
-	warm_room(0.004 * (1.0 - clampf(frac, 0.0, 1.0)) * (1.0 - 0.8 * deficit))
+	# a clean, controlled (low) throw earns a little Applause. (It used to be scaled down by
+	# the Strength deficit, so a sagging heavy prop did not read to the crowd as tidy
+	# control - there is no such throw any more.)
+	warm_room(0.004 * (1.0 - clampf(frac, 0.0, 1.0)))
 	# but now that the crowd's patience is a resource (Phase 2), a genuinely BIG throw
 	# thrills them: on stage, height feeds the meter a little, so spectacle buys time
 	# and a timid low weave slowly bores the room even as it stays tidy.
 	if mode == MODE_PERFORM and not tut_active:
-		warm_room(APPL_THROW_HEIGHT * clampf(frac, 0.0, 1.4) * (1.0 - 0.8 * deficit))
+		warm_room(APPL_THROW_HEIGHT * clampf(frac, 0.0, 1.4))
 	if mode == MODE_PERFORM and not tut_active and frac >= 1.1:
 		play_sfx("gasp", -13.0)   # the crowd inhales at a genuinely risky throw
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
@@ -7636,15 +7893,10 @@ func pattern_mult() -> float:
 	return float(PATTERNS[pattern]["mult"])
 
 
-func object_mult() -> float:
-	# harder LOADS pay more, independent of which pattern they are juggled in
-	# (ideas.rtf: using more objects should give score a good boost compared to
-	# just spamming three balls). The ball-count term and the prop's own score
-	# multiplier compound, so climbing BOTH axes (more props AND heavier ones)
-	# is the way to a big number - e.g. seven torches far outpays three balls,
-	# but only a player who can actually sustain them gets there.
-	var ball_step := float(num_balls - MIN_BALLS)
-	return (1.0 + OBJ_BALL_BONUS * ball_step) * prop_score_mult()
+func prop_sig(kind: int = -1) -> float:
+	# `p`, the prop's exponent signature. See PROP_SIG.
+	var k := prop_type if kind < 0 else kind
+	return float(PROP_SIG[k]) if k < PROP_SIG.size() else 1.0
 
 
 func stage_darkness() -> float:
@@ -7676,86 +7928,155 @@ func is_picky_crowd() -> bool:
 	return encore_on("critic") or encore_on("hecklers")
 
 
-func prop_score_mult(kind: int = -1) -> float:
-	# the prop's own score multiplier (reward), read by object_mult on top of the ball-count
-	# term - plus its signature CONTEXT bonus: torches in the dark, knives before a picky
-	# crowd. Both only ever ADD, so choosing the right prop for the night pays and choosing
-	# the wrong one merely forgoes the bonus, never a penalty for it.
-	var k := prop_type if kind < 0 else kind
-	var m := float(PROPS[k]["smult"])
-	if k == PROP_TORCHES and is_dark_context():
-		m += DARK_PROP_BONUS
-	if k == PROP_KNIVES and is_picky_crowd():
-		m += PICKY_PROP_BONUS
-	return m
-
-
 func prop_thrill() -> float:
-	# extra crowd patience a heavy prop's Perfect catch buys: the danger of the thing thrills
-	# the room. Scales with weight, and doubles for knives before a picky crowd - exactly the
-	# fast-draining Hecklers set where keeping the room in their seats matters most.
-	var w := prop_weight() - 1
-	if w <= 0:
+	# EXTRA CROWD PATIENCE, and since 2026-07-29 this is the WHOLE of what knives and torches
+	# do for you beyond their signature (Louis: "knives just give the crowd more patience,
+	# torches give more patience and glow in the dark - so no multipliers or whatever"). The
+	# danger of the thing thrills the room, so it stays in its seat longer.
+	#
+	# It is no longer a smooth function of weight. Weight already prices a prop twice over -
+	# once at the arms in Strength, once in the score signature - and a third quiet curve on
+	# top of those is exactly the compounding this whole pass exists to remove. Two props buy
+	# patience, the rest buy none, and knives still buy double before a crowd that is hard to
+	# hold.
+	if prop_type != PROP_KNIVES and prop_type != PROP_TORCHES:
 		return 0.0
-	var t := THRILL_PERFECT * float(w)
+	var t := THRILL_PERFECT
 	if prop_type == PROP_KNIVES and is_picky_crowd():
 		t *= 2.0
 	return t
 
 
-func chain_mult() -> float:
-	# A SATURATING CURVE, so the score stays LINEAR IN TIME - see CHAIN_GAIN for why that
-	# matters and what the previous version got wrong. x1.0 cold, x2.5 at forty straight
-	# Perfects, approaching x4 and never reaching it. No hard cap anywhere: it is a limit, not
-	# a wall, so nothing ever "maxes out" on screen.
-	var c := float(chain)
-	return 1.0 + CHAIN_GAIN * c / (c + CHAIN_HALF)
+# =============================================================================
+# THE SCORE, rebuilt from scratch 2026-07-29 to Louis's specification.
+#
+# An act is a series of SEGMENTS. A segment is a stretch of consecutive catches with the
+# same load, and it ends when a prop hits the floor. Its worth is
+#
+#     s  x  PRODUCT over tricks i of (ti ^ mi)  x  x ^ (n * p)
+#
+# where x is the weighted count of catches in it (a Perfect counts 3, a Good 2, a Late 1),
+# n is the number of objects, p is the prop's signature (PROP_SIG), s is the pattern
+# multiplier, and mi is how many times trick i landed. The act's score is the sum over
+# segments, and there is nothing else in it.
+#
+# WHAT THIS REPLACED, and why each piece had to go rather than be tuned:
+#   * per-catch points (CATCH_PTS) x a chain multiplier x a pattern multiplier x an object
+#     multiplier. Four curves multiplying, three of which grew with the same underlying
+#     thing - how hard the load is - so the same difficulty was being paid for repeatedly
+#     and no single number could be reasoned about.
+#   * the PERFECT CHAIN, which reset on a Good catch. There is no chain at all now: a
+#     Perfect is simply worth three catches to a Good's two. That is a far better trade
+#     than it looks. The old rule made one Good catch in fifty cost you the whole
+#     accumulated chain, which is a cliff; this makes it cost exactly one catch of credit.
+#   * `run_mult`, a running product of trick multipliers. Tricks still multiply, but they
+#     multiply THEIR OWN SEGMENT rather than a floating accumulator, so the exponent and
+#     the tricks are two factors of one expression instead of two systems meeting at a
+#     variable.
+#
+# GOOD AND LATE CATCHES NO LONGER END A SEGMENT. Only a drop does, and only a challenge
+# that says so in as many words (the two Critics). That is Louis's rule and it is the one
+# that makes the number on screen mean "how long have I kept this up".
+#
+# ON THE SIZE OF THESE NUMBERS. The exponent is n * p, so three balls in a Cascade run at 3
+# and seven torches at 21; twenty Perfect catches is 216,000 for the first and about 10^37
+# for the second. That is deliberate and it is why goal_for computes a goal from the load
+# in hand rather than from a flat number per venue - see it for the arithmetic. Nothing may
+# assume a score fits in an int, and everything that prints one goes through score_text.
+# =============================================================================
+const CATCH_WEIGHT := [3.0, 2.0, 1.0]   # what a Perfect, a Good and a Late are worth to `x`
 
 
-func trick_difficulty(t: int) -> float:
-	# `p` FOR ONE LANDING OF THIS TRICK - the base in p^x - scaled by how hard the situation
-	# is. The base sits in TRICKS; everything else is context, and it multiplies only the
-	# EXCESS over 1.0, so the result can never dip to or below 1 and turn a trick into a
-	# penalty. A Spin with three balls in a Cascade is worth x2; the same Spin with fifteen
-	# chainsaws in Tennis is worth x6.9, which is the whole reason to climb.
-	if t < 0 or t >= TRICKS.size():
-		return 1.0
-	var base := float(TRICKS[t].get("diff", 1.0))
-	var ctx := (1.0 + TRICK_DIFF_WEIGHT * float(prop_weight() - 1)) \
-		* (1.0 + TRICK_DIFF_COUNT * float(num_balls - MIN_BALLS)) \
-		* pattern_mult()
-	return 1.0 + (base - 1.0) * ctx
-
-
-func add_run_pts(p: float) -> void:
-	run_pts += maxf(p, 0.0)
+func seg_open(reason: String = "") -> void:
+	# BANK WHAT IS STANDING AND START A NEW SEGMENT on the load in hand. Called on a drop, at
+	# the start of an act, and whenever the load itself changes - because n, p and s are
+	# factors of the whole segment, so a player who built a long x on three balls and then
+	# switched to seven torches would otherwise have the switch reach backwards and rescore
+	# every catch they already made. Closing the segment at the switch is both the honest
+	# reading of the formula and the thing that stops it being an exploit.
+	banked_pts = minf(banked_pts + seg_value(), SCORE_CEIL)
+	seg_x = 0.0
+	seg_tricks.clear()
+	seg_n = num_balls
+	seg_p = prop_sig()
+	seg_s = pattern_mult()
+	seg_reason = reason
 	recalc_score()
 
 
-func apply_trick_mult(t: int) -> void:
-	# ONE LANDING, ONE MULTIPLICATION. x landings of the same trick therefore multiply the run
-	# by p^x with no special case anywhere - which is exactly the sentence Louis wrote the
-	# feature as, and the reason it is worth resisting any "and also +N points" on top.
-	var p := trick_difficulty(t)
-	if p <= 1.0:
+func seg_sync_load() -> void:
+	# the load may have changed without a drop (the O, P and 1/2 keys all do it mid-act).
+	# Nothing happens if it has not - this is cheap enough to call from anywhere that might.
+	if seg_n != num_balls or not is_equal_approx(seg_p, prop_sig()) or not is_equal_approx(seg_s, pattern_mult()):
+		seg_open("load")
+
+
+func seg_exponent() -> float:
+	return float(seg_n) * seg_p
+
+
+func seg_value() -> float:
+	# one segment, worth exactly the expression at the head of this region
+	if seg_x <= 0.0:
+		return 0.0
+	var m := seg_s
+	for t in seg_tricks:
+		m *= pow(trick_mult(int(t)), float(seg_tricks[t]))
+	return minf(m * safe_pow(seg_x, seg_exponent()), SCORE_CEIL)
+
+
+func safe_pow(base: float, e: float) -> float:
+	# pow() OVERFLOWS TO INF LONG BEFORE THE CEILING DOES, and an INF score poisons every
+	# comparison downstream of it (a goal check, a record, a pay calculation) in a way that
+	# is very hard to trace back here. Fifteen chainsaws is an exponent of 75, so a segment
+	# of only 10,000 weighted catches is already 10^300. Decided in logs, which cannot
+	# overflow, and only then raised.
+	if base <= 0.0 or e <= 0.0:
+		return 0.0
+	if log(base) / log(10.0) * e >= 300.0:
+		return SCORE_CEIL
+	return pow(base, e)
+
+
+func seg_add_catch(quality: int) -> void:
+	# quality 0 Perfect, 1 Good, 2 Late
+	seg_x += CATCH_WEIGHT[clampi(quality, 0, 2)]
+	recalc_score()
+
+
+func trick_mult(t: int) -> float:
+	# `ti` FOR ONE LANDING OF THIS TRICK - Louis's own flat values, straight out of TRICKS.
+	# THE CONTEXT SCALING IS GONE (it used to grow a trick's worth with prop weight, count
+	# and pattern, so a Spin was x2 on three balls and x6.9 on fifteen chainsaws in Tennis).
+	# Under the new formula the load is already in the exponent, where it is worth orders of
+	# magnitude more than it ever was as a multiplier, so scaling the trick by the load as
+	# well was charging for the same difficulty twice.
+	# STILL TO BALANCE: nothing caps how many times a trick may land in one segment, so
+	# ti^mi is unbounded and cheapest to farm at the LOWEST load - see tasks.md for the two
+	# candidate nerfs. Louis asked for the suggestion, not the implementation.
+	if t < 0 or t >= TRICKS.size():
+		return 1.0
+	return float(TRICKS[t].get("diff", 1.0))
+
+
+func seg_add_trick(t: int) -> void:
+	# ONE LANDING, ONE MULTIPLICATION: mi landings of trick i multiply this segment by
+	# ti^mi with no special case anywhere, which is exactly the sentence Louis wrote it as.
+	if trick_mult(t) <= 1.0:
 		return
-	run_mult = minf(run_mult * p, SCORE_CEIL)
+	seg_tricks[t] = int(seg_tricks.get(t, 0)) + 1
 	recalc_score()
 
 
 func close_run() -> void:
-	# A DROP BANKS THE RUN. Everything the run grew to is locked in and a fresh run opens at
-	# multiplier 1 - so a drop is not a small setback, it is the end of an exponential, and the
+	# A DROP BANKS THE SEGMENT. Everything it grew to is locked in and a new one opens at
+	# x = 0 - so a drop is not a small setback, it is the end of an exponential, and the
 	# later it happens the more it costs. That is the tension the whole system is for.
-	banked_pts = minf(banked_pts + run_pts * run_mult, SCORE_CEIL)
-	run_pts = 0.0
-	run_mult = 1.0
-	chain = 0
-	recalc_score()
+	seg_open("drop")
 
 
 func recalc_score() -> void:
-	score = minf(banked_pts + run_pts * run_mult, SCORE_CEIL)
+	score = minf(banked_pts + seg_value(), SCORE_CEIL)
 
 
 func rec_table() -> Array[float]:
@@ -7941,7 +8262,7 @@ func on_trick() -> void:
 			# trick has no shaped throw to land - it IS the press - and it is now the biggest
 			# multiplier in the game, paid for by the 44 ticks of blindness below.
 			if not tut_active:
-				apply_trick_mult(trick_sel)
+				seg_add_trick(trick_sel)
 				tricks_landed += 1
 				trick_score += 1
 			set_trick_msg("SPIN")
@@ -7970,7 +8291,7 @@ func on_trick() -> void:
 				# ON is the activation; holding it costs nothing more and pays nothing more,
 				# so the score inside a run stays linear in time.
 				if not tut_active:
-					apply_trick_mult(trick_sel)
+					seg_add_trick(trick_sel)
 				# ...AND IT SAYS SO WHEN THE COMBINATION FIGHTS ITSELF. Three of the
 				# eighteen pattern x toggle states are geometrically contradictory rather
 				# than merely hard - see trick_pattern_warning - and the player is TOLD
@@ -8025,8 +8346,8 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 	if t < 0 or t >= TRICKS.size():
 		return
 	var td: Dictionary = TRICKS[t]
-	if encore_score_mult() <= 0.0:
-		return   # For the Danger: a light prop scores nothing, and neither do its tricks
+	if not encore_scores_prop():
+		return   # a prop this crowd will not be paid by scores nothing, and neither do its tricks
 	# **THE MULTIPLICATION ALREADY HAPPENED, AT THE PRESS.** This function runs on every catch
 	# of a shaped throw, so multiplying here is multiplying per CATCH - which is the time-based
 	# exponential the per-activation rule exists to remove. What is left for a landing to do is
@@ -8060,10 +8381,20 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 
 #region XP, LEVELING & UNLOCK ANNOUNCEMENTS
 func xp_to_next(lv: int) -> int:
-	# a power curve (exponent 1.4) plus a flat linear term: accelerates the XP cost
-	# per level to pair with POINTS_PER_LEVEL's own accelerating points-per-level -
-	# tuned to the ~level 115 / ~2.4M total XP completion arc (see CLAUDE.md)
-	return int(round(60.0 * pow(float(lv), 1.4))) + 40 * lv
+	# LEVELS ARRIVE TWICE AS OFTEN AND ARE WORTH HALF AS MUCH (2026-07-29, Louis: "make sure
+	# the player only unlocks everything at about level 100, which should be the current
+	# level 50 - make levels happen twice as fast - that should be 10 to 20 hours").
+	#
+	# The arithmetic, because it is the whole change and it is easy to get wrong. The old
+	# curve was 60 * lv^1.4 + 40 * lv. To halve the level scale, level L on the new curve has
+	# to cost what half a level cost on the old one at the same POINT IN THE GAME, i.e.
+	# new(L) = old(L/2) / 2 = 30 * (L/2)^1.4 + 20 * L, and 30 / 2^1.4 is 11.36. Summed to
+	# level 100 that is ~354k XP against the old curve's ~358k to level 50 - the same work,
+	# the same ten-to-twenty hours, twice as many level-ups on the way.
+	#
+	# THE POINTS PER LEVEL HALVE WITH IT (see add_xp), or this would simply hand out twice
+	# the stat points for the same play, which is not what "twice as fast" means.
+	return int(round(11.4 * pow(float(lv), 1.4))) + 10 * lv
 
 
 func all_stats_capped() -> bool:
@@ -8086,7 +8417,7 @@ func add_xp(amount: int) -> void:
 		# ends. This curve lands it at ~level 115 and ~2.4M XP: about 30-40 hours
 		# of skilled play, all content long since unlocked on the way (Louis asked
 		# what the completion arc should be - that is the answer it now has).
-		points += POINTS_PER_LEVEL + level / 12
+		points += POINTS_PER_LEVEL + level / 50
 		leveled = true
 	if leveled:
 		var s := get_viewport_rect().size
@@ -8381,7 +8712,7 @@ func resolve_act() -> void:
 		# stamped once, off the FINAL (post-collapse-strip) score, and pushed to the
 		# clipboard right away so a player who cashes in and quits still has it -
 		# the results card shows the same string, never a second, later computation
-		var enc_name := String(ENCORES[encore]["name"]) if encore >= 0 and encore < ENCORES.size() else "no Encore"
+		var enc_name := encore_names() if not encores.is_empty() else "no Encore"
 		var outcome := "all 3 goals" if complete else "%d/%d goals" % [goals_hit, NUM_GOALS]
 		daily_share = GAME_TITLE + " Daily %d-%02d-%02d  -  %s, %s  -  %s  -  %s pts  -  best streak %d" % [
 			int(daily_seed() / 10000), int(daily_seed() / 100) % 100, daily_seed() % 100,
@@ -8424,8 +8755,8 @@ func slow_target() -> float:
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
 	# frame-perfect catch, and an earned fifty-Perfect thirty-second window. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
-	var a := 0.0 if purist_run() else float(mini(speed, SPEED_CAP)) / 8.0 / 100.0
-	if pie_active and not purist_run():
+	var a := 0.0 if purist_stat("spd") else float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
+	if pie_active and not purist_all():
 		a += PIE_SLOW
 	if _frames < amazing_until:
 		a += BURST_SLOW
@@ -8461,121 +8792,141 @@ func slow_amount() -> float:
 	return _slow_cur   # the live value, always easing linearly (see SLOW_RAMP)
 
 
+func purist_all() -> bool:
+	# THE PURIST BOOKING: no gear, no stats, no help, and its own record board. This is the
+	# whole-night version and it is the only one that decides which board a score is written
+	# to. Training is never purist (practice is practice).
+	return purist and mode == MODE_PERFORM
+
+
+func purist_stat(id: String) -> bool:
+	# ...AND THE FOUR STAT-BY-STAT VERSIONS (2026-07-29, Louis: "split purist night into all
+	# four stats with combinations of them possible in late game stages"). One Encore per
+	# stat, each stripping only its own, so a night can ask for hands with no Accuracy while
+	# leaving the stamina and the slow motion alone. The booking-level Purist above implies
+	# all four at once, which is what keeps the old board meaning what it always meant.
+	return purist_all() or encore_on("purist_" + id)
+
+
 func purist_run() -> bool:
-	# a PURIST booking strips the stat comforts from the catch maths, so its records are
-	# pure skill. The Purist's Night Encore does the same to a single set. Which RECORD
-	# board a night writes to still keys off the booking's `purist` flag, not this - so a
-	# Purist Encore only makes the third set harder, it does not relabel the whole booking.
-	# Training is never purist (practice is practice).
-	return (purist and mode == MODE_PERFORM) or encore_on("purist")
+	# "is anything at all being stripped tonight", for the readouts and the gear checks
+	return purist_all() or purist_stat("acc") or purist_stat("str") \
+		or purist_stat("end") or purist_stat("spd")
 
 
 func eff_accuracy() -> float:
-	if purist_run():
+	if purist_stat("acc"):
 		return clampf(5.0 * stamina_mult(), 0.0, 100.0)   # a fresh juggler's hands
 	return clampf(float(accuracy) * stamina_mult(), 0.0, 100.0)
 
 
-func inacc_factor() -> float:
-	# 1.0 of the base inaccuracy at Accuracy 0, ACC_MIN_FACTOR at Accuracy 100.
-	# Never reaches zero, so a max-height throw always still needs a real catch.
-	return lerpf(1.0, ACC_MIN_FACTOR, eff_accuracy() / 100.0)
+func height_penalty(over: float) -> float:
+	# what a throw's height costs an off-Perfect catch: one straight line from nothing at the
+	# tap floor to HEIGHT_PEN_MAX at HEIGHT_PEN_TOP. `over` is height ABOVE this count's own
+	# tap floor, never the absolute height - see the HEIGHT_PEN_MAX entry for the measurement
+	# that made that distinction necessary.
+	return clampf(over, 0.0, HEIGHT_PEN_TOP) / HEIGHT_PEN_TOP * HEIGHT_PEN_MAX
 
 
-func catch_chance(quality: int, height: float) -> float:
+func catch_chance(quality: int, over: float) -> float:
 	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures.
-	# Rises with Accuracy and falls with the throw's height. Perfect timing is
-	# handled separately in on_catch.
+	# Rises with Accuracy and falls with how much higher than necessary the throw went.
+	# Perfect timing is handled separately in on_catch.
 	if tut_active:
 		return 1.0   # a lesson never punishes a reasonable attempt with an unseen dice
 					 # roll. A total MISS still loses the ball (MISTIME/MISS_GRACE reach
 					 # drop_ball), so whiffing entirely is still taught.
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
-	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
-	p += float(PROPS[prop_type]["fgive"])   # clubs are intrinsically forgiving: a better off-Perfect
-	if wearing("gloves"):
-		p += GLOVES_FGIVE   # SILK GLOVES give every prop what a club has by nature. Comfort
-							 # axis only: it moves the off-Perfect ODDS, never the Perfect
-							 # window itself, so the timing floor is exactly where it was
-											# catch than their weight implies. A property of the prop
-											# itself (like its weight), so it stands even in a Purist run.
-	if not purist_run():
-		p += strength_catch_mod()  # raw muscle steadies a heavy prop in the hand (and only a
-								   # too-weak grip on a heavy prop makes the catch itself shaky)
+	var p := base + acc_norm * ACC_CATCH_BONUS - height_penalty(over)
+	# THE PROP IS NOT IN THIS SUM ANY MORE (2026-07-29). `fgive` gave clubs a kinder
+	# off-Perfect catch and Strength steadied a heavy prop in the hand; both are gone. A
+	# prop's character is now four flat things and no curves: what it costs in Strength to
+	# throw, what it costs in stamina, what it is worth in the score, and whether it moves
+	# the Perfect FRAMES (clubs +1, the chainsaw -1). Knives and torches buy crowd patience
+	# instead, and torches glow. Nothing about a prop touches the catch ODDS.
+	if not purist_all():
+		if wearing("gloves"):
+			p += GLOVES_FGIVE       # silk gloves: comfort, on the odds only, never the window
 		if wearing("glasses"):
-			p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
+			p += GLASSES_CATCH_BONUS
 	if spinning():
 		p -= SPIN_ACC_PENALTY      # a Spin means catching blind, so off-Perfect gets riskier
 	return clampf(p, MIN_CATCH_P, 1.0)
 
 
-func strength_surplus() -> float:
-	# how far Strength exceeds the CURRENT prop's requirement, as a fraction of the
-	# remaining room up to the stat's REAL cap. The old hardcoded 100 here was the
-	# previous ceiling: with the cap at 200 it silently froze every benefit past
-	# Strength 100, which (with the last ball gate at 165) made points above ~170
-	# worth nothing at all (Louis). Now every point from the requirement to 200
-	# pays out the same linear slice, for every prop.
-	var req := prop_req()
-	if req <= 0 or strength <= req:
-		return 0.0
-	return clampf((float(strength) - float(req)) / maxf(1.0, float(STR_CAP) - float(req)), 0.0, 1.0)
-
-
-func strength_catch_mod() -> float:
-	# How Strength changes the catch of the CURRENT prop. Light props (balls, eggs) are
-	# unaffected. For a heavy prop, being well OVER its Required Strength steadies it and
-	# eases the catch; being UNDER it makes even the catch shaky. Scales with the prop's
-	# weight, so the top props gain the most from raw muscle, and it is never a height or
-	# timing change, only a small nudge to the off-Perfect odds.
-	var w := prop_weight() - 1                 # 0 for balls/eggs, up to 4 for torches
-	var req := prop_req()
-	if w <= 0 or req <= 0:
-		return 0.0
-	if strength > req:
-		return strength_surplus() * float(w) * STRENGTH_CATCH
-	var ratio := clampf(float(strength) / float(req) - 1.0, -1.0, 0.0)   # -1 hopeless, 0 just enough
-	return ratio * float(w) * STRENGTH_CATCH
-
-
 func focus() -> float:
-	# Accuracy trained beyond 100 becomes Focus. Catch maths still cap at 100
-	# (see eff_accuracy), so Focus never makes catching easier, only cheaper and,
-	# very late, a touch more forgiving on the Perfect window.
+	# Accuracy trained beyond 100 becomes Focus. The catch maths still cap at 100 (see
+	# eff_accuracy), so Focus never makes catching easier - it makes throwing cheaper, and
+	# then, past 150, it widens the timing.
+	if purist_stat("acc"):
+		return 0.0
 	return maxf(0.0, float(accuracy) - 100.0)
 
 
 func focus_stam_mult() -> float:
-	# Stage 1: Focus 0..100 lowers every action's stamina cost toward a floor.
-	return lerpf(1.0, FOCUS_STAM_FLOOR, clampf(focus() / 100.0, 0.0, 1.0))
+	# STAGE ONE, Accuracy 101 to 150 (2026-07-29, Louis: "101-150 should be focus which
+	# linearly cuts stamina costs from 1 to 0.25 with a minimum of 1 per throw"). It used to
+	# run 101 to 200, so the same discount is reached in half the points and the second half
+	# of the track is free to do something else. The one-point floor lives at the two places
+	# a cost is actually spent, not here.
+	return lerpf(1.0, FOCUS_STAM_FLOOR, clampf(focus() / FOCUS_STAM_SPAN, 0.0, 1.0))
+
+
+func focus_frames() -> int:
+	# STAGE TWO, Accuracy 151 to 200: one Perfect frame per FOCUS_WINDOW_PER points, five in
+	# all, and the track stops at 200. (It used to start at 101 and run to an Accuracy cap of
+	# 250 for six frames, overlapping stage one the whole way.)
+	var extra := focus() - FOCUS_STAM_SPAN
+	if extra <= 0.0:
+		return 0
+	return mini(FOCUS_WINDOW_MAX, int(extra / FOCUS_WINDOW_PER))
+
+
+func strength_frames() -> int:
+	# THE LAST FIVE POINTS OF STRENGTH buy a Perfect frame (2026-07-29, Louis). Every count
+	# of every prop is already open at 195 (fifteen chainsaws), so without this the top of
+	# the track was dead weight - the one stat that could be maxed and then stop paying.
+	if purist_stat("str"):
+		return 0
+	return 1 if strength >= STR_CAP - STR_FRAME_LAST else 0
+
+
+func frame_bonus() -> int:
+	# HOW MANY TICKS EVERY CATCH BAND MOVES, and the reason this function exists at all
+	# (2026-07-29, Louis: "i expect adding a perfect frame to adjust the good, late and whiff
+	# frames accordingly with adding one to all. same for removing one").
+	#
+	# The old code widened the PERFECT band alone, into a fixed Good boundary, so a player
+	# earning frames did not get a kinder game - they got the Good tier eaten, one tick at a
+	# time, until at the Accuracy cap it vanished entirely and every Good catch was silently
+	# relabelled a Perfect. That reads as generosity and is really the loss of a whole tier.
+	# One shared offset moves Perfect, Good and Late together, so the bands keep their widths
+	# and a frame is worth the same thing wherever it comes from.
+	#
+	# Clamped so the Perfect band can never fall below PWIN_FLOOR, and clamped ONCE, here, so
+	# that a floored Perfect cannot leave Good and Late shifted by a different amount.
+	var b := focus_frames() + strength_frames() + int(PROPS[prop_type]["pwin"])
+	if encore_on("cold"):
+		b -= 1        # Cold Hands: one frame tighter (it was two before the bands moved
+					  # together, when a tick of Perfect was a much smaller thing to lose)
+	return maxi(PWIN_FLOOR - W_PERFECT, b)
 
 
 func perfect_window() -> int:
-	# Stage 2: once stage 1 has bottomed out (Focus > 100), each FOCUS_WINDOW_PER
-	# of further Focus widens the Perfect band by a tick, capped at the Good band
-	# (W_GOOD) so timing still rules. At the Accuracy cap (250) the window reaches
-	# exactly W_GOOD, which FOLDS the Good tier into Perfect - those catches simply
-	# score Perfect instead, a generous reward for maxing Accuracy, not a lost tier.
-	# Below the cap a Good band still sits between Perfect and Late.
 	if tut_active:
-		return W_LATE   # in a lesson, ANY in-window press is a Perfect: a beginner
-						# should never fail a catch they reasonably attempted. The real
-						# windows return the instant the lesson ends.
-	var w := W_PERFECT
-	if not purist_run():           # no Focus widening on the Purist board
-		var extra := focus() - 100.0
-		var bonus := 0
-		if extra > 0.0:
-			bonus = mini(FOCUS_WINDOW_MAX, int(extra / FOCUS_WINDOW_PER))
-		w = mini(W_GOOD, W_PERFECT + bonus)
-	if encore_on("cold"):
-		w = maxi(2, w - 2)         # Cold Hands: the Perfect window is two ticks tighter
-	# heavier props ask for tighter timing (clubs stay forgiving for their weight, torches
-	# tightest) - the difficulty half of the per-prop character. Floored so the sum of a
-	# heavy prop AND Cold Hands is still humanly hittable.
-	w = maxi(PWIN_FLOOR, w + int(PROPS[prop_type]["pwin"]))
-	return w
+		return late_window()   # in a lesson, ANY in-window press is a Perfect: a beginner
+							   # should never fail a catch they reasonably attempted
+	return W_PERFECT + frame_bonus()
+
+
+func good_window() -> int:
+	return W_GOOD + frame_bonus()
+
+
+func late_window() -> int:
+	# the outer edge: past this a press is a whiff, not a catch
+	return W_LATE + frame_bonus()
 
 
 func run_clean() -> float:
@@ -8755,20 +9106,8 @@ func cur_prop() -> Dictionary:
 	return PROPS[prop_type]
 
 
-func prop_req(kind: int = -1) -> int:
-	return int(PROPS[prop_type if kind < 0 else kind]["req"])
-
-
 func prop_weight(kind: int = -1) -> int:
 	return int(PROPS[prop_type if kind < 0 else kind]["weight"])
-
-
-func prop_deficit() -> float:
-	# how far below the prop's Required Strength we are, 0 (fine) to 1 (hopeless)
-	var req := prop_req()
-	if req <= 0 or strength >= req:
-		return 0.0
-	return clampf(float(req - strength) / float(req), 0.0, 1.0)
 
 
 func have(kind: int) -> int:
@@ -8778,8 +9117,10 @@ func have(kind: int) -> int:
 
 
 func available(kind: int) -> bool:
-	# selectable only if you own enough to juggle the minimum count
-	return have(kind) >= MIN_BALLS
+	# selectable only if you own enough to juggle the minimum count AND are strong enough to
+	# throw that many. Both halves are hard walls (2026-07-29): a prop you cannot lift three
+	# of is not a prop you can practise with, so it should not be offered.
+	return have(kind) >= MIN_BALLS and max_count(kind) >= MIN_BALLS
 
 
 func prop_color(kind: int) -> Color:
@@ -8997,10 +9338,17 @@ func _migrate_lesson_id(id: String) -> String:
 func load_progress() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(save_file()) == OK:
-		accuracy = int(cf.get_value("stats", "accuracy", 5))
-		strength = int(cf.get_value("stats", "strength", 6))
-		endurance = int(cf.get_value("stats", "endurance", 0))
-		speed = int(cf.get_value("stats", "speed", 0))
+		# CLAMPED TO THE LIVE CAPS ON THE WAY IN (2026-07-29). Accuracy's ceiling came down
+		# from 250 to 200 with the Focus rework, so a save made before that can carry up to
+		# fifty points the game no longer has a use for - and an out-of-range stat is the
+		# kind of thing that reads fine on the sheet and then divides by a cap somewhere far
+		# away. The points are not refunded: they were spent on a stage of Focus that no
+		# longer exists, and quietly handing back fifty stat points is a bigger surprise than
+		# quietly losing them.
+		accuracy = clampi(int(cf.get_value("stats", "accuracy", 5)), 0, ACC_CAP)
+		strength = clampi(int(cf.get_value("stats", "strength", 6)), 0, STR_CAP)
+		endurance = clampi(int(cf.get_value("stats", "endurance", 0)), 0, END_CAP)
+		speed = clampi(int(cf.get_value("stats", "speed", 0)), 0, SPEED_CAP)
 		pie_count = int(cf.get_value("stats", "pies", 0))
 		pie_active = bool(cf.get_value("day", "pie_active", false))
 		money = int(cf.get_value("stats", "money", START_GOLD))
@@ -9017,8 +9365,18 @@ func load_progress() -> void:
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
 		# an old save wrote ONE "glow_kit" flag; it means both halves, which is exactly
 		# what it bought. Read it as the default for each so nobody loses a 60,000 item.
+		# AN OLD SAVE'S GLOW TAPE LIT EVERY PROP IT OWNED, so that is exactly what it is
+		# migrated to: a glowing copy of the whole collection. Anything else would take a
+		# 34,000 purchase away from somebody mid-career.
 		var old_kit := bool(cf.get_value("stats", "glow_kit", false))
-		has_glow_tape = bool(cf.get_value("stats", "glow_tape", old_kit))
+		var old_tape := bool(cf.get_value("stats", "glow_tape", old_kit))
+		var gsaved: Array = cf.get_value("stats", "glow_count", [])
+		glow_count = [0, 0, 0, 0, 0, 0, 0]
+		for gi2 in mini(gsaved.size(), glow_count.size()):
+			glow_count[gi2] = maxi(0, int(gsaved[gi2]))
+		if old_tape and gsaved.is_empty():
+			for gi3 in glow_count.size():
+				glow_count[gi3] = int(prop_count[gi3]) if gi3 < prop_count.size() else 0
 		has_backroom = bool(cf.get_value("stats", "backroom", false))
 		energy_drinks = int(cf.get_value("stats", "energy_drinks", 0))
 		level = int(cf.get_value("prog", "level", 1))
@@ -9178,8 +9536,7 @@ func save_progress() -> void:
 	# them from `wearing()` would mean a hat taken off for one act came back as a hat never
 	# bought, which is a save-eating bug hiding in a one-word difference.
 	cf.set_value("stats", "glasses", owns_any("glasses"))
-	cf.set_value("stats", "glow_kit", has_glow_tape and owns_any("glow"))   # kept for old builds
-	cf.set_value("stats", "glow_tape", has_glow_tape)
+	cf.set_value("stats", "glow_count", glow_count)
 	cf.set_value("stats", "glow_suit", owns_any("glow"))
 	cf.set_value("stats", "gloves", owns_any("gloves"))
 	cf.set_value("stats", "boots", owns_any("boots"))
@@ -9421,7 +9778,7 @@ func update_sim() -> void:
 	# props that visibly clack both become nearly uncatchable (see on_catch); a PERFECT
 	# pattern never collides, so this only ever punishes sloppy heights that share air.
 	# The dev --collcheck harness rides the same loop to audit the ideal geometry.
-	var clacks := set_collide or encore_on("tight")
+	var clacks := set_collide
 	if clacks or _collcheck:
 		var fly: Array[Ball] = []
 		var fpos: Array[Vector2] = []
@@ -11539,9 +11896,9 @@ func draw_targets() -> void:
 			draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
 		elif b.bumped:
 			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.4, 0.3, 0.2 + 0.5 * t), 3.0, true)
-		elif adiff <= W_GOOD:
+		elif adiff <= good_window():
 			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
-		elif adiff <= W_LATE and dd < 0:
+		elif adiff <= late_window() and dd < 0:
 			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.9, 0.62, 0.35, 0.7), 3.0, true)
 		else:
 			draw_arc(b.to_pos, r, 0.0, TAU, 40,
@@ -11594,11 +11951,26 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 			# is still the exception the Encore is built around: it carries its own fire.
 			if encore_on("blackout"):
 				var dark_pos := flight_pos(b)
+				# **AND AN UNLIT PROP IS NOW SIMPLY NOT THERE** (2026-07-29, Louis: "make
+				# normal objects (not glow in the dark) completely invisible - so it is
+				# possible, but incredibly hard to juggle"). It used to be drawn at
+				# BLACKOUT_UNLIT, a dim silhouette, which is the compromise this entry's
+				# earlier paragraphs argue for. He has overruled it, and the reason the
+				# overrule is safe is the new ownership gate: Blackout cannot roll at all
+				# until you own three glowing balls or torches (see encore_pool), so nobody
+				# meets this challenge without the answer to it already in the bag. What
+				# used to be a mercy is now the price of admission.
+				# A TORCH IS THE EXCEPTION AND ONLY HALF AN EXCEPTION: the flame and its
+				# glow are always visible, because fire is fire, but the HANDLE under it
+				# vanishes with everything else unless the torch itself is a glowing one.
 				if b.kind == PROP_TORCHES:
 					draw_flame_in_dark(b, dark_pos)
-				else:
+					if prop_glows(b.kind):
+						draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind),
+							prop_spin_angle(b), 1.0)
+				elif prop_glows(b.kind):
 					draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind),
-						prop_spin_angle(b), 1.0 if has_glow_tape else BLACKOUT_UNLIT)
+						prop_spin_angle(b), 1.0)
 				continue
 			draw_trail(b)
 			var pos := flight_pos(b)
@@ -11729,13 +12101,37 @@ func warm_room(amount: float) -> void:
 	# a single answer. Losses are deliberately NOT routed through it: a coat that softened
 	# the drop as well as speeding the climb would be two buffs wearing one price.
 	applause = minf(1.0, applause + amount * (COAT_WARM if wearing("coat") else 1.0))
+	# ONCE YOU HAVE HAD THEM, THEY WILL NOT THROW TOMATOES (2026-07-29, Louis: "the public
+	# may only throw tomatoes if the performer never entered the green public, else the
+	# people already got what they came for and are happy enough"). A one-way latch, on the
+	# same FLOWER_GREEN line the flower economy already uses, so "the meter went green" means
+	# one thing everywhere. It is reset per act in start_run, never mid-act - the whole point
+	# is that the room remembers the good part of the night even after it goes wrong.
+	if applause >= FLOWER_GREEN:
+		won_the_room = true
+
+
+func prop_glows(kind: int = -1) -> bool:
+	# do the props IN HAND carry phosphor? You need a glowing one for every object you are
+	# fielding: eight balls and three glowing ones is eight ordinary balls, because the two
+	# would be indistinguishable in the air and the pattern is what you are reading.
+	var k := prop_type if kind < 0 else kind
+	return k < glow_count.size() and glow_count[k] >= num_balls
+
+
+func can_juggle_glowing() -> bool:
+	# ...and could this save field a glowing routine AT ALL - the gate Blackout hangs on
+	# (Louis: "at least 3 glow in the dark balls or torches"). Deliberately the two props he
+	# named: balls are the cheap answer everyone can reach and torches are the spectacular
+	# one, and between them no player is ever locked out or handed it for nothing.
+	return glow_count[PROP_BALLS] >= MIN_BALLS or glow_count[PROP_TORCHES] >= MIN_BALLS
 
 
 func glow_props_lit() -> bool:
 	# phosphor only shows where it would actually matter - a dark stage - which is the
 	# rule the prop halos already follow (Louis: a glow that is always on is just a
 	# colour, and stops meaning anything)
-	return has_glow_tape and is_dark_context()
+	return prop_glows() and is_dark_context()
 
 
 func glow_suit_lit() -> bool:
@@ -11848,9 +12244,10 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		var bsc := prop_scale(b.kind)
 		if b.kind == PROP_TORCHES:
 			draw_flame_in_dark(b, pos)   # fire is fire, in the hand as in the air
-		else:
-			draw_glow_in_dark(pos, b.color, b.kind, bsc, prop_spin_angle(b),
-				1.0 if has_glow_tape else BLACKOUT_UNLIT)
+			if prop_glows(b.kind):
+				draw_glow_in_dark(pos, b.color, b.kind, bsc, prop_spin_angle(b), 1.0)
+		elif prop_glows(b.kind):
+			draw_glow_in_dark(pos, b.color, b.kind, bsc, prop_spin_angle(b), 1.0)
 		return
 	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
 								   # (prop_hit_scale) ever shrinks - on a big load, or
@@ -13118,18 +13515,26 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
 
 		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
-		if encore >= 0 and encore < ENCORES.size():
+		if not encores.is_empty():
+			# ONE CARD PER CHALLENGE, stacked (2026-07-29): a Purist night can carry four at
+			# once, and one card listing four names with four descriptions run together is
+			# unreadable. Each keeps its own box and its own height, and the box still grows
+			# to whatever its description wraps to (36 of chrome plus a 15px line each) so a
+			# longer challenge is never clipped by its own border.
 			var ec := Color(1.0, 0.55, 0.42)
-			# the card grows to whatever its description wraps to (36 of chrome plus a
-			# 15px line each), so a longer challenge is never clipped by its own border
-			var edesc := String(ENCORES[encore]["desc"])
-			var elines := _wrap_lines(font, edesc, LW - 28, 11)
-			# ...and it sits under the crowd card, whose own height is now a variable
+			# ...and the stack sits under the crowd card, whose own height is a variable
 			# (the dial is taller than the bar it replaced), so this follows it
 			var eay := ccard_y + ccard_h + 8.0
-			hud_card(Rect2(LX, eay, LW, 36.0 + 15.0 * float(maxi(elines.size(), 2))), Color(ec.r, ec.g, ec.b, 0.5))
-			draw_fit_string(font, Vector2(LX + 14, eay + 22.0), String(ENCORES[encore]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
-			_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+			for e in encores:
+				if e < 0 or e >= ENCORES.size():
+					continue
+				var edesc := String(ENCORES[e]["desc"])
+				var elines := _wrap_lines(font, edesc, LW - 28, 11)
+				var ehh := 36.0 + 15.0 * float(maxi(elines.size(), 2))
+				hud_card(Rect2(LX, eay, LW, ehh), Color(ec.r, ec.g, ec.b, 0.5))
+				draw_fit_string(font, Vector2(LX + 14, eay + 22.0), String(ENCORES[e]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
+				_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+				eay += ehh + 6.0
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
 		# here (Louis: no redundancy) - the routine card at the foot of the stage
@@ -13149,18 +13554,19 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if not results_open:
 		var RW := 264.0
 		var RX := s.x - 18.0 - RW
-		# THE RUN MULTIPLIER, which is now the addictive number and has no ceiling to show.
-		# The card used to print the streak against its cap ("x30  MAX"); there is no cap any
-		# more, and the interesting figure is what the TRICKS have built - the thing that is
-		# lost at the next drop. The chain sits beside it, small, because it is the linear
-		# half and now worth a twentieth of what it used to look like.
+		# THE SEGMENT, which is the addictive number now and has no ceiling to show. The big
+		# figure is what THIS stretch is worth - everything a drop is about to cost - and the
+		# small line underneath is the arithmetic behind it: the weighted catch count and the
+		# exponent it is being raised to. The exponent is the part a player plans around,
+		# because it is the one thing they chose before the act started.
 		hud_card(Rect2(RX, 16, RW, 50))
-		var heat := clampf(log(maxf(run_mult, 1.0)) / 9.0, 0.0, 1.0)   # x1 cool, x8000 hot
+		var segv := seg_value()
+		var heat := clampf(log(maxf(segv, 1.0)) / 24.0, 0.0, 1.0)
 		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
-		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if chain > 0 else 0
-		draw_string(font, Vector2(RX + 14, 52), "x%s" % mult_text(run_mult), HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "RUN MULT", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(RX + RW - 150, 56), "chain %d  ·  x%.2f" % [chain, chain_mult()], HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if seg_x > 0.0 else 0
+		draw_string(font, Vector2(RX + 14, 52), score_text(segv), HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
+		draw_string(font, Vector2(RX + RW - 150, 40), "THIS RUN", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + RW - 150, 56), "%d catches  ^%.1f" % [int(seg_x), seg_exponent()], HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
 		# stat points are actionable (Tab), so they get one pulsing line. Gold,
@@ -13208,9 +13614,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_routine_hud(font, s)
 
 	if not tut_active and not results_open:
-		# an under-strength warning sits low-centre, in words, only when it applies
-		if prop_deficit() > 0.0:
-			draw_text_shout(font, Vector2(0, s.y - 112.0), "TOO WEAK for %s  -  throws sag low and wild (needs Strength %d)" % [String(cur_prop()["name"]).to_upper(), prop_req()], HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.55, 0.4))
+		# THE STRENGTH WARNING IS A WALL NOW, NOT A WARNING (2026-07-29). It used to read
+		# "TOO WEAK ... throws sag low and wild", which described the old deficit model:
+		# you could always throw, it just came out badly. Under the new rule the load is
+		# simply not liftable, so the line says what is true and what would fix it.
+		if strength < prop_req():
+			draw_text_shout(font, Vector2(0, s.y - 112.0), "TOO HEAVY  -  %d %s needs Strength %d" % [num_balls, String(cur_prop()["name"]).to_upper(), prop_req()], HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.55, 0.4))
 		if not started:
 			var verb := "perform" if performing else "practise"
 			var pa2 := 0.75 + 0.25 * sin(float(tick) * 0.06)
@@ -14476,7 +14885,7 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 	# places on screen can disagree about what a point is worth.
 	#
 	# Every entry is a threshold the GAME ITSELF gates on, read out of the real tables
-	# (PATTERNS/TRICKS' own acc/str fields, PROPS' req, BALL_GATES) or computed from the
+	# (PATTERNS/TRICKS' own acc/str fields, PROP_STR_UNIT) or computed from the real
 	# real formula - never a decorative number. Louis, 2026-07-27: Speed had a line
 	# saying what its points do and the others did not, so nobody could tell what
 	# Accuracy or Strength were for.
@@ -14497,29 +14906,33 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 			add.call(int(t[which]), String(t["name"]))
 	match which:
 		"acc":
-			# the two Focus stages, in the words of what they DO at the counter. They sit
-			# on the same even 50-point ladder the pattern and trick walls moved onto.
+			# THE TWO FOCUS STAGES, and they no longer overlap: 101-150 is the stamina
+			# discount, 151-200 is the timing, five frames one at a time.
 			add.call(100, "Focus: less stamina")
-			add.call(200, "wider Perfect window")
-			add.call(ACC_CAP, "Good scores Perfect")
+			add.call(150, "cheapest throws")
+			for f in range(1, FOCUS_WINDOW_MAX + 1):
+				add.call(150 + f * int(FOCUS_WINDOW_PER), "+%d catch frame%s" % [f, "" if f == 1 else "s"])
 		"str":
-			# what raw muscle opens: the counts, one every 16.7 points (BALL_GATES).
-			# The heavy PROPS' own requirements are deliberately NOT listed here - four
-			# more pips crammed into the bottom quarter is the exact crowding this pass
-			# exists to remove, and every shop card already prints its own "Str 12".
-			for n in BALL_GATES:
-				add.call(int(BALL_GATES[n]), "%d props" % int(n))
+			# WHAT RAW MUSCLE OPENS, straight off the one rule (PROP_STR_UNIT x count) rather
+			# than the old BALL_GATES table. Only the prop IN HAND is listed, because the
+			# answer is different for every prop now - fifteen balls is 15 points and fifteen
+			# chainsaws is 195, and a single ladder cannot say both. The shop cards carry each
+			# prop's own arithmetic at the point of choice.
+			var unit := prop_str_unit()
+			for n in range(MIN_BALLS, MAX_BALLS_HARD + 1):
+				add.call(unit * n, "%d %s" % [n, String(cur_prop()["name"]).to_lower()])
+			add.call(STR_CAP - STR_FRAME_LAST, "+1 catch frame")
 		"end":
 			# no named skill: labelled with the stamina pool it reaches, which IS the effect
 			for frac in [0.25, 0.5, 0.75, 1.0]:
 				var ev := int(round(float(cap) * frac))
 				add.call(ev, "%d stamina" % int(round(100.0 + 9.0 * float(ev))))
 		"spd":
-			# every whole percent of slow motion is its own step: 8 points buys one, and
-			# it accrues CONTINUOUSLY (see slow_target) - a point is never wasted waiting
-			# for a milestone, the pips just mark where the number ticks over
-			for pct in [2, 5, 10, 15, 20, 25]:
-				add.call(pct * 8, "%d%% slow" % pct)
+			# every whole percent of slow motion is its own step: SPEED_PER_PCT points buys
+			# one, and it accrues CONTINUOUSLY (see slow_target) - a point is never wasted
+			# waiting for a milestone, the pips just mark where the number ticks over
+			for pct in [2, 5, 10, 15, 20]:
+				add.call(pct * SPEED_PER_PCT, "%d%% slow" % pct)
 	var out: Array[Dictionary] = []
 	var vals := by_val.keys()
 	vals.sort()
@@ -15342,17 +15755,29 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_line(Vector2(cx0 + 16.0, cy0 + 130.0), Vector2(cx0 + cw - 16.0, cy0 + 130.0),
 			Color(pcol.r, pcol.g, pcol.b, 0.22), 1.0)
 		draw_fit_string(font, Vector2(cx0, cy0 + 156.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
-		var req := int(PROPS[i]["req"])
-		var reqline := "weight %d  ·  light throw" % int(PROPS[i]["weight"]) if req == 0 else "weight %d  ·  Str %d" % [int(PROPS[i]["weight"]), req]
+		# WHAT YOUR ARMS SAY, at the point of choice. A prop costs PROP_STR_UNIT per OBJECT
+		# now, so the useful number on a shop card is not "Str 48 to hold one torch" but how
+		# many of them you could actually field, and what the next one would cost. A card
+		# whose answer is "none" says so in red before any money changes hands.
+		# KEPT SHORT ON PURPOSE. The first wording was "Str 1 each - you can throw 15", which
+		# needs more width than a seventh of the panel has, so fit_text ellipsised it to "you
+		# can thro..." - and an ellipsised line whose last word is the NUMBER has thrown away
+		# the only part worth reading (CLAUDE.md's own rule about numbers, met from the other
+		# direction: the fix is fewer words, not a smaller font).
+		var can := max_count(i)
+		var reqline := "Str %d each  ·  max %d" % [prop_str_unit(i), can]
 		if i == PROP_EGGS:
-			reqline = "weight 1  ·  fragile"
+			reqline = "Str %d each  ·  fragile" % prop_str_unit(i)
 		var reqcol := Color(0.75, 0.68, 0.6)
-		if req > strength:
-			reqcol = Color(0.95, 0.6, 0.45)   # under-strength: flag it before the buy
-		draw_string(font, Vector2(cx0, cy0 + 178.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, reqcol)
-		# the REWARD, quantified: this prop's own score multiplier, so the harder-pays-more
-		# trade is legible at the point of choice (context bonuses stack on top, in play)
-		draw_string(font, Vector2(cx0, cy0 + 198.0), "pays  ×%.2f" % float(PROPS[i]["smult"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
+		if can < MIN_BALLS:
+			reqcol = Color(0.95, 0.6, 0.45)   # not strong enough for a routine: flag it
+			reqline = "needs Str %d for three" % prop_req(i, MIN_BALLS)
+		# draw_fit_string, NOT draw_string with a width: `width` CLIPS mid-glyph, which is how
+		# this line came out reading "you can throw 1" for a player who can throw 15.
+		draw_fit_string(font, Vector2(cx0, cy0 + 178.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw - 10.0, 11, reqcol)
+		# the REWARD, quantified: this prop's signature is an EXPONENT, so the honest thing
+		# to print is what it does to the exponent at the count in hand, not a multiplier
+		draw_string(font, Vector2(cx0, cy0 + 198.0), "score ^%.1f at %d" % [float(num_balls) * prop_sig(i), num_balls], HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
 		# THE SET: you need one prop per object you juggle, so what actually matters at
 		# the counter is stock against YOUR count - not the raw number owned. A short
 		# meter and one line say whether tonight's routine is fielded, and the top-up key
@@ -15363,6 +15788,10 @@ func draw_shop(font: Font, s: Vector2) -> void:
 		draw_meter(cx0 + 14.0, cy0 + 208.0, cw - 28.0, 7.0, setf, setc)
 		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
 		draw_fit_string(font, Vector2(cx0, cy0 + 232.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
+		# THE GLOWING SET IS NOT ON THE CARD. It was, for exactly one render, and it landed
+		# straight through the price plate: the card is full from its icon to its foot and
+		# there is no row left in it. It lives in the detail strip instead, which is where a
+		# prop's identity already lives and which only ever describes the SELECTED prop.
 		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0),
 			shop_key_label(ci), commafy(cost), afford)
 
@@ -15376,7 +15805,9 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var glist := shop_gear()
 	var gn := glist.size()
 	var gy := y0 + ch + 30.0
-	draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+	if gn > 0:   # ...and no header over an empty row: the gear cards all became clothing or,
+		# in the Glow Tape's case, per-prop stock, so the row is usually empty now
+		draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
 	# A GEAR CARD HAS A MAXIMUM WIDTH. With the clothes gone the row holds ONE item, and
 	# `innerw / 1` stretched that card across the whole panel - a single object floating in
 	# 1,040px of empty card, which reads as a bug rather than as a shop with one thing left
@@ -15445,6 +15876,10 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			var pk: int = shop_props()[shop_sel]
 			detail_head = String(PROPS[pk]["name"])
 			detail = String(PROPS[pk]["trait"])
+			# ...and what a GLOWING set of them would cost, since this is the only place in
+			# the game that sells one, and the card itself is full to its foot.
+			var gown := glow_count[pk] if pk < glow_count.size() else 0
+			detail += "   [G] glowing: own %d, %s each" % [gown, commafy(glow_cost(pk))]
 		else:
 			var gi := shop_sel - shop_gear0()
 			var gl := shop_gear()
@@ -15458,11 +15893,11 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# ---------------- footer: the keys ----------------
 	if pad_active():
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
-			[[["Stick"], "choose"], [k_finish(), "buy one"], [["X"], "buy the set"], [k_sheet(), "leave"]])
+			[[["Stick"], "choose"], [k_finish(), "buy one"], [["X"], "the set"], [["G"], "glowing"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
-			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "buy the set"],
-			 [["Tab"], "leave"]])
+			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "the set"],
+			 [["G"], "glowing"], [["Tab"], "leave"]])
 
 
 #endregion
@@ -16056,7 +16491,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		desc = String(pd2["desc"])
 		req_line = skill_req_text(pd2)
 		is_unlocked = pattern_unlocked(pi2)
-		how = "In practice, press P to switch patterns. Score multiplier x%.2f at your CURRENT load (x%.2f base - more balls and heavier props push it higher still)." % [float(pd2["mult"]) * object_mult(), float(pd2["mult"])]
+		how = "In practice, press P to switch patterns. This pattern multiplies a whole clean run by x%.2f, and the run itself is raised to the power of your load - %d %s is an exponent of %.1f right now." % [float(pd2["mult"]), num_balls, String(cur_prop()["name"]).to_lower(), float(num_balls) * prop_sig()]
 		if pi2 == CASCADE:
 			# true only of Cascade itself - this used to print unconditionally on
 			# every pattern's card, so Columns/Tennis/etc. all falsely claimed it too
@@ -18513,9 +18948,9 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# challenge when one was rolled. Cash in from the first number on; each further
 	# goal is the gamble.
 	if booking_active:
-		var has_enc := encore >= 0 and encore < ENCORES.size()
+		var has_enc := not encores.is_empty()
 		var bw := 400.0
-		var bh := 146.0 if has_enc else 76.0
+		var bh := (76.0 + 70.0 * float(encores.size())) if has_enc else 76.0
 		var bx := s.x - 18.0 - bw
 		var by2 := s.y - 88.0 - bh
 		hud_panel(Rect2(bx, by2, bw, bh))
@@ -18524,11 +18959,16 @@ func draw_establish(font: Font, s: Vector2) -> void:
 			commafy(goal_for(establish_venue, 0)), commafy(goal_for(establish_venue, 1)), commafy(goal_for(establish_venue, 2))],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 19, Color(1.0, 0.88, 0.5, tagA))
 		if has_enc:
-			var enc: Dictionary = ENCORES[encore]
 			var ec := Color(1.0, 0.55, 0.4)
-			draw_fit_string(font, Vector2(bx + 16.0, by2 + 82.0), "TONIGHT'S CHALLENGE:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
-			draw_wrap_fit(font, String(enc["desc"]), Rect2(bx + 16.0, by2 + 92.0, bw - 32.0, bh - 100.0), 11,
-				Color(0.9, 0.82, 0.72, 0.85 * tagA))
+			var ey := by2 + 82.0
+			for e in encores:
+				if e < 0 or e >= ENCORES.size():
+					continue
+				var enc: Dictionary = ENCORES[e]
+				draw_fit_string(font, Vector2(bx + 16.0, ey), "TONIGHT:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
+				draw_wrap_fit(font, String(enc["desc"]), Rect2(bx + 16.0, ey + 10.0, bw - 32.0, 52.0), 11,
+					Color(0.9, 0.82, 0.72, 0.85 * tagA))
+				ey += 70.0
 
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
 	draw_string(font, Vector2(0, s.y - 34.0), "press any key to begin", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
@@ -19108,7 +19548,7 @@ func throw_step() -> void:
 				var t := flower_tier_roll()
 				throw_from_crowd("flower", t)
 				run_flowers += int(FLOWER_TIERS[t]["val"])
-	elif applause <= TOMATO_RED and not collapsing:
+	elif applause <= TOMATO_RED and not collapsing and not won_the_room:
 		# the room turning on you. Still rarer than flowers by design - this is a warning
 		# you can still act on, not a punishment stacked on top of losing the crowd - but
 		# it has to actually HAPPEN to be a warning (2026-07-27, Louis: "i didn't see
@@ -20003,6 +20443,18 @@ func demo_spin_room() -> bool:
 
 
 func _demo_step() -> void:
+	# **THE ACT IS OVER: STOP PLAYING** (2026-07-29). Without this the autoplayer keeps
+	# throwing after the results card is up, and a throw sets `running` again - so the act
+	# resolves, the crowd stands, the bot restarts it, it resolves again, and `ovation_left`
+	# is re-armed to OVATION_TICKS every time it is about to reach zero. Since --demo now
+	# quits ON that zero, the harness hung forever on any act it played cleanly. It looked
+	# like a scoring bug and it is a harness bug, and it only started firing on every run
+	# when the new goals made a flawless act the NORMAL outcome rather than a rare one: the
+	# ovation needs `dropped == 0`, and the old goals took long enough that the bot always
+	# fumbled something on the way. The "zombie-feeding" this file's --calib note already
+	# describes is the same behaviour, seen from the collapse side.
+	if results_open:
+		return
 	# INSIDE A LESSON the autoplayer plays off the beat logic and nothing else. On a
 	# GUIDED step the beats already drive it (tut_hold_autoplay); on the free pass its
 	# own metronome used to take over, and that metronome re-throws the instant it

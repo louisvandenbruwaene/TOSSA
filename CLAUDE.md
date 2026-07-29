@@ -20,6 +20,93 @@ means an IACTO build still on the machine keeps working and the two diverge, whi
 the safe direction to fail in. Delete that function only once no IACTO build exists
 anywhere - "nobody could still have one" is a guess, not a fact.
 
+## THE REVAMP (2026-07-29) - read this before touching score, stats or Encores
+
+Louis rewrote most of the game's numbers in one brief. The individual changes are
+documented at their own constants in `Game.gd`; this is the map, and `tasks.md` holds the
+brief itself with every item ticked off.
+
+**THE SCORE IS SEGMENTS.** An act is a series of segments; a segment is a stretch of
+consecutive catches with the same load, ended only by a DROP. Its worth is
+
+    s  x  PRODUCT over tricks i of (ti ^ mi)  x  x ^ (n * p)
+
+x is the weighted catch count (Perfect 3, Good 2, Late 1), n the object count, p the
+prop's `PROP_SIG`, s the pattern multiplier, mi how many times trick i landed. The act's
+score is the sum, and there is nothing else in it. Gone with the old model: per-catch
+points, the Perfect chain and its saturating multiplier, the ball-count bonus, the prop
+score multiplier, the trick context scaling, and `run_mult`. **A Good catch no longer ends
+anything** - it is worth two instead of three, which is a slope where the old chain reset
+was a cliff.
+
+**A SUM OF EXPONENTIALS IS ITS LARGEST TERM.** At the Arena's exponent of 21 a segment 20%
+shorter than your best contributes about a hundredth of it. So "the score" means "your one
+best clean run" in practice, and every goal, every calibration and every balance argument
+has to be read that way. It is why `goal_for` is expressed in CATCHES.
+
+**GOALS ARE A RUN LENGTH.** The load moves a score by thirty-odd orders of magnitude, so
+one flat number per venue cannot work - it is unreachable with three balls and already
+banked in four catches with seven torches. `GOAL_CATCHES` is what a house asks for in
+catches and `goal_for` raises it by the load in hand. `VENUE_BASE`/`GOAL_STEP` are deleted.
+Run `--ladder` after touching any of it: the tool now shares `goal_for` and `safe_pow` with
+the game instead of reimplementing the scoring, so it cannot drift.
+
+**NOTHING MAY ASSUME A SCORE FITS IN AN INT, OR IN A FLOAT'S RANGE.** `safe_pow` decides
+in logs and clamps at `SCORE_CEIL` (1e300) because `pow` reaches INF long before that, and
+an INF poisons every goal check, record and pay downstream in a way that is very hard to
+trace back. Everything that prints a score goes through `score_text`.
+
+**STRENGTH IS A WALL, NOT A PENALTY.** `PROP_STR_UNIT` per object times the count: 15
+chainsaws asks 195, 7 torches 56, 3 balls 3. This replaced BOTH `BALL_GATES` and the `req`
+field. Two whole systems died with it - the under-Strength DEFICIT family (sagging, wobbly
+throws) and the Strength catch bonus - because you can no longer make a throw you are not
+strong enough for. The last five points of Strength buy a Perfect frame, since every count
+of everything is open at 195.
+
+**ONE OFFSET MOVES ALL THREE CATCH BANDS.** `frame_bonus()` is added to Perfect, Good AND
+Late together (`perfect_window()` / `good_window()` / `late_window()`); never compare a
+press against the raw `W_*` constants. The old code widened Perfect alone into a fixed Good
+boundary, so earning frames quietly ATE the Good tier until at the cap it vanished.
+
+**ACCURACY 101-150 IS STAMINA, 151-200 IS TIMING, and the cap is 200.** The two Focus
+stages used to overlap for a hundred points.
+
+**SPEED IS 10 POINTS PER 1%, TO 20%**, and the Pie and the two earned bursts are 10% each,
+so the four sources sum to exactly the 50% cap instead of overshooting it by 20.
+
+**DRIFT AND JITTER ARE GONE.** Drift moved a landing sideways and a catch is decided on
+TIMING alone, so it never made anything harder. Jitter moved the arrival tick by up to 5
+against a 7-tick Perfect window, which is most of a band decided by dice.
+
+**HEIGHT IS MEASURED FROM THIS COUNT'S OWN TAP FLOOR** (`Ball.over_tap`), not absolutely.
+`count_air_scale` lifts the tap floor with the load, so a TAP already read as 0.60 at seven
+objects and past the old 1.4 clamp at twelve - every throw at the top counts was taking the
+maximum penalty. The penalty now prices the CHOICE to throw higher than needed, runs to 1.8
+(what a held High Toss really reaches), and the 90%/70% promise is true at every count.
+
+**THE ENCORE IS A LIST** (`encores`), not an index, because the four Purists combine:
+`purist_slots(venue)` allows one at the Circus, two at the Championship, three at the World
+Arena, four at the Midnight Show. Read them through `encore_on()` as before. Close Quarters
+is replaced by two crowd tastes (Scared, Fancy) mirroring For the Danger, and The Critic
+split in two - both END THE SEGMENT on a bad catch, which is a far heavier thing than the
+old "it does not score" now that a segment is an exponential.
+
+**GLOWING PROPS ARE STOCK** (`glow_count`, bought with G in the shop, `GLOW_PROP_MULT`
+times the plain price), not one 34,000 switch that lit the whole collection. Blackout makes
+an ordinary prop **completely invisible** now, which is only fair because `encore_pool`
+will not roll it until you own three glowing balls or torches.
+
+**LEVELS COME TWICE AS FAST AND ARE WORTH HALF.** Same XP for the same build, twice as many
+level-ups: ~252 points by level 100 (every stat wall in the game), ~884 by level 230 (all
+four caps). Halving `xp_to_next` WITHOUT halving `POINTS_PER_LEVEL` would have doubled the
+build for the same hours.
+
+**TOMATOES ARE OFF ONCE THE ROOM HAS BEEN GREEN** (`won_the_room`, a one-way latch per act).
+
+**STILL OPEN, deliberately:** nothing caps how many times a trick may land in one segment,
+so ti^mi is unbounded and cheapest to farm at the LOWEST load. Louis asked for a suggestion
+rather than an implementation - see the foot of `tasks.md` for the two candidates.
+
 ## The three pillars (never trade these away)
 
 1. **Skill first.** Stats govern access and comfort (which props and counts are
@@ -47,31 +134,32 @@ anywhere - "nobody could still have one" is a guess, not a fact.
   any pad button via Settings > Controls, which now has a keyboard column and a
   gamepad column (Tab, or the pad's own Y, swaps focus between them).
 - **Throw model:** a tap is the lowest, snappiest throw; holding lifts continuously
-  toward 1.4 (1.8 for a held High Toss). Height buys airtime, costs accuracy.
-  Under-Strength throws sag and wobble. (ideas.rtf's discrete five heights were
-  deliberately replaced by this continuous model after playtesting.)
+  toward 1.4 (1.8 for a held High Toss). Height buys airtime, costs catch odds.
+  There is no under-Strength throw any more: Strength is a hard wall (see THE REVAMP
+  below), so a prop you cannot lift is a prop you cannot pick up.
 - **Catch model:** Perfect always secures; Good/Late are a chance that rises with
-  Accuracy and falls with throw height. Focus (Accuracy past 100) first cuts stamina
-  costs, then widens the Perfect window (to 250).
-- **PROP IDENTITY (2026-07-26, VERIFIED with --maxstats calib):** every prop class is a
-  real CHOICE, not just a heavier ball, across four levers held in `PROPS` + code, so a
-  matched choice is rewarded and a mismatched one punished (the balance goal). Perfect
-  window (`pwin`, difficulty): balls/eggs/rings 7, clubs 6 (forgiving for its weight),
-  knives 5, torches 4, floored at `PWIN_FLOOR` 3 so heavy+Cold Hands stays hittable.
-  Score multiplier (`smult`, reward, read by `prop_score_mult` -> `object_mult`): balls
-  1.00 up to torches 1.70, replacing the old flat per-weight-step bonus - climbing weight
-  AND count compounds. Throw stamina (`stam`, the early limiter): rings cut to 2 as their
-  low-stamina signature (the endurance prop). Catch forgiveness (`fgive`): clubs +0.12 on
-  off-Perfect, even in Purist. CONTEXT edges live in code, never flat fields, and only ever
-  ADD: torches +`DARK_PROP_BONUS` (0.30) where the stage is dark (`is_dark_context`:
-  Blackout, Stage Fright, the Midnight Show - all softened or late, so "only torches are
-  juggleable" never lands before the player would own them), knives +`PICKY_PROP_BONUS`
-  (0.30) before a hard-to-please crowd (`is_picky_crowd`: The Critic, The Hecklers) plus a
-  weight-scaled `prop_thrill` patience feed on Perfect catches. Calib proof: a master earns
-  monotonically more per weight step (torches x7 678k vs balls x7 399k), an uninvested
-  player collapses on the same heavy props (torches x5 12k vs balls x5 239k), 3 balls stays
-  locked out of venue 5, dark/picky A/B edges land on +17.6%/+19.3%. `--maxstats` (dev)
-  models a fully invested master so a heavy-prop calib is fair (a bare-Strength one is not).
+  Accuracy and falls with how much HIGHER than the tap floor the throw went. At
+  Accuracy 100 with no gear and no extra height that is 90% and 70% exactly. Focus
+  (Accuracy 101-150) cuts stamina costs; Accuracy 151-200 buys five catch FRAMES.
+- **PROP IDENTITY, second edition (2026-07-29).** The 2026-07-26 version gave every prop
+  four levers - a Perfect-window shift, its own score multiplier, a stamina rate, a catch
+  forgiveness nudge - plus two context bonuses in code (torches scored more in the dark,
+  knives before a picky crowd). It was verified, it was balanced, and Louis replaced it,
+  for a reason worth keeping: **weight was being charged for three or four times over.** A
+  heavy prop cost more Strength AND scored more AND caught worse AND tired you faster, so
+  no single number could be reasoned about and the only honest way to know whether a prop
+  was worth it was to run the calibration. Now:
+  - what it costs to THROW: `PROP_STR_UNIT` per object, times the count. One rule.
+  - what it costs in STAMINA: `stam`, unchanged. Rings stay cheap for their weight.
+  - what it is worth in SCORE: `PROP_SIG`, and it is an EXPONENT, not a multiplier.
+  - what it does to the TIMING: `pwin`, and it is only ever +1 (clubs), 0, or -1
+    (chainsaw) - and it now moves the Good and Late bands with it, not just Perfect.
+  - and two things that are not numbers: knives and torches buy crowd patience
+    (`prop_thrill`), and torches glow.
+  `smult`, `fgive`, `req`, `DARK_PROP_BONUS` and `PICKY_PROP_BONUS` are all deleted. The
+  situations the two context bonuses rewarded are still real and both props still answer
+  them - a torch is the only thing you can SEE in a Blackout, and knives hold a restless
+  room - which is a better reward than a number, because the player watches it happen.
 - **NO TEXT EVER LEAVES ITS CONTAINER** (2026-07-27, Louis, a standing rule). Three
   primitives, and the reason they exist: `draw_string`'s `width` argument does NOT
   shorten text, it CLIPS it mid-glyph, which is how a hub card came to read "LEARN -
