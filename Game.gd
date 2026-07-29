@@ -438,6 +438,24 @@ const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward th
 # is now per-prop ("smult" in PROPS, read via prop_score_mult) so each class pays its
 # own rate and can carry a context bonus, replacing the old flat per-weight-step const.
 const OBJ_BALL_BONUS := 0.12    # per ball above MIN_BALLS
+# --- THE EXPONENTIAL SCORE (2026-07-29). See the note on `score` for the shape; these are
+# the numbers that decide how steep it is.
+const CATCH_PTS := 100.0        # raw points a Perfect catch puts into the run...
+const CATCH_PTS_GOOD := 25.0    # ...and a Good one, which also resets the chain
+const CHAIN_STEP := 0.05        # the LINEAR half, and it is deliberately shallow: the chain
+							     # multiplier is 1 + 0.05 x chain, so sixty straight Perfects
+							     # multiply by 4, not by sixty. It used to be the chain length
+							     # itself, capped at ten per object - a cap Louis asked to
+							     # remove, and removing it from THAT curve would have made
+							     # linear play stronger rather than weaker. Shallow and
+							     # uncapped is the combination he asked for.
+const TRICK_DIFF_WEIGHT := 0.20 # how much each step of prop weight scales a trick's
+							     # difficulty: a chainsaw is worth twice a ball
+const TRICK_DIFF_COUNT := 0.08  # ...and each object past three: fifteen nearly doubles it
+const SCORE_CEIL := 1.0e300     # the hard ceiling (Louis: "E notation up to E300"). Well
+							     # inside a double's 1.8e308, so no arithmetic can overflow to
+							     # INF and print as "inf" on a results card. Realistic top
+							     # play lands nearer E20-E40; this is a wall, not a target.
 const STATE_FLIGHT := 0
 const STATE_HAND := 1
 const MODE_TRAIN := 0     # practice: no crowd, no pay, lighter energy cost
@@ -624,16 +642,42 @@ const TR_SPIN := 2
 # mistake this project already rejected for props.
 # The over-the-top MACHINERY stays exactly where it is: the patterns above are built on
 # it. Only the trick that duplicated them is removed.
+# `diff` IS THE EXPONENT'S BASE - the p in Louis's own p^x. It is what one landing of this
+# trick multiplies the whole current run by, before the context scaling in trick_difficulty()
+# lifts it for a hard prop, a big count and a demanding pattern.
+#
+# **A TOGGLE'S p IS PER CATCH; A LIVE TRICK'S IS PER PRESS**, and that is why their numbers
+# look nothing alike. A toggle shapes EVERY throw while it runs, so every catch under it is a
+# landing and x is the length of the run - measured, Behind the Back at 1.55 cleared all three
+# goals of the Small Theatre in 3.2 seconds and scored 791,803, because p^60 of anything near
+# 1.9 is not a game. At 1.055 the same toggle held for sixty catches is worth about x100, and
+# for a hundred and fifty at fifteen chainsaws about x1e12, which is the curve that was
+# wanted. Spin is pressed once and pays 2.0 flat, limited by costing you the ability to catch
+# while it runs rather than by its own number.
+#
+# `cascade_only` is Louis's gating: "make tricks only work on the cascade pattern, except high
+# toss and spin which work everywhere". It reads well because Cascade is the one pattern with
+# no shape of its own to protect - every other pattern IS a fixed geometry, and a trick that
+# reshapes every throw conflicts with it directly. The combination audit measured exactly
+# that: Behind the Back under Columns clears -13.6px, because a column comes down where it
+# left and a behind-the-back throw releases from across the body.
 const TRICKS := [
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "bonus": 60,  "shout": "BEHIND THE BACK!",
-	 "desc": "Toggle: every throw loops behind the back. Style the crowd loves, if you keep landing it."},
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "bonus": 90,  "shout": "HIGH TOSS!",
-	 "desc": "Toggle: every throw flies sky high - hold the throw and it climbs clean out of the frame. For a single toss, switch on, throw, switch off."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "bonus": 0,   "shout": "SPIN!",
-	 "desc": "Spin the moment a ball is in the air. Catches score double, you catch blind."},
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "diff": 1.055, "cascade_only": true, "shout": "BEHIND THE BACK!",
+	 "desc": "Toggle: every throw loops behind the back. Cascade only - no other pattern survives it. Every catch under it multiplies the run."},
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "diff": 1.012, "cascade_only": false, "shout": "HIGH TOSS!",
+	 "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!",
+	 "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
-const TRICK_COOLDOWN := 96         # ticks before a LIVE trick can fire again
+const TRICK_COOLDOWN := 0          # NO COOLDOWN (2026-07-29, Louis: "change the spin cooldown
+							        # to zero but make it impossible to catch or throw while
+							        # spinning"). The cooldown existed to stop the key being
+							        # mashed; the lockout is a far better limiter because it
+							        # is a COST rather than a rule - every tick spent turning
+							        # is a tick you are not catching in, so at fifteen objects
+							        # a spin is near suicide and at three it is free. The prop
+							        # count polices it by itself.
 # (per-trick score bonuses live in the TRICKS table's "bonus" field)
 
 # --- slow motion (ideas.rtf): every source adds its share, stacking linearly.
@@ -939,7 +983,39 @@ var last_drop_tick := -999               # for the juggler's wince expression
 
 var applause := 0.7
 var peak_applause := 0.7  # the crowd's high point this run, for the reputation swing
-var score := 0
+# THE SCORE IS EXPONENTIAL AND IT IS A FLOAT (2026-07-29, Louis: "i'd also like balatro like
+# scoring system: exponential. remove the max multiplier everywhere. Just make it way harder
+# to get to the goal with linear multiplication ... doing x amount of tricks with difficulty
+# value p during a performance multiplies the current score (since last drop) with p^x").
+#
+# THE SHAPE, in his own terms. An act is a series of RUNS, and a run is the stretch since the
+# last drop. Within a run you accumulate raw points linearly; landing a trick multiplies the
+# WHOLE run by that trick's difficulty. x tricks at difficulty p therefore multiply the run by
+# exactly p^x, which is the sentence above turned into arithmetic. A drop BANKS the run at
+# whatever it grew to and starts a fresh one at multiplier 1.
+#
+#     score  =  banked_pts  +  run_pts x run_mult
+#
+# Three consequences worth being deliberate about:
+#   * A drop no longer merely resets a streak, it CLOSES an exponential. Late in a good run
+#     that is the most expensive thing that can happen to you, which is what makes a big
+#     number feel dangerous to carry.
+#   * The linear half is deliberately WEAK (see CHAIN_STEP): a trickless act should struggle
+#     to reach the first goal. Louis asked for that in as many words.
+#   * There are NO CAPS left. The chain multiplier used to stop at ten per object; it climbs
+#     forever now, because the exponential is what the ceiling is for.
+#
+# 64-BIT INTS TOP OUT AT 9.2e18, so `score` is a float and everything that stores or compares
+# one is too (the record boards, the career best, the goals). Floats lose exact integers past
+# 2^53, which is correct and even desirable here: past that point the number is scenery and
+# is printed in E notation anyway (see score_text).
+var score := 0.0
+var banked_pts := 0.0   # runs already closed by a drop, at the multiplier they reached
+var run_pts := 0.0      # raw points in the CURRENT run - since the last drop
+var run_mult := 1.0     # ...and what the tricks in it have multiplied that run by
+var chain := 0          # consecutive PERFECT catches. Good and Late both reset it (Louis:
+					     # "good catches reset the counter and that weighs hard"), which is
+					     # what makes an all-Perfect act worth so much more than a clean one.
 var streak := 0
 var best_streak := 0
 var dropped := 0
@@ -1029,13 +1105,15 @@ var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
 var last_rep_delta := 0   # reputation change from the last performance, for the results screen
 var run_venue := 0        # which venue this run was performed at (records key off this)
-var best_scores: Array[int] = [0, 0, 0, 0, 0, 0, 0]  # best performance score per venue tier
+# THE BOARDS ARE FLOAT NOW, because the scores they hold are (see the note on `score`). A
+# 64-bit int tops out at 9.2e18 and this game can print 1e40 on a good night.
+var best_scores: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # best score per venue
 # --- the Purist ladder (GDD "Purist boards"): a performance booked as PURIST
 # strips every stat comfort from the catch maths (Accuracy read as a fresh
 # juggler's, no glasses, no Focus window, no Strength steadying), so its records
 # are pure skill. Separate per-venue bests, toggled per booking in the day hub.
 var purist := false
-var best_scores_purist: Array[int] = [0, 0, 0, 0, 0, 0, 0]
+var best_scores_purist: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # --- the career ledger (persisted per slot): lifetime numbers behind the record
 # boards, shown on the RECORDS AND HISTORY screen reached from Settings
 var career := {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
@@ -2010,8 +2088,8 @@ func _physics_process(delta: float) -> void:
 		# since after a collapse the halted-sim autoplayer keeps zombie-feeding itself.
 		var wt := goal_for(run_venue, 0)
 		var reason := "COLLAPSE" if collapsing else "time"
-		print("CALIB venue=%d prop=%d n=%d hold=%d end=%s tick=%d score=%d caught=%d streak=%d appl=%.2f  goal1=%d clears=%s" % [
-			run_venue, prop_type, num_balls, _demo_hold, reason, tick, score, caught, best_streak, applause, wt, str(score >= wt)])
+		print("CALIB venue=%d prop=%d n=%d hold=%d end=%s tick=%d score=%s caught=%d streak=%d appl=%.2f  goal1=%s clears=%s" % [
+			run_venue, prop_type, num_balls, _demo_hold, reason, tick, score_text(score), caught, best_streak, applause, score_text(wt), str(score >= wt)])
 		get_tree().quit()
 		return
 	step_effects()   # age the egg-break shards, yolk splats, and particles
@@ -2643,7 +2721,7 @@ func establish_key() -> void:
 #endregion
 
 #region ACT GOALS & ENCORES
-func goal_for(venue: int, gi: int) -> int:
+func goal_for(venue: int, gi: int) -> float:
 	# goal number gi (0 first, 1 second, 2 final), scaling off the VENUE and the
 	# standing ante, never off the player's own record (scaling off your best would
 	# punish you for improving). A challenge that stretches the night (The Long Set)
@@ -2652,10 +2730,10 @@ func goal_for(venue: int, gi: int) -> int:
 	var step := float(GOAL_STEP[clampi(gi, 0, GOAL_STEP.size() - 1)])
 	var a := 1.0 + ANTE_STEP * float(ante[clampi(venue, 0, ante.size() - 1)])
 	var enc := encore_target_mult() if gi == NUM_GOALS - 1 else 1.0
-	return int(round(base * step * a * enc))
+	return base * step * a * enc
 
 
-func next_goal() -> int:
+func next_goal() -> float:
 	# the first goal the act has NOT yet reached, or the final goal once all have
 	# fallen (the meter then shows a full bar, not a moving one)
 	return goal_for(run_venue, clampi(goals_hit, 0, NUM_GOALS - 1))
@@ -4413,7 +4491,7 @@ func tut_due_key(step: Dictionary) -> Array:
 	var e := {"act": "trick", "hand": -1, "rank": 0, "ok": false,
 		"key": String(k_trick()[0]), "what": String(t["name"]).to_upper()}
 	if String(t["kind"]) == "live":
-		if balls_airborne() >= int(t["min_air"]) and tick >= trick_ready:
+		if balls_airborne() >= int(t["min_air"]) and not spinning():
 			return [e]
 		return []
 	if not trick_primed:
@@ -5015,7 +5093,7 @@ func tut_action_cue(step: Dictionary) -> Dictionary:
 		if ti >= 0 and ti < TRICKS.size():
 			var t: Dictionary = TRICKS[ti]
 			if String(t["kind"]) == "live":
-				if balls_airborne() >= int(t["min_air"]) and tick >= trick_ready:
+				if balls_airborne() >= int(t["min_air"]) and not spinning():
 					return {"key": String(k_trick()[0]), "label": "%s  -  now" % String(t["name"]).to_upper()}
 				return {}   # not ready: the per-hand keys are already naming the catch/throw that gets there
 			var lbl := "switch on" if goal == "trick_on" else ("switch off" if goal == "trick_off" else "trick")
@@ -6485,7 +6563,11 @@ func start_run(n: int) -> void:
 	charging = [false, false]
 	applause = 0.7
 	peak_applause = 0.7
-	score = 0
+	score = 0.0
+	banked_pts = 0.0
+	run_pts = 0.0
+	run_mult = 1.0
+	chain = 0
 	streak = 0
 	best_streak = 0
 	dropped = 0
@@ -6598,6 +6680,15 @@ func start_run(n: int) -> void:
 # -----------------------------------------------------------------------------
 
 func on_catch(h: int) -> void:
+	# YOU CANNOT CATCH WHILE YOU TURN (2026-07-29, Louis: "make it impossible to catch or throw
+	# while spinning"). This is what replaced the cooldown, and it is a better limiter for a
+	# reason worth stating: a cooldown is a RULE the game imposes, while the lockout is a COST
+	# the player pays out of the same resource the pattern already spends - airtime. At three
+	# balls a 44-tick blind spot is nothing; at fifteen it is three missed catches and
+	# therefore three drops. The prop count polices the Spin by itself, and buying the airtime
+	# to survive one (a High Toss first) becomes real play rather than a timer.
+	if spinning() and not tut_active:
+		return
 	if collapsing:
 		return  # the act has fallen apart: you watch it all come down, you cannot save it.
 				# Without this a player (or the autoplayer) could keep catching the still-
@@ -6692,7 +6783,6 @@ func on_catch(h: int) -> void:
 	# whiff, never a special sound per object) - it used to be
 	# `play_sfx(_catch_sound(best.kind), -20.0)` right here. The sounds themselves
 	# are still generated in gen_sfx if this ever wants to come back.
-	var sc_before := score
 	var cashing_in := false
 	if not juggled and not tut_active:
 		# NOT JUGGLING (juggling_catch): the air is bare behind this catch. On stage
@@ -6732,7 +6822,8 @@ func on_catch(h: int) -> void:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
-		score += int(round(100.0 * streak_mult() * pm))
+		chain += 1
+		add_run_pts(CATCH_PTS * chain_mult() * pm)
 		warm_room(APPL_PERFECT + prop_thrill())   # danger thrills the room
 		add_xp(3)
 		# the slow-motion earn, only when a REAL pattern is up (three props or
@@ -6781,7 +6872,13 @@ func on_catch(h: int) -> void:
 		# The Critic: nothing short of a Perfect pays - everything else about a
 		# Good/Late catch (streak, applause, XP, the popup itself) is untouched,
 		# only the score line is gated, same choke point "fire"/For the Danger uses
-		score += 0 if encore_on("critic") else int(round(50.0 * streak_mult() * pm))
+		# A GOOD CATCH RESETS THE CHAIN (Louis: "good catches reset the counter and that
+		# weighs hard"). It still scores - it was a catch - but at a quarter rate and with the
+		# linear multiplier back to nothing, which is what makes an all-Perfect act worth so
+		# many times a merely clean one.
+		chain = 0
+		if not encore_on("critic"):
+			add_run_pts(CATCH_PTS_GOOD * pm)
 		warm_room(APPL_GOOD)
 		add_xp(2)
 		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
@@ -6792,7 +6889,9 @@ func on_catch(h: int) -> void:
 	else:
 		streak = 0
 		perfect_chain = 0
-		score += 0 if encore_on("critic") else int(round(10.0 * pm))
+		chain = 0
+		if not encore_on("critic"):
+			add_run_pts(10.0 * pm)
 		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
 		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
@@ -6801,24 +6900,17 @@ func on_catch(h: int) -> void:
 	# act is one continuous run now, so its live score IS the number the record
 	# board will judge.
 	if mode == MODE_PERFORM and not record_broken and run_venue >= 0 and run_venue < rec_table().size() \
-			and rec_table()[run_venue] > 0 and score > rec_table()[run_venue]:
+			and rec_table()[run_venue] > 0.0 and score > rec_table()[run_venue]:
 		record_broken = true
 		var s := get_viewport_rect().size
 		add_popup(Vector2(s.x * 0.5, s.y * 0.27), "NEW RECORD!", Color(1.0, 0.86, 0.42))
 		play_sfx("record", -7.0)
 		spawn_parts(Vector2(s.x * 0.5, s.y * 0.16), Color(1.0, 0.85, 0.45), 26, 2.6, "confetti")
 
-	# a live Spin doubles whatever this catch scored, and credits the trick once
-	if spinning():
-		var extra := score - sc_before
-		score += int(round(float(extra) * (SPIN_CATCH_MULT - 1.0)))
-		trick_score += int(round(float(extra) * (SPIN_CATCH_MULT - 1.0)))
-		warm_room(APPL_SPIN)
-		add_popup(outer_pos(h) + Vector2(0, -20), "x2", Color(0.72, 0.9, 1.0))
-		if not spin_scored:
-			spin_scored = true
-			tricks_landed += 1
-			add_xp(3)
+	# (A Spin no longer doubles individual catches. It multiplies the whole RUN the moment it
+	# fires - see on_trick - which is both a far bigger reward and the thing that makes the
+	# exponential exponential. Doubling catches on top would have been the same bonus paid
+	# twice, and it is the mechanic the lockout replaced.)
 	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
 	if best.trick >= 0 and best_d <= W_GOOD:
 		reward_trick(best.trick, outer_pos(h), best.height)
@@ -6860,6 +6952,8 @@ func check_goals() -> void:
 
 #region THROWING
 func on_throw_press(h: int) -> void:
+	if spinning() and not tut_active:
+		return   # ...and no throwing either, for the same reason - see on_catch
 	if collapsing or stack(h).is_empty():
 		return   # nothing you throw during a collapse counts; the set is already over
 	if tut_holding():
@@ -7535,22 +7629,63 @@ func prop_thrill() -> float:
 	return t
 
 
-func streak_cap() -> int:
-	# the multiplier a load can reach is CAPPED at ten per ball (Louis): 3 balls stop
-	# at 30, 4 at 40, up to 7 at 70. An easy three-ball run can hold a streak forever,
-	# so without this it out-earns a genuinely hard load; the cap makes climbing to more
-	# (and heavier) props - object_mult() above - the only way to a bigger multiplier.
-	return num_balls * 10
+func chain_mult() -> float:
+	# THE LINEAR HALF, and it is shallow ON PURPOSE. It used to be the streak length itself,
+	# capped at ten per object. Louis asked for the cap gone and for linear play to be a far
+	# worse way to reach a goal - and simply deleting the cap would have done the opposite,
+	# since an uncapped streak length is the steepest linear curve there is. So the curve came
+	# down as the ceiling came off: 1 + 0.05 x chain, uncapped, which turns sixty straight
+	# Perfects into x4 rather than into x60.
+	return 1.0 + CHAIN_STEP * float(chain)
 
 
-func streak_mult() -> float:
-	# the multiplier IS the streak length, growing one per clean catch up to the load's
-	# cap, then holding flat there. The streak itself keeps counting (for the record);
-	# only its score multiplier stops climbing.
-	return float(mini(streak, streak_cap()))
+func trick_difficulty(t: int) -> float:
+	# `p` FOR ONE LANDING OF THIS TRICK - the base in p^x - scaled by how hard the situation
+	# is. The base sits in TRICKS; everything else is context, and it multiplies only the
+	# EXCESS over 1.0, so the result can never dip to or below 1 and turn a trick into a
+	# penalty. A Spin with three balls in a Cascade is worth x2; the same Spin with fifteen
+	# chainsaws in Tennis is worth x6.9, which is the whole reason to climb.
+	if t < 0 or t >= TRICKS.size():
+		return 1.0
+	var base := float(TRICKS[t].get("diff", 1.0))
+	var ctx := (1.0 + TRICK_DIFF_WEIGHT * float(prop_weight() - 1)) \
+		* (1.0 + TRICK_DIFF_COUNT * float(num_balls - MIN_BALLS)) \
+		* pattern_mult()
+	return 1.0 + (base - 1.0) * ctx
 
 
-func rec_table() -> Array[int]:
+func add_run_pts(p: float) -> void:
+	run_pts += maxf(p, 0.0)
+	recalc_score()
+
+
+func apply_trick_mult(t: int) -> void:
+	# ONE LANDING, ONE MULTIPLICATION. x landings of the same trick therefore multiply the run
+	# by p^x with no special case anywhere - which is exactly the sentence Louis wrote the
+	# feature as, and the reason it is worth resisting any "and also +N points" on top.
+	var p := trick_difficulty(t)
+	if p <= 1.0:
+		return
+	run_mult = minf(run_mult * p, SCORE_CEIL)
+	recalc_score()
+
+
+func close_run() -> void:
+	# A DROP BANKS THE RUN. Everything the run grew to is locked in and a fresh run opens at
+	# multiplier 1 - so a drop is not a small setback, it is the end of an exponential, and the
+	# later it happens the more it costs. That is the tension the whole system is for.
+	banked_pts = minf(banked_pts + run_pts * run_mult, SCORE_CEIL)
+	run_pts = 0.0
+	run_mult = 1.0
+	chain = 0
+	recalc_score()
+
+
+func recalc_score() -> void:
+	score = minf(banked_pts + run_pts * run_mult, SCORE_CEIL)
+
+
+func rec_table() -> Array[float]:
 	# which record board this booking plays on: the stat-assisted one or the Purist
 	return best_scores_purist if purist else best_scores
 
@@ -7708,17 +7843,34 @@ func on_trick() -> void:
 	elif trick_sel < 0 or not trick_unlocked(trick_sel):
 		trick_sel = int(unlocked_tricks()[0])
 	var t: Dictionary = TRICKS[trick_sel]
+	# CASCADE ONLY, FOR EVERY TRICK BUT HIGH TOSS AND SPIN (2026-07-29, Louis). This is the
+	# combination audit's finding turned into a rule rather than a warning: every pattern
+	# except Cascade IS a fixed geometry, and a trick that reshapes every throw is in direct
+	# conflict with one. Cascade is the only pattern with no shape of its own to protect, so it
+	# is the only one with room for a shaping trick. High Toss changes height and Spin changes
+	# nothing about the throw at all, so both ride anything.
+	if bool(t.get("cascade_only", false)) and pattern != CASCADE:
+		set_trick_msg("%s only works in a Cascade  -  press P to switch" % String(t["name"]).to_upper())
+		play_sfx("whiff", -12.0)
+		return
 	match String(t["kind"]):
 		"live":
 			if balls_airborne() < int(t["min_air"]):
 				var na := int(t["min_air"])
 				set_trick_msg("Spin needs a ball in the air" if na == 1 else "Spin needs %d in the air" % na)
 				return
-			if tick < trick_ready:
-				return   # still cooling down; ignore the mash
+			if spinning():
+				return   # already turning: the lockout below is the limiter, not a mash guard
 			spin_until = tick + SPIN_TICKS
 			spin_scored = false
 			trick_ready = tick + TRICK_COOLDOWN
+			# THE SPIN MULTIPLIES THE RUN THE MOMENT IT FIRES, not on some later catch. A live
+			# trick has no shaped throw to land - it IS the press - and it is now the biggest
+			# multiplier in the game, paid for by the 44 ticks of blindness below.
+			if not tut_active:
+				apply_trick_mult(trick_sel)
+				tricks_landed += 1
+				trick_score += 1
 			set_trick_msg("SPIN")
 			play_sfx("streak", -7.0)
 			if tut_active:
@@ -7795,19 +7947,16 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 	if t < 0 or t >= TRICKS.size():
 		return
 	var td: Dictionary = TRICKS[t]
-	var bonus := int(td["bonus"])
-	if t == TR_HIGH and height > 1.35:
-		# a HELD High Toss climbs past the tap's 1.35 toward 1.8, and the climb
-		# pays: up to half again the flourish at the full frame-leaving height.
-		# Higher risk (wider drift, a beat out of sight) earns a higher reward,
-		# the same bargain the Purist bonus makes.
-		bonus = int(round(float(bonus) * (1.0 + 0.5 * clampf((height - 1.35) / 0.45, 0.0, 1.0))))
-	bonus = int(round(float(bonus) * encore_score_mult()))   # For the Danger zeroes light props
-	if bonus <= 0:
-		return
+	if encore_score_mult() <= 0.0:
+		return   # For the Danger: a light prop scores nothing, and neither do its tricks
+	# THE TRICK MULTIPLIES THE RUN. It used to add a flat bonus - 60 for a Behind the Back, 90
+	# for a High Toss - which is a rounding error beside a run worth millions and was never
+	# going to produce the curve Louis asked for. One landing, one multiplication, so x
+	# landings give p^x with no special case (see apply_trick_mult).
+	var before := score
+	apply_trick_mult(t)
 	var tog := String(td["kind"]) == "toggle"
-	score += bonus
-	trick_score += bonus
+	trick_score += int(round(clampf(score - before, 0.0, 1.0e18)))
 	warm_room(0.03 if tog else 0.09)
 	if tog:
 		if not toggle_scored:
@@ -8037,7 +8186,7 @@ func resolve_act() -> void:
 	# A cash-in keeps every point on the board - that is why cashing in is a choice
 	# worth making.
 	if set_collapsed:
-		score = goal_for(run_venue, goals_hit - 1) if goals_hit >= 1 else 0
+		score = goal_for(run_venue, goals_hit - 1) if goals_hit >= 1 else 0.0
 	elif goals_hit == 0 and fail_reason == "":
 		# ...unless something closer to the event already said why. The empty-air rule can
 		# end an act because the props RAN OUT ("stranded"), and overwriting that with
@@ -8101,7 +8250,7 @@ func resolve_act() -> void:
 		applause = 1.0    # they are on their feet, and the gauge has to agree
 		play_sfx("streak", -3.0)
 	last_pay = int(round(float(run_flowers) * purist_mult))
-	if money < BROKE_GOLD and score > 0:
+	if money < BROKE_GOLD and score > 0.0:
 		last_pay = maxi(last_pay, BUSK_FLOOR)
 	money += last_pay
 	# ...and the tomatoes, which are only KEPT when the night actually went wrong: a
@@ -8122,7 +8271,7 @@ func resolve_act() -> void:
 	career["perfs"] = int(career["perfs"]) + 1
 	career["gold_earned"] = int(career["gold_earned"]) + last_pay
 	career["tricks"] = int(career["tricks"]) + tricks_landed
-	career["best_score"] = maxi(int(career["best_score"]), score)
+	career["best_score"] = maxf(float(career["best_score"]), score)
 	career["best_streak"] = maxi(int(career["best_streak"]), best_streak)
 	# the record board keys off the act's score. A Purist act writes to the Purist
 	# board and never the assisted one.
@@ -8161,7 +8310,7 @@ func resolve_act() -> void:
 		var outcome := "all 3 goals" if complete else "%d/%d goals" % [goals_hit, NUM_GOALS]
 		daily_share = GAME_TITLE + " Daily %d-%02d-%02d  -  %s, %s  -  %s  -  %s pts  -  best streak %d" % [
 			int(daily_seed() / 10000), int(daily_seed() / 100) % 100, daily_seed() % 100,
-			String(venue_data(run_venue)["name"]), enc_name, outcome, commafy(score), best_streak]
+			String(venue_data(run_venue)["name"]), enc_name, outcome, score_text(score), best_streak]
 		DisplayServer.clipboard_set(daily_share)
 	results_open = true
 	results_tick = tick
@@ -8170,9 +8319,9 @@ func resolve_act() -> void:
 	if _demo:
 		# dev: report the whole-act outcome, so --demo --booking is a one-shot end-to-end
 		# check of the resolve path (goals, stripping, pay, rep)
-		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%d pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%s pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
-			score, last_pay, last_rep_delta, str(results_record), tick, run_flowers,
+			score_text(score), last_pay, last_rep_delta, str(results_record), tick, run_flowers,
 			run_tomatoes, ovation_bonus, peak_applause])
 		if daily_active:
 			print(daily_share)
@@ -8598,49 +8747,26 @@ func _coll_pair(pa: Vector2, pb: Vector2, a: Ball, b: Ball) -> String:
 		pb.x, pb.y, str(b.over_top), b.height, prog.call(b)]
 
 
-func prop_hit_scale(kind: int) -> float:
-	# the prop's HITBOX, and ONLY its hitbox (Louis: the clubs, torches and knives keep
-	# their true drawn size - it was never their look that needed fixing). From six
-	# objects up a big load needs daylight between props to be juggleable at all, and
-	# the stance must not widen to buy it, so what tightens is the collision radius:
-	# big props shed most of their extra bulk quickly, and the whole set eases in a
-	# little further toward eleven. Every DRAWING reads prop_scale, the true size, so a
-	# six-club load looks exactly like a five-club load - it just forgives near misses.
-	var sc := prop_scale(kind)
-	# TWO separate shrinks, and they do different jobs.
+func prop_hit_scale(_kind: int) -> float:
+	# ONE HITBOX (2026-07-29, Louis: "right now i feel like some patterns use different hitboxes
+	# for each prop. I want only one hitbox, such that the pattern that is most picky: eg 15
+	# chainsaw columns, still works as expected").
 	#
-	# (1) A big prop sheds most of its EXTRA bulk over a ball's as soon as a load needs
-	# the room, so a club's hitbox walks toward a ball's while the club still LOOKS like
-	# a club. Full bulk at three objects, HIT_EXCESS_KEEP of it from four up.
+	# It used to be three shrinks multiplied together - a per-PROP one so a club's bulk faded
+	# toward a ball's, a per-COUNT one on a ~1/count curve, and a per-PATTERN one off
+	# PATTERNS["room"]. Each was individually well reasoned, and the three together meant no two
+	# situations shared a collision rule: "does this pattern work at this count with this prop"
+	# had 6 x 13 x 7 different answers, and tuning any one moved the others. That is the thing
+	# he is describing.
 	#
-	# (2) The whole set then eases in with the count, and it eases along the curve the
-	# PATTERN's own geometry follows: a hand's road is (outer - inner) px wide and the
-	# count/2 balls sharing it pass ~2*(outer - inner)/count apart, so the room a
-	# pattern leaves falls like 1/count and the hitbox is set to fall with it
-	# (HIT_ROOM/count - HIT_TRIM). That keeps roughly the SAME px of daylight between
-	# hitboxes at every count, which is what makes each count read as a little harder
-	# than the one below rather than a cliff: this used to drop to 6% of drawn size the
-	# instant a fourth object appeared, so 4 through 15 objects were all equally and
-	# completely collision-proof while 3 was not (Louis, 2026-07-26: the difficulty
-	# should interpolate against the odd count either side of it).
-	#
-	# (3) ...and then by the room THIS pattern leaves (PATTERNS' "room"), because that
-	# varies far more than the count does: Columns leaves ~40px of daylight where Tennis
-	# leaves ~2px. Blended in from four objects up, so three of anything still collides
-	# at exactly the size it is drawn - at the beginner count, what you see is what hits.
-	var excess := (sc - 1.0) * lerpf(1.0, HIT_EXCESS_KEEP, clampf(float(num_balls - 3), 0.0, 1.0))
-	var whole := clampf(HIT_ROOM / float(maxi(num_balls, 1)) - HIT_TRIM, HIT_FLOOR, 1.0)
-	var room := float(PATTERNS[pattern].get("room", 1.0))
-	whole *= lerpf(1.0, room, clampf(float(num_balls - 3), 0.0, 1.0))
-	var hit := (1.0 + excess) * whole
-	if kind == PROP_RINGS:
-		hit *= RING_HIT_FACTOR
-	return hit
+	# Now: one number, small enough that the tightest real geometry in the game - fifteen
+	# chainsaws in Columns, which the lane arithmetic packs to about 9px of daylight - has room
+	# to run. A clack is therefore a genuine collision at any count rather than a threshold that
+	# moved under the player. PATTERNS["room"] is unread now; it stays in the table because it
+	# is a measured fact about each pattern and whoever tunes collisions next will want it.
+	return HIT_FLOOR
 
 
-#endregion
-
-#region STATS INVESTMENT & SAVE/LOAD
 func invest(which: String) -> void:
 	if points <= 0:
 		return
@@ -8837,11 +8963,11 @@ func load_progress() -> void:
 		var bs: Variant = cf.get_value("prog", "best_scores", [])
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
-				best_scores[i] = int((bs as Array)[i])
+				best_scores[i] = float((bs as Array)[i])
 		var bp: Variant = cf.get_value("prog", "best_scores_purist", [])
 		if bp is Array:
 			for i in mini((bp as Array).size(), best_scores_purist.size()):
-				best_scores_purist[i] = int((bp as Array)[i])
+				best_scores_purist[i] = float((bp as Array)[i])
 		pattern_ver = int(cf.get_value("prog", "pattern_ver", 0))
 		var raw_pattern_sel := int(cf.get_value("prog", "pattern_sel", CASCADE))
 		if pattern_ver < 2:
@@ -9040,6 +9166,11 @@ func still_dropping() -> bool:
 func drop_ball(b: Ball, why: String) -> void:
 	if not balls.has(b):
 		return
+	# A DROP CLOSES THE RUN, and that is now the most expensive thing in the game: whatever the
+	# tricks multiplied this run to is banked at that value, and the next one opens at x1.
+	# Done FIRST, before anything else about the drop, so nothing can score into a run that is
+	# already over.
+	close_run()
 	balls.erase(b)
 	dropped += 1
 	career["drops"] = int(career["drops"]) + 1
@@ -9148,14 +9279,17 @@ func coach_text() -> String:
 	# rung. Silent on a collapse (fail_text already owns that) and during a lesson.
 	if set_collapsed or tut_active:
 		return ""
-	var rec := rec_table()[run_venue] if run_venue >= 0 and run_venue < rec_table().size() else 0
+	var rec: float = rec_table()[run_venue] if run_venue >= 0 and run_venue < rec_table().size() else 0.0
 	var ds := "" if dropped == 1 else "s"
 	if dropped > 0:
 		var gap := rec - score
-		if not results_record and gap > 0 and gap * 4 < score:
+		if not results_record and gap > 0.0 and gap * 4.0 < score:
 			# genuinely close to the board - quantify exactly how close
-			return "%d drop%s reset your streak. Just %s more and the record here was yours." % [dropped, ds, commafy(gap)]
-		return "%d drop%s reset your streak, and the streak is your score multiplier - a tidy run pays far more than a bold one." % [dropped, ds]
+			return "%d drop%s closed your run. Just %s more and the record here was yours." % [dropped, ds, score_text(gap)]
+		# ...and the line is about the EXPONENTIAL now, not the streak: a drop banks the run
+		# and starts the multiplier again at one, which is both more expensive to explain and
+		# far more useful for a player to hear
+		return "%d drop%s banked your run and started the multiplier over. The longer a run lives, the more every trick in it is worth." % [dropped, ds]
 	# a spotless night: praise honestly, then point at the load, the real way up
 	if num_balls < 5 or prop_weight() <= 1:
 		return "Not one drop. Heavier props and higher counts pay more per catch - the record falls to a bigger load, not a safer one."
@@ -12534,6 +12668,36 @@ func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
 		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
 
 
+func score_text(v: float) -> String:
+	# HOW A BIG NUMBER IS PRINTED, and the switch has to happen somewhere. Under a million it
+	# is an ordinary comma-grouped figure, because that is a number a player reads as a
+	# quantity. Past that, digits stop being information - nobody reads the difference between
+	# 41,882,610 and 41,883,004 - so it goes to E notation, which is also the only honest way
+	# to print 1e47.
+	#
+	# The threshold is deliberately LOW. Balatro switches early for the same reason: the moment
+	# a number is scenery, showing it as scenery is clearer than showing it as a ledger, and it
+	# makes the jump from "a good act" to "an absurd one" legible at a glance.
+	if not is_finite(v):
+		return "E300+"
+	var a := absf(v)
+	if a < 1.0e6:
+		return commafy(int(round(v)))
+	var e := int(floor(log(a) / log(10.0)))
+	var m := a / pow(10.0, float(e))
+	return "%s%.2fe%d" % ["-" if v < 0.0 else "", m, e]
+
+
+func mult_text(v: float) -> String:
+	# the RUN multiplier, which lives in a far smaller range than the score and wants to keep
+	# its decimals for as long as it can
+	if v < 100.0:
+		return "%.2f" % v
+	if v < 1.0e6:
+		return commafy(int(round(v)))
+	return score_text(v)
+
+
 func commafy(n: int) -> String:
 	# a thousands separator for the big booking numbers, so 34000 reads at a glance
 	var raw := str(absi(n))
@@ -12609,24 +12773,24 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var tcard_h := 196.0
 		hud_card(Rect2(LX, tcard_y, LW, tcard_h), Color(1.0, 0.82, 0.4, 0.4))
 		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55))
-		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), commafy(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.94, 0.76))
+		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.94, 0.76))
 		# the record chase, top-right of the card
 		if run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
 			if record_broken:
 				var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
 				draw_string(font, Vector2(LX + 14, tcard_y + 78), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(1.0, 0.86, 0.42, ra))
 			else:
-				draw_string(font, Vector2(LX + 14, tcard_y + 78), "best  %s" % commafy(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, dim)
+				draw_string(font, Vector2(LX + 14, tcard_y + 78), "best  %s" % score_text(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, dim)
 		# THE HAT runs the WHOLE act - zero to the final goal - with a mark on the crown
 		# at each goal line, so where you are and what is left both read at a glance. It
 		# rises on the same concave curve (goal_bar_pos) the horizontal meter used, so
 		# nothing about the PACING of an act changed here, only the picture of it.
 		var g_final := goal_for(run_venue, NUM_GOALS - 1)
-		var tfrac := goal_bar_pos(float(score), float(g_final))
+		var tfrac := goal_bar_pos(score, g_final)
 		var marks := PackedFloat32Array()
 		for gi in NUM_GOALS - 1:
-			marks.append(goal_bar_pos(float(goal_for(run_venue, gi)), float(g_final)))
-		var over := 0.0 if score <= g_final else clampf(float(score - g_final) / float(maxi(g_final, 1)), 0.0, 1.0)
+			marks.append(goal_bar_pos(goal_for(run_venue, gi), g_final))
+		var over := 0.0 if score <= g_final else clampf((score - g_final) / maxf(g_final, 1.0), 0.0, 1.0)
 		# THE CROWD SHOWS THE GOAL, so the rail does not have to (Louis). A money hat
 		# that filled up used to live here; the pile of flowers at the juggler's feet
 		# says the same thing far better, on the stage itself, where the player is
@@ -12687,7 +12851,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			goal_head = "NEXT GOAL"
 		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(0.85, 0.72, 0.55))
 		if goals_hit < NUM_GOALS:
-			draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), commafy(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
+			draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), score_text(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
 		else:
 			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, 12, Color(1.0, 0.88, 0.5))
 		if goals_hit > 0:
@@ -12696,12 +12860,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# ABOVE that is what you are risking by pushing on - true even after all three
 			# goals, while you chase a record (the old "every point is yours" was wrong).
 			var banked := goal_for(run_venue, mini(goals_hit, NUM_GOALS) - 1)
-			draw_fit_string(font, Vector2(LX + 14, tcard_y + 158), "risking  %s" % commafy(maxi(0, score - banked)),
+			draw_fit_string(font, Vector2(LX + 14, tcard_y + 158), "risking  %s" % score_text(maxf(0.0, score - banked)),
 				HORIZONTAL_ALIGNMENT_LEFT, 136.0, 12, Color(1.0, 0.72, 0.55))
 		# the standing offer: from the first goal on, the cash-in is always open
 		if goals_hit >= 1:
 			var pl := 0.7 + 0.3 * sin(float(tick) * 0.14)
-			draw_fit_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), commafy(score)],
+			draw_fit_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), score_text(score)],
 				HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 11, Color(0.75, 0.95, 0.7, pl))
 		else:
 			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, 10, Color(0.72, 0.66, 0.58, 0.7))
@@ -12756,19 +12920,18 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if not results_open:
 		var RW := 264.0
 		var RX := s.x - 18.0 - RW
-		# the MULTIPLIER - the addictive number, big and heat-coloured. It is the streak
-		# CAPPED per load (streak_cap): once you hit the ceiling it holds, so a bigger
-		# multiplier means more (and heavier) props, not a longer easy run (Louis).
+		# THE RUN MULTIPLIER, which is now the addictive number and has no ceiling to show.
+		# The card used to print the streak against its cap ("x30  MAX"); there is no cap any
+		# more, and the interesting figure is what the TRICKS have built - the thing that is
+		# lost at the next drop. The chain sits beside it, small, because it is the linear
+		# half and now worth a twentieth of what it used to look like.
 		hud_card(Rect2(RX, 16, RW, 50))
-		var cap := streak_cap()
-		var mult := mini(streak, cap)
-		var capped := streak >= cap and streak > 0
-		var heat := clampf(float(mult) / float(cap), 0.0, 1.0)
+		var heat := clampf(log(maxf(run_mult, 1.0)) / 9.0, 0.0, 1.0)   # x1 cool, x8000 hot
 		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
-		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if streak > 0 else 0
-		draw_string(font, Vector2(RX + 14, 52), "x%d" % mult, HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "MAX  -  x%d" % cap if capped else "STREAK  /%d" % cap, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(1.0, 0.7, 0.35) if capped else Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(RX + RW - 150, 56), "best  %d" % best_streak, HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if chain > 0 else 0
+		draw_string(font, Vector2(RX + 14, 52), "x%s" % mult_text(run_mult), HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
+		draw_string(font, Vector2(RX + RW - 150, 40), "RUN MULT", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + RW - 150, 56), "chain %d  ·  x%.2f" % [chain, chain_mult()], HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
 		# stat points are actionable (Tab), so they get one pulsing line. Gold,
@@ -12939,13 +13102,13 @@ func draw_results(font: Font, s: Vector2) -> void:
 	# stat rows, each fading in a beat after the last; the score value counts up
 	var t_count := clampf(float(age - 8) / 46.0, 0.0, 1.0)
 	var eased := 1.0 - pow(1.0 - t_count, 3.0)
-	var shown_score := int(round(float(score) * eased))
+	var shown_score := score * eased
 	var ra := func(i: int) -> float: return clampf(float(age - 10 - i * 7) / 10.0, 0.0, 1.0)
 	var y := py + 140.0
 	var rowh := 40.0
-	_result_row(font, lx, rx, y, "Booking score", commafy(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
+	_result_row(font, lx, rx, y, "Booking score", score_text(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
 	if age > 54:
-		var rec := "NEW VENUE RECORD" if results_record else "best here   %s" % commafy(rec_table()[run_venue])
+		var rec := "NEW VENUE RECORD" if results_record else "best here   %s" % score_text(rec_table()[run_venue])
 		if purist:
 			rec = "PURIST  -  " + rec
 		var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
@@ -13913,8 +14076,8 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	match kind:
 		"live":
 			use = "spin"
-			if tick < trick_ready:
-				use = "spin in %.1fs" % (float(trick_ready - tick) / 120.0)
+			if spinning():
+				use = "turning..."
 		"toggle":
 			use = "switch off" if toggle_on == sel else "switch on"
 		_:
@@ -17204,7 +17367,7 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 	var lines := [
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%s performances,  %s catches" % [commafy(int(career["perfs"])), commafy(int(career["catches"]))],
-		"best streak %s,  highest score %s" % [commafy(int(career["best_streak"])), commafy(int(career["best_score"]))],
+		"best streak %s,  highest score %s" % [commafy(int(career["best_streak"])), score_text(float(career["best_score"]))],
 		"%s %s earned, and all of it spent" % [commafy(int(career["gold_earned"])), coin_word()],
 	]
 	for i in lines.size():
@@ -17234,7 +17397,7 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 	var lines := [
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%s performances,  %s catches,  best streak %s" % [commafy(int(career["perfs"])), commafy(int(career["catches"])), commafy(int(career["best_streak"]))],
-		"highest score  %s" % commafy(int(career["best_score"])),
+		"highest score  %s" % score_text(float(career["best_score"])),
 	]
 	for i in lines.size():
 		var la := clampf(float(cine_tick - 70 - i * 25) / 40.0, 0.0, 1.0)
@@ -17365,7 +17528,7 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		["practice sessions", str(int(career["practices"]))],
 		["catches  /  drops", "%s  /  %s" % [commafy(int(career["catches"])), commafy(int(career["drops"]))]],
 		["longest streak ever", commafy(int(career["best_streak"]))],
-		["highest score anywhere", commafy(int(career["best_score"]))],
+		["highest score anywhere", score_text(float(career["best_score"]))],
 		["tricks landed", commafy(int(career["tricks"]))],
 		["%s earned on stage" % coin_word(), commafy(int(career["gold_earned"]))],
 	]
@@ -17899,7 +18062,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
-	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %s" % commafy(int(career["best_score"])), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
+	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %s" % score_text(float(career["best_score"])), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
 	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
 	cur += 82.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "code", "b": "Louis Vandenbruwaene"})
@@ -19319,6 +19482,18 @@ func draw_shadow(feet: Vector2, w: float) -> void:
 #endregion
 
 #region DEV: AUTOPLAYER & SCREENSHOT CAPTURE
+func demo_spin_room() -> bool:
+	# dev only: the autoplayer will not spin itself into a drop. A Spin now blocks catching for
+	# SPIN_TICKS, so a bot that spins whenever it can simply deletes its own set - measured,
+	# `--demo --trick spin` collapsed after 202 ticks with nothing on the board, which makes
+	# the flag useless for exactly the thing it exists to capture. It waits for a real gap now,
+	# which is also the way a human has to play it.
+	for b in balls:
+		if b.state == STATE_FLIGHT and b.land_tick - tick < SPIN_TICKS + 8:
+			return false
+	return balls_airborne() > 0
+
+
 func _demo_step() -> void:
 	# INSIDE A LESSON the autoplayer plays off the beat logic and nothing else. On a
 	# GUIDED step the beats already drive it (tut_hold_autoplay); on the free pass its
@@ -19403,7 +19578,7 @@ func _demo_step() -> void:
 	# (in unpinned mode, or when Spin itself is the pinned trick)
 	var pin_kind := String(TRICKS[_demo_trick_pin]["kind"]) if _demo_trick_pin >= 0 else ""
 	if _demo_trick and (_demo_trick_pin == -1 or _demo_trick_pin == TR_SPIN) \
-			and balls_airborne() >= 2 and tick >= trick_ready and tick >= 40:
+			and balls_airborne() >= 2 and not spinning() and tick >= 40 and demo_spin_room():
 		spin_until = tick + SPIN_TICKS
 		spin_scored = false
 		trick_ready = tick + TRICK_COOLDOWN
