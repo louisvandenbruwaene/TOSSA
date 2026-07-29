@@ -541,6 +541,13 @@ const GLOW_SUIT_COST := 34000  # the costume alone
 # THE COSTUME, and what each piece is worth (2026-07-28, Louis picked the set). Prices
 # climb with how much the piece changes a night: gloves are a small mercy on every catch,
 # the waistcoat is the late-game money piece.
+# THE SET BONUS (2026-07-29, Louis: "only with a fitting part of the costume (eg: the right
+# pants for the right stage) does the score ever reach what you want it to, the full set
+# ofcourse gives the best possible score"). Every piece cut for tonight's house pays; the
+# full set pays more than the sum of its parts, so completing one is a goal rather than a
+# rounding error. Eight pieces at +6% is x1.48, and the full-set kicker takes it to x1.78.
+const SET_PIECE_BONUS := 0.06
+const SET_FULL_BONUS := 1.20
 const GLOVES_COST := 2500
 const BOOTS_COST := 3500
 const HAT_COST := 4000
@@ -1075,7 +1082,6 @@ var prop_type := PROP_BALLS  # the object being juggled this run
 # is called before anything reads it, so a future eighth prop is one PROPS row and no
 # other edit at all.
 var prop_count: Array[int] = [0, 0, 0, 0, 0, 0, 0]
-var has_glasses := false  # bought gear: raises the catch chance
 var has_backroom := false # paid the 16+ fee at the curtain, so the back of the shop -
 						   # the dangerous props, the pie and the glow gear - is open
 # THE GLOW KIT SPLITS IN TWO (2026-07-28, Louis: "the glow in dark kit should be able to
@@ -1085,16 +1091,9 @@ var has_backroom := false # paid the 16+ fee at the curtain, so the back of the 
 # the dark, the phosphor on the SUIT is what stops the performer being a hole in it. The
 # Kit survives as a discounted bundle that simply sets both.
 var has_glow_tape := false   # the props carry phosphor
-var has_glow_suit := false   # ...and so does the costume
 # THE COSTUME (2026-07-28, Louis picked this set). Every piece is drawn on the performer
 # and every buff is on the COMFORT/REWARD axis - none of them touches the catch timing,
 # which is the guardrail that keeps the stats from playing the game for you.
-var has_gloves := false   # off-Perfect catches get the clubs' own forgiveness, on any prop
-var has_boots := false    # every throw costs one less stamina
-var has_hat := false      # the room throws a better TIER more often
-var has_coat := false     # the crowd warms faster
-var has_vest := false     # ...and throws more often
-var has_helmet := false   # bought gear: unlocks buying and auto-drinking Energy Drinks
 var energy_drinks := 0    # owned stock, automatically sipped as stamina runs out
 var level := 1
 var xp := 0               # xp accumulated inside the current level
@@ -1205,15 +1204,28 @@ var skills_sel := 0        # which entry the Skills reference has expanded
 # career without ever connecting the two. The screen says so plainly.
 var tailor_open := false
 var tailor_sel := 0        # cursor within the current column
-var tailor_col := 0        # 0 = the suit list, 1 = the pieces
+var tailor_col := 0        # 0 = the suit list, 1 = the rack
+var tailor_stage := 0      # ...and which HOUSE's cut the rack's cursor is on
 var outfit_suit := -1      # persisted: which stage's costume to wear, or -1 to follow the
 						    # stage you are standing on (the behaviour before this existed)
-var wear_hat := true       # persisted: each bought piece, on or off. All default TRUE so an
-var wear_coat := true      # existing career opens the tailor already dressed in everything
-var wear_vest := true      # it owns, rather than stripped by an update it did not ask for.
-var wear_gloves := true
-var wear_boots := true
-var wear_glow := true
+# EVERY PIECE IS BOUGHT, PER STAGE (2026-07-29, Louis: "no costume is ever earned, they are
+# all bought. only with a fitting part of the costume (eg: the right pants for the right stage)
+# does the score ever reach what you want it to, the full set ofcourse gives the best possible
+# score ... Make all of these special clothes in all different stage colors, so that they look
+# well together for every stage outfit").
+#
+# So a garment is not one thing you own, it is SEVEN - one cut in each house's colours - and
+# what you wear is a piece and the stage it was cut for. Wearing the Circus's waistcoat at the
+# Circus pays; wearing the Backyard's there does not. `owned_wear` is the set of
+# "<piece>:<stage>" strings bought, which keeps one flat persisted list however many pieces
+# exist and needs no migration when an eighth is added.
+#
+# **AND IT IS A REAL LOADOUT NOW** (Louis, reversing the cosmetic-only call I made yesterday):
+# the buffs follow what is WORN, not what is owned. Which means the screen has to be honest
+# about it, loudly, because the trap I was avoiding is real - see draw_tailor.
+var owned_wear: Array = []      # "<piece>:<stage>" for every garment bought
+var worn_piece := {}            # piece id -> the stage index worn, or absent for none
+const WEAR_PIECES: Array[String] = ["hat", "coat", "vest", "gloves", "boots", "glasses", "helmet", "glow"]
 var debug_mode := false   # debug build: free stat editing in the character sheet
 # EXPERIMENTS (2026-07-25): a small, debug-only toggle panel (F9) for trying an
 # alternate version of a screen without touching code each time - see
@@ -1795,18 +1807,20 @@ func _ready() -> void:
 			set_collide = true
 		if ua.has("--glow"):        # dev: own the whole Glow Kit this session, for Blackout shots
 			has_glow_tape = true
-			has_glow_suit = true
-		if ua.has("--wardrobe"):    # dev: wear all five costume pieces this session. They
-			has_gloves = true       # cost 28,500 between them, i.e. most of a career, so
-			has_boots = true        # without this the finished figure had no capture path
-			has_hat = true          # at all and every piece would be checked in isolation
-			has_coat = true         # - which is how a hat and a tailcoat end up fighting.
-			has_vest = true
+		if ua.has("--wardrobe"):
+			# dev: buy and wear THIS STAGE'S cut of every garment. A full wardrobe now costs
+			# 28,500 per house and there are seven houses, so without this the dressed figure
+			# has no capture path at all and every piece would only ever be judged alone -
+			# which is how a hat and a tailcoat end up fighting.
+			for _p in WEAR_PIECES:
+				var _k := wear_key(_p, cur_venue())
+				if not owned_wear.has(_k):
+					owned_wear.append(_k)
+				worn_piece[_p] = cur_venue()
 		if ua.has("--boo"):         # dev: pin the room in the red, so the tomato path
 			_boo = true             # can be seen at all - see the note in update_sim
 		if ua.has("--nokit"):       # dev: the mirror of --glow. The demo save OWNS the
 			has_glow_tape = false   # Glow Kit (glow_kit=true), so every --demo capture of
-			has_glow_suit = false
 									# a dark stage was silently the charged version and the
 									# un-charged one had no capture path at all
 		if ua.has("--sheet"):   # dev: open the character sheet for a screenshot
@@ -1814,13 +1828,6 @@ func _ready() -> void:
 			sheet_open = true
 		if ua.has("--shop"):    # dev: open the shop for a screenshot
 			shop_open = true
-			# ...and `--shop back` opens the far side of the curtain, which is otherwise
-			# only reachable by paying the fee inside a real career - so the back room
-			# had no capture path at all, the same gap --day was added to close
-			var shi := ua.find("--shop")
-			if shi + 1 < ua.size() and String(ua[shi + 1]) == "back":
-				has_backroom = true
-				shop_room = SHOP_ROOM_BACK
 		if ua.has("--results"):   # dev: fabricate a finished act to screenshot the card
 			mode = MODE_PERFORM
 			run_venue = 4
@@ -2837,7 +2844,7 @@ func too_tired() -> bool:
 	# or, with the Energy-Drink Helmet stocked, as long as the next dip has a
 	# real drink behind it: spend_stamina pours one the instant it's needed, so
 	# a stocked player is never actually stuck here, just reading a stale number.
-	if has_helmet and energy_drinks > 0:
+	if wearing("helmet") and energy_drinks > 0:
 		return false
 	return stamina < TIRED_FLOOR
 
@@ -3008,6 +3015,15 @@ func day_actions() -> Array[Dictionary]:
 		"cost": "%d %s" % [INN_COST, coin_word()], "ok": money >= INN_COST,
 		"why": "not enough %s  -  the innkeeper does not haggle" % coin_word() if money < INN_COST else "",
 		"sub": "ends the day, wake fully rested. Keep %d %s aside or the road ends." % [INN_COST, coin_word()]})
+	# UNCLE DAN'S PIE IS SOLD WHERE IT IS EATEN (2026-07-29, Louis: "Uncle dan's pie should
+	# also be only for sale in the rest menu"). It was a shop card, which put a stimulant on
+	# the same row as juggling clubs; the rest drawer is where every other restorative already
+	# lives and where a player is when they want one. Buying costs no day segment - it is a
+	# pie, not an evening.
+	out.append({"id": "buy_pie", "grp": "rest", "icon": "pie", "name": "BUY Uncle Dan's Pie",
+		"cost": "%s %s" % [commafy(PIE_COST), coin_word()], "ok": money >= PIE_COST,
+		"why": "not enough %s" % coin_word() if money < PIE_COST else "",
+		"sub": "a stimulant slice for the pantry. You have %d. Eating one slows the whole day %d%%." % [pie_count, int(round(PIE_SLOW * 100.0))]})
 	if pie_count > 0:
 		out.append({"id": "pie", "grp": "rest", "icon": "pie", "name": "EAT Uncle Dan's Pie",
 			"cost": "own %d" % pie_count, "ok": not pie_active, "why": "one is already working" if pie_active else "",
@@ -3026,7 +3042,7 @@ func day_actions() -> Array[Dictionary]:
 		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
 			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
 			"sub": "no %s and no Strength tick: just +%d stamina, and one fewer egg to juggle." % [coin_word(), int(EGG_EAT_STAM)]})
-	if has_helmet:
+	if true:
 		# DRINKS BELONG WHERE THE RECOVERY IS (2026-07-28, Louis, describing them as
 		# bought "in the resting area"). They are stocked from the shop too and always
 		# were, but everything else that puts stamina back - the meal, the bed, the pie,
@@ -3240,6 +3256,10 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			# vignette between the press and the shop was dead time)
 			shop_open = true
 			play_sfx("ui2", -13.0)
+		"buy_pie":
+			try_buy_pie()
+			if shop_msg != "":
+				set_day_msg(shop_msg)
 		"drinks":
 			# a restock, not an errand: no vignette and no day segment, for the same
 			# reason the shop itself opens instantly. try_buy_drinks owns the whole
@@ -3418,75 +3438,33 @@ func sheet_input(kc: int) -> void:
 # gives the dangerous half a door to be behind.
 const SHOP_ROOM_FRONT := 0
 const SHOP_ROOM_BACK := 1
-const SHOP_DOOR_W := 44.0     # the doorway bar itself...
-const SHOP_DOOR_GUT := 62.0   # ...and the gutter reserved for it at BOTH edges of the panel,
-							   # in every room, so the goods never shift when you walk through
-const SHOP_FRONT_PROPS: Array[int] = [PROP_BALLS, PROP_EGGS, PROP_RINGS, PROP_CLUBS]
-const SHOP_BACK_PROPS: Array[int] = [PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW]
 
 func shop_props() -> Array[int]:
-	return SHOP_BACK_PROPS if shop_room == SHOP_ROOM_BACK else SHOP_FRONT_PROPS
+	# EVERY PROP, IN ONE ROW (2026-07-29). Derived from PROPS, so an eighth is one table entry
+	# and no other edit - the lesson the chainsaw taught when it walked into six hard-coded 6s.
+	var out: Array[int] = []
+	for i in PROPS.size():
+		out.append(i)
+	return out
 
 
 func shop_gear() -> Array[Dictionary]:
-	# EVERY NON-PROP PURCHASE, as data. It was four parallel arrays (names, descriptions,
-	# colours, owned, counts, costs) indexed in lockstep, which is fine at four items and
-	# unmaintainable at eleven - and the costume pass takes it to eleven. One row per
-	# item, filtered by room, so adding a twelfth is one entry.
+	# WHAT THE SHOP STILL SELLS (2026-07-29, Louis: "I want all of these clothes to be for sale
+	# in the tailor, not the shop. so sell the glow in dark props in the shop and glow in the
+	# dark clothes with all other clothes in the tailor ... Energy drinks should ONLY be able
+	# to be bought in the resting menu ... Uncle dan's pie should also be only for sale in the
+	# rest menu. That should perhaps make the shop just one part again").
+	#
+	# So this is the PROP shop and nothing else: the objects you juggle, and the one piece of
+	# gear that is about the objects rather than about you. Glasses, gloves, boots, hat,
+	# tailcoat, waistcoat, glow suit and the energy helmet are clothing and live in the tailor;
+	# the pie and the drinks are food and live in REST. Everything is where the thing IS - which
+	# is also what let the two rooms and the 16+ curtain go, since they existed to solve a
+	# layout problem (seven prop cards would not fit beside eleven gear ones) that no longer
+	# exists.
 	var g: Array[Dictionary] = []
-	if shop_room == SHOP_ROOM_FRONT:
-		g.append({"id": "glasses", "name": "Glasses", "cost": GLASSES_COST, "owned": has_glasses,
-			"col": Color(0.72, 0.86, 0.96), "desc": "a better chance on off-Perfect catches"})
-		g.append({"id": "gloves", "name": "Silk Gloves", "cost": GLOVES_COST, "owned": has_gloves,
-			"col": Color(0.95, 0.92, 0.88), "desc": "every prop catches as forgivingly as a club does - it widens the ODDS on a Good or Late catch, never the Perfect window"})
-		g.append({"id": "boots", "name": "Stage Boots", "cost": BOOTS_COST, "owned": has_boots,
-			"col": Color(0.62, 0.50, 0.40), "desc": "every throw costs one less stamina, so a long set stops being the thing that ends the night"})
-		# THE HAT AND THE DRINKS ARE TWO OBJECTS (2026-07-28, Louis: the "energy drink hat
-		# ... should be distinct from energy drinks"). They used to be ONE card that
-		# shape-shifted: the Helmet until owned, Energy Drinks forever after, sharing an id
-		# and therefore sharing an ICON, so the thing you buy once and the thing you buy ten
-		# of were the same picture. They are two rows now, and the drinks row only appears
-		# once there is a hat to pour them into - which is also the honest statement of the
-		# dependency between them.
-		g.append({"id": "helmet", "name": "Energy-Drink Helmet", "cost": ENERGY_HELMET_COST,
-			"owned": has_helmet, "col": Color(0.95, 0.75, 0.35),
-			"desc": "a hat that never lets your stamina run out - buying it fills the tank"})
-		if has_helmet:
-			g.append({"id": "drinks", "name": "Energy Drinks", "cost": ENERGY_DRINK_BATCH_COST,
-				"owned": false, "count": energy_drinks, "col": Color(0.92, 0.42, 0.30),
-				"desc": "%d for %s, and each one is +%d%% stamina, auto-sipped the instant you run low" % [
-					ENERGY_DRINK_BATCH, commafy(ENERGY_DRINK_BATCH_COST), int(ENERGY_DRINK_STAMINA_PCT * 100.0)]})
-		# THE DOOR IS NOT A CARD - IT IS A DOOR, and it is at the EDGE (2026-07-28 evening,
-		# Louis: "the buttons for front room and back room of the shop, should be placed not
-		# as an item, but on the right and left side of the screen respectively (going to the
-		# back feels like stepping to the right on the screen), and it should be the form of a
-		# triangle / arrow pointing to the back").
-		#
-		# The first pass made it a gear card, which fixed the real problem (a hotkey with no
-		# object behind it) and introduced a smaller one: a door sitting in a row of goods
-		# reads as something you BUY, and it ate a slot in a row that had already run out of
-		# width once. He is describing the right answer - **a door is a place, not a purchase,
-		# and its position on the screen should be the direction you are going.** Right edge
-		# to step into the back, left edge to come out.
-		#
-		# It lives in `shop_door()` now, drawn and hit-tested outside both rows, so the gear
-		# row is goods only. See draw_shop_door.
-		return g
-	g.append({"id": "pie", "name": "Uncle Dan's Pie", "cost": PIE_COST, "owned": false,
-		"count": pie_count, "col": Color(0.9, 0.62, 0.3), "desc": "a whole day of slow, clear time"})
-	g.append({"id": "hat", "name": "Top Hat", "cost": HAT_COST, "owned": has_hat,
-		"col": Color(0.30, 0.28, 0.34), "desc": "a showman's hat, and the room answers it: better tributes come up more often - posies where there were single stems"})
-	g.append({"id": "coat", "name": "Tailcoat", "cost": COAT_COST, "owned": has_coat,
-		"col": Color(0.34, 0.30, 0.46), "desc": "properly dressed, the crowd warms %d%% faster - you reach the green sooner and stay there" % int(round((COAT_WARM - 1.0) * 100.0))})
-	g.append({"id": "vest", "name": "Sequin Waistcoat", "cost": VEST_COST, "owned": has_vest,
-		"col": Color(0.96, 0.84, 0.42), "desc": "you catch the light, and they throw %d%% more often. The late-game money piece." % int(round((VEST_RATE - 1.0) * 100.0))})
 	g.append({"id": "glow_tape", "name": "Glow Tape", "cost": GLOW_TAPE_COST, "owned": has_glow_tape,
 		"col": Color(0.65, 0.95, 0.55), "desc": "the PROPS carry phosphor: you can read the pattern on any dark stage"})
-	g.append({"id": "glow_suit", "name": "Glow Suit", "cost": GLOW_SUIT_COST, "owned": has_glow_suit,
-		"col": Color(0.55, 0.95, 0.75), "desc": "the COSTUME does: you stop being a hole in the dark"})
-	g.append({"id": "glow_kit", "name": "Glow-in-the-Dark Kit", "cost": GLOW_KIT_COST,
-		"owned": has_glow_tape and has_glow_suit, "col": Color(0.72, 1.0, 0.62),
-		"desc": "both halves at once, and cheaper than buying them apart"})
 	return g
 
 
@@ -3495,23 +3473,13 @@ func shop_gear0() -> int:
 
 
 func shop_cards() -> int:
-	# ...and the DOOR is the last stop on the cursor's walk, past the goods (see shop_door).
-	# It is one more index rather than a special case in every key handler: Left/Right wrap
-	# through it, Enter acts on it, and the number keys simply never reach it, which is right
-	# - a door has no price and so no buy key.
-	return shop_props().size() + shop_gear().size() + 1
-
-
-func shop_door_idx() -> int:
 	return shop_props().size() + shop_gear().size()
 
 
 func shop_on_door() -> bool:
-	return shop_sel == shop_door_idx()
-
-
-func shop_door_id() -> String:
-	return "frontroom" if shop_room == SHOP_ROOM_BACK else "backroom"
+	return false   # ONE ROOM: there is nowhere to walk to. Kept as a function rather than
+				   # deleted because prop CATEGORIES (the accepted next big piece) will want a
+				   # drawer again, and this is the seam it will open at.
 
 # THE KEYBOARD SHORTCUT PRINTED ON EACH CARD, in card order across both rows. One table,
 # read by the drawing AND by shop_input, because the two disagreeing is exactly what
@@ -3526,12 +3494,6 @@ func shop_key_label(i: int) -> String:
 func shop_buy_sel() -> void:
 	# Enter (pad A) acts on whichever card the cursor lights, prop or gear - or walks
 	# through the door, which is the one slot that is not a purchase
-	if shop_on_door():
-		if shop_room == SHOP_ROOM_BACK:
-			shop_leave_back_room()
-		else:
-			shop_through_curtain()
-		return
 	var props := shop_props()
 	if shop_sel < props.size():
 		try_buy(props[shop_sel])
@@ -3544,96 +3506,17 @@ func shop_buy_sel() -> void:
 
 
 func try_buy_gear(id: String) -> void:
-	match id:
-		"glasses":   try_buy_glasses()
-		"pie":       try_buy_pie()
-		"glow_kit":  try_buy_glow_kit()
-		"glow_tape": try_buy_once("glow_tape", GLOW_TAPE_COST)
-		"glow_suit": try_buy_once("glow_suit", GLOW_SUIT_COST)
-		"gloves":    try_buy_once("gloves", GLOVES_COST)
-		"boots":     try_buy_once("boots", BOOTS_COST)
-		"hat":       try_buy_once("hat", HAT_COST)
-		"coat":      try_buy_once("coat", COAT_COST)
-		"vest":      try_buy_once("vest", VEST_COST)
-		"backroom":  shop_through_curtain()
-		"frontroom": shop_leave_back_room()
-		"helmet":    try_buy_helmet()
-		"drinks":    try_buy_drinks()
-
-
-func gear_owned_flag(id: String) -> bool:
-	match id:
-		"glow_tape": return has_glow_tape
-		"glow_suit": return has_glow_suit
-		"gloves":    return has_gloves
-		"boots":     return has_boots
-		"hat":       return has_hat
-		"coat":      return has_coat
-		"vest":      return has_vest
-	return false
-
-
-func set_gear_flag(id: String) -> void:
-	match id:
-		"glow_tape": has_glow_tape = true
-		"glow_suit": has_glow_suit = true
-		"gloves":    has_gloves = true
-		"boots":     has_boots = true
-		"hat":       has_hat = true
-		"coat":      has_coat = true
-		"vest":      has_vest = true
-
-
-func try_buy_once(id: String, cost: int) -> void:
-	# every ONE-OFF piece of gear buys the same way - confirm, pay, set its flag, save -
-	# so a new one is a row in shop_gear() plus a line in two small tables, never another
-	# near-identical try_buy_* function (there were four of those before the costume).
-	if gear_owned_flag(id) or money < cost:
+	# the shop's gear row is one item now - the glow TAPE, which is about the props. Every
+	# other piece of gear became clothing and is bought in the tailor, per house.
+	if id != "glow_tape" or has_glow_tape or money < GLOW_TAPE_COST:
 		return
-	if not confirm_spend(id, cost, true):
+	if not confirm_spend("glow_tape", GLOW_TAPE_COST, true):
 		return
-	money -= cost
-	set_gear_flag(id)
+	money -= GLOW_TAPE_COST
+	has_glow_tape = true
 	shop_buy_ms = int(Time.get_ticks_msec())
 	save_progress()
 	play_sfx("money", -6.0)
-
-
-func shop_through_curtain() -> void:
-	# THROUGH THE CURTAIN. The first time it costs the 16+ fee and a day segment, like any
-	# errand; after that the back room is simply the other half of the shop. Refused rather
-	# than half-charged if the purse is short - and it SAYS the price, because a card that
-	# does nothing when pressed is worse than no card.
-	if has_backroom:
-		shop_room = SHOP_ROOM_BACK
-		shop_sel = 0
-		play_sfx("ui", -15.0)
-		return
-	if money < BACKROOM_COST:
-		shop_msg = "the fee at the curtain is %s" % commafy(BACKROOM_COST)
-		shop_msg_warn = true
-		shop_msg_ms = int(Time.get_ticks_msec())
-		play_sfx("whiff", -10.0)
-		return
-	if not confirm_spend("backroom", BACKROOM_COST, true):
-		return
-	money -= BACKROOM_COST
-	has_backroom = true
-	shop_room = SHOP_ROOM_BACK
-	shop_sel = 0
-	seg_used = mini(seg_used + 1, SEG_PER_DAY)
-	shop_msg = "through the curtain - mind the sharp things"
-	shop_msg_warn = false
-	shop_msg_ms = int(Time.get_ticks_msec())
-	shop_buy_ms = int(Time.get_ticks_msec())
-	save_progress()
-	play_sfx("money", -6.0)
-
-
-func shop_leave_back_room() -> void:
-	shop_room = SHOP_ROOM_FRONT
-	shop_sel = 0
-	play_sfx("ui", -15.0)
 
 
 func shop_input(kc: int) -> void:
@@ -3656,25 +3539,12 @@ func shop_input(kc: int) -> void:
 		KEY_DOWN, KEY_UP:
 			var g0 := shop_gear0()
 			var gn := maxi(1, shop_gear().size())
-			# the DOOR is not on either row, so up/down leaves it for the nearest gear card
-			# rather than trying to map it into a column that does not contain it
-			if shop_on_door():
-				shop_sel = shop_cards() - 2
-			elif shop_sel < g0:
+			if shop_sel < g0:
 				shop_sel = g0 + shop_sel * gn / maxi(g0, 1)   # prop column -> nearest gear card
 			else:
 				shop_sel = (shop_sel - g0) * maxi(g0, 1) / gn   # ...and back again
 			shop_sel = clampi(shop_sel, 0, shop_cards() - 1)
 			play_sfx("ui", -15.0)
-		KEY_C:
-			# C is KEPT as a shortcut, and only as a shortcut. The door is a place on the
-			# screen now (see draw_shop_door), which is the way it is meant to be found; this
-			# is the same function under a key, for whoever has already learned it. Both
-			# routes going through one function is what stops them ever charging different fees.
-			if shop_room == SHOP_ROOM_BACK:
-				shop_leave_back_room()
-			else:
-				shop_through_curtain()
 		KEY_ENTER, KEY_KP_ENTER:
 			shop_buy_sel()
 		KEY_B, KEY_SPACE:
@@ -5363,56 +5233,19 @@ func try_buy_pie() -> void:
 	if money < PIE_COST:
 		play_sfx("whiff", -10.0)
 		return
-	if not confirm_spend("pie", PIE_COST, true):
+	if not confirm_spend("pie", PIE_COST, false):
 		return
 	money -= PIE_COST
 	pie_count += 1
 	shop_buy_ms = int(Time.get_ticks_msec())
+	# a receipt, because the rest drawer has no price plate to confirm against
+	shop_msg = "one slice in the pantry  -  %d now" % pie_count
+	shop_msg_warn = false
+	shop_msg_ms = int(Time.get_ticks_msec())
 	save_progress()
 	play_sfx("money", -6.0)
 
 
-func try_buy_glasses() -> void:
-	if has_glasses or money < GLASSES_COST:
-		return
-	if not confirm_spend("glasses", GLASSES_COST, true):
-		return
-	money -= GLASSES_COST
-	has_glasses = true
-	shop_buy_ms = int(Time.get_ticks_msec())
-	save_progress()
-	play_sfx("money", -6.0)
-
-
-func try_buy_glow_kit() -> void:
-	# the BUNDLE: cheaper than the two halves bought separately, and it simply sets both,
-	# so nothing downstream has to know whether a player bought the set or built it up
-	if (has_glow_tape and has_glow_suit) or money < GLOW_KIT_COST:
-		return
-	if not confirm_spend("glow_kit", GLOW_KIT_COST, true):
-		return
-	money -= GLOW_KIT_COST
-	has_glow_tape = true
-	has_glow_suit = true
-	shop_buy_ms = int(Time.get_ticks_msec())
-	save_progress()
-	play_sfx("money", -6.0)
-
-
-func try_buy_helmet() -> void:
-	# the helmet itself is the one purchase that pays back immediately: buying
-	# it tops the purse's stamina up on the spot, on top of unlocking Energy
-	# Drinks (Louis: "automatically refills your stamina upon buying").
-	if has_helmet or money < ENERGY_HELMET_COST:
-		return
-	if not confirm_spend("helmet", ENERGY_HELMET_COST, true):
-		return
-	money -= ENERGY_HELMET_COST
-	has_helmet = true
-	stamina = stamina_max
-	shop_buy_ms = int(Time.get_ticks_msec())
-	save_progress()
-	play_sfx("money", -6.0)
 
 
 func try_buy_drinks() -> void:
@@ -5420,7 +5253,7 @@ func try_buy_drinks() -> void:
 	# drink at a time never made sense for a stock meant to last whole
 	# performances. ENERGY_DRINK_BATCH_COST undercuts what ENERGY_DRINK_BATCH
 	# drinks would cost bought one at a time, the real discount asked for.
-	if not has_helmet or money < ENERGY_DRINK_BATCH_COST:
+	if money < ENERGY_DRINK_BATCH_COST:
 		return
 	if not confirm_spend("drinks", ENERGY_DRINK_BATCH_COST, true):
 		return
@@ -5601,16 +5434,8 @@ func reset_new_game() -> void:
 	prop_count = [3, 0, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
 	sync_props()
 	prop_type = PROP_BALLS
-	has_glasses = false
 	has_glow_tape = false
-	has_glow_suit = false
-	has_gloves = false
-	has_boots = false
-	has_hat = false
-	has_coat = false
-	has_vest = false
 	has_backroom = false
-	has_helmet = false
 	energy_drinks = 0
 	level = 1
 	xp = 0
@@ -6769,7 +6594,10 @@ func on_catch(h: int) -> void:
 	# harder patterns AND harder loads pay more per catch (their base difficulty is the
 	# reward), so grinding the tamest routine is never the best. encore_score_mult zeroes
 	# light props on a "For the Danger" night.
-	var pm := pattern_mult() * object_mult() * encore_score_mult()
+	# COSTUME_SET_BONUS joins the multiplier here rather than anywhere else, because this is
+	# the one place every scoring path already passes through - and because dressing for the
+	# house is exactly the kind of preparation that should pay per catch rather than once.
+	var pm := pattern_mult() * object_mult() * encore_score_mult() * costume_set_bonus()
 	best.state = STATE_HAND
 	stack(h).append(best)
 	catch_flash[h] = tick
@@ -7162,7 +6990,7 @@ func do_throw(h: int, hold: int) -> void:
 	if not tut_active:
 		# STAGE BOOTS take a point off every throw, on the same floor Focus already uses:
 		# never below 1, so no amount of gear makes a throw free
-		var drain := maxf(1.0, float(PROPS[b.kind]["stam"]) - floor(focus() / 20.0) - (1.0 if has_boots else 0.0))
+		var drain := maxf(1.0, float(PROPS[b.kind]["stam"]) - floor(focus() / 20.0) - (1.0 if wearing("boots") else 0.0))
 		spend_stamina(drain)
 	# where the throw is headed: crossing patterns swap hands, columns (pattern or
 	# toggle) keep each ball its lane, and an over-the-top throw always crosses,
@@ -8148,7 +7976,7 @@ func spend_stamina(amount: float) -> void:
 	# the whole point of stocking up. Never fires without the helmet, and never
 	# invents stamina beyond what real owned drinks can cover.
 	stamina = maxf(0.0, stamina - amount)
-	while stamina <= 0.0 and has_helmet and energy_drinks > 0:
+	while stamina <= 0.0 and wearing("helmet") and energy_drinks > 0:
 		energy_drinks -= 1
 		stamina = minf(stamina_max, stamina + stamina_max * ENERGY_DRINK_STAMINA_PCT)
 
@@ -8419,7 +8247,7 @@ func catch_chance(quality: int, height: float) -> float:
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
 	var p := base + acc_norm * ACC_CATCH_BONUS - clampf(height, 0.0, 1.4) * HEIGHT_CATCH_PENALTY
 	p += float(PROPS[prop_type]["fgive"])   # clubs are intrinsically forgiving: a better off-Perfect
-	if has_gloves:
+	if wearing("gloves"):
 		p += GLOVES_FGIVE   # SILK GLOVES give every prop what a club has by nature. Comfort
 							 # axis only: it moves the off-Perfect ODDS, never the Perfect
 							 # window itself, so the timing floor is exactly where it was
@@ -8428,7 +8256,7 @@ func catch_chance(quality: int, height: float) -> float:
 	if not purist_run():
 		p += strength_catch_mod()  # raw muscle steadies a heavy prop in the hand (and only a
 								   # too-weak grip on a heavy prop makes the catch itself shaky)
-		if has_glasses:
+		if wearing("glasses"):
 			p += GLASSES_CATCH_BONUS   # bought gear lifts the odds of an off-Perfect catch
 	if spinning():
 		p -= SPIN_ACC_PENALTY      # a Spin means catching blind, so off-Perfect gets riskier
@@ -8940,19 +8768,11 @@ func load_progress() -> void:
 		# save keeps at least the starting kit of three (balls are stock now)
 		prop_count[PROP_BALLS] = maxi(prop_count[PROP_BALLS], 3)
 		prop_type = int(cf.get_value("stats", "prop_type", PROP_BALLS))
-		has_glasses = bool(cf.get_value("stats", "glasses", false))
 		# an old save wrote ONE "glow_kit" flag; it means both halves, which is exactly
 		# what it bought. Read it as the default for each so nobody loses a 60,000 item.
 		var old_kit := bool(cf.get_value("stats", "glow_kit", false))
 		has_glow_tape = bool(cf.get_value("stats", "glow_tape", old_kit))
-		has_glow_suit = bool(cf.get_value("stats", "glow_suit", old_kit))
-		has_gloves = bool(cf.get_value("stats", "gloves", false))
-		has_boots = bool(cf.get_value("stats", "boots", false))
-		has_hat = bool(cf.get_value("stats", "hat", false))
-		has_coat = bool(cf.get_value("stats", "coat", false))
-		has_vest = bool(cf.get_value("stats", "vest", false))
 		has_backroom = bool(cf.get_value("stats", "backroom", false))
-		has_helmet = bool(cf.get_value("stats", "helmet", false))
 		energy_drinks = int(cf.get_value("stats", "energy_drinks", 0))
 		level = int(cf.get_value("prog", "level", 1))
 		xp = int(cf.get_value("prog", "xp", 0))
@@ -9043,12 +8863,31 @@ func load_progress() -> void:
 	# every wear flag defaults TRUE, so a career from before the tailor existed opens
 	# dressed in everything it owns rather than stripped by an update it never asked for
 	outfit_suit = int(cf.get_value("wear", "suit", -1))
-	wear_hat = bool(cf.get_value("wear", "hat", true))
-	wear_coat = bool(cf.get_value("wear", "coat", true))
-	wear_vest = bool(cf.get_value("wear", "vest", true))
-	wear_gloves = bool(cf.get_value("wear", "gloves", true))
-	wear_boots = bool(cf.get_value("wear", "boots", true))
-	wear_glow = bool(cf.get_value("wear", "glow", true))
+	# WHAT IS OWNED, AND WHAT IS ON. Both are flat lists keyed by "<piece>:<stage>", so adding
+	# a ninth garment or an eighth house needs no migration at all.
+	var ow: Variant = cf.get_value("wear", "owned", [])
+	owned_wear.clear()
+	if ow is Array:
+		for v in (ow as Array):
+			owned_wear.append(String(v))
+	var wp: Variant = cf.get_value("wear", "worn", {})
+	worn_piece.clear()
+	if wp is Dictionary:
+		for k in (wp as Dictionary):
+			worn_piece[String(k)] = int((wp as Dictionary)[k])
+	# A CAREER FROM BEFORE THE TAILOR SOLD CLOTHES keeps everything it bought, cut for the
+	# house it had reached when it bought it - which is the only stage it could have been
+	# wearing them at. Nothing is taken away, and one of them will therefore match.
+	if int(cf.get_value("wear", "ver", 0)) < 1:
+		var vstage := clampi(venue_index(), 0, MAX_VENUE)
+		for pair in [["glasses", "glasses"], ["gloves", "gloves"], ["boots", "boots"],
+				["hat", "hat"], ["coat", "coat"], ["vest", "vest"], ["helmet", "helmet"],
+				["glow", "glow_suit"]]:
+			if bool(cf.get_value("stats", String(pair[1]), false)):
+				var k := wear_key(String(pair[0]), vstage)
+				if not owned_wear.has(k):
+					owned_wear.append(k)
+				worn_piece[String(pair[0])] = vstage
 	var skill_ver := int(cf.get_value("prog", "skill_ver", 0))
 	if skill_ver < 1:
 		for tab: Array in [TRICKS, PATTERNS]:
@@ -9086,17 +8925,22 @@ func save_progress() -> void:
 	cf.set_value("stats", "reputation", reputation)
 	cf.set_value("stats", "prop_count", prop_count)
 	cf.set_value("stats", "prop_type", prop_type)
-	cf.set_value("stats", "glasses", has_glasses)
-	cf.set_value("stats", "glow_kit", has_glow_tape and has_glow_suit)   # kept for old builds
+	# THESE EIGHT KEYS ARE LEGACY, and they are written from OWNERSHIP rather than from what
+	# is worn. They exist only so the pre-tailor migration in load_progress can read a save
+	# written by an older build - and that migration takes them to mean "bought". Writing
+	# them from `wearing()` would mean a hat taken off for one act came back as a hat never
+	# bought, which is a save-eating bug hiding in a one-word difference.
+	cf.set_value("stats", "glasses", owns_any("glasses"))
+	cf.set_value("stats", "glow_kit", has_glow_tape and owns_any("glow"))   # kept for old builds
 	cf.set_value("stats", "glow_tape", has_glow_tape)
-	cf.set_value("stats", "glow_suit", has_glow_suit)
-	cf.set_value("stats", "gloves", has_gloves)
-	cf.set_value("stats", "boots", has_boots)
-	cf.set_value("stats", "hat", has_hat)
-	cf.set_value("stats", "coat", has_coat)
-	cf.set_value("stats", "vest", has_vest)
+	cf.set_value("stats", "glow_suit", owns_any("glow"))
+	cf.set_value("stats", "gloves", owns_any("gloves"))
+	cf.set_value("stats", "boots", owns_any("boots"))
+	cf.set_value("stats", "hat", owns_any("hat"))
+	cf.set_value("stats", "coat", owns_any("coat"))
+	cf.set_value("stats", "vest", owns_any("vest"))
 	cf.set_value("stats", "backroom", has_backroom)
-	cf.set_value("stats", "helmet", has_helmet)
+	cf.set_value("stats", "helmet", owns_any("helmet"))
 	cf.set_value("stats", "energy_drinks", energy_drinks)
 	cf.set_value("prog", "level", level)
 	cf.set_value("prog", "xp", xp)
@@ -9113,12 +8957,9 @@ func save_progress() -> void:
 	# opening the game to find yourself re-dressed by the machine is exactly the small
 	# betrayal that makes a wardrobe feel fake.
 	cf.set_value("wear", "suit", outfit_suit)
-	cf.set_value("wear", "hat", wear_hat)
-	cf.set_value("wear", "coat", wear_coat)
-	cf.set_value("wear", "vest", wear_vest)
-	cf.set_value("wear", "gloves", wear_gloves)
-	cf.set_value("wear", "boots", wear_boots)
-	cf.set_value("wear", "glow", wear_glow)
+	cf.set_value("wear", "owned", owned_wear)
+	cf.set_value("wear", "worn", worn_piece)
+	cf.set_value("wear", "ver", 1)
 	cf.set_value("prog", "career", career)
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
@@ -11097,8 +10938,14 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 	var bone := maxf(46.0, reach * 0.56)
 	var elbow := solve_elbow(shoulder, hand, bone, bone, bend)
 	var wrist := hand + (elbow - hand).normalized() * 7.0   # forearm stops just short of the palm
-	draw_capsule(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm (sleeved), tapering to the elbow
-	draw_capsule(elbow, wrist, 13.0, 10.0, skin)       # forearm (skin), tapering to the wrist
+	# THE SLEEVE RUNS TO THE WRIST (2026-07-29, Louis: "i believe a juggler has his costume
+	# arms reach until his arms, not elbows. The only skin i should see are the hands (if not
+	# wearing gloves) and the face"). He is right about the costume and right about the
+	# picture: a performer in evening dress has no bare forearm, and the two skin-coloured
+	# capsules were reading as rolled-up shirtsleeves on a man wearing a tailcoat. The whole
+	# arm is cloth now, and the only skin below the collar is the hand itself.
+	draw_capsule(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm, tapering to the elbow
+	draw_capsule(elbow, wrist, 13.0, 10.0, sleeve)     # forearm, same cloth, to the wrist
 	draw_circle(elbow, 7.0, sleeve)                    # elbow joint
 	if cuff.a > 0.0:
 		# WARDROBE pass only (performer_polish): the jacket sleeve runs on down the
@@ -11126,18 +10973,59 @@ func solve_elbow(a: Vector2, b: Vector2, l1: float, l2: float, bend: float) -> V
 	return a + dir * x + perp * hgt
 
 
-func wearing(id: String) -> bool:
-	# IS IT ON HIM. Every drawing asks this and never `has_*` directly, because owning a
-	# garment and wearing it are two different facts now (see the tailor's own note). The
-	# BUFFS still read `has_*`, deliberately.
-	match id:
-		"hat":    return has_hat and wear_hat
-		"coat":   return has_coat and wear_coat
-		"vest":   return has_vest and wear_vest
-		"gloves": return has_gloves and wear_gloves
-		"boots":  return has_boots and wear_boots
-		"glow":   return has_glow_suit and wear_glow
+func owns_any(piece: String) -> bool:
+	# do you own THIS GARMENT in any house's cut at all. Used by the legacy save keys and by
+	# nothing that scores - a garment you own but are not wearing buys you nothing now.
+	for st in MAX_VENUE + 1:
+		if owns_wear(piece, st):
+			return true
 	return false
+
+
+func wear_key(piece: String, stage: int) -> String:
+	return "%s:%d" % [piece, stage]
+
+
+func owns_wear(piece: String, stage: int) -> bool:
+	return owned_wear.has(wear_key(piece, stage))
+
+
+func worn_stage(piece: String) -> int:
+	# which STAGE'S cut of this piece is on him, or -1 for none. A piece can only be worn if
+	# it is also owned - a save that loses a purchase (it cannot, but the invariant is cheap)
+	# can never leave him wearing something he does not have.
+	var s := int(worn_piece.get(piece, -1))
+	return s if s >= 0 and owns_wear(piece, s) else -1
+
+
+func wearing(id: String) -> bool:
+	# IS IT ON HIM. Every drawing asks this and every BUFF asks it too, now that the tailor is
+	# a real loadout (Louis: "I'd rather the tailor be a real loadout: buffs follow wearing").
+	return worn_stage(id) >= 0
+
+
+func wear_matches(piece: String) -> bool:
+	# ...AND IS IT THE RIGHT ONE FOR TONIGHT. This is the whole of Louis's set mechanic: a
+	# garment cut for the house you are playing works, one cut for another house is just
+	# clothes. `cur_venue` rather than the tailor's chosen suit, because the point is to dress
+	# FOR the room.
+	return worn_stage(piece) == cur_venue()
+
+
+func costume_set_bonus() -> float:
+	# HOW MUCH OF TONIGHT'S SET YOU ARE ACTUALLY WEARING, as a score multiplier. Every matching
+	# piece pays; the full set pays best, and pays a little more than the sum of its parts so
+	# that completing one is a real goal rather than a rounding error.
+	var n := 0
+	for p in WEAR_PIECES:
+		if wear_matches(p):
+			n += 1
+	if n <= 0:
+		return 1.0
+	var m := 1.0 + SET_PIECE_BONUS * float(n)
+	if n >= WEAR_PIECES.size():
+		m *= SET_FULL_BONUS
+	return m
 
 
 func costume_palette() -> Dictionary:
@@ -11154,48 +11042,61 @@ func suit_name(i: int) -> String:
 	return String(venue_data(i)["name"])
 
 
-func tailor_pieces() -> Array[Dictionary]:
-	# every bought garment, with what it does and whether it is currently on. Built fresh so
-	# drawing and input can never disagree about which rows exist - the same contract
-	# day_actions() and shop_gear() are built on.
-	var out: Array[Dictionary] = []
-	if has_hat:
-		out.append({"id": "hat", "name": "Top Hat", "on": wear_hat, "gear": "hat",
-			"note": "better tributes, more often"})
-	if has_coat:
-		out.append({"id": "coat", "name": "Tailcoat", "on": wear_coat, "gear": "coat",
-			"note": "the crowd warms %d%% faster" % int(round((COAT_WARM - 1.0) * 100.0))})
-	if has_vest:
-		out.append({"id": "vest", "name": "Sequin Waistcoat", "on": wear_vest, "gear": "vest",
-			"note": "+%d%% flowers thrown" % int(round((VEST_RATE - 1.0) * 100.0))})
-	if has_gloves:
-		out.append({"id": "gloves", "name": "Silk Gloves", "on": wear_gloves, "gear": "gloves",
-			"note": "a club's forgiveness on every prop"})
-	if has_boots:
-		out.append({"id": "boots", "name": "Stage Boots", "on": wear_boots, "gear": "boots",
-			"note": "every throw costs one less stamina"})
-	if has_glow_suit:
-		out.append({"id": "glow", "name": "Glow Suit", "on": wear_glow, "gear": "glow_suit",
-			"note": "phosphor, on any dark stage"})
-	return out
+func wear_piece_def(piece: String) -> Dictionary:
+	# ONE ROW PER GARMENT: what it is called, what it costs, and what wearing it does. The cost
+	# is per STAGE cut, so a full wardrobe for one house is the sum of these and a full wardrobe
+	# for every house is seven times that - which is the late-game money sink the economy wanted.
+	match piece:
+		"glasses": return {"name": "Glasses",          "cost": GLASSES_COST,       "note": "+%d%% to every off-Perfect catch" % int(GLASSES_CATCH_BONUS * 100.0)}
+		"gloves":  return {"name": "Silk Gloves",      "cost": GLOVES_COST,        "note": "a club's forgiveness on every prop"}
+		"boots":   return {"name": "Stage Boots",      "cost": BOOTS_COST,         "note": "every throw costs one less stamina"}
+		"hat":     return {"name": "Top Hat",          "cost": HAT_COST,           "note": "better tributes, more often"}
+		"coat":    return {"name": "Tailcoat",         "cost": COAT_COST,          "note": "the crowd warms %d%% faster" % int(round((COAT_WARM - 1.0) * 100.0))}
+		"vest":    return {"name": "Sequin Waistcoat", "cost": VEST_COST,          "note": "+%d%% flowers thrown" % int(round((VEST_RATE - 1.0) * 100.0))}
+		"helmet":  return {"name": "Energy Helmet",    "cost": ENERGY_HELMET_COST, "note": "drinks pour themselves as you run dry"}
+		"glow":    return {"name": "Glow Suit",        "cost": GLOW_SUIT_COST,     "note": "you glow on a dark stage instead of vanishing into it"}
+	return {"name": piece, "cost": 0, "note": ""}
 
 
-func tailor_toggle(id: String) -> void:
-	match id:
-		"hat":    wear_hat = not wear_hat
-		"coat":   wear_coat = not wear_coat
-		"vest":   wear_vest = not wear_vest
-		"gloves": wear_gloves = not wear_gloves
-		"boots":  wear_boots = not wear_boots
-		"glow":   wear_glow = not wear_glow
+func tailor_buy(piece: String, stage: int) -> void:
+	var d := wear_piece_def(piece)
+	var cost := int(d["cost"])
+	if owns_wear(piece, stage) or money < cost:
+		if money < cost:
+			set_day_msg("not enough %s  -  %s asks %s" % [coin_word(), String(d["name"]), commafy(cost)])
+			play_sfx("whiff", -10.0)
+		return
+	if not confirm_spend("wear_%s_%d" % [piece, stage], cost, false):
+		return
+	money -= cost
+	owned_wear.append(wear_key(piece, stage))
+	worn_piece[piece] = stage      # a thing you just bought goes straight on. Nobody buys a hat
+								   # to leave it in a box.
+	save_progress()
+	play_sfx("money", -6.0)
+
+
+func tailor_wear(piece: String, stage: int) -> void:
+	# WEAR IT, OR TAKE IT OFF. Pressing the cut you are already wearing removes it, which is
+	# the only way to go bare-headed and is worth having: a piece cut for the wrong house is
+	# not merely useless, it is a slot you could be scoring with.
+	if not owns_wear(piece, stage):
+		tailor_buy(piece, stage)
+		return
+	if int(worn_piece.get(piece, -1)) == stage:
+		worn_piece.erase(piece)
+	else:
+		worn_piece[piece] = stage
 	save_progress()
 	play_sfx("ui2", -13.0)
 
 
 func tailor_input(kc: int) -> void:
+	# TWO COLUMNS AND A GRID. Column 0 is the SUIT (which house's base costume to wear);
+	# column 1 is the RACK - one row per garment, one column per house - so `tailor_sel` is a
+	# row and `tailor_stage` the cut within it.
 	var suits := venue_index() + 2        # "follow the stage", then one per stage reached
-	var pieces := tailor_pieces().size()
-	var n := suits if tailor_col == 0 else maxi(pieces, 1)
+	var n := suits if tailor_col == 0 else WEAR_PIECES.size()
 	match kc:
 		KEY_TAB, KEY_ESCAPE:
 			tailor_open = false
@@ -11206,19 +11107,31 @@ func tailor_input(kc: int) -> void:
 		KEY_DOWN, KEY_S:
 			tailor_sel = (tailor_sel + 1) % n
 			play_sfx("ui", -15.0)
-		KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D:
-			if pieces > 0:
-				tailor_col = 1 - tailor_col
-				tailor_sel = 0
-				play_sfx("ui", -15.0)
+		KEY_LEFT, KEY_A:
+			# inside the RACK, left/right walk the houses; at its left edge they step back to
+			# the suit column, so one axis does both and nothing needs a modifier key
+			if tailor_col == 1 and tailor_stage > 0:
+				tailor_stage -= 1
+			else:
+				tailor_col = 0
+				tailor_sel = mini(tailor_sel, suits - 1)
+			play_sfx("ui", -15.0)
+		KEY_RIGHT, KEY_D:
+			if tailor_col == 0:
+				tailor_col = 1
+				tailor_sel = mini(tailor_sel, WEAR_PIECES.size() - 1)
+			else:
+				tailor_stage = mini(tailor_stage + 1, venue_index())
+			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			if tailor_col == 0:
 				# row 0 is "follow the stage"; the rest are stages in order
 				outfit_suit = -1 if tailor_sel == 0 else tailor_sel - 1
 				save_progress()
 				play_sfx("ui2", -13.0)
-			elif pieces > 0:
-				tailor_toggle(String(tailor_pieces()[tailor_sel]["id"]))
+			else:
+				tailor_wear(WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)],
+					clampi(tailor_stage, 0, venue_index()))
 
 
 func glove_cloth() -> Color:
@@ -11524,7 +11437,7 @@ func warm_room(amount: float) -> void:
 	# decay is the only other thing touching `applause`, so "what can raise the room?" has
 	# a single answer. Losses are deliberately NOT routed through it: a coat that softened
 	# the drop as well as speeding the climb would be two buffs wearing one price.
-	applause = minf(1.0, applause + amount * (COAT_WARM if has_coat else 1.0))
+	applause = minf(1.0, applause + amount * (COAT_WARM if wearing("coat") else 1.0))
 
 
 func glow_props_lit() -> bool:
@@ -14759,9 +14672,25 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
 	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "THE TAILOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	# THE ONE SENTENCE THIS SCREEN MUST GET RIGHT. It is a loadout now (Louis reversed the
+	# cosmetic-only call), which means taking a piece off costs you its bonus - and the trap I
+	# was avoiding when I made it cosmetic is real, so the screen states the rule and the live
+	# set bonus states the consequence. A player who dresses badly should be able to SEE that
+	# they have, on this screen, before the act.
 	draw_string(font, Vector2(px + 40.0, py + 82.0),
-		"how you go on stage. Every bonus you own keeps paying whether you wear it or not - this is looks, not loadout.",
+		"what you wear is what you get. A piece cut for tonight's house pays; the same piece cut for another is only clothes.",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
+	draw_purse(font, px + pw - 40.0, py + 52.0)
+	# the live read: how much of tonight's set is actually on him
+	var setb := costume_set_bonus()
+	var setn := 0
+	for p2 in WEAR_PIECES:
+		if wear_matches(p2):
+			setn += 1
+	draw_string(font, Vector2(px + pw - 460.0, py + 82.0),
+		"tonight at the %s:  %d of %d pieces  ·  score x%.2f" % [suit_name(cur_venue()), setn, WEAR_PIECES.size(), setb],
+		HORIZONTAL_ALIGNMENT_RIGHT, 420.0, 13,
+		Color(0.75, 0.95, 0.70) if setn > 0 else Color(0.86, 0.62, 0.52))
 	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
 	# ---------------- THE MIRROR ----------------
@@ -14813,8 +14742,6 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var hy := py + 146.0
 	draw_string(font, Vector2(cx1, hy), "THE SUIT", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
 		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 0 else Color(0.72, 0.62, 0.5, 0.8))
-	draw_string(font, Vector2(cx2, hy), "WHAT YOU WEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
-		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 1 else Color(0.72, 0.62, 0.5, 0.8))
 	var row_h := 40.0
 	var y0 := hy + 34.0
 	# row 0 is FOLLOW THE STAGE - the behaviour that existed before this screen did, kept
@@ -14838,103 +14765,80 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		if chosen:
 			draw_string(font, Vector2(cx1 + colw - 86.0, ry), "worn", HORIZONTAL_ALIGNMENT_RIGHT, 60.0, 12, Color(0.6, 0.9, 0.62))
 
-	# ---------------- THE PIECES ----------------
-	var pieces := tailor_pieces()
-	if pieces.is_empty():
-		draw_wrap_fit(font, "Nothing bought yet. The shop's gear row sells a top hat, a tailcoat, a sequin waistcoat, silk gloves and stage boots - each one shows up here the moment it is yours.",
-			Rect2(cx2, y0 - 14.0, colw, 160.0), 13, Color(0.70, 0.64, 0.58))
-	for j in pieces.size():
-		var pd: Dictionary = pieces[j]
-		var ry2 := y0 + float(j) * row_h
-		var sel2 := tailor_col == 1 and tailor_sel == j
-		if sel2:
-			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, colw, 34.0), Color(1.0, 0.85, 0.45, 0.09),
-				Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
-		var on: bool = bool(pd["on"])
-		var nc2 := Color(1.0, 0.9, 0.6) if sel2 else (Color(0.88, 0.82, 0.70) if on else Color(0.60, 0.55, 0.50))
-		draw_fit_string(font, Vector2(cx2, ry2), String(pd["name"]), HORIZONTAL_ALIGNMENT_LEFT, colw - 110.0, 16, nc2)
-		# the same sliding pill the settings screen uses, so ON/OFF looks the same
-		# everywhere in the game
-		draw_pill_toggle(cx2 + colw - 66.0, ry2 - 13.0, 44.0, 18.0, on)
-	# the selected piece's own line, under the column: what it does, and the standing
-	# reminder that taking it off costs nothing but the look
-	if tailor_col == 1 and not pieces.is_empty():
-		var pnote := String(pieces[clampi(tailor_sel, 0, pieces.size() - 1)]["note"])
-		draw_string(font, Vector2(cx2, y0 + float(pieces.size()) * row_h + 16.0),
-			"%s  -  yours whether or not you wear it" % pnote, HORIZONTAL_ALIGNMENT_LEFT, colw, 12,
-			Color(0.72, 0.86, 0.68))
+	# ---------------- THE RACK: one row per garment, one column per house ----------------
+	# EVERY PIECE IS BOUGHT AND EVERY PIECE HAS SEVEN CUTS (2026-07-29). A list of on/off
+	# toggles cannot express that, so the rack is a GRID: the garment down the side, the house
+	# across the top. A cell is a swatch in that house's own colours - owned or not, worn or
+	# not - which means the whole wardrobe, what it costs and what still matches tonight are
+	# one glance rather than eight screens.
+	var tonight := cur_venue()
+	var cellw := 30.0
+	var rowh2 := 40.0
+	draw_string(font, Vector2(cx2, hy), "THE RACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
+		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 1 else Color(0.72, 0.62, 0.5, 0.8))
+	# the house headings, with TONIGHT'S marked - the only column that pays
+	for st in venue_index() + 1:
+		var hx := cx2 + 132.0 + float(st) * cellw
+		var hc := Color(1.0, 0.86, 0.5) if st == tonight else Color(0.62, 0.56, 0.50)
+		draw_string(font, Vector2(hx - 6.0, hy), str(st + 1), HORIZONTAL_ALIGNMENT_CENTER, cellw, 12, hc)
+		if st == tonight:
+			draw_rect(Rect2(hx - 13.0, hy + 6.0, cellw - 4.0, 2.0), Color(1.0, 0.86, 0.5, 0.7))
+	for j2 in WEAR_PIECES.size():
+		var piece: String = WEAR_PIECES[j2]
+		var pdef := wear_piece_def(piece)
+		var ry2 := y0 + float(j2) * rowh2
+		var rowsel := tailor_col == 1 and tailor_sel == j2
+		if rowsel:
+			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, 132.0 + float(venue_index() + 1) * cellw + 16.0, 34.0),
+				Color(1.0, 0.85, 0.45, 0.07), Color(1.0, 0.88, 0.5, 0.40), 1.2, 8.0, 8.0, 0.04)
+		var wst := worn_stage(piece)
+		var nc3 := Color(1.0, 0.9, 0.6) if rowsel else (Color(0.88, 0.82, 0.70) if wst >= 0 else Color(0.62, 0.57, 0.52))
+		draw_fit_string(font, Vector2(cx2, ry2), String(pdef["name"]), HORIZONTAL_ALIGNMENT_LEFT, 124.0, 14, nc3)
+		for st2 in venue_index() + 1:
+			var sx2 := cx2 + 132.0 + float(st2) * cellw - 13.0
+			var box := Rect2(sx2, ry2 - 13.0, cellw - 6.0, 17.0)
+			var sv := venue_data(st2)
+			var owned2 := owns_wear(piece, st2)
+			# GLOVES AND BOOTS KEEP THEIR OWN COLOUR (Louis: "the gloves can stay white and
+			# the boots brown"), so their swatch shows the cloth they are actually made of
+			# rather than a house tint that will never appear on the figure.
+			var swatch: Color = Color(0.93, 0.92, 0.88) if piece == "gloves" \
+				else (Color(0.42, 0.26, 0.17) if piece == "boots" else Color(sv["suit"]))
+			if owned2:
+				draw_rect(box, swatch)
+				if wst == st2:
+					draw_rect(box, Color(1.0, 0.92, 0.55), false, 2.0)   # WORN
+			else:
+				draw_rect(box, Color(swatch.r * 0.26, swatch.g * 0.26, swatch.b * 0.26, 0.75))
+				draw_rect(box, Color(0.55, 0.50, 0.45, 0.45), false, 1.0)
+			if rowsel and tailor_stage == st2:
+				draw_rect(Rect2(box.position.x - 3.0, box.position.y - 3.0, box.size.x + 6.0, box.size.y + 6.0),
+					Color(1.0, 0.88, 0.5, 0.95), false, 1.6)
+	# the selected cell, spelled out: what it is, what it does, and what it costs or is worth
+	if tailor_col == 1:
+		var pc: String = WEAR_PIECES[clampi(tailor_sel, 0, WEAR_PIECES.size() - 1)]
+		var pdf := wear_piece_def(pc)
+		var stg := clampi(tailor_stage, 0, venue_index())
+		var owned3 := owns_wear(pc, stg)
+		var fy2 := y0 + float(WEAR_PIECES.size()) * rowh2 + 8.0
+		draw_string(font, Vector2(cx2, fy2), "%s  -  %s cut" % [String(pdf["name"]), suit_name(stg)],
+			HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 14, Color(1.0, 0.88, 0.55))
+		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 12,
+			Color(0.78, 0.90, 0.72))
+		if not owned3:
+			var afford2 := money >= int(pdf["cost"])
+			draw_string(font, Vector2(cx2, fy2 + 40.0), "buy for %s" % commafy(int(pdf["cost"])),
+				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13,
+				Color(0.78, 0.96, 0.72) if afford2 else Color(0.90, 0.55, 0.48))
+		elif worn_stage(pc) == stg:
+			draw_string(font, Vector2(cx2, fy2 + 40.0), "worn  -  press again to take it off",
+				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13, Color(0.80, 0.75, 0.68))
+		else:
+			draw_string(font, Vector2(cx2, fy2 + 40.0), "owned  -  press to wear it",
+				HORIZONTAL_ALIGNMENT_LEFT, colw + 80.0, 13, Color(0.80, 0.75, 0.68))
 
 	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
 		[[["Up", "Down"], "choose"], [["Left", "Right"], "column"], [["Enter"], "wear it"], [["Tab"], "leave"]])
-
-
-func draw_shop_door(font: Font, panel: Rect2) -> void:
-	# THE DOOR IS A DIRECTION (2026-07-28 evening, Louis: "going to the back feels like
-	# stepping to the right on the screen"). That sentence is the whole design and it is a
-	# better one than the card it replaces: a card in the gear row asks "will you buy this?",
-	# and the honest question here is "will you go through?". So the way in stands against the
-	# RIGHT edge of the panel and the way out against the LEFT, and each is a big arrow
-	# pointing the way it takes you - the position IS the information, before any lettering.
-	#
-	# Drawn as a tall bar with a chevron cut into its inner face rather than a plain triangle:
-	# a triangle alone at this height reads as a play button, and the bar is what makes it a
-	# doorway with something beyond it. The curtain fold behind the chevron is the one mark
-	# that ties it to the room it opens onto.
-	var back := shop_room == SHOP_ROOM_FRONT      # true = this door leads INTO the back room
-	var dir := 1.0 if back else -1.0              # +1 points right, -1 left
-	var sel := shop_on_door()
-	var w := SHOP_DOOR_W
-	var h := 300.0
-	var x := panel.position.x + panel.size.x - SHOP_DOOR_GUT + (SHOP_DOOR_GUT - w) * 0.5 if back \
-		else panel.position.x + (SHOP_DOOR_GUT - w) * 0.5
-	var r := Rect2(x, panel.position.y + panel.size.y * 0.5 - h * 0.5 - 20.0, w, h)
-	# LOCKED reads differently from open: a fee still to pay is amber and carries its price,
-	# an open door is the room's own colour.
-	var locked := back and not has_backroom
-	var kc := Color(0.95, 0.62, 0.30) if locked else (Color(0.86, 0.42, 0.40) if back else Color(0.62, 0.74, 0.88))
-	if sel:
-		soft_card(r, Color(kc.r * 0.26, kc.g * 0.26, kc.b * 0.26, 0.97), Color(1.0, 0.88, 0.5, 0.95),
-			2.5, 11.0, 18.0, 0.07)
-	else:
-		soft_card(r, Color(kc.r * 0.13, kc.g * 0.13, kc.b * 0.13, 0.92), Color(kc.r, kc.g, kc.b, 0.45),
-			1.5, 11.0, 12.0)
-	var cy := r.position.y + r.size.y * 0.5
-	var cx := r.position.x + r.size.x * 0.5
-	# the curtain beyond it: two folds pulled back from the middle, so the arrow is standing
-	# in a doorway rather than floating on a panel
-	for sgn: float in [-1.0, 1.0]:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx + sgn * 15.0, cy - 96.0), Vector2(cx + sgn * 5.0, cy - 88.0),
-			Vector2(cx + sgn * 7.0, cy + 88.0), Vector2(cx + sgn * 15.0, cy + 96.0)]),
-			Color(kc.r, kc.g, kc.b, 0.18))
-	# THE ARROW. It breathes toward the way it goes when selected, which is the cheapest
-	# possible way to say "this one moves you" without a word of explanation.
-	var nudge := (6.0 * (0.5 + 0.5 * sin(atick() * 0.07))) if sel else 0.0
-	var ax := cx + dir * nudge
-	var a := 1.0 if sel else 0.72
-	for lay in [[26.0, 46.0, 0.30], [18.0, 32.0, 1.0]]:
-		var aw: float = float(lay[0])
-		var ah: float = float(lay[1])
-		var al: float = float(lay[2])
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(ax + dir * aw, cy), Vector2(ax - dir * aw * 0.55, cy - ah),
-			Vector2(ax - dir * aw * 0.10, cy - ah), Vector2(ax + dir * aw * 1.45, cy),
-			Vector2(ax - dir * aw * 0.10, cy + ah), Vector2(ax - dir * aw * 0.55, cy + ah)]),
-			Color(kc.r, kc.g, kc.b, al * a))
-	# the label, turned to run UP the bar - a door this narrow has no room for a horizontal
-	# word, and a rotated one also reads as signage on a doorframe, which is what it is
-	draw_set_transform(Vector2(cx, cy + (86.0 if back else -86.0)), (-PI * 0.5 if back else PI * 0.5), Vector2.ONE)
-	var word := ("BACK ROOM" if back else "FRONT ROOM")
-	draw_string(font, Vector2(-70.0, 5.0), word, HORIZONTAL_ALIGNMENT_CENTER, 140.0, 13,
-		Color(kc.r, kc.g, kc.b, 0.95 * a))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	# ...and the fee, only while there is one to pay. A number on an open door would read
-	# as a toll that is charged every time.
-	if locked:
-		draw_string(font, Vector2(r.position.x, r.position.y - 10.0), commafy(BACKROOM_COST),
-			HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 13, Color(0.95, 0.72, 0.42))
-		draw_string(font, Vector2(r.position.x, r.position.y + r.size.y + 18.0), "16+",
-			HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 12, Color(0.85, 0.60, 0.36))
 
 
 func draw_shop(font: Font, s: Vector2) -> void:
@@ -14948,24 +14852,17 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.99), Color(0.9, 0.6, 0.35, 0.55), 2.0, 16.0, 22.0)
 
-	# THE ROWS LEAVE A GUTTER ON BOTH SIDES, always, whichever room is showing. Reserving it
-	# only where a door actually is would make the whole shop jump sideways every time you
-	# walked through one - and reserving nothing is what put the first door bar straight
-	# through the last gear card. One constant, read here and by draw_shop_door, so the two
-	# cannot disagree about where the goods stop and the doorway starts.
-	var tx := px + 40.0 + SHOP_DOOR_GUT
-	var innerw := pw - 80.0 - SHOP_DOOR_GUT * 2.0
+	var tx := px + 40.0
+	var innerw := pw - 80.0
 	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
 	# WHICH ROOM, said in the header rather than left to be inferred from the goods
 	# ...and it no longer has to teach a hotkey. The C hint lived here because C was the
 	# only way through the curtain; the door is a card on the gear row now and explains
 	# itself where every other purchase does.
 	var sub := "to juggle N of a prop, own N of them"
-	if shop_room == SHOP_ROOM_BACK:
-		sub = "the back room  -  mind the sharp things"
 	draw_string(font, Vector2(tx + 118.0, py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
 		Color(0.95, 0.72, 0.55) if shop_room == SHOP_ROOM_BACK else Color(0.75, 0.68, 0.6))
-	draw_purse(font, px + pw - 40.0 - SHOP_DOOR_GUT, py + 52.0)
+	draw_purse(font, px + pw - 40.0, py + 52.0)
 
 	# ---------------- PROPS: one card per prop, in one row ----------------
 	# THE ROW FITS WHATEVER PROPS HOLDS. It was `(innerw - gap * 5) / 6`, so the seventh
@@ -14973,7 +14870,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	# out through the panel's right border and off the screen. Both terms come off the
 	# count now. This row is the reason a prop CATEGORY system is the right next move:
 	# past about eight cards there is no width left, whatever the arithmetic says.
-	draw_string(font, Vector2(tx, py + 96.0), "PROPS" if shop_room == SHOP_ROOM_FRONT else "DANGEROUS",
+	draw_string(font, Vector2(tx, py + 96.0), "PROPS",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
 	var room_props := shop_props()
 	var np := room_props.size()
@@ -15043,15 +14940,21 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	var gn := glist.size()
 	var gy := y0 + ch + 30.0
 	draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+	# A GEAR CARD HAS A MAXIMUM WIDTH. With the clothes gone the row holds ONE item, and
+	# `innerw / 1` stretched that card across the whole panel - a single object floating in
+	# 1,040px of empty card, which reads as a bug rather than as a shop with one thing left
+	# in it. Capped at the width four cards used to get, and the row centres what it has.
 	var ggap := 14.0 if gn <= 4 else 10.0
-	var gw := (innerw - ggap * float(gn - 1)) / float(gn)
+	var gw := minf((innerw - ggap * float(gn - 1)) / float(gn), 260.0)
+	var grow_w := gw * float(gn) + ggap * float(gn - 1)
+	var gx0 := tx + (innerw - grow_w) * 0.5
 	var wide := gn <= 4
 	var gh := 152.0
 	var gy0 := gy + 14.0
 	for i in gn:
 		var e: Dictionary = glist[i]
 		var gsel := shop_sel == shop_gear0() + i
-		var cx0 := tx + float(i) * (gw + ggap)
+		var cx0 := gx0 + float(i) * (gw + ggap)
 		var cc: Color = e["col"]
 		var gcost := int(e["cost"])
 		var owned := bool(e["owned"])
@@ -15084,9 +14987,6 @@ func draw_shop(font: Font, s: Vector2) -> void:
 				shop_key_label(shop_gear0() + i), commafy(gcost), money >= gcost,
 				"walk through" if gcost == 0 else "")
 
-	# ---------------- THE DOOR, at the edge it leads to ----------------
-	draw_shop_door(font, Rect2(px, py, pw, ph))
-
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
 	# this is where a prop's IDENTITY lives (its signature edge), so the small cards stay
 	# uncluttered and the player still learns why they would pick one prop over another. A
@@ -15108,14 +15008,6 @@ func draw_shop(font: Font, s: Vector2) -> void:
 			var pk: int = shop_props()[shop_sel]
 			detail_head = String(PROPS[pk]["name"])
 			detail = String(PROPS[pk]["trait"])
-		elif shop_on_door():
-			detail_head = "The Front Room" if shop_room == SHOP_ROOM_BACK else "The Back Room"
-			if shop_room == SHOP_ROOM_BACK:
-				detail = "back out through the curtain, to the safe goods"
-			elif has_backroom:
-				detail = "the sharp things are through here - knives, torches, the saw, and Uncle Dan's pie"
-			else:
-				detail = "16 and over. A one-off fee of %s at the curtain, and an errand's worth of the day" % commafy(BACKROOM_COST)
 		else:
 			var gi := shop_sel - shop_gear0()
 			var gl := shop_gear()
@@ -15133,7 +15025,7 @@ func draw_shop(font: Font, s: Vector2) -> void:
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
 			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "buy the set"],
-			 [["C"], "back room" if shop_room == SHOP_ROOM_FRONT else "front of shop"], [["Tab"], "leave"]])
+			 [["Tab"], "leave"]])
 
 
 #endregion
@@ -15376,7 +15268,7 @@ func draw_mini_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve
 	var elbow := solve_elbow(shoulder, hand, bone, bone, bend)
 	var wrist := hand + (elbow - hand).normalized() * 3.2 * k
 	draw_capsule(shoulder, elbow, 19.0 * PV_K * k, 14.0 * PV_K * k, sleeve)
-	draw_capsule(elbow, wrist, 13.0 * PV_K * k, 10.0 * PV_K * k, skin)
+	draw_capsule(elbow, wrist, 13.0 * PV_K * k, 10.0 * PV_K * k, sleeve)   # cloth to the wrist
 	draw_circle(elbow, 7.0 * PV_K * k, sleeve)
 
 
@@ -18510,7 +18402,7 @@ func flower_tier_roll() -> int:
 	var v := venue_generosity()
 	# THE TOP HAT is a showman's hat and the room answers it: every tier's odds widen,
 	# which reads as posies where there were single stems rather than as a bigger number
-	if has_hat:
+	if wearing("hat"):
 		v = clampf(v + HAT_TIER_LIFT, 0.0, 1.0)
 	if dropped == 0 and applause > 0.94:
 		if v >= 0.5 and randf() < 0.04 + 0.09 * v:
@@ -18593,7 +18485,7 @@ func throw_step() -> void:
 	var rolls := int(FLOWER_THROWERS[vi])
 	# ...and the SEQUIN WAISTCOAT is the late-game money piece: the room throws OFTENER,
 	# which compounds with everything already raising the rate rather than replacing it
-	var p := clampf(FLOWER_P * flower_pressure() * flower_fame() * (VEST_RATE if has_vest else 1.0), 0.0, 0.85)
+	var p := clampf(FLOWER_P * flower_pressure() * flower_fame() * (VEST_RATE if wearing("vest") else 1.0), 0.0, 0.85)
 	if p > 0.0:
 		for _i in rolls:
 			if randf() < p:
