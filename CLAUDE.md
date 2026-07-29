@@ -1672,6 +1672,80 @@ Do not reshape the figure to fit a hat.
   three pages half empty** - a reference document that wastes a third of its paper reads as
   unfinished.
 
+## THE 2026-07-29 (evening) PASS - exponential scoring, and the tailor as a shop
+
+- **THE SCORE IS EXPONENTIAL AND AN ACT IS A SERIES OF RUNS** (Louis: "i'd also like balatro
+  like scoring system: exponential ... doing x amount of tricks with difficulty value p during
+  a performance multiplies the current score (since last drop) with p^x"). A run is the stretch
+  since the last drop; raw points accumulate linearly inside one and a landed trick multiplies
+  the WHOLE run, so x landings give p^x with no special case. A drop banks the run and opens
+  the next at x1 - which turns a drop from "your streak resets" into "your exponential ends",
+  and that is the tension the system exists for. `score` is a float: 64-bit ints stop at 9.2e18
+  and this prints 1e40 on a good night. `score_text` switches to E notation past a million,
+  because past that digits are scenery.
+  **THE LINEAR HALF HAD TO COME DOWN AS THE CEILING CAME OFF.** He asked for the max multiplier
+  gone AND for linear play to be a far worse way to reach a goal, and those pull opposite ways:
+  an uncapped streak length is the steepest linear curve there is. `CHAIN_STEP` is 0.05, so
+  sixty straight Perfects multiply by 4 rather than by sixty. Good catches now reset the chain
+  too, which is what makes an all-Perfect act worth many times a merely clean one.
+  **A TOGGLE'S p IS PER CATCH AND A LIVE TRICK'S IS PER PRESS**, which is why their numbers look
+  nothing alike and is the single most important thing to remember when adding a trick. Measured:
+  Behind the Back at diff 1.55 cleared all three goals of the Small Theatre in 3.2 seconds and
+  scored 791,803, because a toggle shapes every throw, so x is the length of the run and p^60 of
+  anything near 1.9 is not a game. At 1.055 the same toggle over sixty catches is x100.
+- **TRICKS ARE CASCADE-ONLY EXCEPT HIGH TOSS AND SPIN**, which is the previous day's combination
+  audit turned from a warning into a rule. Cascade is the only pattern with no shape of its own
+  to protect; every other one IS a fixed geometry that a shaping trick contradicts.
+- **THE SPIN HAS NO COOLDOWN AND A FULL LOCKOUT** (Louis: "change the spin cooldown to zero but
+  make it impossible to catch or throw while spinning"). This is a better limiter than a timer
+  for a reason worth keeping: a cooldown is a RULE, the lockout is a COST paid out of the same
+  resource the pattern already spends. At three balls 44 blind ticks are free; at fifteen they
+  are three missed catches. **The prop count polices the Spin by itself**, and buying the airtime
+  to survive one (a High Toss first) becomes real play. The autoplayer needed `demo_spin_room`
+  or `--demo --trick spin` deleted its own set in 202 ticks.
+- **ONE HITBOX** (Louis). Three shrinks used to multiply together - per prop, per count, per
+  pattern - so no two situations shared a collision rule and "does this work" had 6 x 13 x 7
+  answers that moved each other. It is `HIT_FLOOR` for everything now, sized for the tightest
+  real geometry in the game (fifteen chainsaws in Columns, ~9px of daylight).
+- **THE TAILOR IS THE CLOTHES SHOP, AND A REAL LOADOUT** (Louis, reversing yesterday's
+  cosmetic-only call: "I'd rather the tailor be a real loadout: buffs follow wearing"). Every
+  garment is bought PER HOUSE - eight pieces in seven cuts, `owned_wear` keyed "<piece>:<stage>"
+  so a ninth garment needs no migration - and worn from a rack that is a grid: garment down the
+  side, house across the top. A piece cut for tonight's stage pays (`SET_PIECE_BONUS`), the full
+  matching set pays more than the sum of its parts, and the header shows the count and the live
+  multiplier BEFORE the act. The trap I was avoiding when I made it cosmetic is real, so the
+  screen states the rule rather than hiding it.
+  **THE LEGACY SAVE KEYS ARE WRITTEN FROM OWNERSHIP, NOT FROM WHAT IS WORN**, and that
+  one-word difference is a save-eating bug if it goes the other way: the pre-tailor migration
+  reads them as "bought", so a hat taken off for one act would come back as a hat never bought.
+- **THE SHOP IS ONE ROOM AGAIN.** Clothes to the tailor, pie and drinks to REST, glow tape kept
+  (it is about the props). The two rooms and the 16+ curtain existed to solve a layout problem -
+  seven prop cards would not fit beside eleven gear ones - and with eight cards they fit. A gear
+  card also has a MAXIMUM width now: at one item `innerw / 1` stretched it across the whole panel.
+- **SLEEVES RUN TO THE WRIST** (Louis). A performer in evening dress has no bare forearm, and
+  two skin capsules read as rolled-up shirtsleeves under a tailcoat.
+- **THE DECK IS STILL, AND EVERY FACE WAS REDRAWN TO LOUIS'S OWN BRIEF.** Ballerina alone;
+  temple without props or motion; a duck and a DUCKLING for Shower and Half Shower (the joke is
+  the proportions, not the size - a scaled-down duck is a distant duck, a duckling has a bigger
+  head on a shorter neck with a stubbier bill); an upright racket with a still ball; the Leaning
+  Tower for High Toss; a fan of cards held behind the back for Behind the Back. **No card
+  animates any more** - a still illustration reads as a printed card and an animated one reads
+  as a screen.
+  **LIMBS ARE CAPSULES, NOT HAND-WRITTEN OUTLINES.** The ballerina's arms were eight-point
+  outlines - out along the top edge, back along the bottom - and at the shoulder the two edges
+  CROSSED (measured: the outgoing edge at y -0.153 where the returning one was at -0.136, order
+  flipping by x -0.044). Godot refuses a self-intersecting polygon silently, so the arms did not
+  draw at all and the log filled with one triangulation failure per frame - the exact signature
+  this file already records for a static shape. `draw_capsule` cannot fold through itself.
+- **A DOTALL REGEX DELETED 16,099 LINES OF Game.gd**, and the recovery is the lesson.
+  `re.search(r"const SHOP_DOOR_W := .*?walk through\n", src, re.S)` looks bounded and is not:
+  with DOTALL, `.` crosses newlines, so it matched from that constant to the LAST "walk through"
+  in the file. The work was recovered by restoring HEAD and re-applying every edit from the
+  session transcript, and it cost about an hour. **Never use re.S on this file to delete a
+  range.** Cut with `src.index(start)` / `src.index(end, i)` - two explicit anchors that fail
+  loudly - and commit before any structural edit, which is the other half of why the loss was
+  survivable at all.
+
 ## MINIMUM REQUIREMENTS (2026-07-28) - derived from measurement, not guessed
 
 Louis asked for a guess at the minimum spec. It is better than a guess, because the numbers
