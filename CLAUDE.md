@@ -1828,7 +1828,30 @@ taste.
   once**, so 206s is the ONE-activation figure and a floor, not a ceiling: three activations is
   2.46^3 = x14.9 and lands the same act near 42 seconds, which is where the clock floor for
   that house sits (40s). That is the intended shape - build, and the clock becomes the wall.
-- **THE BOT CANNOT MEASURE ABOVE THE THEATRE, AND THE REASON IS ARITHMETIC RATHER THAN A
+- **`--ladder` IS THE ANSWER TO A LADDER THE BOT CANNOT MEASURE**, and building it immediately
+  found two rungs I had wrong. It prints every house's expected build, its base rate, its goals,
+  how many trick activations the final goal actually needs, and how long that build takes -
+  computed from the live constants, in one second. `LADDER_BUILD` holds the build each house
+  assumes, as DATA: until it existed the derivation lived in my head and in prose, which is how
+  a ladder ends up with assumptions nobody can check. **Arithmetic in a comment rots; arithmetic
+  in a tool gets re-run.** Run it after touching VENUE_BASE, GOAL_STEP, CATCH_PTS, CHAIN_GAIN,
+  any trick's `diff`, or the set bonus.
+  **What it found on its first run:** the World Arena and the Midnight Show each needed ONE MORE
+  activation than the build they were supposedly derived from, and took 162 and 201 seconds
+  against floors of 55 and 60. Their bases came down from 1.25e7/3.1e8 to 4.1e6/9.2e7. Every
+  rung is now clock-gated at its own build - the wall a well-built act meets is the clock, and a
+  weaker one is held by the number, which is the whole design:
+      Backyard 0 acts, 22s vs 30s floor    Circus 3, 35s vs 45s      Arena 4, 53s vs 55s
+      Street 1, 14s vs 35s                 Champ 4, 32s vs 50s       Midnight 5, 60s vs 60s
+      Theatre 2, 39s vs 40s
+- **A HIGH-THROWING PATTERN IS WHAT MAKES A SPIN POSSIBLE AT HIGH COUNTS**, and this fell out of
+  the measurements rather than being designed. At seven objects a plain Cascade tap gives a
+  catch every 19 ticks and a Spin needs 52 clear - it can never fit. Half Shower's high road is
+  176 ticks and leaves gaps of about 50, which is why `--trick spin` scored 27,410 under Half
+  Shower and exactly 0 under the same count in Cascade. **Pattern choice and trick choice are
+  therefore coupled through airtime**, which is a real piece of depth and worth protecting: any
+  future change to pattern heights changes which tricks are usable at which counts.
+- **THE BOT CANNOT MEASURE THE TOP HOUSES, AND THE REASON IS ARITHMETIC RATHER THAN A
   BALANCE FAULT.** `--demo --trick spin` at seven torches scored ZERO and took no goals in 338
   seconds, which looks like a broken ladder and is not. At seven objects the tap airtime is 134
   ticks, so a catch arrives every 19; a Spin blocks catching for 44 and `demo_spin_room` wants
