@@ -10570,60 +10570,72 @@ func draw_top_hat(head: Vector2, r: float, silk: Color, band: Color, accent: Col
 
 func draw_stage_boot(at: Vector2, H: float, side: float, leather: Color, spat: Color,
 		accent: Color) -> void:
-	# WARDROBE: STAGE BOOTS (3,500). A boot, not a darker shoe - and the difference is two
-	# marks, both of which the old flat ellipse had neither of: a SHAFT rising past the
-	# ankle and a HEEL under it. A toe cap on its own just reads as a shinier shoe.
+	# WARDROBE: STAGE BOOTS, third pass (2026-07-29, Louis: "make the boots and gloves look
+	# better tho"). The previous one had the right PARTS - shaft, toe cap, heel, spat strap -
+	# and still read as a lump, and the reason is worth writing down because it applies to any
+	# small object: **it had no ankle.** Every shape was a straight-sided slab stacked on the
+	# next, so the boot was a column on a wedge; a real boot narrows sharply at the ankle and
+	# swells again at the calf, and that single waist is what the eye reads as "boot" before it
+	# reads any of the details.
 	#
-	# Everything is in units of H (the figure's head unit) inside a MIRRORED transform, so
-	# one description of the boot serves both feet and it scales with the figure at any
-	# window size. `at` is the floor point under the ankle, so y runs negative upward and
-	# y = 0 is exactly where the boards are - a boot drawn to any other datum floats.
-	# TWO THINGS THE FIRST PASS GOT WRONG, both visible the moment it was on screen.
-	# (1) The leather was the plain `shoe` brown, 0.20/0.12/0.09, which against boards that
-	# are themselves near-black is not a dark boot, it is an absence. A boot has to be
-	# LIGHTER than the floor it stands on or it has no silhouette at all, so the base tone
-	# is lifted here rather than at the call site - the bare shoe is still welcome to be a
-	# shadow, since it is not a thing the player paid for. Lifted by MULTIPLYING the
-	# channels, not by `lightened()`, which lerps toward white and turned the same brown
-	# into concrete grey - the trap this file already records for `suit.lightened()`.
-	# (2) The spat was one broad band across the whole instep in the shirt's near-white
-	# cloth, which read as a WHITE SOCK: it covered more of the boot than the boot did. A
-	# spat is two narrow straps with buttons, and narrow is the entire point.
+	# Also new: a proper turned-down CUFF at the top, a stacked heel with visible layers, and a
+	# sole that runs past the upper as a welt. Everything is still in units of H inside a
+	# mirrored transform, so one description serves both feet at any figure size.
 	var hide := Color(minf(leather.r * 1.75 + 0.05, 1.0), minf(leather.g * 1.65 + 0.03, 1.0),
 		minf(leather.b * 1.50 + 0.02, 1.0))
 	var lit := Color(minf(hide.r * 1.34, 1.0), minf(hide.g * 1.30, 1.0), minf(hide.b * 1.26, 1.0))
-	var dark := Color(leather.r * 0.70, leather.g * 0.70, leather.b * 0.70)
+	var dark := Color(leather.r * 0.68, leather.g * 0.68, leather.b * 0.70)
+	var cuff := Color(minf(hide.r * 1.12, 1.0), minf(hide.g * 1.06, 1.0), minf(hide.b * 1.00, 1.0))
 	draw_set_transform(at, 0.0, Vector2(side * H, H))
-	# the shaft, slightly flared at its top the way a dress boot's is. It covers the
-	# trouser hem, which is right: this is a boot worn OVER the trouser, on stage.
+	# THE SHAFT, WITH AN ANKLE. Six points down each side rather than two: wide at the calf,
+	# pinched at -0.30, wide again over the instep.
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.18, -0.22), Vector2(0.16, -0.22), Vector2(0.19, -0.56), Vector2(-0.21, -0.56)]), hide)
-	draw_colored_polygon(PackedVector2Array([   # the shaft's lit front, so it is a tube
-		Vector2(-0.03, -0.22), Vector2(0.14, -0.22), Vector2(0.17, -0.56), Vector2(-0.01, -0.56)]), lit)
-	# the foot: a heel at the back, a long vamp, a toe that lifts a little off the boards
+		Vector2(-0.205, -0.560), Vector2(0.175, -0.560),
+		Vector2(0.158, -0.430), Vector2(0.128, -0.300),
+		Vector2(0.150, -0.190), Vector2(0.168, -0.100),
+		Vector2(-0.190, -0.100), Vector2(-0.172, -0.190),
+		Vector2(-0.150, -0.300), Vector2(-0.182, -0.430)]), hide)
+	# the lit front of the shaft, following the same waist so it can never cross the outline
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.26, -0.04), Vector2(-0.22, -0.24), Vector2(0.06, -0.30),
-		Vector2(0.25, -0.20), Vector2(0.34, -0.09), Vector2(0.32, -0.03),
-		Vector2(-0.26, -0.03)]), hide)
+		Vector2(-0.030, -0.556), Vector2(0.150, -0.556),
+		Vector2(0.134, -0.430), Vector2(0.106, -0.300),
+		Vector2(0.128, -0.190), Vector2(0.144, -0.104),
+		Vector2(-0.020, -0.104), Vector2(-0.016, -0.190),
+		Vector2(-0.014, -0.300), Vector2(-0.024, -0.430)]), lit)
+	# THE CUFF, turned down over the top: a band a little wider than the shaft, in a paler
+	# leather. It is what stops the boot ending in a cut edge.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.222, -0.610), Vector2(0.192, -0.610),
+		Vector2(0.180, -0.526), Vector2(-0.210, -0.526)]), cuff)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.222, -0.610), Vector2(0.192, -0.610),
+		Vector2(0.188, -0.588), Vector2(-0.218, -0.588)]), lit)
+	# the foot: a heel seat at the back, a long vamp, a toe that lifts off the boards
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.245, -0.045), Vector2(-0.205, -0.116), Vector2(0.060, -0.132),
+		Vector2(0.235, -0.086), Vector2(0.318, -0.032), Vector2(0.300, -0.008),
+		Vector2(-0.245, -0.008)]), hide)
 	draw_colored_polygon(PackedVector2Array([   # the toe cap: patent, the one part that shines
-		Vector2(0.12, -0.03), Vector2(0.32, -0.03), Vector2(0.34, -0.09), Vector2(0.23, -0.21)]), lit)
-	draw_colored_polygon(PackedVector2Array([   # the sole...
-		Vector2(-0.27, -0.03), Vector2(0.32, -0.03), Vector2(0.31, 0.0), Vector2(-0.28, 0.0)]), dark)
-	draw_colored_polygon(PackedVector2Array([   # ...and the heel block under it
-		Vector2(-0.27, 0.0), Vector2(-0.15, 0.0), Vector2(-0.15, -0.10), Vector2(-0.27, -0.10)]), dark)
-	# THE SPAT is the mark that says "stage" rather than "outdoors": ONE pale strap buttoned
-	# over the shaft, cut from the shirt's own cloth so it dims with the costume wherever the
-	# venue means the performer to stay dark.
-	#
-	# ONE, not two - checked on the stage figure, where the boot is about 22px tall. Two
-	# straps 0.14H apart merge at that size into alternating light and dark bands, and what
-	# the finished juggler had on his feet was a pair of striped SOCKS. A single band high on
-	# the shaft, with its own button, reads as the fastening it is. (The wide shop icon has
-	# the room for two and keeps them - it is drawn at three times this size.)
-	var sy := -0.42
+		Vector2(0.118, -0.010), Vector2(0.300, -0.010), Vector2(0.318, -0.034),
+		Vector2(0.222, -0.092)]), lit)
+	draw_line(Vector2(0.118, -0.012), Vector2(0.150, -0.104), Color(dark.r, dark.g, dark.b, 0.7), 0.012)
+	# the WELT, running a touch past the upper all the way round - the ridge every real
+	# leather sole has, and the mark that says the boot is built rather than moulded
 	draw_colored_polygon(PackedVector2Array([
-		Vector2(-0.20, sy), Vector2(0.18, sy - 0.02), Vector2(0.18, sy - 0.10), Vector2(-0.20, sy - 0.08)]), spat)
-	draw_circle(Vector2(-0.11, sy - 0.05), 0.034, accent)
+		Vector2(-0.262, -0.010), Vector2(0.318, -0.010), Vector2(0.312, 0.014), Vector2(-0.268, 0.014)]), dark)
+	# a STACKED heel: three thin layers, which is what a heel is and what one block is not
+	for hl in 3:
+		var hy := 0.010 - float(hl) * 0.036
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-0.258 + float(hl) * 0.004, hy), Vector2(-0.132, hy),
+			Vector2(-0.132, hy - 0.032), Vector2(-0.254 + float(hl) * 0.004, hy - 0.032)]),
+			dark if hl % 2 == 0 else Color(dark.r * 1.35, dark.g * 1.35, dark.b * 1.30))
+	# THE SPAT: one pale strap buttoned across the shaft's waist, which is also the narrowest
+	# place on the boot - a strap belongs where a boot is actually cinched.
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-0.158, -0.268), Vector2(0.138, -0.286), Vector2(0.142, -0.352), Vector2(-0.166, -0.334)]), spat)
+	draw_line(Vector2(-0.160, -0.276), Vector2(0.140, -0.294), Color(0, 0, 0, 0.16), 0.010)
+	draw_circle(Vector2(-0.098, -0.308), 0.032, accent)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -11047,14 +11059,17 @@ func wear_piece_def(piece: String) -> Dictionary:
 	# is per STAGE cut, so a full wardrobe for one house is the sum of these and a full wardrobe
 	# for every house is seven times that - which is the late-game money sink the economy wanted.
 	match piece:
-		"glasses": return {"name": "Glasses",          "cost": GLASSES_COST,       "note": "+%d%% to every off-Perfect catch" % int(GLASSES_CATCH_BONUS * 100.0)}
-		"gloves":  return {"name": "Silk Gloves",      "cost": GLOVES_COST,        "note": "a club's forgiveness on every prop"}
-		"boots":   return {"name": "Stage Boots",      "cost": BOOTS_COST,         "note": "every throw costs one less stamina"}
-		"hat":     return {"name": "Top Hat",          "cost": HAT_COST,           "note": "better tributes, more often"}
-		"coat":    return {"name": "Tailcoat",         "cost": COAT_COST,          "note": "the crowd warms %d%% faster" % int(round((COAT_WARM - 1.0) * 100.0))}
-		"vest":    return {"name": "Sequin Waistcoat", "cost": VEST_COST,          "note": "+%d%% flowers thrown" % int(round((VEST_RATE - 1.0) * 100.0))}
-		"helmet":  return {"name": "Energy Helmet",    "cost": ENERGY_HELMET_COST, "note": "drinks pour themselves as you run dry"}
-		"glow":    return {"name": "Glow Suit",        "cost": GLOW_SUIT_COST,     "note": "you glow on a dark stage instead of vanishing into it"}
+		# `gear` is the id draw_gear_icon knows this object by, which is not always the
+		# piece's own id - the glow SUIT's picture is filed under "glow_suit" because the shop
+		# once sold a tape and a kit beside it.
+		"glasses": return {"name": "Glasses",          "gear": "glasses", "cost": GLASSES_COST,       "note": "+%d%% to every off-Perfect catch" % int(GLASSES_CATCH_BONUS * 100.0)}
+		"gloves":  return {"name": "Silk Gloves",      "gear": "gloves", "cost": GLOVES_COST,        "note": "a club's forgiveness on every prop"}
+		"boots":   return {"name": "Stage Boots",      "gear": "boots", "cost": BOOTS_COST,         "note": "every throw costs one less stamina"}
+		"hat":     return {"name": "Top Hat",          "gear": "hat", "cost": HAT_COST,           "note": "better tributes, more often"}
+		"coat":    return {"name": "Tailcoat",         "gear": "coat", "cost": COAT_COST,          "note": "the crowd warms %d%% faster" % int(round((COAT_WARM - 1.0) * 100.0))}
+		"vest":    return {"name": "Sequin Waistcoat", "gear": "vest", "cost": VEST_COST,          "note": "+%d%% flowers thrown" % int(round((VEST_RATE - 1.0) * 100.0))}
+		"helmet":  return {"name": "Energy Helmet",    "gear": "helmet", "cost": ENERGY_HELMET_COST, "note": "drinks pour themselves as you run dry"}
+		"glow":    return {"name": "Glow Suit",        "gear": "glow_suit", "cost": GLOW_SUIT_COST,     "note": "you glow on a dark stage instead of vanishing into it"}
 	return {"name": piece, "cost": 0, "note": ""}
 
 
@@ -11180,22 +11195,39 @@ func draw_hand(h: int) -> void:
 	fill_ellipse(pos + Vector2(inward * openf * 1.5, -stretch * 0.5), 11.5, 11.5 + stretch, sk)
 	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
 	if gloved:
-		# THE WRIST OPENING plus one seam is the whole read. A glove at 23px has no room
-		# for fingers (the bare hand deliberately has none either), so what has to say
-		# "glove" is the EDGE where the cloth stops - a scalloped hem across the wrist -
-		# and the stitched seam running up out of it. Both are filled shapes in the
-		# cloth's own shade, never outlines: an outlined mitt reads as a mitten.
-		var hem := sk.darkened(0.16)
-		var wy := pos.y + 7.0
+		# SILK GLOVES, second pass (2026-07-29, Louis: "make the boots and gloves look better
+		# tho"). The first one drew a scalloped hem and one seam and left it there, which at
+		# 23px is a pale blob with a frill under it. What was missing is the thing that makes
+		# a glove a glove and not a mitten: **the THUMB**. A glove has a shape a bare hand
+		# does not, and the thumb is the whole of it - so it gets drawn even though the bare
+		# hand deliberately has no fingers, because here it is the identifying mark rather
+		# than a detail.
+		var hem := sk.darkened(0.18)
+		var seam := sk.darkened(0.30)
+		# the thumb, up and inward - toward the body, the way a hand held to catch sits
 		draw_colored_polygon(PackedVector2Array([
-			Vector2(pos.x - 10.0, wy - 3.0), Vector2(pos.x + 10.0, wy - 3.0),
-			Vector2(pos.x + 8.6, wy + 4.6), Vector2(pos.x, wy + 6.2),
-			Vector2(pos.x - 8.6, wy + 4.6)]), hem)
-		draw_line(Vector2(pos.x + inward * 1.5, wy - 2.0),
-			Vector2(pos.x + inward * 3.0, pos.y - 5.0 - stretch * 0.4), Color(hem.r, hem.g, hem.b, 0.75), 1.4)
+			pos + Vector2(inward * 6.0, 1.0), pos + Vector2(inward * 12.4, -3.4),
+			pos + Vector2(inward * 13.6, -7.6), pos + Vector2(inward * 9.2, -8.0),
+			pos + Vector2(inward * 4.6, -3.4)]), sk)
+		# THREE STITCH LINES fanning from the wrist over the back of the hand - the
+		# "pointing" a real dress glove has, and the second thing that says glove
+		for fa in [-0.36, 0.0, 0.36]:
+			var d := Vector2(sin(fa), -cos(fa))
+			draw_line(pos + d * 2.4 + Vector2(0.0, 1.0), pos + d * 9.2 - Vector2(0.0, stretch * 0.3),
+				Color(seam.r, seam.g, seam.b, 0.55), 1.2)
+		# the wrist opening: a band with a scalloped lower edge and a button at the side,
+		# which is what a dress glove closes with
+		var wy := pos.y + 7.2
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(pos.x - 10.4, wy - 3.4), Vector2(pos.x + 10.4, wy - 3.4),
+			Vector2(pos.x + 9.0, wy + 4.4), Vector2(pos.x + 3.4, wy + 2.2),
+			Vector2(pos.x, wy + 5.6), Vector2(pos.x - 3.4, wy + 2.2),
+			Vector2(pos.x - 9.0, wy + 4.4)]), hem)
+		draw_line(Vector2(pos.x - 10.0, wy - 2.6), Vector2(pos.x + 10.0, wy - 2.6), Color(1, 1, 1, 0.30), 1.3)
+		draw_circle(Vector2(pos.x + inward * 7.4, wy + 0.6), 1.5, Color(seam.r, seam.g, seam.b, 0.85))
 		# the silk's own sheen: one small filled highlight, up and left like every other
 		# light on this stage
-		fill_ellipse(pos + Vector2(-3.6, -4.0 - stretch * 0.4), 3.8, 2.6, Color(1, 1, 1, 0.28))
+		fill_ellipse(pos + Vector2(-3.6, -4.6 - stretch * 0.4), 4.2, 2.8, Color(1, 1, 1, 0.30))
 
 	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
 	# drawn at stage centre while held. That was a fix for an older hand placement: the
@@ -14873,13 +14905,13 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	# not - which means the whole wardrobe, what it costs and what still matches tonight are
 	# one glance rather than eight screens.
 	var tonight := cur_venue()
-	var cellw := 30.0
+	var cellw := 26.0
 	var rowh2 := 40.0
 	draw_string(font, Vector2(cx2, hy), "THE RACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 15,
 		Color(0.95, 0.8, 0.55, 0.9) if tailor_col == 1 else Color(0.72, 0.62, 0.5, 0.8))
 	# the house headings, with TONIGHT'S marked - the only column that pays
 	for st in venue_index() + 1:
-		var hx := cx2 + 132.0 + float(st) * cellw
+		var hx := cx2 + 160.0 + float(st) * cellw
 		var hc := Color(1.0, 0.86, 0.5) if st == tonight else Color(0.62, 0.56, 0.50)
 		draw_string(font, Vector2(hx - 6.0, hy), str(st + 1), HORIZONTAL_ALIGNMENT_CENTER, cellw, 12, hc)
 		if st == tonight:
@@ -14890,13 +14922,32 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		var ry2 := y0 + float(j2) * rowh2
 		var rowsel := tailor_col == 1 and tailor_sel == j2
 		if rowsel:
-			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, 132.0 + float(venue_index() + 1) * cellw + 16.0, 34.0),
+			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, 160.0 + float(venue_index() + 1) * cellw + 16.0, 34.0),
 				Color(1.0, 0.85, 0.45, 0.07), Color(1.0, 0.88, 0.5, 0.40), 1.2, 8.0, 8.0, 0.04)
 		var wst := worn_stage(piece)
 		var nc3 := Color(1.0, 0.9, 0.6) if rowsel else (Color(0.88, 0.82, 0.70) if wst >= 0 else Color(0.62, 0.57, 0.52))
-		draw_fit_string(font, Vector2(cx2, ry2), String(pdef["name"]), HORIZONTAL_ALIGNMENT_LEFT, 124.0, 14, nc3)
+		# EVERY ROW CARRIES ITS OWN OBJECT (2026-07-29, Louis: "it's not obvious what the
+		# glowsuit button does"). He is right, and a name is a poor answer for a garment: a
+		# rack of eight text labels is a list, and a list is the one thing a wardrobe should
+		# never be. `draw_gear_icon` already draws each of these as the thing it is - it was
+		# built for the shop cards these rows replaced - so the picture is free and the two
+		# can never drift.
+		# ...at a THIRD of the size they were drawn for. draw_gear_icon has no scale argument
+		# (it was written for a 152px shop card), so the transform wraps the call rather than
+		# the function growing a parameter every caller would then have to pass. Safe here
+		# because none of these icons sets its own transform - the two that do, the props,
+		# are not on this screen.
+		# 0.42, NOT 0.62, and the number is set by the WIDEST icon rather than the average
+		# one. The glasses span ±28 units and the helmet ±40 (two cans and a cap), so at 0.62
+		# they reached 17 and 25px from centre and ran straight through the name beside them -
+		# "Energy Helme" with a can sitting on the t. Sized so the widest of them clears the
+		# label column, which is what an icon gutter is for.
+		draw_set_transform(Vector2(cx2 + 12.0, ry2 - 5.0), 0.0, Vector2.ONE * 0.42)
+		draw_gear_icon(String(pdef.get("gear", piece)), Vector2.ZERO, Color(nc3.r, nc3.g, nc3.b, 1.0), rowsel)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_fit_string(font, Vector2(cx2 + 30.0, ry2), String(pdef["name"]), HORIZONTAL_ALIGNMENT_LEFT, 116.0, 14, nc3)
 		for st2 in venue_index() + 1:
-			var sx2 := cx2 + 132.0 + float(st2) * cellw - 13.0
+			var sx2 := cx2 + 160.0 + float(st2) * cellw - 13.0
 			var box := Rect2(sx2, ry2 - 13.0, cellw - 6.0, 17.0)
 			var sv := venue_data(st2)
 			var owned2 := owns_wear(piece, st2)
@@ -16195,19 +16246,44 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 				draw_line(zp + Vector2(zs * 0.5, -zs * 0.5), zp + Vector2(-zs * 0.5, zs * 0.5), zc, 1.4)
 				draw_line(zp + Vector2(-zs * 0.5, zs * 0.5), zp + Vector2(zs * 0.5, zs * 0.5), zc, 1.4)
 		"pie":
-			# UNCLE DAN'S PIE: a real slice - a crimped crust along the back, a filled
-			# wedge, and a lattice over it. A bare triangle read as a torch flame next to
-			# the torch card, which is exactly the mistake the gear icons already paid for.
-			var crust := Color(minf(1.0, col.r * 1.1), col.g * 0.86, col.b * 0.55)
+			# UNCLE DAN'S PIE (redrawn 2026-07-29, Louis: "i want there to be a good looking
+			# visible icon of the pie"). It was a flat wedge with two lines across it, which
+			# is a triangle wearing a hat - and a slice of pie is not a flat shape, it is a
+			# WEDGE WITH DEPTH. What makes one recognisable is the CUT FACE: the tall filled
+			# side you see because somebody has taken it out of a pie. So: a golden crimped
+			# top, a dark filling below it on the cut face, a pastry base, and steam. The
+			# depth is the whole read; the crimping is what says "baked".
+			var crustc := Color(minf(1.0, col.r * 1.06), col.g * 0.84, col.b * 0.48)
+			var crust_lo := Color(crustc.r * 0.72, crustc.g * 0.64, crustc.b * 0.40)
+			var fill := Color(0.62, 0.28, 0.16)
+			# the CUT FACE, front-on: a tall triangle standing on the base. Drawn first, so
+			# the top crust laps over it.
 			draw_colored_polygon(PackedVector2Array([
-				c + Vector2(-8.0, 5.5), c + Vector2(8.0, 5.5), c + Vector2(0.0, -7.0)]), col)
-			draw_line(c + Vector2(-8.0, 5.5), c + Vector2(0.0, -7.0), Color(col.r, col.g, col.b, 0.55), 1.2)
-			# the lattice: two strips across the filling
-			draw_line(c + Vector2(-4.6, 0.4), c + Vector2(4.6, 0.4), Color(crust.r, crust.g, crust.b, 0.8), 1.3)
-			draw_line(c + Vector2(-6.4, 3.2), c + Vector2(6.4, 3.2), Color(crust.r, crust.g, crust.b, 0.8), 1.3)
-			# the crimped back crust, a row of little bumps
-			for pi in 5:
-				draw_circle(c + Vector2(-6.4 + float(pi) * 3.2, 5.8), 1.9, crust)
+				c + Vector2(-8.4, 6.2), c + Vector2(8.4, 6.2),
+				c + Vector2(6.6, -1.4), c + Vector2(-6.6, -1.4)]), fill)
+			# the filling's own darker shadow along the bottom, so it is not one flat slab
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-8.4, 6.2), c + Vector2(8.4, 6.2),
+				c + Vector2(7.8, 3.6), c + Vector2(-7.8, 3.6)]), Color(fill.r * 0.66, fill.g * 0.60, fill.b * 0.58))
+			# the TOP CRUST, seen slightly from above: a wedge narrowing to the point of the
+			# slice at the back, which is what gives the whole thing perspective
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-7.2, -0.6), c + Vector2(7.2, -0.6),
+				c + Vector2(2.4, -7.6), c + Vector2(-2.4, -7.6)]), crustc)
+			draw_line(c + Vector2(-4.8, -3.8), c + Vector2(4.8, -3.8), Color(crust_lo.r, crust_lo.g, crust_lo.b, 0.85), 1.2)
+			# the crimped rim along the front edge - the row of thumb-pressed bumps a pie has
+			for pi in 6:
+				draw_circle(c + Vector2(-7.0 + float(pi) * 2.8, -0.4), 2.1, crustc)
+				draw_circle(c + Vector2(-7.0 + float(pi) * 2.8, -1.2), 1.2, Color(crust_lo.r, crust_lo.g, crust_lo.b, 0.55))
+			# the pastry base under the filling, and two curls of steam
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-8.8, 6.2), c + Vector2(8.8, 6.2),
+				c + Vector2(8.2, 8.4), c + Vector2(-8.2, 8.4)]), crust_lo)
+			for sg: float in [-1.0, 1.0]:
+				for k in 3:
+					var t := float(k) / 2.0
+					draw_circle(c + Vector2(sg * 3.4 + sin(t * 3.4) * 1.6, -9.4 - t * 3.4),
+						1.5 - t * 0.7, Color(1.0, 0.96, 0.90, 0.22 - t * 0.13))
 		"tomato":
 			draw_tomato(c, 1.35, 0.4, col.a)
 		"egg":
@@ -16238,14 +16314,29 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 			draw_rect(Rect2(c.x - 7.5, c.y - 3.0, 15.0, 10.0), col)
 			draw_arc(c + Vector2(0.0, -3.0), 4.5, PI, TAU, 12, col, 1.8, true)
 		"hanger":
-			# THE TAILOR: a coat hanger. The hook is what makes it one - a bare triangle is
-			# a roof, and the whole read depends on that little question-mark of wire above
-			# the shoulders.
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(c.x - 9.0, c.y + 6.0), Vector2(c.x, c.y - 2.0), Vector2(c.x + 9.0, c.y + 6.0),
-				Vector2(c.x + 9.0, c.y + 8.5), Vector2(c.x, c.y + 0.5), Vector2(c.x - 9.0, c.y + 8.5)]), col)
-			draw_arc(Vector2(c.x, c.y - 5.0), 3.4, PI * 0.15, PI * 1.6, 12, col, 1.7, true)
-			draw_line(Vector2(c.x, c.y - 2.0), Vector2(c.x, c.y - 5.0), col, 1.7)
+			# THE TAILOR: A DRESS FORM (2026-07-29, Louis: "the tailor icon ... looks bad").
+			# It was a coat hanger, and a hanger at 18px is a triangle with a wire on it - I
+			# even wrote in the comment that the whole read depended on the hook, which is a
+			# confession that the shape was not doing the work. A dressmaker's dummy is the
+			# better mark for the same idea: it is a torso, so it is instantly a HUMAN SHAPE
+			# and instantly about clothes, and unlike a hanger nothing else in this game
+			# looks remotely like one. The tape measure over the shoulder is the second cue
+			# and costs one line.
+			var form := col
+			var form_lo := Color(col.r * 0.72, col.g * 0.72, col.b * 0.74)
+			draw_colored_polygon(PackedVector2Array([   # the stand: a post on a round foot
+				Vector2(c.x - 1.6, c.y + 3.0), Vector2(c.x + 1.6, c.y + 3.0),
+				Vector2(c.x + 1.6, c.y + 8.0), Vector2(c.x - 1.6, c.y + 8.0)]), form_lo)
+			fill_ellipse(Vector2(c.x, c.y + 9.0), 6.2, 1.9, form_lo)
+			draw_colored_polygon(PackedVector2Array([   # the bust: shoulders, waist, hem
+				Vector2(c.x - 7.4, c.y - 6.2), Vector2(c.x - 2.4, c.y - 8.4),
+				Vector2(c.x + 2.4, c.y - 8.4), Vector2(c.x + 7.4, c.y - 6.2),
+				Vector2(c.x + 5.0, c.y - 0.6), Vector2(c.x + 6.4, c.y + 3.4),
+				Vector2(c.x - 6.4, c.y + 3.4), Vector2(c.x - 5.0, c.y - 0.6)]), form)
+			draw_line(Vector2(c.x, c.y - 8.0), Vector2(c.x, c.y + 3.0), Color(0, 0, 0, 0.18), 1.1)
+			# the tape measure, hung round the neck and down one side
+			draw_line(Vector2(c.x - 4.6, c.y - 7.2), Vector2(c.x + 4.6, c.y - 7.2), Color(1.0, 0.86, 0.42, 0.95), 1.6)
+			draw_line(Vector2(c.x + 4.6, c.y - 7.2), Vector2(c.x + 6.2, c.y + 1.0), Color(1.0, 0.86, 0.42, 0.95), 1.6)
 		"drink":
 			# ENERGY DRINKS in the rest drawer: a can, and the pull ring is what makes it
 			# a can rather than a tin. Deliberately NOT the helmet's picture - the hat and
