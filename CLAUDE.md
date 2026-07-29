@@ -1775,6 +1775,67 @@ Do not reshape the figure to fit a hat.
   rather than the average: the glasses span 28 units either side and the helmet 40, so at 0.62
   they ran through the label beside them and the screen read "Energy Helme" with a can on the t.
 
+## THE ANTE LADDER, and the two arithmetic errors it took to find it (2026-07-29)
+
+Louis: "i want both exponential scoring and ante's. just like balatro", with hard pacing floors
+("at least 15 seconds for the first reward and at least 60 seconds for the biggest ... no 5
+second first reward possible at all"), and then, after seeing the first attempt: "the scoring
+should feel normal and not exponential in the beginning ... The backyard should stay below 1000
+as final score ... different stages scale exponential, but each stage has linear scoring", and
+finally "you are out of whack". He was right, twice, and both faults were arithmetic rather than
+taste.
+
+- **A SCORE BAR CANNOT ENFORCE A TIME.** The score is exponential, so a run carrying a x500
+  multiplier passes any fixed number in a handful of throws: whatever the bar, some player
+  clears it in four seconds. The only thing that enforces a minimum time is a minimum time. A
+  goal now banks on TWO gates - a number and a clock (`GOAL_MIN_S_LOW/HIGH`, 8/16/30 seconds at
+  the Backyard rising to 15/32/60 at the last house). The number is what makes a weak setup
+  struggle; the clock is what stops a strong one finishing early. Tricks move you from
+  number-gated to clock-gated, which is a large improvement if you were slow and a marginal one
+  at the wall - exactly what he asked for. **And a hidden gate must be shown**: the moment the
+  score passes the bar the target line becomes a countdown, because a full bar that does nothing
+  reads as a broken game.
+- **ERROR ONE: THE CHAIN MADE THE SCORE QUADRATIC IN TIME.** `1 + 0.05 x chain`, uncapped,
+  sounded like the answer to "remove the max multiplier" and summed over k catches to ~0.025k^2 -
+  so a sixty-second act scored FOUR times a thirty-second one. "Each stage has linear scoring" is
+  impossible under that however the constants are set, and it is the root of the first
+  calibration being out of whack. `chain_mult` saturates now: `1 + 3 x c/(c+40)`, x1 cold, x2.5
+  at forty, approaching x4 and never reaching it. A limit, not a wall - nothing "maxes out" on
+  screen - and the total is linear in time again.
+- **ERROR TWO: I SET THE LADDER FROM A CEILING INSTEAD OF FROM A CLIMB.** He named E50 as an
+  upper BOUND, so I put the top rung near E48 and divided down: 152x a rung. No build in this
+  game bridges 152x. **A ladder is measured from the climbing.** A real build gains ~6x a rung
+  early and ~20x late (count +12% a prop, prop x1.0 to x2.1, pattern x1.0 to x1.5, costume to
+  x1.78, plus p per trick activation which is itself scaled by all three). The rungs follow that:
+      Backyard 800 | Street 5,100 | Theatre 35,200 | Circus 198k | Champ 2.4M | Arena 40M |
+      Midnight 992M
+  E notation now begins around the World Arena, an expert at the top house measures near E17,
+  and both sit far inside the E50 he named. **The goal is the bar; the number you leave on the
+  board is the flex.**
+- **EVERY TRICK PAYS PER ACTIVATION, NOT PER CATCH**, and this is what actually makes "linear
+  within a stage" true. A toggle shapes every throw while it runs, so paying it per catch made
+  x the length of the act - an exponential in TIME. Paid per press, x is a thing the player
+  chooses, bounded by attention and risk. Score inside a run is then (linear in time) x (a
+  multiplier you built), which is Balatro's shape exactly.
+- **MEASURED, first act, ante 0, frame-perfect bot:**
+      Backyard, 3 balls, no tricks      803 points, all three goals, 38.6s
+      Theatre, 5 clubs, no tricks       20,900, TWO of three goals, 372s
+  The second line is the design working rather than failing: the top rung of a house is not
+  reachable by playing longer, only by bringing more. A trickless act should stall at the second
+  goal and cash in.
+- **THE ANTE IS GENTLER THAN THE RUNGS.** 1.25^n capped at 6, so four acts at a venue make it
+  2.4x and eight make it 6x. At my first guess (1.45 capped at 12) the SECOND act at a house was
+  already harder than the house above it, which does not push a player up the ladder, it strands
+  them - and reputation comes from goals, so a stranded player cannot earn their way out.
+- **A BANKED GOAL IS PAID IN FLOWERS, ONE FROM EACH WING** (Louis: "subgoals should flower small
+  flowers, one on each side"). `throw_from_crowd` takes a `side` now. Two stems arriving together
+  from opposite sides reads as a GESTURE; the same two from random seats read as one more gust of
+  the ordinary drift and the moment is lost.
+- **THE WARDROBE IS PRICED BY HOUSE** (Louis: "backyard should be cheap, midnight expensive").
+  `WEAR_STAGE_COST` runs 0.35 to 3.60, so a Backyard top hat is 1,400 and a Midnight one 14,400.
+  One flat price made the seven cuts interchangeable, which is exactly wrong when the whole point
+  of a per-house wardrobe is that the grand houses are an aspiration.
+
 ## MINIMUM REQUIREMENTS (2026-07-28) - derived from measurement, not guessed
 
 Louis asked for a guess at the minimum spec. It is better than a guess, because the numbers
