@@ -328,16 +328,39 @@ const PATTERNS := [
 # tenth of the letter height, positive y is DOWN), and scale multiplies that one letter.
 # A letter's slot widens with its scale, so making one bigger pushes the others aside
 # instead of overlapping them.
-const CAP_SIZE := 0.34        # the mark's height as a fraction of the picture's height
-const CAP_Y := 0.50           # where the mark's middle sits (0 top, 1 bottom)
-const CAP_GAP := 0.20         # space between letters, in units of the mark's height
+const CAP_SIZE := 0.26        # the LETTER height as a fraction of the picture's height. The
+							   # whole mark is `mark_height()`, about 2.4 letter heights,
+							   # because the A's fire climbs so far above the cap line - so
+							   # this may not go past about 0.41 at any framing, and 0.26
+							   # leaves a fifth of the frame clear above and below.
+							   # **IT WAS DEAD UNTIL 2026-07-29**, along with CAP_Y: the five
+							   # capsule pictures each had `s.y * 0.34` and `s.y * 0.50`
+							   # typed into them, so the two constants documented as the way
+							   # to move the mark around moved nothing. That is also why the
+							   # rebuilt A came out with its flame cut off by the top edge:
+							   # nothing was reading the number that would have fixed it.
+const CAP_Y := 0.50           # where the mark's middle sits (0 top, 1 bottom). Read through
+							   # mark_cy_centred, which is what turns it into the LETTER-box
+							   # centre capsule_mark actually takes.
+const CAP_GAP := 0.13         # space between letters, in units of the mark's height. Cut
+							   # from 0.20 on 2026-07-29: with cap_letter_width finally
+							   # measuring the S and the A honestly, the old gap put five
+							   # separate objects on a shelf rather than one word, which is
+							   # half of what Louis meant by the mark looking "disconnected".
 const CAP_NUDGE := [          #  x      y     scale        letter
-	Vector3(0.00, -0.10, 1.1),  #                          T  (two knives)
-	Vector3(-0.20, 0.00, 1.00),  #                          O  (ring)
-	Vector3(-0.15, 0.00, 1.00),  #                          S  (balls)
-	Vector3(-0.05, 0.00, 1.00),  #                          S  (balls)
-	Vector3(0.00, -0.30, 1.00),  #                          A  (two torches)
+	Vector3(0.00, 0.00, 1.10),  #                          T  (two knives)
+	Vector3(-0.06, 0.00, 1.00),  #                          O  (ring)
+	Vector3(-0.02, 0.00, 1.00),  #                          S  (balls)
+	Vector3(0.00, 0.00, 1.00),  #                          S  (balls)
+	Vector3(0.00, 0.00, 1.00),  #                          A  (two torches + a club)
 ]
+# EVERY LETTER STANDS ON THE SAME LINE (2026-07-29, Louis: the mark "seems a bit
+# disconnected"). The y column above was carrying -0.10 on the T and -0.30 on the A, which
+# is a tenth and a third of a letter height of lift - so three of the five letters floated
+# at three different levels and the word had no baseline to read along. The A no longer
+# needs its lift because its torches now stand on the baseline by construction rather than
+# hanging their butts below it, and the T never needed one. The x column is nearly zero now
+# too, because cap_letter_width finally measures what the S and the A really span.
 const GAME_TITLE := "TOSSA"
 const TITLE_MARK := "TOSS"
 # NAMES STILL ON THE TABLE (Louis, 2026-07-28) - kept here beside the switch so choosing
@@ -11962,9 +11985,13 @@ func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
 
 
 func draw_club(pos: Vector2, ang: float, sc: float) -> void:
+	# EVERY COLOUR PASSES THROUGH ca() (2026-07-29), because the club is now the A's
+	# crossbar in the wordmark and the mark fades in and out as one thing. `ca` is the
+	# identity outside a mark, so the stage pays nothing for this - and drawing a SECOND
+	# club here for the logo would break the file's own rule that a prop has one shape.
 	draw_set_transform(pos, ang, Vector2.ONE * sc)
-	var body := Color(0.90, 0.35, 0.38)
-	var band := Color(0.96, 0.92, 0.85)
+	var body := ca(Color(0.90, 0.35, 0.38))
+	var band := ca(Color(0.96, 0.92, 0.85))
 	# PROPORTION (2026-07-27): the body runs longer and the head narrower than it did.
 	# At 7 units of head against 14 of body the club was as wide as it was long above
 	# the grip, which read as a LOLLIPOP - never more so than blown up on a shop card.
@@ -11975,10 +12002,10 @@ func draw_club(pos: Vector2, ang: float, sc: float) -> void:
 		Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16),
 	]), body)
 	draw_circle(Vector2(0, -16.5), 6.0, body)              # rounded head
-	draw_line(Vector2(-2.8, -2.4), Vector2(2.8, -2.4), Color(0.98, 0.92, 0.86, 0.8), 2.0)   # collar
+	draw_line(Vector2(-2.8, -2.4), Vector2(2.8, -2.4), ca(Color(0.98, 0.92, 0.86, 0.8)), 2.0)   # collar
 	# a soft same-hue sheen INSIDE the head - the old pale band arc sat on the rim
 	# and read as a white chip stuck to the club (Louis), worst at shop-card size
-	draw_circle(Vector2(-1.9, -18.4), 2.3, Color(1.0, 0.55, 0.56, 0.45))
+	draw_circle(Vector2(-1.9, -18.4), 2.3, ca(Color(1.0, 0.55, 0.56, 0.45)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
@@ -16751,14 +16778,20 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# also no room: at title size the mark starts a sixth of the way down the screen, and
 	# the cascade was being clipped by the top edge. (draw_menu_cascade is still used by
 	# the key art and the credits, where the mark is smaller and the room is there.)
-	var mark_top := s.y * 0.19
+	# AND THE MENU ROWS COME OFF IT TOO (2026-07-29). The divider and the subtitle were
+	# already placed off mark_height(), which is exactly right, but the three options
+	# underneath sat at a flat `s.y * 0.62` - so the moment the A grew, the subtitle was
+	# drawn straight through the word Play. Half a layout computed and half of it guessed
+	# is the same bug as guessing all of it, it just waits longer to show up.
+	var mark_top := s.y * 0.10
 	var mark_bot := mark_top + mark_height(float(MENU_MARK))
 	draw_wordmark(mark_top, MENU_MARK, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, mark_bot + 16.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
-	draw_string(font, Vector2(0, mark_bot + 58.0), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
+	var sub_y := mark_bot + 58.0
+	draw_string(font, Vector2(0, sub_y), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
 
 	var opts := menu_options()   # the same live list menu_input drives, so cursor and drawing agree
-	var oy := s.y * 0.62
+	var oy := maxf(s.y * 0.62, sub_y + 48.0)
 	for i in opts.size():
 		var sel := i == menu_sel
 		var txt := ("%s" % opts[i]) if not sel else (">    %s    <" % opts[i])
@@ -16829,12 +16862,48 @@ func capsule_embers(c: Vector2, r: float, n: int, col: Color) -> void:
 # 6.9th and a 9.6th - a pea beside them - and BOTH references independently said the ball
 # should be about 1.44x bigger, which is CAP_BALL_R below. Louis spotted it by eye first.
 const CAP_BALL_R := 0.119     # a ball's radius, in units of the mark's letter height
+const CAP_S_R := 0.225        # the radius of each of the S's two loops. FIVE balls run round
+							   # each loop now, not seven: at seven the balls overlapped by
+							   # more than a sixth of themselves, so the stroke closed into a
+							   # solid ring and the two S's read as one cluster of balls
+							   # rather than as two letters. At five they very nearly touch,
+							   # which is what makes the eye follow the curve.
+const CAP_S_BALLS := 5
 # THE KNIFE'S OWN MEASUREMENTS, so the layout never has to guess them. Local units, the
 # same ones cap_knife draws in: the point is at -26 and the butt cap ends at +16.3.
 const CAP_KNIFE_TIP := -26.0
 const CAP_KNIFE_BUTT := 15.6   # the stage knife's own pommel edge (13.2 + its 2.4 radius)
 const CAP_KNIFE_LEN := CAP_KNIFE_BUTT - CAP_KNIFE_TIP          # 42.3, tip to butt
 const CAP_KNIFE_MID := (CAP_KNIFE_TIP + CAP_KNIFE_BUTT) * 0.5  # -4.85, the balance point
+# ...and the CLUB's own, for the same reason: it is the A's crossbar (2026-07-29), and the
+# bar has to be centred on the club's MIDDLE rather than on its grip origin, exactly the
+# trap the T's knife crossbar already fell into once.
+const CAP_CLUB_KNOB := 17.8    # the knob's far edge (centre 15 + its 2.8 radius)
+const CAP_CLUB_TIP := -22.5    # the head's far edge (centre -16.5 + its 6.0 radius)
+const CAP_CLUB_LEN := CAP_CLUB_KNOB - CAP_CLUB_TIP           # 40.3, knob to head
+const CAP_CLUB_MID := (CAP_CLUB_KNOB + CAP_CLUB_TIP) * 0.5   # -2.35, the balance point
+# THE TORCH's, likewise. The A is built off these three numbers and nothing else.
+const CAP_TORCH_SHAFT := TORCH_BUTT - TORCH_WICK             # 19, butt to wick
+const CAP_TORCH_LEAN := 0.46   # how far each of the A's strokes leans off vertical, radians.
+							   # The two shafts MEET at their wicks, so this angle and the
+							   # shaft length together decide how wide the letter stands: any
+							   # bigger and the A splays, any smaller and it is a candle.
+const CAP_TORCH_SC := 0.044    # the A's torch scale, in units of the mark's letter height.
+							   # THE NUMBER THIS LETTER LIVES OR DIES ON, and the first two
+							   # tries both had it wrong. A torch is 19 units of shaft under
+							   # 22 of fire, so the shaft cannot be sized without sizing the
+							   # flame with it, and the two want opposite things: the SHAFTS
+							   # are the letter's strokes and want to reach the cap line, the
+							   # FLAME is the apex and gets away with overshooting it. At
+							   # 0.032 the strokes stood at 0.55 of a letter height against
+							   # the T, O and S at 0.92 to 1.00, so on the title screen the
+							   # word read as "TOSS" with a campfire after it. At 0.044 the
+							   # strokes reach 0.75 and the fire tops out around 2.2, which
+							   # is a tall letter but an unmistakable one.
+const CAP_CROSSBAR_AT := 0.34  # how far up the shafts the crossbar sits, 0 butt, 1 wick
+const CAP_CROSSBAR_OVER := 1.22  # ...and how far past them it reaches. A bar that stops
+								  # exactly at the strokes is what a letterform does, and at
+								  # this size it simply vanished between two dark handles.
 # THE PICTURE HAS A LIGHT SOURCE IN IT, so everything obeys it (2026-07-28, Louis: "a
 # sharper image with everything on it that would be in real life"). Two torches burn at
 # the right-hand end of the word. In a dark room that is the brightest thing in frame by
@@ -17125,16 +17194,24 @@ func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 
 const CAP_FLAME_STEPS := 26      # a still frame can afford a smooth silhouette; the stage
 								 # flame's 7-point profile is what makes it look faceted
-const CAP_FLAME_UPRIGHT := 0.25  # HOW FAR A LEANING TORCH'S FLAME COMES BACK TO VERTICAL.
+const CAP_FLAME_UPRIGHT := 0.80  # HOW FAR A LEANING TORCH'S FLAME COMES BACK TO VERTICAL.
 								 # 0 burns straight out of the torch, 1 is dead upright.
-								 # 0.62 was tried and it broke the letter: the A is two
-								 # leaning torches whose FLAMES make its apex, and nearly
-								 # upright flames splay apart at the top instead of
-								 # converging, leaving two parallel candles on slanted
-								 # sticks. At 0.25 the fire follows the torch, bends a
-								 # little upright on the way (which is what tells the eye
-								 # it is burning rather than painted on), and the two tips
-								 # still meet. The wordmark wins ties against physics.
+								 # **RAISED FROM 0.25 TO 0.80 ON 2026-07-29, and the entry it
+								 # replaces was right for the letter it was written against
+								 # and wrong for this one.** It used to argue that upright
+								 # flames "splay apart at the top instead of converging",
+								 # which was true while the two torches stood a fifth of a
+								 # letter apart at the wick: from two separated wicks, only a
+								 # flame that follows its torch can lean in far enough to
+								 # meet its neighbour. The A's wicks now MEET, so the whole
+								 # argument inverts - two fires leaning out of one point
+								 # cross each other and open into a butterfly, which is
+								 # exactly what the first render of the rebuilt letter did.
+								 # From a shared wick it is the UPRIGHT flame that merges,
+								 # and the pair reads as one apex fire with a little life in
+								 # it. **The lesson worth keeping: this number is not a
+								 # property of fire, it is a property of where the wicks
+								 # are, so it has to be re-derived whenever the letter moves.**
 
 func cap_flame_shape(base: Vector2, h: float, w: float, sway: float, wob: float, ph: float) -> PackedVector2Array:
 	# A FLAME SILHOUETTE THAT IS NOT A TRIANGLE (2026-07-28). The old capsule fire was
@@ -17280,6 +17357,17 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true) -> void:
 		draw_circle(wpos + Vector2(ex, ey), er, ca(Color(1.0, 0.62 + 0.25 * rise, 0.22, ea)))
 
 
+func cap_s_color(i: int) -> Color:
+	# the S's own warm ramp, gold at the top of the stroke down to a deep red at its foot -
+	# see the "S" branch for why the stage's four-colour set (which includes a cold blue)
+	# cannot be used here
+	var cols := [
+		Color(1.0, 0.84, 0.38), Color(1.0, 0.72, 0.30), Color(1.0, 0.58, 0.24),
+		Color(0.98, 0.45, 0.28), Color(0.94, 0.36, 0.34),
+	]
+	return cols[i % cols.size()]
+
+
 func cap_nudge(i: int) -> Vector3:
 	# one letter's x / y / scale from the tuning table, safely - the table is edited by
 	# hand, so a name of a different length must not crash the picture
@@ -17291,11 +17379,16 @@ func cap_nudge(i: int) -> Vector3:
 func cap_letter_width(ch: String, gsz: float) -> float:
 	# how much room one letter's marks actually need, so its neighbours sit clear of it -
 	# the ring is measured by its OUTER edge, which is what Louis asked for
+	# EVERY ONE OF THESE IS COMPUTED, not chosen (2026-07-29). The S used to claim 0.48,
+	# which is the distance between its two loop CENTRES and ignores the ball hanging off
+	# each side, so the two S's were drawn a whole ball-width closer together than they
+	# looked and the pair read as one cluster. The A likewise: its width is now whatever
+	# its two leaning shafts actually span.
 	match ch:
 		"T": return gsz * 0.86
 		"O": return gsz * 1.00
-		"S": return gsz * 0.48
-		"A": return gsz * 0.78
+		"S": return gsz * (CAP_S_R * 2.0 + CAP_BALL_R * 2.0)
+		"A": return gsz * (CAP_TORCH_SHAFT * CAP_TORCH_SC * sin(CAP_TORCH_LEAN) * 2.0 + 0.16)
 		_: return gsz * 0.60
 
 
@@ -17304,8 +17397,19 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 # established). The letters are `size` tall and sit on a baseline; the A's torch FLAMES
 # climb well above the cap line and its HANDLES hang below it, so the picture is a good
 # deal taller than the lettering it is standing in for.
-const MARK_RISE := 1.34   # above the baseline, in units of letter height
-const MARK_DROP := 0.30   # ...and below it
+const MARK_RISE := 2.28   # above the baseline, in units of letter height
+const MARK_DROP := 0.14   # ...and below it
+# BOTH RECOMPUTED 2026-07-29, when the A was rebuilt. The arithmetic, so the next change to
+# the letter can redo it rather than guess:
+#   rise = shaft * cos(lean) * scale            = 19 * 0.8961 * 0.044 = 0.749  (the wick)
+#        + flame height * widest layer * flicker * scale
+#                                               = 22 * 1.29 * 1.20 * 0.044 = 1.499
+#        = 2.248, taken to 2.28 for the flame's sway.
+#   drop = the S's lowest ball  = 0.46 - CAP_S_R + CAP_BALL_R = 0.11, taken to 0.14.
+# The drop HALVED because the A's torches now stand ON the baseline instead of hanging
+# their butts a third of a letter below it, and the rise grew because the apex is a merged
+# fire rather than two separate ones. Embers are deliberately allowed past the rise: they
+# are sparse sparks and leaving the frame is the point of them.
 const MENU_MARK := 108    # the title screen's letter height. The prop mark is far WIDER
 						   # than the word it replaced (five objects and their gaps against
 						   # five glyphs) and a good deal taller, so it is sized by the room
@@ -17316,6 +17420,17 @@ const MENU_MARK := 108    # the title screen's letter height. The prop mark is f
 func mark_height(size: float) -> float:
 	# the whole picture's height, flame tips to handle butts
 	return size * (MARK_RISE + MARK_DROP)
+
+
+func mark_cy_centred(sy: float, size: float, at: float = CAP_Y) -> float:
+	# THE MARK IS NOT CENTRED ON ITS LETTERING, so a caller that wants the whole picture in
+	# the middle of a frame cannot simply hand capsule_mark the middle of that frame - which
+	# is what all five store capsules did, and why the rebuilt A's flame ran straight off the
+	# top edge. capsule_mark's `cy` is the middle of the LETTER BOX, and the picture reaches
+	# MARK_RISE above the baseline against only MARK_DROP below it, so it is wildly
+	# top-heavy. This converts "put the picture's own middle at `at`" into that letter-box
+	# centre, off the same two constants the drawing uses.
+	return sy * at + size * ((MARK_RISE - MARK_DROP) * 0.5 - 0.5)
 
 
 func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> void:
@@ -17347,7 +17462,7 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 		var w: float = widths[i]
 		var base := base0 + size * n.y
 		var ring_r := size_l * 0.50
-		var s_r := size_l * 0.24                 # radius of each of the S's two loops
+		var s_r := size_l * CAP_S_R              # radius of each of the S's two loops
 		x += size * n.x
 		match ch:
 			"T":
@@ -17377,23 +17492,59 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 			"S":
 				# an S is two loops: the top one sweeps from its right tip up over and down
 				# to the waist, the bottom one carries on from the waist round to the left.
-				var cxs := x + s_r
+				# ONE WARM RAMP, not the four-colour juggling set (2026-07-29). The stage's
+				# ball_color cycles gold, orange, red and a pale BLUE, and a cold ball
+				# dropped into a warm letter reads as a different object that wandered in,
+				# which broke the stroke twice per S. Gold through red keeps the two loops
+				# reading as one continuous line, and the picture's light is firelight
+				# anyway, so a blue ball was never lit by anything in frame.
+				var cxs := x + s_r + size_l * CAP_BALL_R
 				var c1 := Vector2(cxs, base - size_l * 0.46 - s_r)
 				var c2 := Vector2(cxs, base - size_l * 0.46 + s_r)
-				# fewer balls, each at its REAL size against the ring and torches beside it
 				var br := size_l * CAP_BALL_R
-				for j in 7:
-					var a1 := lerpf(0.0, -1.5 * PI, float(j) / 6.0)
-					cap_ball(c1 + Vector2(cos(a1), sin(a1)) * s_r, ball_color(j), br)
-				for j in 7:
-					var a2 := lerpf(-0.5 * PI, PI, float(j) / 6.0)
-					cap_ball(c2 + Vector2(cos(a2), sin(a2)) * s_r, ball_color(j + 2), br)
+				var nb := CAP_S_BALLS
+				for j in nb:
+					var a1 := lerpf(0.0, -1.5 * PI, float(j) / float(nb - 1))
+					cap_ball(c1 + Vector2(cos(a1), sin(a1)) * s_r, cap_s_color(j), br)
+				for j in nb:
+					var a2 := lerpf(-0.5 * PI, PI, float(j) / float(nb - 1))
+					cap_ball(c2 + Vector2(cos(a2), sin(a2)) * s_r, cap_s_color(j + nb), br)
 			"A":
-				# two torches leaning into each other, both burning, and nothing else -
-				# the gap between them at the top IS the letter's apex
-				var tsc := size_l * 0.028
-				cap_torch(Vector2(x + w * 0.10, base), 0.30, tsc)
-				cap_torch(Vector2(x + w * 0.90, base), -0.30, tsc)
+				# TWO TORCHES THAT MEET, AND A CLUB ACROSS THEM (2026-07-29, Louis: "the
+				# torches not coming together to form the top of the A"). They used to stand
+				# 0.21 letter-heights apart at the tip with nothing between them, so the
+				# picture was two torches side by side and the eye had no letter to find.
+				#
+				# Now the two shafts are the A's two STROKES: their butts stand on the
+				# baseline at the outer corners and they lean in until their WICKS meet on
+				# the centre line, so the fires start from the same point and burn as one
+				# apex. Every number comes off CAP_TORCH_SHAFT / _LEAN / _SC, so the letter
+				# cannot come apart if the torch is redrawn.
+				var tsc := size_l * CAP_TORCH_SC
+				var shaft := CAP_TORCH_SHAFT * tsc          # butt to wick, in pixels
+				var dx := shaft * sin(CAP_TORCH_LEAN)       # how far out each butt stands
+				var cxa := x + w * 0.5
+				var lean := CAP_TORCH_LEAN
+				# the origin cap_torch draws from is the GRIP, and the butt hangs TORCH_BUTT
+				# below it along the shaft, so each torch is placed by where its butt has to
+				# land rather than by where its origin happens to fall
+				var foot_l := Vector2(cxa - dx, base) - Vector2(0.0, TORCH_BUTT).rotated(lean) * tsc
+				var foot_r := Vector2(cxa + dx, base) - Vector2(0.0, TORCH_BUTT).rotated(-lean) * tsc
+				# THE CROSSBAR, and it is drawn FIRST so both shafts lie over it - a bar
+				# painted on top of the strokes reads as a stick resting against them.
+				var bar_l := foot_l + Vector2(0.0, TORCH_BUTT - CAP_TORCH_SHAFT * CAP_CROSSBAR_AT).rotated(lean) * tsc
+				var bar_r := foot_r + Vector2(0.0, TORCH_BUTT - CAP_TORCH_SHAFT * CAP_CROSSBAR_AT).rotated(-lean) * tsc
+				var bar_c := (bar_l + bar_r) * 0.5
+				var bar_ang := (bar_r - bar_l).angle() + PI * 0.5
+				var csc := bar_l.distance_to(bar_r) * CAP_CROSSBAR_OVER / CAP_CLUB_LEN
+				cap_torch(foot_l, lean, tsc)
+				cap_torch(foot_r, -lean, tsc)
+				# ...and the bar goes ON TOP of both shafts, which is the opposite of what the
+				# first attempt did. Behind them it was a dark club between two dark handles
+				# and it disappeared: at this size the crossbar is only 0.10 letter-heights
+				# thick, so it has nothing to spare. Laid over, it reads as one bar crossing
+				# two strokes, which is the shape the letter needs.
+				draw_club(bar_c - Vector2(0.0, CAP_CLUB_MID).rotated(bar_ang) * csc, bar_ang, csc)
 			_:
 				pass
 		x += w + gap - size * n.x
@@ -17405,14 +17556,14 @@ func capsule_one(font: Font, s: Vector2, k: float) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.05, 0.045), Color(0.02, 0.013, 0.017), 24)
 	draw_spotlight_cone(s, s.x * 0.5, 0.30)
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.72, Color(1.0, 0.62, 0.26, 0.20))
-	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
 	draw_vignette(s, 0.56)
 
 
 func capsule_two(font: Font, s: Vector2, k: float) -> void:
 	# 2. NOTHING AT ALL. Near-black, no light source, no frame: the props are the picture.
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.035, 0.028, 0.032), Color(0.008, 0.007, 0.010), 20)
-	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
 	draw_vignette(s, 0.70)
 
 
@@ -17421,7 +17572,7 @@ func capsule_three(font: Font, s: Vector2, k: float) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.12, 0.045, 0.028), Color(0.018, 0.011, 0.013), 24)
 	draw_glow(Vector2(s.x * 0.72, s.y * 0.46), s.y * 0.60, Color(1.0, 0.50, 0.18, 0.30))
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.40, Color(1.0, 0.72, 0.32, 0.20))
-	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
 	capsule_embers(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.52, 30, Color(1.0, 0.70, 0.32, 0.5))
 	draw_vignette(s, 0.58)
 
@@ -17432,7 +17583,7 @@ func capsule_four(font: Font, s: Vector2, k: float) -> void:
 	draw_curtain_wall(s, s.y * 1.02, s.y * 0.02, Color(0.28, 0.065, 0.095), 26)
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.012, 0.02, 0.35))
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.70, Color(1.0, 0.72, 0.34, 0.18))
-	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
 	draw_vignette(s, 0.60)
 
 
@@ -17442,7 +17593,7 @@ func capsule_five(font: Font, s: Vector2, k: float) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.025, 0.045, 0.075), Color(0.008, 0.012, 0.022), 22)
 	draw_stars(s, 46, 0.85)
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.62, Color(0.35, 0.62, 1.0, 0.16))
-	capsule_mark(s, s.y * 0.50, s.y * 0.34)
+	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
 	draw_vignette(s, 0.62)
 
 
@@ -18441,7 +18592,11 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		var btxt := String(row["b"])
 		match kind:
 			"title":
-				draw_wordmark(ry - 78.0, 52, Color(gold.r, gold.g, gold.b, a), s)
+				# the row's own y is where the mark's BASELINE belongs, so the top is that
+				# minus the rise. It used to be a hand-picked 78, which happened to equal
+				# 52 * the MARK_RISE of the day and stopped being true the moment the A
+				# was rebuilt.
+				draw_wordmark(ry - 52.0 * MARK_RISE, 52, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
 			"orn":
@@ -18465,7 +18620,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.42
-		draw_wordmark(fy - 96.0, 58, Color(1.0, 0.9, 0.55, fa), s)
+		draw_wordmark(fy - 58.0 * MARK_RISE, 58, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.72, 0.6, 0.65 * fa))
 

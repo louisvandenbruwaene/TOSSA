@@ -224,23 +224,51 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ---
 
-## 12. Decisions needed from Louis
+## 12. Decisions, answered 2026-07-29
 
-1. **The logo fix.** Which repair for the A and the S's.
-2. **The exponent.** `x ^ (n * p)` grows very fast. Three balls over twenty Perfect
-   catches is 216,000. Five clubs is 3 x 10^14. Seven torches is 2 x 10^37. Fifteen
-   chainsaws is past 10^130. Balatro-sized numbers may be exactly the intent, but the
-   venue GOALS are currently a flat number per venue, so with this formula the load you
-   bring decides whether a goal is trivial or impossible. Either goals scale with the load
-   or the exponent is tamed.
-3. **Balls at 15 for 15 Strength.** The new rule makes every count of balls available
-   almost immediately, and balls cost 20 each. The count ladder for light props disappears.
-   Intended, or does a light prop keep a floor?
-4. **The Shower's `s` value**, missing from the list.
-5. **Glow in the dark**: today it is one Kit bought once that lights every prop. Louis's
-   Blackout rule speaks of "3 glow in the dark balls or torches", which sounds like
-   glowing props are their own stock to buy. Which is it.
-6. **The high-count height penalty**, given that a tap is already at maximum height from
-   about 12 objects up.
-7. **Nerfing early trick spam.** Suggestion only, nothing to be built.
-8. **Where the first single-stat Purist may appear** in the venue ladder.
+1. **The logo.** DECIDED: fix the props themselves, stay with the all-props mark. The two
+   torches lean in until they touch and their flames merge into one apex, a club lies
+   across them as the A's crossbar, each S drops to five bigger balls in one warm colour,
+   every letter sits on one baseline.
+2. **The exponent.** DECIDED: keep the formula exactly as written, and make **the venue
+   goal a demanded RUN LENGTH** instead of a flat number. The house asks for a clean run
+   of roughly N catches and the goal is `s * N ^ (n * p)`, computed from the load actually
+   being juggled. The demand is therefore the same whatever you bring, heavy props are
+   purely a score and record play, and records stay raw score so the heaviest load a
+   player can hold is what sets them. Target run lengths: Backyard 18, Street 26, Theatre
+   34, Circus 44, Championship 56, World Arena 70, and the Midnight Show above that.
+3. **Ball counts.** DECIDED: as specified, skill is the only gate. 15 balls at Strength
+   15. Keeping fifteen balls in the air is the wall.
+4. **The Shower's `s`.** Not answered, and it must have a value. Taking **1.8**, above
+   Reverse Cascade and Tennis at 1.5 and below Half Shower at 2, which matches the order
+   the old table already had. Say if it should be otherwise.
+5. **Glow in the dark.** DECIDED: glowing props become their own **stock**, bought like
+   any other prop, so Blackout is a real decision about what to bring. The single 60,000
+   Glow Kit is replaced by cheaper per-prop purchases.
+6. **The high-count height penalty.** Proceeding on the recommendation unless told
+   otherwise: height is measured **relative to that count's own tap floor**, so a tap is
+   always a zero penalty whatever the load, and the penalty only ever measures the choice
+   to throw higher than needed. That makes the 90% and 70% promise true at every count.
+7. **Nerfing early trick spam.** Suggestion still owed, nothing to be built. See below.
+8. **The first single-stat Purist.** Proceeding with the Circus (venue 3) as the earliest,
+   Championship for two at once, World Arena for three, Midnight Show for all four.
+
+## 13. Trick spam, the suggestion (NOT to be built)
+
+The exploit in `s * PRODUCT(ti ^ mi) * x ^ (n*p)` is that `mi` has no ceiling. Three balls
+in a Cascade with a Spin landed on every single catch is `2 ^ mi`, which passes any number
+in the game inside a minute, and it is easiest at the lowest count.
+
+Two levers, either alone or together:
+
+1. **A trick pays once per round of the pattern.** A trick's multiplier only counts if at
+   least `n` catches have landed since the last one that paid. At three balls that is one
+   trick every three catches, at fifteen it is one every fifteen. It is honest to real
+   juggling (nobody spins on every throw), it needs no new number, and it scales itself.
+2. **A trick is worth more under a harder load.** `ti` grows with `n * p`, so a Spin on
+   three balls is worth much less than the same Spin on seven torches. The code already
+   has this shape in `trick_difficulty`, which currently scales a trick by weight, count
+   and pattern. Keeping a version of it is the smallest change of the two.
+
+Recommendation: lever 1 alone. It caps the spam by construction rather than by tuning, and
+it leaves `ti` as the flat, readable number Louis wrote down.
