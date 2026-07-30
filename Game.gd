@@ -388,11 +388,16 @@ const CAP_SIZE := 0.26        # the LETTER height as a fraction of the picture's
 const CAP_Y := 0.50           # where the mark's middle sits (0 top, 1 bottom). Read through
 							   # mark_cy_centred, which is what turns it into the LETTER-box
 							   # centre capsule_mark actually takes.
-const CAP_GAP := 0.13         # space between letters, in units of the mark's height. Cut
-							   # from 0.20 on 2026-07-29: with cap_letter_width finally
-							   # measuring the S and the A honestly, the old gap put five
-							   # separate objects on a shelf rather than one word, which is
-							   # half of what Louis meant by the mark looking "disconnected".
+const CAP_GAP := 0.045        # space between letters, in units of the mark's height. Cut
+							   # from 0.20 to 0.13 on 2026-07-29 and to this on 2026-07-30
+							   # (Louis: "move the letters closer together to seem more like the
+							   # word tossa"), which is the same note a third time and so the
+							   # right answer is a decisive cut rather than another shave. What
+							   # makes it safe to go this tight: cap_letter_width measures each
+							   # letter's REAL extent, so a gap here is true daylight between two
+							   # objects and not slack in a bounding box. At 0.13 the five props
+							   # still read as five props on a shelf; a word is letters that
+							   # nearly touch.
 const CAP_NUDGE := [          #  x      y     scale        letter
 	Vector3(0.00, 0.00, 1.10),  #                          T  (two knives)
 	Vector3(-0.06, 0.00, 1.00),  #                          O  (ring)
@@ -758,12 +763,29 @@ const TR_SPIN := 2
 # reshapes every throw conflicts with it directly. The combination audit measured exactly
 # that: Behind the Back under Columns clears -13.6px, because a column comes down where it
 # left and a behind-the-back throw releases from across the body.
+# THE THREE TRICK WALLS ARE SPREAD ON PURPOSE (2026-07-30, Louis: the stat milestones "look ugly
+# and cramped ... you are allowed to change the tricks actual location, the rest you should choose
+# what to show or not"). The tricks are the only walls in the game that may move freely - a
+# pattern's gate and a prop's Strength requirement are both balance - so they are what gets used
+# to put a named skill in each track's empty stretch instead of on top of another mark:
+#   Behind the Back  acc 50 -> 25.  It sat on Columns (also acc 50), so one pip carried the label
+#     "Columns, Behind the Back" and the track's whole bottom half was bare. Moved DOWN rather
+#     than up, deliberately: it is the FIRST trick (lvl 3), and 25 makes it arrive earlier than
+#     it used to rather than later, which is the safe direction to move a gate a player is
+#     already climbing toward.
+#   High Toss        str 50 -> 75.  Strength's count pips crowd the bottom third (15 clubs is 60),
+#     so 50 was inside the crowd and 75 is in the gap above it.
+#   Spin             spd 40 -> 75.  It sat between the 2% slow pip at 20 and the 5% at 50. 75 is
+#     the empty stretch between 5% and 10%, and a mid-track wall reads right for the biggest
+#     multiplier in the game.
+# All three still gate the same skills in the same order at the same levels; only the numbers on
+# their own tracks moved, and no prop, count or pattern requirement was touched.
 const TRICKS := [
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 50, "perf": 5, "min_air": 0, "diff": 1.20, "cascade_only": true, "shout": "BEHIND THE BACK!",
+	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 25, "perf": 5, "min_air": 0, "diff": 1.20, "cascade_only": true, "shout": "BEHIND THE BACK!",
 	 "desc": "Toggle: every throw loops behind the back. Cascade only - no other pattern survives it. Every catch under it multiplies the run."},
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 50, "perf": 10, "min_air": 0, "diff": 1.10, "cascade_only": false, "shout": "HIGH TOSS!",
+	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 75, "perf": 10, "min_air": 0, "diff": 1.10, "cascade_only": false, "shout": "HIGH TOSS!",
 	 "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 40, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!",
+	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 75, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!",
 	 "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
 ]
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
@@ -7348,6 +7370,15 @@ func prop_str_unit(kind: int = -1) -> int:
 	return int(PROP_STR_UNIT[k]) if k < PROP_STR_UNIT.size() else 1
 
 
+func prop_plural(kind: int = -1) -> String:
+	# a prop's name as it reads AFTER A COUNT, lower case. Six of the seven names are already
+	# plural ("Balls", "Knives", "Torches") and the seventh is not, so the Strength track was
+	# printing "15 chainsaw" beside "15 torches". One place, because both ladders on that track
+	# and anything that later names a quantity of a prop want the same answer.
+	var n := String(PROPS[prop_type if kind < 0 else kind]["name"]).to_lower()
+	return n if n.ends_with("s") else n + "s"
+
+
 func prop_req(kind: int = -1, n: int = -1) -> int:
 	# the Strength to throw `n` of this prop (defaulting to the count in play)
 	return prop_str_unit(kind) * (num_balls if n < 0 else n)
@@ -13171,10 +13202,10 @@ func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
 # every slice by construction - it cannot self-intersect, which is the failure mode this file
 # has now paid for three times.
 #
-# THE FIRST AND LAST ENTRIES ARE CAP_CLUB_KNOB AND CAP_CLUB_TIP, and they are typed here as
-# literals on purpose: those two constants place the A's crossbar in the wordmark, so keeping
-# the club's overall length and balance point EXACTLY as they were is what lets the shape
-# change without moving the logo. Change an end here and change it there in the same edit.
+# THE TWO ENDS ARE THE CLUB'S WHOLE EXTENT, and this is now the only place they live. They were
+# also `CAP_CLUB_KNOB` / `CAP_CLUB_TIP` out in the capsule layout for one day, because the club
+# was the A's crossbar and the letter had to know how long it was. A ball replaced it on
+# 2026-07-30, so that copy is deleted and a prop's measurements sit beside the prop again.
 const CLUB_PROF := [
 	[17.8, 0.0], [17.1, 1.75], [15.6, 2.80], [14.1, 2.45], [13.0, 1.50],   # the knob, and its waist
 	[10.5, 1.42], [6.0, 1.56], [2.0, 1.86],                                # the handle, barely flaring
@@ -13319,6 +13350,13 @@ func draw_club_v2(pos: Vector2, ang: float, sc: float) -> void:
 
 
 func draw_club(pos: Vector2, ang: float, sc: float) -> void:
+	# NO CALLER SINCE 2026-07-30, and that is recorded rather than left to be discovered. Its one
+	# caller was the wordmark's A crossbar, which is a ball now; the stage and the shop both draw
+	# `cap_club` through `draw_prop_rich`. It is kept because `draw_egg`, `draw_knife` and
+	# `draw_torch` are in exactly the same state - the flat version of a prop that the rich
+	# version superseded - and the uncalled-function sweep has been reporting that family for
+	# some time. Delete the four together or keep the four together; one of them going alone is
+	# how a set of siblings quietly stops being a set.
 	if exp_on("club_v2"):
 		draw_club_v2(pos, ang, sc)
 		return
@@ -16086,19 +16124,26 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 	# Accuracy or Strength were for.
 	var cap := stat_cap(which)
 	var by_val: Dictionary = {}
-	var add := func(v: int, s: String) -> void:
+	# WHICH VALUES NAME A SKILL, tracked as it is built (2026-07-30). `stat_pips` thins this
+	# list for display and a skill must never be the entry it drops: "Half Shower" is why a
+	# player is looking at the Accuracy track at all, where "+3 catch frames" is one rung of a
+	# ladder that has five of them.
+	var skill_at: Dictionary = {}
+	var add := func(v: int, s: String, is_skill := false) -> void:
 		if v <= 0 or v > cap:
 			return
 		by_val[v] = String(by_val.get(v, "")) + (", " if by_val.has(v) else "") + s
+		if is_skill:
+			skill_at[v] = true
 	# the skills each stat gates, straight from their own tables. EVERY stat is asked
 	# now, not just acc/str: the tricks carry Speed and Endurance walls since 2026-07-27
 	# and a wall nobody can see is a wall nobody plans around.
 	for p in PATTERNS:
 		if p.has(which):
-			add.call(int(p[which]), String(p["name"]))
+			add.call(int(p[which]), String(p["name"]), true)
 	for t in TRICKS:
 		if t.has(which):
-			add.call(int(t[which]), String(t["name"]))
+			add.call(int(t[which]), String(t["name"]), true)
 	match which:
 		"acc":
 			# THE TWO FOCUS STAGES, and they no longer overlap: 101-150 is the stamina
@@ -16115,7 +16160,22 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 			# prop's own arithmetic at the point of choice.
 			var unit := prop_str_unit()
 			for n in range(MIN_BALLS, MAX_BALLS_HARD + 1):
-				add.call(unit * n, "%d %s" % [n, String(cur_prop()["name"]).to_lower()])
+				add.call(unit * n, "%d %s" % [n, prop_plural()])
+			# ...AND WHAT A HEAVIER PROP WOULD ASK, which is what puts anything at all in the top
+			# of this track (2026-07-30). The count ladder for the prop IN HAND covers the bottom
+			# of it and nothing else - a full fifteen clubs is Strength 60 of 200, fifteen balls
+			# is 15 - so however the pips were thinned, Strength stayed a cluster at the foot with
+			# one mark at the ceiling. That is not a display problem, it is missing content: the
+			# reason to push Strength past a full set of what you hold is to hold something
+			# HEAVIER, and it is the same rule (PROP_STR_UNIT x count) either way, so the numbers
+			# are as real as the ones below them. With clubs in hand this adds 15 knives at 90,
+			# 15 torches at 120 and 15 chainsaws at 195, and the track finally reads end to end.
+			# Only heavier props, and only their FULL set: one row per prop, never a second
+			# thirteen-rung ladder.
+			for pk in PROPS.size():
+				if prop_str_unit(pk) > unit:
+					add.call(prop_str_unit(pk) * MAX_BALLS_HARD,
+						"%d %s" % [MAX_BALLS_HARD, prop_plural(pk)])
 			add.call(STR_CAP - STR_FRAME_LAST, "+1 catch frame")
 		"end":
 			# no named skill: labelled with the stamina pool it reaches, which IS the effect
@@ -16132,9 +16192,72 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 	var vals := by_val.keys()
 	vals.sort()
 	for v in vals:
-		out.append({"val": int(v), "label": String(by_val[v])})
-	if out.is_empty() or int(out[out.size() - 1]["val"]) < cap:
-		out.append({"val": cap, "label": "MAX"})
+		out.append({"val": int(v), "label": String(by_val[v]), "skill": skill_at.has(int(v))})
+	# THE SYNTHETIC "MAX" ONLY EARNS A ROW IF IT IS CLEAR OF THE LAST REAL ONE. Strength's top
+	# milestone is the catch frame at STR_CAP - STR_FRAME_LAST, which is 195 against a cap of
+	# 200: two rows five points apart, drawn as two pips five PIXELS apart at the top of the
+	# track. "MAX" says nothing the track's own ceiling does not already say, so where it would
+	# crowd a real milestone it simply is not added.
+	if out.is_empty() or float(cap) - float(out[out.size() - 1]["val"]) >= float(cap) * STAT_PIP_GAP:
+		out.append({"val": cap, "label": "MAX", "skill": false})
+	return out
+
+
+const STAT_PIP_GAP := 0.075   # the closest two PIPS may sit, as a fraction of the stat's cap.
+							  # 15 points of 200 is 16px on the growth column's track, and a
+							  # label needs 15 of those - so this is really the label's spacing
+							  # floor promoted to where the pips are chosen, rather than left
+							  # to the drawing to paper over after the fact.
+
+func stat_pips(which: String) -> Array[Dictionary]:
+	# THE MILESTONES A COLUMN DRAWS, which is deliberately not all of them (2026-07-30, Louis:
+	# the stat milestones "look ugly and cramped ... the rest you should choose what to show or
+	# not"). Strength offers one threshold per count from 3 to 15 of the prop in hand, and with
+	# clubs that is thirteen pips inside the bottom 30% of the track: measured, a solid smear of
+	# white dots with four labels next to it, because the DRAWING already had a 15px spacing
+	# floor for labels and none at all for the pips it drew them beside. That mismatch is the
+	# whole bug - the screen was quietly admitting the list was too dense for the space and then
+	# drawing it anyway.
+	#
+	# What survives, in order of priority:
+	#   - anything that names a SKILL. That is what a player is climbing toward.
+	#   - the TOP milestone, so the ceiling always has a mark. If it lands within the gap of a
+	#     kept non-skill row, it takes that row's place rather than crowding it.
+	#   - a full set of the prop in hand (Strength's most aspirational number).
+	#   - whatever else clears STAT_PIP_GAP from the last row kept.
+	#
+	# THIS LIST MUST NEVER ANSWER "WHAT DOES MY NEXT POINT BUY", and that is the reason it is a
+	# second function rather than a filter inside stat_milestones. Thin the list the "next: X at
+	# N (+M)" line reads and the screen starts lying about the game: with clubs at Strength 20
+	# the true next threshold is 24 for a sixth club, and a thinned list would report 28 for a
+	# seventh. The pips are a summary; that line is a fact.
+	var full := stat_milestones(which)
+	if full.size() <= 2:
+		return full
+	var cap := stat_cap(which)
+	var min_gap := maxf(float(cap) * STAT_PIP_GAP, 1.0)
+	var top_val := int(full[full.size() - 1]["val"])
+	# the prop in hand fielded in full - Strength only, since it is the one stat whose rows are
+	# counts rather than effects
+	var keep_val := -1
+	if which == "str":
+		keep_val = prop_str_unit() * MAX_BALLS_HARD
+	var out: Array[Dictionary] = []
+	var last := -1.0e9
+	for nd: Dictionary in full:
+		var v := int(nd["val"])
+		var must := bool(nd.get("skill", false)) or v == top_val or v == keep_val
+		if not must and float(v) - last < min_gap:
+			continue
+		# a forced row that would crowd the previous one REPLACES it, unless that previous row
+		# is a skill - a named skill outranks a count and outranks the word MAX
+		if must and out.size() > 0 and float(v) - last < min_gap \
+				and not bool(out[out.size() - 1].get("skill", false)):
+			out[out.size() - 1] = nd
+			last = float(v)
+			continue
+		out.append(nd)
+		last = float(v)
 	return out
 
 
@@ -16238,19 +16361,32 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 			trf.set_corner_radius_all(int(trk_w * 0.5))
 			trf.anti_aliasing = true
 			draw_style_box(trf, Rect2(trk_x, trk_bot - fh, trk_w, fh))
+		# TWO LISTS, AND THEY ARE NOT THE SAME LIST (2026-07-30 - see stat_pips). `nodes` is the
+		# complete truth and drives the "next: X at N (+M)" line under the track, because that
+		# line is a fact about the game. `pips` is the thinned ladder that gets drawn, because
+		# thirteen count thresholds do not fit in 215px however honest they are.
 		var nodes := talent_nodes(String(b["id"]))
+		var pips := stat_pips(String(b["id"]))
 		var next_i := -1
 		for ni in nodes.size():
 			if int(nodes[ni]["val"]) > val:
 				next_i = ni
 				break
+		# ...and the pip that PULSES is the next unreached one on the drawn ladder, which is not
+		# always the same threshold. It is not labelled "next" - it just shows which way the
+		# track is heading - and the exact figure sits immediately under it either way.
+		var next_pip := -1
+		for ni in pips.size():
+			if int(pips[ni]["val"]) > val:
+				next_pip = ni
+				break
 		var last_label_y := 1.0e9   # pips are labelled top-down with a spacing floor
-		for ni in nodes.size():
-			var nd: Dictionary = nodes[ni]
+		for ni in pips.size():
+			var nd: Dictionary = pips[ni]
 			var nf := clampf(float(nd["val"]) / float(maxi(1, cap)), 0.0, 1.0)
 			var ppos := Vector2(trk_x + trk_w * 0.5, trk_bot - trk_h * nf)
 			var reached: bool = val >= int(nd["val"])
-			var isnext := ni == next_i
+			var isnext := ni == next_pip
 			if reached:
 				draw_circle(ppos, 5.0, Color(1.0, 1.0, 0.96, 0.95))
 			else:
@@ -18597,11 +18733,12 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	var mark_bot := mark_top + mark_height(float(MENU_MARK))
 	draw_wordmark(mark_top, MENU_MARK, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, mark_bot + 16.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
-	var sub_y := mark_bot + 58.0
-	draw_string(font, Vector2(0, sub_y), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(0.85, 0.72, 0.6))
-
+	# THE TAGLINE IS GONE (2026-07-30, Louis: "Remove 'a juggler's climb'"). The rows move UP into
+	# the room it leaves rather than sitting under a hole, and they are still measured off
+	# mark_height() rather than dropped back to a flat fraction of the screen - that guess is
+	# exactly what drew the old subtitle through the word Play the moment the A grew.
 	var opts := menu_options()   # the same live list menu_input drives, so cursor and drawing agree
-	var oy := maxf(s.y * 0.62, sub_y + 48.0)
+	var oy := maxf(s.y * 0.62, mark_bot + 78.0)
 	for i in opts.size():
 		var sel := i == menu_sel
 		var txt := ("%s" % opts[i]) if not sel else (">    %s    <" % opts[i])
@@ -18689,35 +18826,51 @@ const CAP_KNIFE_TIP := -26.0
 const CAP_KNIFE_BUTT := 15.6   # the stage knife's own pommel edge (13.2 + its 2.4 radius)
 const CAP_KNIFE_LEN := CAP_KNIFE_BUTT - CAP_KNIFE_TIP          # 42.3, tip to butt
 const CAP_KNIFE_MID := (CAP_KNIFE_TIP + CAP_KNIFE_BUTT) * 0.5  # -4.85, the balance point
-# ...and the CLUB's own, for the same reason: it is the A's crossbar (2026-07-29), and the
-# bar has to be centred on the club's MIDDLE rather than on its grip origin, exactly the
-# trap the T's knife crossbar already fell into once.
-const CAP_CLUB_KNOB := 17.8    # the knob's far edge (centre 15 + its 2.8 radius)
-const CAP_CLUB_TIP := -22.5    # the head's far edge (centre -16.5 + its 6.0 radius)
-const CAP_CLUB_LEN := CAP_CLUB_KNOB - CAP_CLUB_TIP           # 40.3, knob to head
-const CAP_CLUB_MID := (CAP_CLUB_KNOB + CAP_CLUB_TIP) * 0.5   # -2.35, the balance point
+# THE CLUB'S FOUR MEASUREMENTS USED TO LIVE HERE and they are gone (2026-07-30): the club was
+# the A's crossbar for one day, and a ball replaced it, so CAP_CLUB_KNOB / _TIP / _LEN / _MID
+# had no reader left but each other. The club's own extent is `CLUB_BUTT_Y` / `CLUB_NOSE_Y`,
+# beside the profile table that draws it, which is where a prop's measurements belong anyway -
+# this block only ever existed because the LAYOUT needed them out here.
 # THE TORCH's, likewise. The A is built off these three numbers and nothing else.
 const CAP_TORCH_SHAFT := TORCH_BUTT - TORCH_WICK             # 19, butt to wick
 const CAP_TORCH_LEAN := 0.46   # how far each of the A's strokes leans off vertical, radians.
 							   # The two shafts MEET at their wicks, so this angle and the
 							   # shaft length together decide how wide the letter stands: any
 							   # bigger and the A splays, any smaller and it is a candle.
-const CAP_TORCH_SC := 0.044    # the A's torch scale, in units of the mark's letter height.
-							   # THE NUMBER THIS LETTER LIVES OR DIES ON, and the first two
-							   # tries both had it wrong. A torch is 19 units of shaft under
-							   # 22 of fire, so the shaft cannot be sized without sizing the
+const CAP_TORCH_SC := 0.058    # the A's torch scale, in units of the mark's letter height.
+							   # THE NUMBER THIS LETTER LIVES OR DIES ON, and the first three
+							   # tries all had it wrong. A torch is 19 units of shaft under
+							   # 22 of fire, so the shaft could not be sized without sizing the
 							   # flame with it, and the two want opposite things: the SHAFTS
 							   # are the letter's strokes and want to reach the cap line, the
 							   # FLAME is the apex and gets away with overshooting it. At
 							   # 0.032 the strokes stood at 0.55 of a letter height against
-							   # the T, O and S at 0.92 to 1.00, so on the title screen the
-							   # word read as "TOSS" with a campfire after it. At 0.044 the
-							   # strokes reach 0.75 and the fire tops out around 2.2, which
-							   # is a tall letter but an unmistakable one.
+							   # the T, O and S at 0.92 to 1.00, so the word read as "TOSS"
+							   # with a campfire after it; 0.044 got the strokes to 0.75, which
+							   # was better and still a campfire.
+							   # THE CONFLICT IS GONE as of 2026-07-30, and it went as a side
+							   # effect of removing the A's third torch: the apex fire no
+							   # longer needs a handle to stand on, so it is drawn at its OWN
+							   # scale (CAP_A_FIRE_SC) and the strokes are free to be as long
+							   # as the letter needs. At 0.058 the shafts rise 19 * cos(0.46)
+							   # * 0.058 = 0.99 of a letter height - they reach the cap line
+							   # exactly, which is what makes the A a letter rather than a
+							   # bonfire with a ball in it.
+const CAP_A_FIRE_SC := 0.72    # the apex fire's scale, as a fraction of the strokes' own. Set
+							   # so 0.058 * 0.72 = 0.0418 against the 0.044 the fire was drawn
+							   # at before: the flame keeps the size it had and the strokes grew
+							   # by a third under it. Deliberately NOT taken further down - the
+							   # fire is the brightest thing in the mark and the reason the
+							   # letter is torches at all.
 const CAP_CROSSBAR_AT := 0.34  # how far up the shafts the crossbar sits, 0 butt, 1 wick
-const CAP_CROSSBAR_OVER := 1.22  # ...and how far past them it reaches. A bar that stops
-								  # exactly at the strokes is what a letterform does, and at
-								  # this size it simply vanished between two dark handles.
+const CAP_A_BALL := 0.46       # the crossbar ball's radius, as a fraction of the GAP between the
+							   # two strokes at that height. Half the gap would have it touching
+							   # both exactly, which at these line weights reads as a ball jammed
+							   # in a vice; a hair under leaves the daylight either side that says
+							   # "resting between them". Its predecessor CAP_CROSSBAR_OVER (1.22)
+							   # is deleted: a club had to reach PAST the strokes to be seen at
+							   # all between two dark handles, and a round object of this size
+							   # does not.
 # THE PICTURE HAS A LIGHT SOURCE IN IT, so everything obeys it (2026-07-28, Louis: "a
 # sharper image with everything on it that would be in real life"). Two torches burn at
 # the right-hand end of the word. In a dark room that is the brightest thing in frame by
@@ -19091,7 +19244,8 @@ func cap_flame_shape(base: Vector2, h: float, w: float, sway: float, wob: float,
 	return pts
 
 
-func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool = true) -> void:
+func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool = true,
+		handle: bool = true) -> void:
 	# `flame` false draws the HANDLE ONLY. The A's two torches meet at their wicks, so both
 	# fires start from the same point and burn straight up (2026-07-29, Louis: "make sure the
 	# flames are identical: fire goes straight up and they begin at the same point, so only
@@ -19099,6 +19253,11 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool
 	# bigger fire, it is the same fire drawn twice at double alpha with double the cost, and
 	# any drift between them - a different lean, a different flicker phase - shows up as a
 	# doubled edge. So the letter draws two handles and one flame.
+	# ...AND `handle` false is the other half of that, added 2026-07-30 (Louis: "remove the
+	# middle torch at the end (in A)"). The apex fire used to be a whole THIRD torch, placed so
+	# its wick landed where the two strokes meet - which meant a complete upright handle hanging
+	# down the middle of the letter, between the two leaning ones. That third handle is what he
+	# was looking at. The flame needs a position and a scale, not a torch, so now it gets them.
 	# THE TORCH, drawn from scratch: the fire is the brightest thing in the picture and
 	# it was the weakest object in it, so it is built here rather than dressed up.
 	#
@@ -19161,7 +19320,8 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool
 	# face were both rebuilt to escape. Baked as filled bands they hold still.
 	_torch_bake()
 	draw_set_transform(p, ang, Vector2.ONE * sc)
-	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _torch_idx, _torch_pts, _torch_cols)
+	if handle:
+		RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _torch_idx, _torch_pts, _torch_cols)
 	if not flame:
 		return
 	# --- the fire ---------------------------------------------------------------------
@@ -19260,15 +19420,17 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 # established). The letters are `size` tall and sit on a baseline; the A's torch FLAMES
 # climb well above the cap line and its HANDLES hang below it, so the picture is a good
 # deal taller than the lettering it is standing in for.
-const MARK_RISE := 2.28   # above the baseline, in units of letter height
+const MARK_RISE := 2.45   # above the baseline, in units of letter height
 const MARK_DROP := 0.14   # ...and below it
-# BOTH RECOMPUTED 2026-07-29, when the A was rebuilt. The arithmetic, so the next change to
-# the letter can redo it rather than guess:
-#   rise = shaft * cos(lean) * scale            = 19 * 0.8961 * 0.044 = 0.749  (the wick)
-#        + flame height * widest layer * flicker * scale
-#                                               = 22 * 1.29 * 1.20 * 0.044 = 1.499
-#        = 2.248, taken to 2.28 for the flame's sway.
+# RECOMPUTED 2026-07-30, when the strokes lengthened and the fire got its own scale. The
+# arithmetic is written out so the next change to the letter can redo it rather than guess:
+#   rise = shaft * cos(lean) * CAP_TORCH_SC     = 19 * 0.8961 * 0.058 = 0.988  (the wick)
+#        + flame height * widest layer * flicker * CAP_TORCH_SC * CAP_A_FIRE_SC
+#                                               = 22 * 1.29 * 1.20 * 0.0418 = 1.424
+#        = 2.412, taken to 2.45 for the flame's sway.
 #   drop = the S's lowest ball  = 0.46 - CAP_S_R + CAP_BALL_R = 0.11, taken to 0.14.
+# Note the two terms moved in OPPOSITE directions this time (the wick up by a third, the
+# flame down by 5%) and the total still grew, which is why this is arithmetic and not a nudge.
 # The drop HALVED because the A's torches now stand ON the baseline instead of hanging
 # their butts a third of a letter below it, and the rise grew because the apex is a merged
 # fire rather than two separate ones. Embers are deliberately allowed past the rise: they
@@ -19366,7 +19528,15 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				var c2 := Vector2(cxs, base - size_l * 0.46 + s_r)
 				var br := size_l * CAP_BALL_R
 				var nb := CAP_S_BALLS
-				for j in range(1, nb - 1):
+				# THE WAIST BALL WAS MISSING FROM BOTH S's (2026-07-30, Louis: "the middle ball in
+				# both s's are missing"). Each loop dropped its FIRST and LAST ball, which is right
+				# at the two outer tips - that is where an S doubles back and the balls crowd. But
+				# the top loop's last ball and the bottom loop's first ball are not tips at all:
+				# they are the same point, the WAIST where the two loops meet, and dropping both
+				# left the letter cut in half. The top loop now runs to its end (`range(1, nb)`,
+				# angle -1.5PI, which is exactly s_r below c1 and therefore the waist) and the
+				# bottom loop still starts at 1, so the waist gets one ball and never two.
+				for j in range(1, nb):
 					var a1 := lerpf(0.0, -1.5 * PI, float(j) / float(nb - 1))
 					cap_ball(c1 + Vector2(cos(a1), sin(a1)) * s_r, cap_s_color(j), br)
 				for j in range(1, nb - 1):
@@ -19398,21 +19568,32 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				var bar_l := foot_l + Vector2(0.0, TORCH_BUTT - CAP_TORCH_SHAFT * CAP_CROSSBAR_AT).rotated(lean) * tsc
 				var bar_r := foot_r + Vector2(0.0, TORCH_BUTT - CAP_TORCH_SHAFT * CAP_CROSSBAR_AT).rotated(-lean) * tsc
 				var bar_c := (bar_l + bar_r) * 0.5
-				var bar_ang := (bar_r - bar_l).angle() + PI * 0.5
-				var csc := bar_l.distance_to(bar_r) * CAP_CROSSBAR_OVER / CAP_CLUB_LEN
 				cap_torch(foot_l, lean, tsc, true, false)
 				cap_torch(foot_r, -lean, tsc, true, false)
-				# ...and ONE fire, upright, standing on the point both wicks arrive at. It is
-				# placed by asking a torch where its own wick is rather than by repeating the
-				# arithmetic, so the flame cannot come adrift from the handles under it.
+				# ...and ONE fire at the apex, WITH NO TORCH UNDER IT (2026-07-30, Louis: "remove
+				# the middle torch at the end (in A)"). It used to be a third complete cap_torch,
+				# placed so its own wick landed where the two strokes meet - which hung a whole
+				# upright HANDLE down the middle of the letter, between the two leaning ones. That
+				# third handle is what he could see. The fire needs a position and a scale, not a
+				# torch, and it is still placed by asking a torch where its own wick is rather
+				# than by repeating the arithmetic, so it cannot come adrift from the strokes.
+				# ...at its OWN scale, which only became possible once it stopped needing a
+				# handle: the origin is placed so the FIRE's wick lands on the point the two
+				# strokes arrive at, so `fsc` and not `tsc` is what steps back from it.
+				var fsc := tsc * CAP_A_FIRE_SC
 				var wick := foot_l + Vector2(0.0, TORCH_WICK).rotated(lean) * tsc
-				cap_torch(wick - Vector2(0.0, TORCH_WICK) * tsc, 0.0, tsc, true, true)
-				# ...and the bar goes ON TOP of both shafts, which is the opposite of what the
-				# first attempt did. Behind them it was a dark club between two dark handles
-				# and it disappeared: at this size the crossbar is only 0.10 letter-heights
-				# thick, so it has nothing to spare. Laid over, it reads as one bar crossing
-				# two strokes, which is the shape the letter needs.
-				draw_club(bar_c - Vector2(0.0, CAP_CLUB_MID).rotated(bar_ang) * csc, bar_ang, csc)
+				cap_torch(wick - Vector2(0.0, TORCH_WICK) * fsc, 0.0, fsc, true, true, false)
+				# THE CROSSBAR IS A BALL (2026-07-30, Louis: "replace the horizontal club with a
+				# ball"). It is the right object by this game's own naming - the wordmark is TOSS
+				# plus the letter a real juggling ball stands in for, which is what TITLE_MARK has
+				# said from the start. It also solves what the club could not: a club is a LONG
+				# thing laid across two strokes, so it had to be scaled to the gap, angled to the
+				# strokes and centred on its own balance point, and it still read as a stick
+				# resting against the letter rather than as part of it. A ball has no angle to get
+				# wrong, and sized to the gap it WEDGES between the two strokes, which is what a
+				# crossbar does. Drawn OVER the shafts for the same reason the club was: behind
+				# them it disappeared between two dark handles.
+				cap_ball(bar_c, cap_s_color(0), bar_l.distance_to(bar_r) * CAP_A_BALL)
 			_:
 				pass
 		x += w + gap - size * n.x

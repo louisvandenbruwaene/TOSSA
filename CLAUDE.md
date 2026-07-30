@@ -598,6 +598,83 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
   act resolved, which made the one path only a perfect act can reach impossible to test
   or screenshot at all.
+- **THE WORDMARK READS AS A WORD** (2026-07-30, Louis: "move the letters closer together to seem
+  more like the word tossa; remove the middle torch at the end (in A); replace the horizontal
+  club with a ball; the middle ball in both s's are missing; remove 'a juggler's climb'"). Five
+  notes, and two of them were bugs rather than taste.
+  **THE S's WERE CUT IN HALF.** Each S is two loops of balls, and each loop dropped its FIRST and
+  LAST ball - right at the outer tips, where an S doubles back and the balls crowd, which is
+  correct. But the top loop's last ball and the bottom loop's first ball are not tips at all:
+  they are THE SAME POINT, the waist where the two loops meet, and dropping both left a hole in
+  the middle of the letter. The top loop runs to its end now (`range(1, nb)`, angle -1.5PI, which
+  is exactly `s_r` below `c1` and therefore the waist) and the bottom still starts at 1, so the
+  waist gets one ball and never two.
+  **THE A HAD A THIRD TORCH IN IT.** The apex fire was a whole extra `cap_torch`, placed so its
+  own wick landed where the two strokes meet - which hung a complete upright HANDLE down the
+  middle of the letter between the two leaning ones. `cap_torch` grew a `handle` flag (the mirror
+  of the `flame` flag it already had), so the apex draws fire and nothing else.
+  **AND THAT UNLOCKED THE LETTER.** `CAP_TORCH_SC`'s own comment had been calling this the number
+  the A lives or dies on, because a torch is 19 units of shaft under 22 of fire and the two want
+  opposite things: the strokes want to reach the cap line, the flame gets away with overshooting
+  it. At 0.044 the strokes stood at 0.75 of a letter height, so the A read as a bonfire. With the
+  fire no longer needing a handle it can be drawn at its OWN scale, so `CAP_TORCH_SC` went to
+  0.058 (strokes at 19 x cos(0.46) x 0.058 = 0.99, i.e. exactly the cap line) and `CAP_A_FIRE_SC`
+  0.72 keeps the flame the size it already was (0.058 x 0.72 = 0.0418 against 0.044). `MARK_RISE`
+  is recomputed from the same arithmetic that is written out beside it - the two terms moved in
+  OPPOSITE directions and the total still grew, which is exactly why that block is arithmetic and
+  not a nudge.
+  **THE CROSSBAR IS A BALL**, which is the right object by the game's own naming: the mark is
+  TOSS plus the letter a real juggling ball stands in for, which is what `TITLE_MARK` has said
+  from the start. It also solves what a club could not - a club is a LONG thing laid across two
+  strokes, so it had to be scaled to the gap, angled to the strokes and centred on its own
+  balance point, and it still read as a stick resting against the letter. `CAP_A_BALL` (0.46) is
+  its radius as a fraction of the GAP between the strokes: half would touch both exactly, which
+  reads as a ball in a vice. **The whole `CAP_CLUB_KNOB/_TIP/_LEN/_MID` block is deleted** - it
+  existed only because the LAYOUT needed the club's extent out there, and the club's own
+  measurements are `CLUB_BUTT_Y` / `CLUB_NOSE_Y` beside the profile that draws it.
+  **`CAP_GAP` is 0.045**, down from 0.20 then 0.13. Third time on the same note, so a decisive
+  cut rather than another shave: `cap_letter_width` measures each letter's real extent, so a gap
+  here is true daylight between two objects rather than slack in a bounding box, and a word is
+  letters that nearly touch. The tagline came off the title screen and the menu rows moved UP
+  into the room it left, still measured off `mark_height()` - **the store capsule keeps it**,
+  since the ask was about the title screen and a storefront capsule wants a line.
+- **THE STAT MILESTONES ARE THINNED FOR DISPLAY, AND THAT IS A SECOND FUNCTION** (2026-07-30,
+  Louis: they "look ugly and cramped ... you are allowed to change the tricks actual location,
+  the rest you should choose what to show or not, don't move other stats around"). Strength
+  offers one threshold per count from 3 to 15 of the prop in hand, so with clubs that is thirteen
+  pips inside the bottom 30% of the track: measured on screen, a solid smear of white dots with
+  four labels beside it. **The drawing already had a 15px spacing floor for LABELS and none at
+  all for the pips it drew them next to** - the screen was admitting the list was too dense for
+  the space and then drawing it anyway, which is the whole bug.
+  `stat_pips()` is the drawn ladder and `stat_milestones()` stays the complete truth. **Two
+  functions, not a filter, and the reason matters: a thinned list must never answer "what does my
+  next point buy".** With clubs at Strength 20 the true next threshold is 24 for a sixth club,
+  and a thinned list would report 28 for a seventh - so the "next: X at N (+M)" line reads the
+  full list and only the pips are thinned. The pulsing pip is the next unreached one on the DRAWN
+  ladder, which is not always the same threshold; it is not labelled "next", it only shows which
+  way the track is heading, and the exact figure sits immediately under it.
+  What survives a thin, in priority order: anything naming a SKILL (that is what a player is
+  climbing toward, where "+3 catch frames" is one rung of five), the TOP milestone so the ceiling
+  always has a mark, a full set of the prop in hand, then whatever clears `STAT_PIP_GAP` (0.075
+  of the cap, which is the label's own 15px floor promoted to where the pips are CHOSEN). A
+  forced row that would crowd the previous one replaces it unless that row names a skill.
+  **STRENGTH NEEDED CONTENT, NOT JUST THINNING.** The count ladder for the prop in hand covers
+  the bottom of the track and nothing else - fifteen clubs is 60 of 200, fifteen balls is 15 - so
+  however the pips were thinned it stayed a cluster at the foot with one mark at the ceiling. The
+  reason to push Strength past a full set of what you hold is to hold something HEAVIER, and it
+  is the same rule (`PROP_STR_UNIT` x count), so one row per heavier prop at its FULL set is as
+  real as the rows below it: with clubs in hand that is 15 knives at 90, 15 torches at 120, 15
+  chainsaws at 195, and with balls the track becomes a genuine ladder of props end to end. No
+  prop, count or pattern requirement moved.
+  **THE THREE TRICK WALLS MOVED, and they are the only walls that may** - a pattern's gate and a
+  prop's Strength requirement are both balance. Behind the Back acc 50 -> 25 (it sat on Columns,
+  also acc 50, so one pip read "Columns, Behind the Back" and the bottom half of the track was
+  bare; moved DOWN on purpose, since it is the first trick and earlier is the safe direction to
+  move a gate someone is already climbing toward), High Toss str 50 -> 75 (out of the count
+  crowd), Spin spd 40 -> 75 (it sat between the 2% and 5% slow pips; 75 is the empty stretch
+  between 5% and 10%, and a mid-track wall reads right for the biggest multiplier in the game).
+  `prop_plural()` also arrived, because six of the seven prop names are already plural and the
+  Strength track was printing "15 chainsaw" beside "15 torches".
 - **THE CLUB IS ONE PROFILE TABLE** (2026-07-30, F9 `club_v2`, ON. Louis asked for the club,
   the trick/pattern cards and the shop to be improved, with the originals kept behind F9).
   Three functions draw a club - `draw_club` on stage and as the wordmark's crossbar, `cap_club`
