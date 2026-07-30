@@ -662,22 +662,63 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   the banner's pace pips, which drew a picture of a system that no longer exists. `draw_tut_intro_card`
   and the rest of the banner are unreachable while every step carries `say` and are kept as the
   fallback for a step that somehow carries none.
-- **THE PROSCENIUM SWAGS** (2026-07-30, Louis: "remove the little decor window on the left and right
-  along with that little light. You are supposed to add the curtains of the theater podium on the
-  left and right top instead"). `draw_theatre_boxes` was framing the title screen with two lit
-  windows out at the edges, which pull the eye AWAY from a wordmark in the middle - the one thing
-  that screen exists to show. **A SWAG IS A FAN OF FOLDS**, and that is the whole drawing: gathered
-  velvet is pinned at one point and every fold runs back to it, so the shape is a fan of wedges
-  sharing an apex with a scalloped hem where the lobes hang. Drawn that way the folds cannot be
-  wrong, because they converge for the reason the cloth does. Three passes to get there: `side` was
-  written as "which half of the screen" rather than "which way is inward", so the left swag's inner
-  corner landed at x = -384 and only the valance drew; the folds were a few very dark triangles over
-  a plain shape and read as black spikes clawing inward (alternating CLOSE tones per wedge is what
-  makes cloth - a big tonal jump makes a hole); and the gold tieback hung at the inner corner, right
-  over the T and the A, looking like two fishing rods propped against the letters. It is at the PIN
-  now, which is where a real one is. **They draw AFTER the veil and the spotlight**: they are the
-  nearest thing in the room, so the wash that pushes the back wall behind the mark must not also
-  wash them out.
+- **THE PROSCENIUM DRAPES** (2026-07-30, Louis: "remove the little decor window on the left and
+  right along with that little light. You are supposed to add the curtains of the theater podium on
+  the left and right top instead" - then, of the four passes that followed, "**they look ai made and
+  horrible**"). `draw_theatre_boxes` was framing the title screen with two lit windows out at the
+  edges, which pull the eye AWAY from a wordmark in the middle - the one thing that screen exists to
+  show. What replaced them went through a fan of wedges, then a stack of `draw_circle`s down each
+  edge with a `draw_arc` tracing every rim, and Louis's verdict on the second is the finding worth
+  keeping: **what makes code-drawn art look generated is that the PRIMITIVE is visible instead of
+  the object.** Six discs and six circular outlines, alternating tones picked per shape rather than
+  by any light, and not one vertical line in a thing that hangs. `menu_swags` is deleted and
+  `menu_drapes` is a real proscenium - a swagged pelmet with braid and fringe, and two tied-back
+  legs falling to the boards.
+  **A FOLD IS A GRADIENT ACROSS CLOTH, NEVER AN OUTLINE AND NEVER A FLAT WEDGE.** A hanging drape is
+  a corrugated sheet, so its surface normal swings inward and outward with every fold and
+  `sin(phase)` IS how much of the stage light that patch is facing. `drape_velvet` is that one
+  function and EVERY value in both legs, the pelmet, the heading and the swags comes out of it -
+  which is why they read as one cloth hung in one room, where `velvet if k % 2 == 0 else velvet_lo`
+  reads as a stack of coins. Two things about it are load-bearing: the lit term is gamma-biased
+  (`pow(.., 2.0)`) because velvet SWALLOWS light, so the trough is broad and the crest a narrow rise
+  out of it - a plain `0.5 + 0.5 * l` gives corrugated plastic; and the sheen exponent is 12, so
+  widening it turns the velvet to satin.
+  **THE CORRUGATION IS NOT A HORIZONTAL DISPLACEMENT**, which is worth saying because displacing it
+  is the obvious move. A fold runs in DEPTH, toward the viewer, and depth projects to nothing in a
+  flat front view - so the folds live entirely in the shading, and they still gather correctly,
+  because a fold sits at a fixed fraction ACROSS the panel while the panel's own width changes down
+  its length. `DRAPE_SILHOUETTE` is that width as a table (pinned full under the pelmet, billowing,
+  pulled back at the tieback, falling free to the boards), so where the tie pinches the cloth the
+  folds crowd together on their own, for the reason real ones do, without a single line placed by
+  hand. It is the single source for the shape: `DRAPE_TIE_KEY` names the tieback row and the bow,
+  the strap and the strap's LENGTH are all read off `drape_width`/`drape_sway` at that row. Left
+  inline once and the strap overhung the cloth by 7px into open air, reading as a gold rod poking
+  out of the curtain - the goal stem's bloom eating the word TONIGHT, met again.
+  **THE GRADIENT IS FREE, SO SPEND IT.** `_soup_quad` (four corners, four colours) and
+  `_soup_fan_lit` (a fan with its own centre colour) are the two new soup primitives, and between
+  them the whole proscenium is one `canvas_item_add_triangle_array`. It is also entirely STATIC -
+  it depends on the viewport and on nothing else - so `drape_bake` runs once and every later frame
+  costs one call and no GDScript at all. That is the chainsaw's finding applied where it actually
+  pays: batching only wins if the triangles are not rebuilt each frame. Measured on the title
+  screen: 1.0-1.2ms draw, 280 calls, ~9k of the 24k primitives.
+  **A FLAT FILL IS WHAT GIVES A SMALL OBJECT AWAY.** The bow proved it twice. Four flat tan polygons
+  at 34px read as cardboard; the two loops merged into one lopsided egg because nothing separated
+  them; and the strap ran straight through the middle like a stick through it. In order of what each
+  fix bought: shade the loops from the centre out, push them apart so a notch of velvet shows
+  between them, and stop the strap AT the knot. Its gold is also its own (`DRAPE_BOW`, far brighter
+  and more saturated than `DRAPE_GOLD`) - the braid's gold is deliberately faint because it is a
+  thread on cloth, and a solid 40px shape filled with it came out tan.
+  **A TRIANGLE ARRAY GETS NO ANTIALIASING**, so every free-standing curved edge needs a FEATHER:
+  one extra column (or row) of the same colour at alpha 0, two pixels out. The leading edge of a leg
+  is a long near-vertical curve and came out visibly stair-stepped - the one thing left on the
+  finished screen that still said programmer art. Two triangles a row buys what hardware AA would
+  have. Same treatment on the swag hem.
+  **THE FRINGE IS A SILHOUETTE, NOT A TEXTURE.** At 1.8px and 30% alpha it was invisible at any
+  size: a strand that faint is below the threshold where the eye assembles a row of them into an
+  edge - the Midnight Show's house lights ("a lamp needs a halo or it is just a brighter
+  rectangle"), from the other direction.
+  **They draw AFTER the veil and the spotlight**: they are the nearest thing in the room, so the
+  wash that pushes the back wall behind the mark must not also wash them out.
   **The mark is placed off the MENU now, not the other way round** (Louis: "move it down a little,
   so it's centered between the top of the screen and the Play button. There shouldn't be much room
   between the yellow thin line and the play button itself"). The rows come off the stage lip, the

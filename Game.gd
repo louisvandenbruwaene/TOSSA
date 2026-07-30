@@ -18922,98 +18922,346 @@ const MENU_ORN_LIFT := 20.0  # how far the gold divider sits ABOVE the first men
 							 # hang 14px under the wordmark, which put it in the middle of the empty
 							 # band between the two - Louis wants it tight to the menu instead.
 
-func menu_swags(s: Vector2) -> void:
-	# THE SWAGS, top left and top right (2026-07-30, Louis: "remove the little decor window on the
-	# left and right along with that little light. You are supposed to add the curtains of the
-	# theater podium on the left and right top instead, you can add nice details there"). This is
-	# the proscenium the boxes were standing in for, and it is the better object for the corner:
-	# a swag FRAMES the picture where a box competes with it, since two lit windows out at the
-	# edges pull the eye away from a wordmark in the middle.
+# --- THE PROSCENIUM DRAPES -------------------------------------------------------------
+# Every number the cloth is made of, together, because the picture is the BALANCE between
+# them and a value edited on its own is how the three earlier passes went wrong.
+const DRAPE_REACH := 0.150   # how far inward a leg reaches at its widest, x s.x
+const DRAPE_FOLDS := 4.25    # fold periods across one leg. The .25 is load-bearing: it puts
+							 # sin(phase) at exactly +1 on the leading edge, so the line the
+							 # eye follows down the picture is a LIT crest and not whatever
+							 # tone the arithmetic happened to land on.
+const DRAPE_COLS := 30       # samples across a leg - this is the SHADING resolution
+const DRAPE_ROWS := 20       # samples down it - this is the SILHOUETTE resolution
+const DRAPE_HEADER := 0.026  # the gathered heading over the rail, above the swags, x s.y
+const DRAPE_SAG := 0.070     # how deep a swag hangs at its middle, x s.y
+const DRAPE_SWAGS := 6       # swags across the pelmet
+const DRAPE_BANDS := 6       # fold arcs nested inside one swag
+# THE SILHOUETTE OF A TIED-BACK LEG, as (t down the leg, width as a fraction of REACH). A
+# curtain is not a rectangle: it is pinned full width under the pelmet, billows a little
+# below that, is PULLED BACK toward the wall at the tieback, then falls free and flares
+# again to the boards. This table is the single source for that shape - `DRAPE_TIE_KEY`
+# names the tieback row and the bow is placed off it, so the knot cannot drift away from
+# the pinch it is supposed to be causing (the mistake the first bow made, hanging at the
+# inner corner over the T and the A like a fishing rod propped against the letters).
+const DRAPE_SILHOUETTE := [
+	Vector2(0.00, 1.00), Vector2(0.17, 1.05), Vector2(0.47, 0.58),
+	Vector2(0.66, 0.76), Vector2(1.00, 0.96)]
+const DRAPE_TIE_KEY := 2
+const DRAPE_DEEP := Color(0.098, 0.019, 0.030)   # the trough, near enough the back wall
+const DRAPE_LIT := Color(0.545, 0.115, 0.142)    # the crest, full in the stage light
+const DRAPE_GOLD := Color(0.86, 0.68, 0.33)
+# THE BOW IS ITS OWN GOLD, brighter and far more saturated than the braid's. It is a small
+# metal thing catching the spotlight against a big red field, and the braid's gold - which
+# is deliberately faint, being a thread on cloth - came out as tan when a solid 40px shape
+# was filled with it. Two different jobs, two colours.
+const DRAPE_BOW := Color(1.00, 0.82, 0.38)
+const DRAPE_BOW_DK := Color(0.63, 0.43, 0.15)
+
+# The whole proscenium is STATIC - it depends on the viewport and on nothing else - so it
+# is baked once into a triangle array and re-emitted for free every frame afterwards. That
+# is the chainsaw's finding applied where it actually pays: batching only wins if the
+# triangles are not rebuilt in GDScript each time, and here they never have to be.
+var _drape_pts := PackedVector2Array()
+var _drape_cols := PackedColorArray()
+var _drape_idx := PackedInt32Array()
+var _drape_for := Vector2.ZERO
+var _drape_fy := -1.0   # BOTH inputs are in the cache key, not just the viewport. fy happens
+						# to be derived from s today, so guarding on s alone would work - and
+						# would silently serve a stale curtain the day a caller passes its own
+						# floor line. A cache key that is only accidentally complete is a bug
+						# with a date on it.
+
+
+func drape_width(t: float) -> float:
+	# the silhouette table read as a curve: find the span t falls in and ease across it.
+	# Smoothstep and not a straight lerp, because hung cloth has no corners in it.
+	var n := DRAPE_SILHOUETTE.size()
+	for k in n - 1:
+		var a: Vector2 = DRAPE_SILHOUETTE[k]
+		var b: Vector2 = DRAPE_SILHOUETTE[k + 1]
+		if t <= b.x or k == n - 2:
+			return lerpf(a.y, b.y, smoothstep(a.x, b.x, t))
+	return 1.0
+
+
+func drape_sway(t: float) -> float:
+	# THE LEADING EDGE'S OWN DRIFT, factored out because TWO things need it: the cloth
+	# draws with it, and the tieback has to stop just short of it. Left inline once and the
+	# strap overhung the curtain by 7px into open air, reading as a gold rod poking out of
+	# the drape - the same class of mistake as the goal stem's bloom eating the word
+	# TONIGHT, and the same fix. When one thing is placed against another, both read the
+	# same number.
+	# 3.8%, not the 5.5% it started at: velvet is HEAVY, and a leading edge that swings
+	# further than this stops reading as a curtain and starts reading as a ribbon.
+	return 1.0 + 0.038 * sin(t * 8.2 + 1.1)
+
+
+func drape_velvet(phase: float, open: float, lift: float, warm: float) -> Color:
+	# ONE LIGHT FOR THE WHOLE PROSCENIUM, and that is the entire difference between cloth
+	# and a stack of shapes. A hanging drape is a corrugated sheet: its surface normal
+	# swings inward and outward with every fold, so `sin(phase)` IS how much of the stage
+	# light that patch of velvet is facing. Nothing in either leg or in the pelmet is a
+	# tone picked by hand - every value comes out of this one function, which is why they
+	# read as one piece of cloth hung in one room. The version this replaced picked a tone
+	# per shape (`velvet if k % 2 == 0 else velvet_lo`), which is a decoration of a fold
+	# rather than a fold, and it is why the old drapes read as stacked coins.
+	#   `open` is how exposed to the room this patch is - distance from the wall on a leg,
+	# distance from the gather on a swag. `lift` is the vertical light profile, `warm` the
+	# footlights coming up off the boards.
+	var l := sin(phase)
+	# gamma-biased toward the dark end: velvet SWALLOWS light, so the trough is broad and
+	# the lit side is a narrow rise out of it. A plain 0.5 + 0.5 * l gives corrugated plastic.
+	var c := DRAPE_DEEP.lerp(DRAPE_LIT, pow(0.5 + 0.5 * l, 2.0))
+	# the sheen: the one narrow bright line real velvet carries along the crest of a fold.
+	# The exponent is high on purpose - widen it and the cloth turns to satin.
+	var sh := pow(maxf(l, 0.0), 12.0) * 0.30
+	var k := lift * lerpf(0.68, 1.10, open)
+	return Color(
+		clampf(c.r * k + sh + warm * 0.26, 0.0, 1.0),
+		clampf(c.g * k + sh * 0.86 + warm * 0.13, 0.0, 1.0),
+		clampf(c.b * k + sh * 0.62 + warm * 0.06, 0.0, 1.0))
+
+
+func drape_leg(s: Vector2, fy: float, side: float) -> void:
+	# ONE LEG, as a grid warped by the silhouette. `side` IS THE DIRECTION INWARD, not
+	# which half of the screen - written the other way round once, and the left leg's inner
+	# edge came out at x = -384, off screen, so only the pelmet drew.
 	#
-	# THIRD PASS: A STACK OF CIRCLES ON THE EDGE, NOT A FAN NEAR THE CORNER (2026-07-30, Louis,
-	# after the first two: "they should be flowing along circlelike segments centered around the
-	# top corners and flowing down the sides" - and then, after a single quarter-circle fan tried
-	# to be that in one shape: "still not quite right"). The fan's mistake, looked at again: ONE
-	# circle, however it is swept, has ONE centre - so its "down the side" reach and its "across
-	# the top" reach are tied together by the same radius, and a shape built that way always
-	# reads as bulging OUT FROM the corner in both directions at once, never as travelling DOWN
-	# the wall. What actually flows down a side is a SEQUENCE of circles, each centred lower than
-	# the last, each one a real "circle-like segment" on its own - which is the literal reading of
-	# "segments centred around the top corner[s] and flowing down the sides": the segments are
-	# circular, and their centres are the ones that walk down the side, starting at the corner.
-	#
-	# Every centre sits EXACTLY ON the edge line (x=0, or x=s.x), so each circle is cut clean in
-	# half by the screen's own boundary and only the inward-facing semicircle is ever drawn - the
-	# curtain's outer half is against the wall and was never going to be seen anyway. Consecutive
-	# circles overlap generously (radius well over half the gap between centres), so the union
-	# reads as one continuous scalloped edge with no seam between segments, and the radius eases
-	# down the stack - biggest right at the corner, where the cloth is gathered, smaller as it
-	# falls - the same taper real gathered fabric has. Alternating CLOSE tones per segment is
-	# still what makes it read as cloth rather than a stack of coins (carried over from every
-	# earlier pass): a big tonal jump between neighbours makes a hole, not a fold.
-	var segs := 6
-	var r_top := 108.0        # the gather, right at the corner - the widest the curtain bulges
-	var r_bot := 58.0         # ...and the narrowest, furthest down the stack
-	var seg_gap := 88.0       # centre-to-centre spacing - well under r_bot*2, so segments always overlap
-	var velvet := Color(0.34, 0.070, 0.095)
-	var velvet_lo := Color(0.26, 0.052, 0.074)
-	var gold := Color(0.86, 0.68, 0.32)
-	# THE VALANCE, across the top of the whole frame, so both swags hang off one pelmet rather
-	# than floating in two corners. Brighter than the back wall because it is nearer.
-	var val_h := s.y * 0.055
-	draw_rect(Rect2(0.0, 0.0, s.x, val_h), velvet)
-	for i in 24:
-		var vx := s.x * (float(i) + 0.5) / 24.0
-		fill_ellipse(Vector2(vx, val_h), s.x / 48.0, val_h * 0.34, velvet if i % 2 == 0 else velvet_lo)
-	draw_rect(Rect2(0.0, val_h - 2.0, s.x, 2.0), Color(gold.r, gold.g, gold.b, 0.30))
-	# `side` IS THE DIRECTION INWARD, not which half of the screen. Written the other way round
-	# first, and the left swag's inner corner came out at x = -384: off screen, so only the valance
-	# drew and the corners looked empty.
+	# The corrugation is NOT a horizontal displacement, and that is worth saying out loud
+	# because displacing it is the obvious move: a fold runs in DEPTH, toward the viewer,
+	# and depth projects to nothing in a flat front view. So the folds live entirely in the
+	# shading - and they still bend and gather correctly, because a fold sits at a fixed
+	# fraction ACROSS the panel and the panel's own width changes down its length. Where
+	# the tieback pinches the cloth the folds crowd together on their own, for the reason
+	# real ones do, without a single line being placed by hand.
+	var ex := 0.0 if side > 0.0 else s.x
+	var reach := s.x * DRAPE_REACH
+	var hem := s.y * 0.024
+	var pos := PackedVector2Array()
+	var col := PackedColorArray()
+	for i in DRAPE_ROWS + 1:
+		var t := float(i) / float(DRAPE_ROWS)
+		var w := drape_width(t) * reach
+		# dark up in the flies, brightest where the spotlight spills across the cloth,
+		# falling away again at the boards. This profile is what stops a leg reading as an
+		# extruded pattern - a fold pattern with no vertical story is wallpaper.
+		var lift := 0.50 + 0.50 * sin(PI * clampf(t * 1.04 + 0.02, 0.0, 1.0))
+		var warm := pow(clampf((t - 0.62) / 0.38, 0.0, 1.0), 2.2)   # the footlights
+		for j in DRAPE_COLS + 2:
+			# THE LAST COLUMN IS A FEATHER, not cloth. A triangle array gets no
+			# antialiasing, so the leading edge - a long near-vertical curve - came out
+			# visibly stair-stepped, which is the one thing on the finished screen that
+			# still said "programmer art". Two pixels of the same colour falling to alpha 0
+			# is what a hardware AA edge would have given, for two more triangles a row.
+			var feather := j > DRAPE_COLS
+			var u := minf(float(j), float(DRAPE_COLS)) / float(DRAPE_COLS)
+			var ph := u * DRAPE_FOLDS * TAU
+			# the leading edge of hung cloth is never a clean line - it sways as the folds
+			# push it out. Eased in by u, so the wall side stays pinned to the screen edge.
+			var sway := lerpf(1.0, drape_sway(t), u)
+			# ...and the hem hangs LOWER in a trough than on a crest, which is the whole
+			# reason a curtain has a scalloped bottom. pow(t, 4) keeps it to the last rows.
+			var y := fy * t + hem * (0.5 - 0.5 * sin(ph)) * pow(t, 4.0)
+			var cc := drape_velvet(ph, u, lift, warm)
+			if feather:
+				cc.a = 0.0
+			pos.append(Vector2(ex + side * (w * u * sway + (2.2 if feather else 0.0)), y))
+			col.append(cc)
+	var stride := DRAPE_COLS + 2
+	for i in DRAPE_ROWS:
+		for j in DRAPE_COLS + 1:
+			var a := i * stride + j
+			var b := a + 1
+			var c := a + stride
+			var d := c + 1
+			_soup_quad(pos[a], pos[b], pos[d], pos[c], col[a], col[b], col[d], col[c])
+
+
+func drape_pelmet(s: Vector2) -> void:
+	# THE BORDER: a gathered heading over the rail with a row of swags hanging off it.
+	# A SWAG IS A FAN OF FOLDS - the note the second pass left behind was right, and the
+	# reason that pass still failed is that it drew the fan as a few very dark triangles,
+	# which reads as black spikes clawing inward. A fold is a GRADIENT across cloth, never
+	# an outline and never a flat wedge; drawn as nested arcs shaded off one light they
+	# converge at the pins because that is where the cloth is actually pinned.
+	var hy := s.y * DRAPE_HEADER
+	var sag := s.y * DRAPE_SAG
+	# the heading, gathered onto the track: fine folds at a fixed pitch in PIXELS, because
+	# a heading tape's pleats are a property of the cloth and not of the window.
+	var hn := int(maxf(24.0, s.x / 26.0))
+	for i in hn:
+		var x0 := s.x * float(i) / float(hn)
+		var x1 := s.x * float(i + 1) / float(hn)
+		var p0 := (x0 / s.x) * float(hn) * TAU
+		var p1 := (x1 / s.x) * float(hn) * TAU
+		var ca := drape_velvet(p0, 0.55, 0.74, 0.0)
+		var cb := drape_velvet(p1, 0.55, 0.74, 0.0)
+		# darker where it tucks under the swags, so the two layers separate
+		_soup_quad(Vector2(x0, 0.0), Vector2(x1, 0.0), Vector2(x1, hy), Vector2(x0, hy),
+			ca, cb, cb.darkened(0.30), ca.darkened(0.30))
+	var ov := s.x / float(DRAPE_SWAGS) * 0.17   # neighbours overlap, so no pin shows a seam
+	var np := 20
+	var nr := DRAPE_BANDS * 4                   # four samples per fold - enough to be smooth
+	for m in DRAPE_SWAGS:
+		var x0 := s.x * float(m) / float(DRAPE_SWAGS) - ov
+		var x1 := s.x * float(m + 1) / float(DRAPE_SWAGS) + ov
+		var pos := PackedVector2Array()
+		var col := PackedColorArray()
+		for r in nr + 2:
+			var edge := r > nr                  # the feathered row - see drape_leg
+			var q := minf(float(r), float(nr)) / float(nr)
+			# one full fold per band, starting in a crease: trough, crest, trough.
+			var ph := q * float(DRAPE_BANDS) * TAU - PI * 0.5
+			var lift := lerpf(0.98, 0.66, q)    # the deeper arcs sink into their own shadow
+			for c in np + 1:
+				var p := float(c) / float(np)
+				var bow := pow(sin(PI * p), 0.9)
+				var cc := drape_velvet(ph, 0.28 + 0.72 * pow(bow, 0.6), lift, 0.0)
+				if edge:
+					cc.a = 0.0
+				# EVERY ARC PINCHES TO THE PINS, which is what makes it a swag rather than
+				# a scalloped rectangle - and it is why the swags have to overlap.
+				pos.append(Vector2(lerpf(x0, x1, p), hy + sag * q * bow + (2.0 if edge else 0.0)))
+				col.append(cc)
+		for r in nr + 1:
+			for c in np:
+				var a := r * (np + 1) + c
+				var b := a + 1
+				var d := a + np + 1
+				var e := d + 1
+				_soup_quad(pos[a], pos[b], pos[e], pos[d], col[a], col[b], col[e], col[d])
+		# the gold braid along the bottom arc, and the fringe hanging off it. Faint, and
+		# deliberately so: a bright line along a curved hem reads as a fringe only at low
+		# alpha, and any brighter it reads as a lightning bolt (the first pass's finding).
+		var prev := Vector2.ZERO
+		for c in np + 1:
+			var p := float(c) / float(np)
+			var pt := Vector2(lerpf(x0, x1, p), hy + sag * pow(sin(PI * p), 0.9))
+			if c > 0:
+				_soup_line(prev, pt, 2.2, Color(DRAPE_GOLD.r, DRAPE_GOLD.g, DRAPE_GOLD.b, 0.42))
+			prev = pt
+		# THE FRINGE IS A SILHOUETTE, NOT A TEXTURE. At 1.8px and 30% alpha the first one
+		# was invisible on screen at any size - a strand that faint is below the threshold
+		# where the eye assembles a row of them into an edge, the same finding the Midnight
+		# Show's house lights left ("a lamp needs a halo or it is just a brighter rectangle").
+		# Solid, wider, and hanging off the hem where it can be read against the dark wall.
+		var fn := int((x1 - x0) / 9.0)
+		for c in fn:
+			var p := (float(c) + 0.5) / float(fn)
+			var bow2 := pow(sin(PI * p), 0.9)
+			var top := Vector2(lerpf(x0, x1, p), hy + sag * bow2 + 1.0)
+			var ln := (9.0 + 4.0 * sin(float(c) * 2.1)) * (0.45 + 0.55 * bow2)
+			var fa := 0.62 * bow2 + 0.14
+			_soup_line(top, top + Vector2(0.0, ln), 2.6,
+				Color(DRAPE_GOLD.r * 0.82, DRAPE_GOLD.g * 0.72, DRAPE_GOLD.b * 0.40, fa))
+	# the pin between each pair of swags: cloth bunched into a knot, with a gold boss on it.
+	# It hides the junction, which is exactly the job a real rosette does.
+	for m in DRAPE_SWAGS + 1:
+		var px := s.x * float(m) / float(DRAPE_SWAGS)
+		for k in 5:
+			var a := PI * (0.16 + 0.68 * float(k) / 4.0)
+			var tip := Vector2(px + cos(a) * sag * 0.30, hy + sin(a) * sag * 0.62)
+			_soup_line(Vector2(px, hy - 2.0), tip, 3.4,
+				drape_velvet(float(k) * 1.9, 0.5, 0.80, 0.0))
+		_soup_ellipse(Vector2(px, hy + 1.0), 5.2, 4.6, 0.0, 10, DRAPE_GOLD.darkened(0.22))
+		_soup_ellipse(Vector2(px - 1.2, hy - 0.4), 2.4, 2.1, 0.0, 8, Color(1.0, 0.90, 0.58))
+
+
+func drape_bow(p: Vector2, sc: float, side: float) -> void:
+	# THE TIEBACK, at the pinch and not at the corner (2026-07-30, Louis: "a small golden
+	# bowtie holding them to the side"). A tieback is a band round the gathered cloth with
+	# a bow at the knot, so it belongs where the leg is narrowest - which is where the
+	# silhouette table says it is, never a hand-picked y.
+	# A FLAT FILL IS WHAT GIVES A SMALL OBJECT AWAY, and this bow proved it twice. The
+	# first was four flat tan polygons; at 34px across that reads as cardboard, the two
+	# loops merged into one lopsided egg because nothing separated them, and the strap ran
+	# straight through the middle like a stick through it. Three fixes, in order of how
+	# much each one bought: the loops are SHADED from the centre out (`_soup_fan_lit`, the
+	# same free-gradient trick the cloth uses); they are pushed apart so a notch of velvet
+	# shows between them, which is the only thing that says "two loops" rather than "a
+	# blob"; and the strap now STOPS at the knot instead of crossing it.
+	var lit := DRAPE_BOW.lightened(0.30)
+	# a soft shadow first, so the bow sits ON the cloth rather than in it
+	_soup_ellipse(p + Vector2(0.0, 0.18 * sc), sc * 1.55, sc * 0.72, 0.0, 12,
+		Color(0.0, 0.0, 0.0, 0.30))
+	# the two ribbon tails, under everything else - a cut ribbon end is NOTCHED, and at
+	# this size that notch is the whole difference between a ribbon and a spike
+	for tail: float in [-1.0, 1.0]:
+		var dir := Vector2(tail * 0.44, 1.0).normalized()
+		var nrm := Vector2(-dir.y, dir.x)
+		var tip := p + dir * sc * 1.30
+		var ring := PackedVector2Array([
+			p - nrm * sc * 0.17, p + nrm * sc * 0.17,
+			tip + nrm * sc * 0.34, tip - dir * sc * 0.30, tip - nrm * sc * 0.34,
+			p - nrm * sc * 0.17])
+		_soup_fan_lit(p.lerp(tip, 0.55), ring,
+			DRAPE_BOW if tail * side > 0.0 else DRAPE_BOW_DK.lightened(0.10),
+			DRAPE_BOW_DK)
+	# THE LOOPS. Swept, not listed: what says "ribbon doubled back on itself" is the CURVE
+	# of the outer edge, and the far one is the darker, so the bow has a front and a back.
+	for wing: float in [-1.0, 1.0]:
+		var ring := PackedVector2Array()
+		for k in 17:
+			var a := lerpf(-PI * 0.78, PI * 0.78, float(k) / 16.0)
+			var rr := sc * (0.45 + 0.42 * cos(a * 0.62))   # full at the tip, pinched at the knot
+			ring.append(p + Vector2(wing * (0.42 * sc + cos(a) * rr), sin(a) * rr * 0.78))
+		ring.append(ring[0])
+		var near := wing * side > 0.0
+		_soup_fan_lit(p + Vector2(wing * 0.70 * sc, -0.06 * sc), ring,
+			lit if near else DRAPE_BOW, DRAPE_BOW if near else DRAPE_BOW_DK)
+	# the knot, sitting proud of both loops with its own little highlight
+	_soup_ellipse(p, 0.30 * sc, 0.36 * sc, 0.0, 12, DRAPE_BOW_DK)
+	_soup_ellipse(p + Vector2(-0.03 * sc, -0.03 * sc), 0.24 * sc, 0.29 * sc, 0.0, 12, DRAPE_BOW)
+	_soup_ellipse(p + Vector2(-0.10 * sc, -0.12 * sc), 0.10 * sc, 0.11 * sc, 0.0, 8,
+		Color(1.0, 0.97, 0.82))
+
+
+func drape_bake(s: Vector2, fy: float) -> void:
+	# Built through the SOUP helpers the flower pile already owns, then lifted out into the
+	# drapes' own arrays - one vocabulary of shapes, one emit. Cleared at both ends because
+	# the soup is a shared scratch buffer and nothing else may inherit half a curtain.
+	_soup_clear()
 	for side: float in [1.0, -1.0]:
-		var ex := 0.0 if side > 0.0 else s.x        # the edge every centre sits on
-		var a_mid := 0.0 if side > 0.0 else PI       # the inward-facing direction at this edge
-		for k in segs:
-			var f := float(k) / float(segs - 1)
-			var cy := val_h + seg_gap * float(k)
-			var r := lerpf(r_top, r_bot, f)
-			draw_circle(Vector2(ex, cy), r, velvet if k % 2 == 0 else velvet_lo)
-			# the gold hem, one faint arc per segment tracing only the visible (inward) half -
-			# faint, because a bright line along a curved hem reads as a fringe only at low
-			# alpha; any brighter and it reads as a lightning bolt.
-			draw_arc(Vector2(ex, cy), r, a_mid - PI * 0.5, a_mid + PI * 0.5, 16,
-				Color(gold.r, gold.g, gold.b, 0.24), 1.6, true)
-		# THE TIEBACK IS A BOWTIE, NEAR THE GATHER POINT (2026-07-30, Louis: "a small golden
-		# bowtie holding them to the side"). A real curtain tieback gathers the cloth with
-		# a bow, not a doorknob with a fringe hanging off it - two ribbon loops pinched at
-		# a knot, with two short tails dropping below.
-		# OFFSET FROM THE CORNER, NOT ON IT: the corner is the single darkest patch on the
-		# whole title screen once draw_vignette lands on it (measured: a bow drawn AT the
-		# corner rendered as a barely-there smudge). `orn` pulls it into the body of the
-		# topmost segment instead, where it has more room to read against mid-tone velvet -
-		# and its own gold is a shade brighter than the hem trace's, which is deliberately
-		# faint (see above), because a small accent this close to the corner still has to
-		# punch through what vignette remains at its new spot.
-		var orn := Vector2(ex + side * 16.0, val_h + 20.0)
-		var bgold := Color(1.0, 0.85, 0.46)
-		var bdk := Color(0.78, 0.60, 0.27)
-		draw_circle(orn, 8.0, Color(0.0, 0.0, 0.0, 0.22))   # a soft dark backing, so the
-			# bow separates from the cloth behind it rather than just sitting on it
-		for wing: float in [-1.0, 1.0]:
-			var tip := orn + Vector2(wing * 12.0, -1.0)
-			draw_colored_polygon(PackedVector2Array([
-				orn + Vector2(wing * 1.6, -3.8), tip + Vector2(0.0, -4.3),
-				tip + Vector2(0.0, 4.3), orn + Vector2(wing * 1.6, 3.8)]),
-				bgold if wing < 0.0 else bdk)
-		for tail: float in [-1.0, 1.0]:
-			var bx: float = orn.x + tail * 2.6
-			draw_colored_polygon(PackedVector2Array([
-				Vector2(bx - 1.9, orn.y + 3.0), Vector2(bx + 1.9, orn.y + 3.0),
-				Vector2(bx + 0.8, orn.y + 12.0), Vector2(bx - 0.8, orn.y + 12.0)]),
-				bdk if tail < 0.0 else bgold)
-		draw_colored_polygon(PackedVector2Array([
-			orn + Vector2(-3.8, -3.8), orn + Vector2(3.8, -3.8),
-			orn + Vector2(3.8, 3.8), orn + Vector2(-3.8, 3.8)]), bgold)
-		draw_circle(orn + Vector2(-1.1, -1.1), 1.8, Color(1.0, 0.96, 0.80, 0.85))
+		drape_leg(s, fy, side)
+	drape_pelmet(s)       # over the legs: the border hangs in front of them in a real house
+	var tie: Vector2 = DRAPE_SILHOUETTE[DRAPE_TIE_KEY]
+	var reach := s.x * DRAPE_REACH
+	for side: float in [1.0, -1.0]:
+		var ex := 0.0 if side > 0.0 else s.x
+		var ty := fy * tie.x
+		# where the cloth's leading edge ACTUALLY is at the tieback row - width and sway,
+		# read off the same two functions the curtain is drawn with. The strap stops at 94%
+		# of it, so a sliver of velvet always shows past the gold.
+		var band := reach * drape_width(tie.x) * drape_sway(tie.x)
+		var knot := Vector2(ex + side * band * 0.70, ty)
+		# the strap, from the wall to the KNOT and no further - it is what the bow is tied
+		# on, so it disappears under it. Thin, because a tieback is a strap and the first
+		# one at 11px read as a plank laid on the cloth, and shaded top-to-bottom so it
+		# wraps the bundle instead of sitting on it.
+		_soup_quad(
+			Vector2(ex, ty - 4.0), Vector2(knot.x, ty - 6.0),
+			Vector2(knot.x, ty + 1.0), Vector2(ex, ty + 3.0),
+			DRAPE_BOW_DK.lightened(0.20), DRAPE_BOW,
+			DRAPE_BOW_DK, DRAPE_BOW_DK.darkened(0.35))
+		drape_bow(knot, reach * 0.098, side)
+	_drape_pts = _soup_pts.duplicate()
+	_drape_cols = _soup_cols.duplicate()
+	_drape_idx = _soup_idx.duplicate()
+	_drape_for = s
+	_drape_fy = fy
+	_soup_clear()
+
+
+func menu_drapes(s: Vector2, fy: float) -> void:
+	# THE PROSCENIUM, rebuilt (2026-07-30, Louis: "fix my title screen curtains, they look
+	# ai made and horrible"). They were a stack of `draw_circle`s down each edge with a
+	# `draw_arc` tracing every rim, which is the tell exactly: the PRIMITIVE was visible
+	# instead of the object. Six discs and six circular outlines, alternating tones picked
+	# per shape rather than by any light, and not one vertical line in a thing that hangs.
+	# Cloth falls, so it is a corrugated sheet under one lamp - see drape_velvet.
+	if _drape_for != s or _drape_fy != fy or _drape_idx.is_empty():
+		drape_bake(s, fy)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _drape_idx, _drape_pts, _drape_cols)
 
 
 func menu_backdrop(s: Vector2) -> void:
@@ -19046,10 +19294,10 @@ func menu_backdrop(s: Vector2) -> void:
 	draw_spotlight_cone(s, s.x * 0.5, 0.15)
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
 	# THE SWAGS GO IN FRONT OF THE VEIL AND THE LIGHT, where draw_theatre_boxes used to be (see
-	# menu_swags for why the boxes went). Order is the whole difference between cloth and a stain:
+	# menu_drapes for why the boxes went). Order is the whole difference between cloth and a stain:
 	# they are the proscenium, the nearest thing in the room, so the veil that pushes the back wall
 	# behind the mark must not also wash them out, and the spotlight cone must not lie over them.
-	menu_swags(s)
+	menu_drapes(s, fy)
 	draw_footlights(s, fy)
 	# the boards, painted LAST over the dressing, with the warm lip draw_backdrop uses - anything
 	# drawn at the floor line itself is buried under them, which is the trap the theatre's own
@@ -21794,12 +22042,20 @@ func _soup_clear() -> void:
 
 func _soup_fan(c: Vector2, ring: PackedVector2Array, col: Color) -> void:
 	# a filled shape as a triangle fan: centre, then the ring, then indices round it
+	_soup_fan_lit(c, ring, col, col)
+
+
+func _soup_fan_lit(c: Vector2, ring: PackedVector2Array, mid: Color, rim: Color) -> void:
+	# the same fan with its OWN COLOUR AT THE CENTRE, which turns any fan-drawn shape into
+	# a rounded one for nothing - the fan already has a vertex there, so the gradient is
+	# free the way _soup_quad's is. Added for the tieback bow, whose loops read as flat
+	# cardboard while every other object on the title screen was shaded.
 	var base := _soup_pts.size()
 	_soup_pts.append(c)
-	_soup_cols.append(col)
+	_soup_cols.append(mid)
 	for q in ring:
 		_soup_pts.append(q)
-		_soup_cols.append(col)
+		_soup_cols.append(rim)
 	for k in ring.size() - 1:
 		_soup_idx.append(base)
 		_soup_idx.append(base + 1 + k)
@@ -21827,6 +22083,30 @@ func _soup_line(a: Vector2, b: Vector2, w: float, col: Color) -> void:
 	_soup_pts.append(b - n)
 	for _k in 4:
 		_soup_cols.append(col)
+	_soup_idx.append(base)
+	_soup_idx.append(base + 1)
+	_soup_idx.append(base + 2)
+	_soup_idx.append(base)
+	_soup_idx.append(base + 2)
+	_soup_idx.append(base + 3)
+
+
+func _soup_quad(a: Vector2, b: Vector2, c: Vector2, d: Vector2,
+		ca: Color, cb: Color, cc: Color, cd: Color) -> void:
+	# a four-corner patch carrying its OWN COLOUR AT EACH CORNER, walked round the
+	# perimeter. This is the whole trick behind the proscenium drapes: the rasterizer
+	# interpolates the shading between the corners for nothing, so a smooth fold costs
+	# exactly what a flat one costs - the same finding draw_spotlight_cone records, where
+	# stacking low-alpha shapes to fake a gradient measured 30% SLOWER and banded anyway.
+	var base := _soup_pts.size()
+	_soup_pts.append(a)
+	_soup_pts.append(b)
+	_soup_pts.append(c)
+	_soup_pts.append(d)
+	_soup_cols.append(ca)
+	_soup_cols.append(cb)
+	_soup_cols.append(cc)
+	_soup_cols.append(cd)
 	_soup_idx.append(base)
 	_soup_idx.append(base + 1)
 	_soup_idx.append(base + 2)
