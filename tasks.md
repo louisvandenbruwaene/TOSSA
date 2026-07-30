@@ -578,3 +578,25 @@ distance, whether it stops too often in the three-ball section - is a hands-on j
 make from screenshots.
 
 **Still open:** Records and history prints the clipped INT64 sentinel for two venues.
+
+## 21. Catching with a full hand is a setting (2026-07-30, night)
+
+Louis: "make it toggleable: whether it's possible to catch an object when you already have one in
+your hand. for now turn it off."
+
+Done - Settings > GAME FEEL > "Catch with a full hand", default OFF, persisted. A refused press is
+not a whiff and costs nothing, since reaching with a full hand is an impossible catch rather than a
+mistimed one. Tutorial beats are exempt: a guided beat freezes the world to demand a press, so a
+rule that could refuse it would hang the lesson.
+
+**One thing I got wrong on the way, since it affects how we test.** The first booking run after the
+change collapsed at zero where the previous one had scored 364,451, and flipping the default back
+scored 585,980 - which reads as proof that the toggle broke the autoplayer. It is not: `--demo`
+seeds its rng per run, so those numbers are not comparable. Three more runs with the toggle off all
+came back 3/3 with no collapse, and instrumenting the refusal branch printed nothing at all, because
+the autoplayer's catch loop has always skipped a hand that is not empty. A single A/B pair of a
+randomised run says nothing.
+
+Adding the row also fixed a real latent bug: the settings screen's `sections` listed a row index 9
+that its `rows` array did not have, so `rows[9]` was an out-of-bounds read inside `_draw` - which
+silently abandons the rest of the draw pass.

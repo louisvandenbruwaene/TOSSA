@@ -1729,6 +1729,18 @@ var reduce_motion := false  # accessibility: master "reduce motion" - suppresses
 						 # shake outright, cuts the hit-stop freezes to a single tick, and
 						 # thins particle bursts. Never touches slow-mo (that stretches the
 						 # catch window, so it is a gameplay benefit, not a visual flourish)
+# CAN A FULL HAND CATCH? (2026-07-30, Louis: "make it toggleable: whether it's possible to catch an
+# object when you already have one in your hand. for now turn it off.") It shipped as always-YES
+# for a while - "traffic is now the player's own problem, and holding two is a legitimate rescue" -
+# and this puts the older rule back as a choice, with OFF as the default Louis asked for. The two
+# are genuinely different games at the top counts: catching into a full hand lets a player bail out
+# of a mess by stacking, which is forgiving but also lets a bad pattern be survived rather than
+# fixed. OFF means a hand must be EMPTY to receive, so every catch has to be paid for with a throw
+# first, which is what the beginner cascade teaches in the first place.
+# A TUTORIAL'S OWN CATCH IGNORES THIS, and it has to: a guided beat freezes the world and demands a
+# press, so a rule that can refuse it would deadlock the lesson (see the `sure` branches in
+# on_catch, which every other way of losing a prop is already skipped for).
+var set_catch_full := false
 var dominant_hand := RIGHT  # which hand is the strong one (Settings). It holds the
                             # extra prop on an odd count and starts the pattern -
                             # every juggler deals the odd ball to their strong hand,
@@ -6409,8 +6421,11 @@ func settings_input(kc: int) -> void:
 	# lost its other one when the Close Quarters Encore was replaced. The Ball.bumped field
 	# and the clack loop go with it - a setting nobody can reach is a mechanic nobody can
 	# meet, and leaving the machinery in place only makes the next reader believe it works.
-	var n := 9   # music, sound, shake, reduce-motion, fullscreen, dominant hand, controls,
-				 # records, Back
+	var n := 10  # music, sound, shake, reduce-motion, fullscreen, dominant hand, catch with a
+				 # full hand, controls, records, Back. Keep this equal to the length of `rows` in
+				 # draw_settings_cards AND to what its `sections` cover - the three have to be
+				 # edited in one go, and the last time they were not, `sections` listed a row 9
+				 # that `rows` did not have.
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -6441,12 +6456,14 @@ func settings_input(kc: int) -> void:
 				5:
 					dominant_hand = LEFT if dominant_hand == RIGHT else RIGHT
 				6:
+					set_catch_full = not set_catch_full
+				7:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				7:
-					game_state = ST_STATS   # the career ledger, back with Esc
 				8:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				9:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -6599,6 +6616,7 @@ func load_settings() -> void:
 	if cf.load(SETTINGS_PATH) == OK:
 		set_shake = bool(cf.get_value("opt", "shake", true))
 		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
+		set_catch_full = bool(cf.get_value("opt", "catch_full", false))
 		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
@@ -6626,6 +6644,7 @@ func save_settings() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("opt", "shake", set_shake)
 	cf.set_value("opt", "reduce_motion", reduce_motion)
+	cf.set_value("opt", "catch_full", set_catch_full)
 	cf.set_value("opt", "dominant_hand", dominant_hand)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
@@ -7642,9 +7661,14 @@ func on_catch(h: int) -> void:
 		# branches above land: the game stopped to ask for it. A press on the OTHER hand falls
 		# through to the ordinary path, where it is a whiff and costs nothing but pride.
 		sure = true
-	# a hand that already HOLDS a ball may still catch (Louis): the stack takes
-	# another. The old "hand occupied, no catch" traffic rule is gone - traffic
-	# is now the player's own problem, and holding two is a legitimate rescue.
+	# CAN A FULL HAND CATCH? A SETTING NOW (2026-07-30, `set_catch_full`, default OFF - see its
+	# declaration). With it off a hand must be EMPTY to receive, which is the older traffic rule
+	# back again; with it on the stack simply takes another and holding two is a legitimate rescue.
+	# Checked BEFORE the ball is chosen, so a refused press costs nothing at all - it is not a
+	# whiff, because reaching with a full hand is not a mistimed catch, it is an impossible one.
+	# `sure` is exempt: a guided lesson beat has frozen the world to demand this press.
+	if not sure and not set_catch_full and not stack(h).is_empty():
+		return
 	var best: Ball = null
 	var best_d := 1000000
 	for b in balls:
@@ -20095,6 +20119,11 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
 		{"kind": "pick", "name": "Dominant hand", "val": dominant_hand == RIGHT, "note": "holds the odd prop and starts the pattern", "col": Color(0.95, 0.7, 0.55)},
+		# ...and the tenth row the `sections` list below has been asking for since the
+		# dominant-hand row arrived: it lists rows [7, 8, 9] while `rows` only ran to 8, so
+		# `rows[9]` was an out-of-range read inside _draw - which this file's own note about
+		# script errors mid-draw says silently abandons the rest of the pass.
+		{"kind": "bool", "name": "Catch with a full hand", "val": set_catch_full, "note": "off: a hand must be empty to receive", "col": Color(0.7, 0.85, 0.6)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
 		{"kind": "nav", "name": "Records and history", "val": false, "note": "your career ledger", "col": Color(0.95, 0.82, 0.5)},
 		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},

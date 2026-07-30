@@ -598,6 +598,30 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
   act resolved, which made the one path only a perfect act can reach impossible to test
   or screenshot at all.
+- **CAN A FULL HAND CATCH? A SETTING NOW** (2026-07-30, Louis: "make it toggleable: whether it's
+  possible to catch an object when you already have one in your hand. for now turn it off").
+  `set_catch_full`, in Settings under GAME FEEL, **default OFF**. It shipped as always-YES for a
+  while - "traffic is now the player's own problem, and holding two is a legitimate rescue" - and
+  this puts the older rule back as a choice. The two are different games at the top counts: catching
+  into a full hand lets a player bail out of a mess by stacking, which is forgiving but also lets a
+  bad pattern be survived rather than fixed; OFF means every catch has to be paid for with a throw
+  first, which is what the beginner cascade teaches in the first place. Checked BEFORE the ball is
+  chosen, so a refused press is not a whiff and costs nothing - reaching with a full hand is not a
+  mistimed catch, it is an impossible one. **`sure` is exempt**, and must be: a guided lesson beat
+  freezes the world to demand a press, so a rule that could refuse it would deadlock the lesson.
+  **AND A NON-DETERMINISTIC HARNESS WILL LIE TO YOU ABOUT WHICH CHANGE DID WHAT.** The first
+  `--demo --booking --venue 2` run after this change collapsed at 0 where the previous run had
+  scored 364,451, and flipping the default back to ON scored 585,980 - which looks exactly like
+  proof. It was not: `--demo` seeds its rng per run, and three more runs with the toggle OFF all
+  came back 3/3 with no collapse. Instrumenting the refusal branch printed **nothing at all**,
+  because the autoplayer's own catch loop has always skipped a hand that is not empty, so it never
+  reaches this rule. **One A/B pair of a randomised run is not a measurement** - the same trap the
+  fps note in this file already records, met from the gameplay side.
+  Adding the row also fixed a latent out-of-range: `draw_settings_cards`' `sections` listed rows
+  [7, 8, 9] while `rows` only ran to 8, so `rows[9]` was an out-of-bounds read inside `_draw` -
+  which this file's own note says silently abandons the rest of that draw pass. `settings_input`'s
+  `n`, the `rows` array and the `sections` indices have to be edited in one go; the comment on `n`
+  now says so.
 - **THE CATCH GUARD: A BEGINNER CANNOT DROP WHILE BEING HELPED** (2026-07-30, Louis: "The tutorial
   is still not pausing when it should ... it should pause the game when the thrown ball comes near
   the perfect catch timing; that makes sure the beginning player doesn't drop during the tutorial").
