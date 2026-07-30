@@ -18922,18 +18922,6 @@ const MENU_ORN_LIFT := 20.0  # how far the gold divider sits ABOVE the first men
 							 # hang 14px under the wordmark, which put it in the middle of the empty
 							 # band between the two - Louis wants it tight to the menu instead.
 
-func _arc_ring_pts(c: Vector2, r: float, a0: float, a1: float, n: int) -> PackedVector2Array:
-	# n+1 points on a true circle of radius r about c, swept from angle a0 to a1 (Godot's
-	# screen convention: angle 0 = +x, PI*0.5 = +y = straight down). menu_swags builds every
-	# curved edge from this now, so a fold's fill and the gold trace over it are always
-	# points on the SAME circle, never an approximation of one.
-	var pts := PackedVector2Array()
-	for i in range(n + 1):
-		var ang := lerpf(a0, a1, float(i) / float(n))
-		pts.append(c + Vector2(cos(ang), sin(ang)) * r)
-	return pts
-
-
 func menu_swags(s: Vector2) -> void:
 	# THE SWAGS, top left and top right (2026-07-30, Louis: "remove the little decor window on the
 	# left and right along with that little light. You are supposed to add the curtains of the
@@ -18942,26 +18930,31 @@ func menu_swags(s: Vector2) -> void:
 	# a swag FRAMES the picture where a box competes with it, since two lit windows out at the
 	# edges pull the eye away from a wordmark in the middle.
 	#
-	# THE FOLDS ARE RINGS NOW, NOT A FAN OF STRAIGHT WEDGES (2026-07-30, Louis, on the second
-	# pass: "they should be flowing along circlelike segments centered around the top corners
-	# and flowing down the sides"). The first two versions both radiated STRAIGHT lines out from
-	# one pinned point - first to hard hem vertices, then to a curved hem - which is a fan, and a
-	# fan does not read as fabric hanging off a fixed corner and falling down the side of the
-	# frame: it reads as spreading sideways FROM the corner. A real gathered curtain's folds are
-	# concentric about the point it is tied at, each one a bit further out (and looser) than the
-	# last, and the whole mass falls along the wall it is fixed to. So every fold here is a true
-	# circular RING SEGMENT about the same centre `c` - the corner where the pelmet meets the
-	# wall - swept from angle 0 (straight in along the top, the SAME distance out as it reaches
-	# down) to angle PI/2 (straight down the side). One radius, two directions: that is what
-	# makes the shape read as flowing down the wall rather than draped across the ceiling.
-	# Growth per ring is EASED (`pow(f, 1.3)`), not linear, so the gather is tight near the
-	# corner and the folds loosen as they fall - a real pinned point does not hold every layer
-	# at an even spacing.
-	# ALTERNATING CLOSE TONES PER RING is what makes cloth (carried over from the very first
-	# version): a big tonal jump between neighbours makes a hole rather than a fold.
-	var rmax := s.y * 0.30          # how far the swag reaches, in BOTH directions at once -
-									 # the whole point of a true circle over an ellipse
-	var folds := 6
+	# THIRD PASS: A STACK OF CIRCLES ON THE EDGE, NOT A FAN NEAR THE CORNER (2026-07-30, Louis,
+	# after the first two: "they should be flowing along circlelike segments centered around the
+	# top corners and flowing down the sides" - and then, after a single quarter-circle fan tried
+	# to be that in one shape: "still not quite right"). The fan's mistake, looked at again: ONE
+	# circle, however it is swept, has ONE centre - so its "down the side" reach and its "across
+	# the top" reach are tied together by the same radius, and a shape built that way always
+	# reads as bulging OUT FROM the corner in both directions at once, never as travelling DOWN
+	# the wall. What actually flows down a side is a SEQUENCE of circles, each centred lower than
+	# the last, each one a real "circle-like segment" on its own - which is the literal reading of
+	# "segments centred around the top corner[s] and flowing down the sides": the segments are
+	# circular, and their centres are the ones that walk down the side, starting at the corner.
+	#
+	# Every centre sits EXACTLY ON the edge line (x=0, or x=s.x), so each circle is cut clean in
+	# half by the screen's own boundary and only the inward-facing semicircle is ever drawn - the
+	# curtain's outer half is against the wall and was never going to be seen anyway. Consecutive
+	# circles overlap generously (radius well over half the gap between centres), so the union
+	# reads as one continuous scalloped edge with no seam between segments, and the radius eases
+	# down the stack - biggest right at the corner, where the cloth is gathered, smaller as it
+	# falls - the same taper real gathered fabric has. Alternating CLOSE tones per segment is
+	# still what makes it read as cloth rather than a stack of coins (carried over from every
+	# earlier pass): a big tonal jump between neighbours makes a hole, not a fold.
+	var segs := 6
+	var r_top := 108.0        # the gather, right at the corner - the widest the curtain bulges
+	var r_bot := 58.0         # ...and the narrowest, furthest down the stack
+	var seg_gap := 88.0       # centre-to-centre spacing - well under r_bot*2, so segments always overlap
 	var velvet := Color(0.34, 0.070, 0.095)
 	var velvet_lo := Color(0.26, 0.052, 0.074)
 	var gold := Color(0.86, 0.68, 0.32)
@@ -18977,40 +18970,30 @@ func menu_swags(s: Vector2) -> void:
 	# first, and the left swag's inner corner came out at x = -384: off screen, so only the valance
 	# drew and the corners looked empty.
 	for side: float in [1.0, -1.0]:
-		var c := Vector2(0.0 if side > 0.0 else s.x, val_h)   # the gather point: the pelmet's own corner
-		var a_top := 0.0 if side > 0.0 else PI   # along the top edge, inward
-		var a_side := PI * 0.5                    # straight down the side, always
-		for k in folds:
-			var r0 := rmax * pow(float(k) / float(folds), 1.3)
-			var r1 := rmax * pow(float(k + 1) / float(folds), 1.3)
-			var outer := _arc_ring_pts(c, r1, a_top, a_side, 10)
-			var band := PackedVector2Array()
-			if r0 <= 0.5:
-				band.append(c)   # the innermost fold is a true pie slice, not a ring
-				band.append_array(outer)
-			else:
-				band.append_array(outer)
-				band.append_array(_arc_ring_pts(c, r0, a_side, a_top, 10))   # reversed, to close the ring
-			draw_colored_polygon(band, velvet if k % 2 == 0 else velvet_lo)
-		# the gold hem, one smooth sweep along the OUTERMOST circle only - the one edge that is
-		# actually visible cloth rather than a seam between two folds. Faint, because a bright
-		# line along a curved hem reads as a fringe only at low alpha - any brighter and it
-		# reads as a lightning bolt.
-		draw_polyline(_arc_ring_pts(c, rmax, a_top, a_side, 24), Color(gold.r, gold.g, gold.b, 0.26), 1.6)
+		var ex := 0.0 if side > 0.0 else s.x        # the edge every centre sits on
+		var a_mid := 0.0 if side > 0.0 else PI       # the inward-facing direction at this edge
+		for k in segs:
+			var f := float(k) / float(segs - 1)
+			var cy := val_h + seg_gap * float(k)
+			var r := lerpf(r_top, r_bot, f)
+			draw_circle(Vector2(ex, cy), r, velvet if k % 2 == 0 else velvet_lo)
+			# the gold hem, one faint arc per segment tracing only the visible (inward) half -
+			# faint, because a bright line along a curved hem reads as a fringe only at low
+			# alpha; any brighter and it reads as a lightning bolt.
+			draw_arc(Vector2(ex, cy), r, a_mid - PI * 0.5, a_mid + PI * 0.5, 16,
+				Color(gold.r, gold.g, gold.b, 0.24), 1.6, true)
 		# THE TIEBACK IS A BOWTIE, NEAR THE GATHER POINT (2026-07-30, Louis: "a small golden
 		# bowtie holding them to the side"). A real curtain tieback gathers the cloth with
 		# a bow, not a doorknob with a fringe hanging off it - two ribbon loops pinched at
 		# a knot, with two short tails dropping below.
-		# OFFSET FROM `c`, NOT ON IT: the gather point sits almost exactly on the screen's own
-		# corner, which is the single darkest patch on the whole title screen once
-		# draw_vignette lands on it (measured: a bow drawn AT the corner rendered as a
-		# barely-there smudge). `orn` pulls it down into the body of the swag instead,
-		# along the same inward direction the rings already open on, where it has more
-		# room to read against mid-tone velvet - and its own gold is a shade brighter
-		# than the hem trace's, which is deliberately faint (see above), because a small
-		# accent this close to the corner still has to punch through what vignette
-		# remains at its new spot.
-		var orn := c + Vector2(side * 12.0, 18.0)
+		# OFFSET FROM THE CORNER, NOT ON IT: the corner is the single darkest patch on the
+		# whole title screen once draw_vignette lands on it (measured: a bow drawn AT the
+		# corner rendered as a barely-there smudge). `orn` pulls it into the body of the
+		# topmost segment instead, where it has more room to read against mid-tone velvet -
+		# and its own gold is a shade brighter than the hem trace's, which is deliberately
+		# faint (see above), because a small accent this close to the corner still has to
+		# punch through what vignette remains at its new spot.
+		var orn := Vector2(ex + side * 16.0, val_h + 20.0)
 		var bgold := Color(1.0, 0.85, 0.46)
 		var bdk := Color(0.78, 0.60, 0.27)
 		draw_circle(orn, 8.0, Color(0.0, 0.0, 0.0, 0.22))   # a soft dark backing, so the
