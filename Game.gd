@@ -1498,7 +1498,9 @@ var outfit_suit := -1      # persisted: which stage's costume to wear, or -1 to 
 # about it, loudly, because the trap I was avoiding is real - see draw_tailor.
 var owned_wear: Array = []      # "<piece>:<stage>" for every garment bought
 var worn_piece := {}            # piece id -> the stage index worn, or absent for none
-const WEAR_PIECES: Array[String] = ["hat", "coat", "vest", "gloves", "boots", "glasses", "helmet", "glow"]
+# "hat" and "helmet" sit ADJACENT on purpose (2026-07-30) - they are the one pair that shares a
+# slot (see wear_category), and the rack groups its rows by walking this array in order.
+const WEAR_PIECES: Array[String] = ["hat", "helmet", "coat", "vest", "gloves", "boots", "glasses", "glow"]
 var debug_mode := false   # debug build: free stat editing in the character sheet
 # EXPERIMENTS (2026-07-25): a small, debug-only toggle panel (F9) for trying an
 # alternate version of a screen without touching code each time - see
@@ -5510,8 +5512,9 @@ func tut_check() -> void:
 		return   # already cleared this step, just waiting for the throw to land
 	var steps := tut_lesson(tut_id)
 	var step: Dictionary = steps[clampi(tut_step, 0, steps.size() - 1)]
+	var goal := String(step["goal"])
 	var done := false
-	match String(step["goal"]):
+	match goal:
 		"throw_r": done = tut_threw_r
 		"throw_l": done = tut_threw_l
 		"catch_r": done = tut_caught_r
@@ -5525,16 +5528,28 @@ func tut_check() -> void:
 		"read": done = true   # nothing to do but read it: Enter is live from the first frame
 		_: done = tut_count >= int(step["need"])
 	if done:
-		# the goal is met, but the step HOLDS OPEN: the banner flips to "good job -
-		# Enter continues, or keep trying", and only the player's Enter moves on
-		# (Louis: never cut away while they are still trying it out). A "read" step is
-		# met at setup, so it makes no noise about it.
 		tut_advance_at = tick
 		# the beat that was frozen is over too: a WON step goes back to free play, so a
 		# player who wants to keep going is not stopped at every prop from here on
 		tut_hold_abort()
-		if String(step["goal"]) != "read":
+		if goal != "read":
 			play_sfx("streak", -10.0)
+		# A SUCCEEDED ACTION MOVES ON BY ITSELF NOW (2026-07-30, Louis: "i shouldn't have
+		# to press enter when i succesfully do what it asks ... should immediately jump to
+		# the next dialogue window"). Only two goals still wait on the player's own Enter:
+		# `read`, which IS a line of dialogue with nothing to press but Enter, and `free`,
+		# whose own text invites practice PAST the threshold ("feel free to master one ball
+		# before moving on") - advancing the instant the count is hit would cut that
+		# practice off rather than offer it. Every named-key `do` beat, every trick/
+		# pattern/prop/count `tut_beat`, and the hand question all clear the instant their
+		# one action lands.
+		# Left off `--demo` on purpose: the harness's own pacing (the dead gap
+		# `tut_maintain` holds open, and the guard in `_demo_step` that leans on it to
+		# keep the generic feeder from sneaking in a stray throw - see its own comment)
+		# is tuned around a step staying "done but open" for a beat, and this collapses
+		# that beat to zero for a real player only.
+		if goal != "read" and goal != "free" and not _demo:
+			tut_advance()
 
 
 func tut_advance() -> void:
@@ -10248,6 +10263,11 @@ func load_progress() -> void:
 	gifted.erase("over")
 	pending_tuts.erase("trick_over")
 	trick_sel = clampi(trick_sel, -1, TRICKS.size() - 1)
+	# ONE PIECE PER CATEGORY, ENFORCED ON LOAD TOO (2026-07-30): a save from before this rule,
+	# or the pre-tailor migration just above (which sets every owned piece's flag from a flat
+	# bool with no notion of a slot at all), can load with a hat and the Energy Helmet both
+	# marked worn. See wear_normalize.
+	wear_normalize()
 	stamina_max = 100.0 + 9.0 * float(endurance)
 	# stamina persists through the day now (sleep restores it). An old save that
 	# predates the day loop simply wakes rested.
@@ -12444,18 +12464,82 @@ func wear_matches(piece: String) -> bool:
 	return worn_stage(piece) == cur_venue()
 
 
+func wear_category(piece: String) -> String:
+	# THE SLOT A GARMENT OCCUPIES (2026-07-30, Louis: "you shouldn't be able to put multiple
+	# clothes of the same category on at once ... headwear: either a hat or the drinking
+	# cap"). Every piece is its own category except the two that share the top of the head -
+	# a performer cannot wear a top hat and the Energy Helmet at once, however well both are
+	# cut for tonight. Singleton categories cost nothing to declare and mean the rest of the
+	# tailor (the exclusivity rule, the set-completion count) never has to special-case the
+	# head: "one piece per category" is the one rule, everywhere.
+	return "head" if piece == "hat" or piece == "helmet" else piece
+
+
+func wear_categories() -> Array:
+	var seen: Array = []
+	for p in WEAR_PIECES:
+		var c := wear_category(p)
+		if not seen.has(c):
+			seen.append(c)
+	return seen
+
+
+func wear_category_matches(cat: String) -> bool:
+	# is SOME piece in this slot on, and cut for tonight - the category-level wear_matches.
+	for p in WEAR_PIECES:
+		if wear_category(p) == cat and wear_matches(p):
+			return true
+	return false
+
+
+func wear_category_label(cat: String) -> String:
+	# the rack's own group heading, only ever drawn over a category with more than one
+	# member - see the loop in draw_tailor.
+	return "HEADWEAR" if cat == "head" else cat.to_upper()
+
+
+func wear_clear_category(piece: String) -> void:
+	# takes off every OTHER garment sharing this one's slot, so putting a piece on can never
+	# leave two occupying the same category - the enforcement half of wear_category. Called
+	# right before a piece is actually worn (tailor_wear, tailor_buy, try_outfit_tonight).
+	var cat := wear_category(piece)
+	for p2 in WEAR_PIECES:
+		if p2 != piece and wear_category(p2) == cat:
+			worn_piece.erase(p2)
+
+
+func wear_normalize() -> void:
+	# A LOADED SAVE CAN PREDATE THE RULE (2026-07-30) - either an old tailor save written
+	# before categories existed, or the pre-tailor migration a few lines up in
+	# load_progress, which sets every owned piece's flag straight from a flat bool with no
+	# notion of a slot at all. Keep only the first match per category (WEAR_PIECES order)
+	# and drop the rest, so a loaded save can never show a performer wearing a top hat and
+	# the Energy Helmet at once.
+	var claimed: Array = []
+	for p in WEAR_PIECES:
+		if worn_stage(p) < 0:
+			continue
+		var c := wear_category(p)
+		if claimed.has(c):
+			worn_piece.erase(p)
+		else:
+			claimed.append(c)
+
+
 func costume_set_bonus() -> float:
 	# HOW MUCH OF TONIGHT'S SET YOU ARE ACTUALLY WEARING, as a score multiplier. Every matching
-	# piece pays; the full set pays best, and pays a little more than the sum of its parts so
-	# that completing one is a real goal rather than a rounding error.
+	# CATEGORY pays (not every piece - the head is one slot, not two), and the full set pays
+	# best, a little more than the sum of its parts so that completing one is a real goal
+	# rather than a rounding error.
+	var cats := wear_categories()
 	var n := 0
-	for p in WEAR_PIECES:
-		if wear_matches(p):
+	for c in cats:
+		if wear_category_matches(c):
 			n += 1
 	if n <= 0:
 		return 1.0
 	var m := 1.0 + SET_PIECE_BONUS * float(n)
-	if n >= WEAR_PIECES.size():
+	if n >= cats.size():
 		m *= SET_FULL_BONUS
 	return m
 
@@ -12517,6 +12601,7 @@ func tailor_buy(piece: String, stage: int) -> void:
 		return
 	money -= cost
 	owned_wear.append(wear_key(piece, stage))
+	wear_clear_category(piece)     # ONE PIECE PER CATEGORY - see wear_category
 	worn_piece[piece] = stage      # a thing you just bought goes straight on. Nobody buys a hat
 								   # to leave it in a box.
 	save_progress()
@@ -12533,6 +12618,8 @@ func tailor_wear(piece: String, stage: int) -> void:
 	if int(worn_piece.get(piece, -1)) == stage:
 		worn_piece.erase(piece)
 	else:
+		wear_clear_category(piece)   # ONE PIECE PER CATEGORY - a hat and the Energy Helmet
+									  # can never both be on him (see wear_category)
 		worn_piece[piece] = stage
 	save_progress()
 	play_sfx("ui2", -13.0)
@@ -12542,18 +12629,37 @@ func try_outfit_tonight() -> void:
 	# THE WHOLE SET, IN ONE PRESS (2026-07-29): the rack's own version of the shop's "B
 	# buys the whole shortfall" (try_top_up). Buying one piece at a time, one Enter each,
 	# is fine for trying things on but a poor way to dress for a house you already know
-	# you want fully kitted - and unlike props, a set is eight DIFFERENT prices, so this
+	# you want fully kitted - and unlike props, a set is several DIFFERENT prices, so this
 	# buys cheapest first, stopping the moment the purse cannot take the next one, rather
 	# than either refusing outright or leaving the purse a strange amount short of a
 	# piece it could have covered by skipping to the next-cheapest one instead. Anything
 	# already owned for tonight but not yet worn (a cut bought on an earlier visit) is
 	# put on too, at no cost - the same as pressing Enter on it directly.
+	#
+	# ONE PIECE PER CATEGORY (2026-07-30): the head slot now has two candidates (hat,
+	# helmet), so this can no longer just walk every piece and buy whatever is affordable -
+	# that would dress him in both at once, which is exactly the thing wear_category exists
+	# to stop. It picks the best candidate PER CATEGORY first: whichever is already owned
+	# for tonight if either is (free beats a fresh purchase every time), else the cheaper
+	# of the two to buy.
 	var st := cur_venue()
-	var order := WEAR_PIECES.duplicate()
-	order.sort_custom(func(a, b): return wear_cost(a, st) < wear_cost(b, st))
+	var pick: Dictionary = {}   # category -> the one piece chosen to fill it tonight
+	for c in wear_categories():
+		if wear_category_matches(c):
+			continue   # already dressed for tonight in this slot
+		var options: Array = []
+		for p in WEAR_PIECES:
+			if wear_category(p) == c:
+				options.append(p)
+		options.sort_custom(func(a, b):
+			var oa := owns_wear(a, st)
+			var ob := owns_wear(b, st)
+			return wear_cost(a, st) < wear_cost(b, st) if oa == ob else oa)
+		pick[c] = options[0]
 	var to_buy: Array = []
 	var spent := 0
-	for p in order:
+	for c2 in pick:
+		var p := String(pick[c2])
 		if owns_wear(p, st):
 			continue
 		var cost := wear_cost(p, st)
@@ -12562,7 +12668,8 @@ func try_outfit_tonight() -> void:
 		to_buy.append(p)
 		spent += cost
 	var to_wear: Array = []
-	for p2 in WEAR_PIECES:
+	for c3 in pick:
+		var p2 := String(pick[c3])
 		if owns_wear(p2, st) and worn_stage(p2) != st:
 			to_wear.append(p2)
 	if to_buy.is_empty() and to_wear.is_empty():
@@ -12575,8 +12682,10 @@ func try_outfit_tonight() -> void:
 		money -= spent
 		for p3 in to_buy:
 			owned_wear.append(wear_key(p3, st))
+			wear_clear_category(p3)
 			worn_piece[p3] = st
 	for p4 in to_wear:
+		wear_clear_category(p4)
 		worn_piece[p4] = st
 	save_progress()
 	if to_buy.is_empty():
@@ -16911,14 +17020,17 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		"what you wear is what you get. A piece cut for tonight's house pays; the same piece cut for another is only clothes.",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
-	# the live read: how much of tonight's set is actually on him
+	# the live read: how much of tonight's set is actually on him. Counted by CATEGORY, not by
+	# raw piece (2026-07-30) - the head is one slot now, not two, so "the full set" means one
+	# piece per slot, not literally every piece in WEAR_PIECES at once (see wear_category).
 	var setb := costume_set_bonus()
+	var wear_cats := wear_categories()
 	var setn := 0
-	for p2 in WEAR_PIECES:
-		if wear_matches(p2):
+	for c0 in wear_cats:
+		if wear_category_matches(c0):
 			setn += 1
 	draw_string(font, Vector2(px + pw - 460.0, py + 82.0),
-		"tonight at %s:  %d of %d pieces  ·  score x%.2f" % [suit_name(cur_venue()), setn, WEAR_PIECES.size(), setb],
+		"tonight at %s:  %d of %d pieces  ·  score x%.2f" % [suit_name(cur_venue()), setn, wear_cats.size(), setb],
 		HORIZONTAL_ALIGNMENT_RIGHT, 420.0, 13,
 		Color(0.75, 0.95, 0.70) if setn > 0 else Color(0.86, 0.62, 0.52))
 	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
@@ -17002,10 +17114,31 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(hx - 6.0, hy), str(st + 1), HORIZONTAL_ALIGNMENT_CENTER, cellw, 12, hc)
 		if st == tonight:
 			draw_rect(Rect2(hx - 13.0, hy + 6.0, cellw - 4.0, 2.0), Color(1.0, 0.86, 0.5, 0.7))
+	# EVERY ROW IS DIVIDED INTO ITS CATEGORY (2026-07-30, Louis: "make sure it's all divided
+	# into categories and make the player choose: eg headwear: either a hat or the drinking
+	# cap"). Only "head" has more than one member today, but this is written off
+	# wear_category so a future pair (say two rival eyewear pieces) groups itself the same
+	# way with no new drawing code. `y_cursor` replaces the flat `y0 + j2 * rowh2`: a group of
+	# more than one earns a small label and a little extra headroom to draw it in, everything
+	# else falls through unchanged.
+	var cat_count := {}
+	for p0 in WEAR_PIECES:
+		var c0 := wear_category(p0)
+		cat_count[c0] = int(cat_count.get(c0, 0)) + 1
+	var y_cursor := y0
+	var prev_cat := ""
 	for j2 in WEAR_PIECES.size():
 		var piece: String = WEAR_PIECES[j2]
 		var pdef := wear_piece_def(piece)
-		var ry2 := y0 + float(j2) * rowh2
+		var cat2 := wear_category(piece)
+		if cat2 != prev_cat:
+			if int(cat_count.get(cat2, 1)) > 1:
+				draw_fit_string(font, Vector2(cx2, y_cursor - 20.0), "%s  -  choose one" % wear_category_label(cat2),
+					HORIZONTAL_ALIGNMENT_LEFT, 300.0, 10, Color(0.85, 0.72, 0.45, 0.75))
+				y_cursor += 12.0
+			prev_cat = cat2
+		var ry2 := y_cursor
+		y_cursor += rowh2
 		var rowsel := tailor_sel == j2
 		if rowsel:
 			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, 160.0 + float(venue_index() + 1) * cellw + 16.0, 34.0),
@@ -17095,7 +17228,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		var pdf := wear_piece_def(pc)
 		var stg := clampi(tailor_stage, 0, venue_index())
 		var owned3 := owns_wear(pc, stg)
-		var fy2 := y0 + float(WEAR_PIECES.size()) * rowh2 + 8.0
+		var fy2 := y_cursor + 8.0   # the loop's own final cursor, so an extra group header pushes this down too
 		draw_string(font, Vector2(cx2, fy2), "%s  -  %s cut" % [String(pdf["name"]), suit_name(stg)],
 			HORIZONTAL_ALIGNMENT_LEFT, detw, 14, Color(1.0, 0.88, 0.55))
 		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, detw, 12,
@@ -17112,6 +17245,16 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		else:
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "owned  -  press to wear it",
 				HORIZONTAL_ALIGNMENT_LEFT, detw, 13, Color(0.80, 0.75, 0.68))
+		# SHARING A SLOT, SPELLED OUT (2026-07-30, Louis: "make the player choose"): only ever
+		# shown for a category with a rival in it, so the one pair that competes (hat, helmet)
+		# says so right where the player is about to press Enter on one of them.
+		if int(cat_count.get(wear_category(pc), 1)) > 1:
+			var rivals: Array = []
+			for pr in WEAR_PIECES:
+				if pr != pc and wear_category(pr) == wear_category(pc):
+					rivals.append(String(wear_piece_def(pr)["name"]))
+			draw_string(font, Vector2(cx2, fy2 + 60.0), "shares a slot with the %s  -  wearing one takes off the other" % ", ".join(rivals),
+				HORIZONTAL_ALIGNMENT_LEFT, detw, 12, Color(0.78, 0.72, 0.62))
 
 	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
 		[[["Up", "Down"], "garment"], [["Left", "Right"], "house"], [["Enter"], "wear it"],
@@ -18779,6 +18922,18 @@ const MENU_ORN_LIFT := 20.0  # how far the gold divider sits ABOVE the first men
 							 # hang 14px under the wordmark, which put it in the middle of the empty
 							 # band between the two - Louis wants it tight to the menu instead.
 
+func _swag_arc_pts(a: Vector2, ctrl: Vector2, b: Vector2, n: int) -> PackedVector2Array:
+	# a quadratic bezier, a to b, sampled at n+1 points - the smooth-hem primitive
+	# menu_swags builds every curved edge from, so the fill and the gold trace over it
+	# can never disagree about where the curve actually runs.
+	var pts := PackedVector2Array()
+	for i in range(n + 1):
+		var t := float(i) / float(n)
+		var u := 1.0 - t
+		pts.append(a * (u * u) + ctrl * (2.0 * u * t) + b * (t * t))
+	return pts
+
+
 func menu_swags(s: Vector2) -> void:
 	# THE SWAGS, top left and top right (2026-07-30, Louis: "remove the little decor window on the
 	# left and right along with that little light. You are supposed to add the curtains of the
@@ -18796,6 +18951,12 @@ func menu_swags(s: Vector2) -> void:
 	# corner, which at that width landed right over the T and the A and looked like two fishing
 	# rods propped against the letters. Alternating CLOSE tones per wedge is what makes cloth;
 	# a big tonal jump makes a hole.
+	# THE HEM IS A CURVE NOW, NOT A ZIGZAG (2026-07-30, Louis: "make them look more natural:
+	# smooth edges like a real curtain"). Each lobe used to belly to a single hard vertex - a
+	# straight line down to a point and straight back up, which is a triangle wave, i.e. a paper
+	# fan rather than gathered velvet. `_swag_arc_pts` sweeps a real quadratic arc through that
+	# same belly point instead, so a lobe's fill and its gold trace both follow one continuous
+	# curve rather than a fold with a crease sewn into it.
 	var drop := s.y * 0.30          # how far the outer edge of each swag hangs
 	var wide := s.x * 0.18          # ...and how far in from its own side it reaches
 	var lobes := 5
@@ -18823,36 +18984,62 @@ func menu_swags(s: Vector2) -> void:
 		for i in lobes + 1:
 			var f := float(i) / float(lobes)
 			hem.append(Vector2(lerpf(ox, ox + side * wide, f), lerpf(drop, val_h * 1.15, f * f)))
-		# one wedge per fold, all of them back to the pin, in alternating close tones
+		# one curved lobe per fold, all of them back to the pin, in alternating close tones
+		var edge := PackedVector2Array()
 		for i in lobes:
 			var a := hem[i]
 			var b := hem[i + 1]
-			var mid := (a + b) * 0.5 + Vector2(0.0, drop * 0.075)   # the belly of this lobe
-			draw_colored_polygon(PackedVector2Array([pin, a, mid, b]),
-				velvet if i % 2 == 0 else velvet_lo)
-		# the gold hem, drawn along the same bellies so it cannot come off the cloth
-		var edge := PackedVector2Array()
-		for i in lobes:
-			edge.append(hem[i])
-			edge.append((hem[i] + hem[i + 1]) * 0.5 + Vector2(0.0, drop * 0.075))
-		edge.append(hem[lobes])
-		# ...faint, because a bright zigzag along a scalloped hem stops reading as a fringe and
-		# starts reading as a lightning bolt. It is here to catch the hem, not to draw it.
+			var belly := (a + b) * 0.5 + Vector2(0.0, drop * 0.075)   # where the lobe hangs lowest
+			# the control point is solved so the arc PASSES THROUGH `belly` at its own
+			# midpoint, not merely toward it: a quadratic sits at t=0.5 exactly halfway
+			# between the midpoint of (a,b) and the control point, so the control has to
+			# overshoot the target by the same distance to land the curve on it.
+			var ctrl := belly * 2.0 - (a + b) * 0.5
+			var arc := _swag_arc_pts(a, ctrl, b, 8)
+			var wedge := PackedVector2Array([pin])
+			wedge.append_array(arc)
+			draw_colored_polygon(wedge, velvet if i % 2 == 0 else velvet_lo)
+			if i > 0:
+				arc.remove_at(0)   # shared with the previous lobe's own last point
+			edge.append_array(arc)
+		# the gold hem, one continuous sweep along the same arcs so it can never come off
+		# the cloth. Faint, because a bright line along a scalloped hem reads as a fringe
+		# only at low alpha - any brighter and it reads as a lightning bolt.
 		draw_polyline(edge, Color(gold.r, gold.g, gold.b, 0.26), 1.6)
-		# ...and the ONE piece of jewellery, at the PIN rather than at the inner corner: a boss
-		# where the cloth is gathered, and a short tassel under it. At the corner it overhung the
-		# lettering; at the pin it is what a real swag actually has, and it is out of the way.
-		draw_circle(pin, 7.0, Color(gold.r * 0.9, gold.g * 0.9, gold.b * 0.9))
-		draw_circle(pin + Vector2(-2.0, -2.0), 2.6, Color(1.0, 0.94, 0.72, 0.65))
-		draw_line(pin, pin + Vector2(0.0, drop * 0.10), Color(gold.r, gold.g, gold.b, 0.85), 2.0)
-		var tas := pin + Vector2(0.0, drop * 0.10)
+		# THE TIEBACK IS A BOWTIE NOW, NEAR THE PIN (2026-07-30, Louis: "a small golden
+		# bowtie holding them to the side"). A real curtain tieback gathers the cloth with
+		# a bow, not a doorknob with a fringe hanging off it - two ribbon loops pinched at
+		# a knot, with two short tails dropping below.
+		# OFFSET FROM THE PIN, NOT ON IT: the pin sits almost exactly on the screen's own
+		# corner, which is the single darkest patch on the whole title screen once
+		# draw_vignette lands on it (measured: a bow drawn AT the pin rendered as a
+		# barely-there smudge). `orn` pulls it down into the body of the swag instead,
+		# along the same inward direction the fan already opens on, where it has more
+		# room to read against mid-tone velvet - and its own gold is a shade brighter
+		# than the hem trace's, which is deliberately faint (see above), because a small
+		# accent this close to the corner still has to punch through what vignette
+		# remains at its new spot.
+		var orn := pin + Vector2(side * 12.0, 15.0)
+		var bgold := Color(1.0, 0.85, 0.46)
+		var bdk := Color(0.78, 0.60, 0.27)
+		draw_circle(orn, 8.0, Color(0.0, 0.0, 0.0, 0.22))   # a soft dark backing, so the
+			# bow separates from the cloth behind it rather than just sitting on it
+		for wing: float in [-1.0, 1.0]:
+			var tip := orn + Vector2(wing * 12.0, -1.0)
+			draw_colored_polygon(PackedVector2Array([
+				orn + Vector2(wing * 1.6, -3.8), tip + Vector2(0.0, -4.3),
+				tip + Vector2(0.0, 4.3), orn + Vector2(wing * 1.6, 3.8)]),
+				bgold if wing < 0.0 else bdk)
+		for tail: float in [-1.0, 1.0]:
+			var bx: float = orn.x + tail * 2.6
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(bx - 1.9, orn.y + 3.0), Vector2(bx + 1.9, orn.y + 3.0),
+				Vector2(bx + 0.8, orn.y + 12.0), Vector2(bx - 0.8, orn.y + 12.0)]),
+				bdk if tail < 0.0 else bgold)
 		draw_colored_polygon(PackedVector2Array([
-			tas + Vector2(-5.0, 0.0), tas + Vector2(5.0, 0.0),
-			tas + Vector2(3.0, drop * 0.06), tas + Vector2(-3.0, drop * 0.06)]), gold)
-		for f2 in 4:
-			var fx := tas.x - 3.0 + float(f2) * 2.0
-			draw_line(Vector2(fx, tas.y + drop * 0.055), Vector2(fx, tas.y + drop * 0.09),
-				Color(gold.r * 0.8, gold.g * 0.8, gold.b * 0.8, 0.85), 1.2)
+			orn + Vector2(-3.8, -3.8), orn + Vector2(3.8, -3.8),
+			orn + Vector2(3.8, 3.8), orn + Vector2(-3.8, 3.8)]), bgold)
+		draw_circle(orn + Vector2(-1.1, -1.1), 1.8, Color(1.0, 0.96, 0.80, 0.85))
 
 
 func menu_backdrop(s: Vector2) -> void:
@@ -19002,13 +19189,17 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# ...and the title's mark is width-clamped, for the same reason the capsules are: MENU_MARK is a
 	# pixel height chosen against a 1280-wide window, and the game does not promise to be 1280 wide.
 	var msz := int(round(mark_fit_size(s, float(MENU_MARK))))
-	var mark_top := maxf((oy - mark_height(float(msz))) * 0.5, 6.0)
+	# THE MARK SITS ON THE DIVIDER NOW, NOT CENTRED ABOVE IT (2026-07-30, Louis: "Tossa should be
+	# moved down, until it sits right above the thin yellow line - don't move the yellow line
+	# tho"). Centring the mark in the empty space above `oy` left a growing gap under it as the
+	# mark shrank to fit a narrow window, which is the opposite of the ask: the DIVIDER is the
+	# fixed point (still MENU_ORN_LIFT above the first card, untouched), and the mark is placed
+	# a small gap above THAT instead.
+	var divider_y := oy - MENU_ORN_LIFT
+	var mark_top := maxf(divider_y - 16.0 - mark_height(float(msz)), 6.0)
 	var mark_bot := mark_top + mark_height(float(msz))
 	draw_wordmark(mark_top, msz, Color(1.0, 0.88, 0.5), s)
-	# the divider belongs to the MENU, not to the word: it sits MENU_ORN_LIFT above the first card
-	# rather than hanging off the mark's bottom, which is what "not much room between the yellow
-	# thin line and the play button" asks for.
-	draw_ornament(cx, oy - MENU_ORN_LIFT, 300.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_ornament(cx, divider_y, 300.0, Color(0.82, 0.62, 0.34, 0.85))
 	menu_rows(font, s, oy)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
 	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
