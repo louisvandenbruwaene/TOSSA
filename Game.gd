@@ -5736,7 +5736,7 @@ func draw_tut_tally(font: Font, s: Vector2, step: Dictionary) -> void:
 	var bw := TUT_SIDE_W
 	var bx := s.x * TUT_SIDE_X
 	var by := s.y * TUT_SIDE_Y
-	soft_card(Rect2(bx, by, bw, 74.0), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.45), 1.4, 12.0, 14.0, 0.05)
+	soft_card(Rect2(bx, by, bw, 74.0), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.45), 1.4, 12.0, 14.0)
 	var rows := [["throws", mini(tut_throws, need_t), need_t], ["catches", mini(tut_count, need_c), need_c]]
 	for i in rows.size():
 		var r: Array = rows[i]
@@ -5805,7 +5805,7 @@ func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
 	var subl: Array = _wrap_lines(font, sub, inner, 13) if sub != "" else []
 	var bh := 46.0 + 24.0 * float(maxi(lines.size(), 1)) + (8.0 + 18.0 * float(subl.size()) if subl.size() > 0 else 0.0)
 	bh = minf(bh, s.y * TUT_SPEECH_BOT - by)
-	soft_card(Rect2(bx, by, bw, bh), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.55), 1.6, 14.0, 18.0, 0.06)
+	soft_card(Rect2(bx, by, bw, bh), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.55), 1.6, 14.0, 18.0)
 	# the tail, so the box reads as something being SAID rather than a heading
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(bx + 74.0, by + bh - 1.0), Vector2(bx + 104.0, by + bh - 1.0),
@@ -5862,7 +5862,7 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 	var bw := TUT_SIDE_W
 	var bx := s.x * TUT_SIDE_X
 	var by := s.y * TUT_SIDE_Y
-	soft_card(Rect2(bx, by, bw, 150.0), Color(0.10, 0.07, 0.09, 0.96), Color(1.0, 0.86, 0.55, 0.5), 1.6, 12.0, 16.0, 0.05)
+	soft_card(Rect2(bx, by, bw, 150.0), Color(0.10, 0.07, 0.09, 0.96), Color(1.0, 0.86, 0.55, 0.5), 1.6, 12.0, 16.0)
 	draw_string(font, Vector2(bx, by + 28.0), "which hand is your strong one?", HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.92, 0.88, 0.78))
 	# SIDE BY SIDE (2026-07-29, Louis: "left and right on the left and on the right side
 	# of each other instead of on top of each other") - the layout is now the answer, not
@@ -5927,7 +5927,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := 20.0
 	var bh := 74.0
-	soft_card(Rect2(bx, by, bw, bh), Color(0.07, 0.05, 0.07, 0.90), Color(kind_col.r, kind_col.g, kind_col.b, 0.42), 1.5, 12.0, 16.0, 0.05)
+	soft_card(Rect2(bx, by, bw, bh), Color(0.07, 0.05, 0.07, 0.90), Color(kind_col.r, kind_col.g, kind_col.b, 0.42), 1.5, 12.0, 16.0)
 	draw_rect(Rect2(bx + 1.0, by + 12.0, 3.0, bh - 24.0), Color(kind_col.r, kind_col.g, kind_col.b, 0.85))
 	draw_string(font, Vector2(bx + 18.0, by + 22.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, 10, Color(kind_col.r, kind_col.g, kind_col.b, 0.95))
 	draw_fit_string(title_font(), Vector2(bx + 18.0, by + 46.0), String(step["text"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, 19, Color(1.0, 0.92, 0.68))
@@ -5986,7 +5986,7 @@ func draw_tut_intro_card(font: Font, s: Vector2, step: Dictionary, accent: Color
 	var chh := minf(300.0, s.y * 0.42)
 	var cx := s.x * 0.5 - cw * 0.5
 	var cy := s.y * 0.30
-	soft_card(Rect2(cx, cy, cw, chh), Color(0.07, 0.05, 0.08, 0.95), Color(accent.r, accent.g, accent.b, 0.5), 2.0, 14.0, 22.0, 0.05)
+	soft_card(Rect2(cx, cy, cw, chh), Color(0.07, 0.05, 0.08, 0.95), Color(accent.r, accent.g, accent.b, 0.5), 2.0, 14.0, 22.0)
 	# the key, given the size of the thing it opens up
 	var cap := String(step.get("cap", ""))
 	var kx := cx + 30.0
@@ -6108,7 +6108,7 @@ func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
 	var bh := 104.0
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := s.y - 162.0
-	soft_card(Rect2(bx, by, bw, bh), Color(0.09, 0.05, 0.10, 0.94), Color(0.72, 0.88, 1.0, 0.40 + 0.35 * pulse), 2.0, 11.0, 14.0, 0.05)
+	soft_card(Rect2(bx, by, bw, bh), Color(0.09, 0.05, 0.10, 0.94), Color(0.72, 0.88, 1.0, 0.40 + 0.35 * pulse), 2.0, 11.0, 14.0)
 	draw_fit_string(font, Vector2(bx + 12.0, by + 24.0), head, HORIZONTAL_ALIGNMENT_CENTER, bw - 24.0, 12, Color(0.72, 0.88, 1.0, 0.9))
 	var x := bx + (bw - total) * 0.5
 	for i in tut_hold.size():
@@ -13974,7 +13974,6 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 #region HUD HELPERS & KEY-HINT LABELS
 # the two shared StyleBoxFlats soft_card re-dresses (see the note inside it)
 var _sb_card := _new_card_sb()
-var _sb_sheen := _new_card_sb()
 
 func _new_card_sb() -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
@@ -13982,12 +13981,19 @@ func _new_card_sb() -> StyleBoxFlat:
 	return sb
 
 
-func soft_card(r: Rect2, fill: Color, border: Color, border_w: float = 1.0, radius: float = 9.0, shadow: float = 12.0, top_sheen := 0.0) -> void:
+func soft_card(r: Rect2, fill: Color, border: Color, border_w: float = 1.0, radius: float = 9.0, shadow: float = 12.0) -> void:
 	# THE shared card look (2026-07-26 UI pass): a rounded, softly shadowed, anti-aliased
 	# panel drawn via StyleBoxFlat in one call. Rounded corners + a real drop shadow are
 	# what lift the whole UI off the flat-coloured-rectangle look that read as cheap.
-	# `top_sheen` overlays a faint lighter band across the top third for a subtle glassy
-	# gradient - StyleBoxFlat has no gradient fill, so this fakes one cheaply.
+	#
+	# ONE COLOUR PER CARD (2026-07-30, Louis: "each selected window has a certain horizontal
+	# line of color change, i don't like that; just choose one color, not two"). There used to
+	# be a `top_sheen` overlay - a lighter StyleBoxFlat across the top 42%, faking the gradient
+	# StyleBoxFlat cannot fill. The trouble is that a box has an EDGE: the "gradient" was two
+	# flat tones meeting at a hard horizontal line 42% down the card, which on a lit menu row
+	# reads as a seam across it rather than as glass. A fake gradient made of two rectangles is
+	# not a gradient, it is a stripe - the same lesson `draw_spotlight_cone` learned when its
+	# flat wedge became per-vertex alpha, except here the honest answer is simply one tone.
 	# PERFORMANCE (2026-07-27): the two StyleBoxFlats are made ONCE and re-dressed per
 	# call, never allocated per card per frame. draw_style_box bakes its geometry at the
 	# call, so a shared, mutated instance draws exactly what a fresh one would - and a
@@ -14003,14 +14009,6 @@ func soft_card(r: Rect2, fill: Color, border: Color, border_w: float = 1.0, radi
 		sb.shadow_color = Color(0.0, 0.0, 0.0, 0.38)
 		sb.shadow_offset = Vector2(0.0, 3.0)
 	draw_style_box(sb, r)
-	if top_sheen > 0.0:
-		var sheen := _sb_sheen
-		sheen.bg_color = Color(1.0, 0.95, 0.85, top_sheen)
-		sheen.set_corner_radius_all(int(radius))
-		# only the top corners carry the sheen's rounding; the bottom is a soft straight cut
-		sheen.corner_radius_bottom_left = 0
-		sheen.corner_radius_bottom_right = 0
-		draw_style_box(sheen, Rect2(r.position.x, r.position.y, r.size.x, r.size.y * 0.42))
 
 
 func hud_panel(r: Rect2, glow: bool = false) -> void:
@@ -14020,19 +14018,25 @@ func hud_panel(r: Rect2, glow: bool = false) -> void:
 	# other (static, always-on) card leaves it off and looks exactly as before.
 	if glow:
 		var pulse := 0.5 + 0.5 * sin(float(cine_tick) * 0.08)
-		soft_card(r, Color(0.06, 0.035, 0.05, 0.62), Color(0.98, 0.74, 0.44, lerpf(0.34, 0.62, pulse)), 1.6, 9.0, 10.0, 0.05)
+		soft_card(r, Color(0.06, 0.035, 0.05, 0.62), Color(0.98, 0.74, 0.44, lerpf(0.34, 0.62, pulse)), 1.6, 9.0, 10.0)
 	else:
 		soft_card(r, Color(0.05, 0.03, 0.045, 0.58), Color(0.9, 0.6, 0.35, 0.26), 1.0, 9.0, 9.0)
 
 
 func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 	# the rail cards (Phase 2 HUD): a touch more opaque than hud_panel so text stays
-	# readable over a busy stage, with a thin top accent line for a little Balatro-ish
-	# chunk. All live HUD lives in the LEFT and RIGHT rails now, never over the centre
-	# where the props fly.
-	soft_card(r, Color(0.075, 0.045, 0.06, 0.88), Color(accent.r, accent.g, accent.b, 0.5), 1.0, 9.0, 12.0, 0.05)
-	# a short accent bar just inside the top, kept clear of the rounded corners
-	draw_rect(Rect2(r.position.x + 10.0, r.position.y + 4.0, r.size.x - 20.0, 2.0), Color(accent.r, accent.g, accent.b, 0.65))
+	# readable over a busy stage. All live HUD lives in the LEFT and RIGHT rails now, never
+	# over the centre where the props fly.
+	#
+	# THE ACCENT BAR IS GONE (2026-07-30, Louis: "remove the weird colored horizontal line on
+	# the top of the item cards ... if there is another location with that weird horizontal bar
+	# near the top of the card, get rid of it"). It was a 2px rect of the card's accent colour
+	# just inside the top edge, meant as Balatro-ish chunk. It reads as a coloured RULE laid
+	# across the card - a line the eye has to account for and which means nothing - and because
+	# hud_card is shared it was doing that on the shop's seven prop cards, the gear cards, the
+	# sheet's cards AND every rail card at once. The accent still identifies the card: it is the
+	# BORDER colour, which is the whole outline rather than one arbitrary edge.
+	soft_card(r, Color(0.075, 0.045, 0.06, 0.88), Color(accent.r, accent.g, accent.b, 0.5), 1.0, 9.0, 12.0)
 
 
 func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
@@ -15039,7 +15043,7 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 		var cy := oy + float(i) * (ch + gap)
 		var ac: Color = o["col"]
 		var fillc := Color(ac.r * 0.18, ac.g * 0.18, ac.b * 0.18, 0.95) if sel else Color(0.11, 0.08, 0.09, 0.85)
-		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.3), 2.0 if sel else 1.0, 11.0, 10.0, 0.06 if sel else 0.0)
+		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.3), 2.0 if sel else 1.0, 11.0, 10.0)
 		# an icon disc on the left says what the option DOES at a glance
 		var ic := Vector2(cx + 34.0, cy + ch * 0.5)
 		draw_circle(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22))
@@ -16519,7 +16523,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		var frac := clampf(float(val) / float(maxi(1, cap)), 0.0, 1.0)
 		# the column card: tinted and brighter-bordered when it is the active branch
 		var cardfill := Color(bcol.r * 0.14, bcol.g * 0.14, bcol.b * 0.16, 0.92) if active else Color(0.11, 0.09, 0.12, 0.85)
-		soft_card(Rect2(cx, coly, colw, colh), cardfill, Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.28), 2.0 if active else 1.0, 13.0, 14.0, 0.06 if active else 0.0)
+		soft_card(Rect2(cx, coly, colw, colh), cardfill, Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.28), 2.0 if active else 1.0, 13.0, 14.0)
 		# name, role, current value
 		draw_string(title_font(), Vector2(cx, coly + 32.0), String(b["name"]), HORIZONTAL_ALIGNMENT_CENTER, colw, 17, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.82))
 		draw_string(font, Vector2(cx, coly + 50.0), String(b["role"]), HORIZONTAL_ALIGNMENT_CENTER, colw, 11, Color(0.72, 0.68, 0.62))
@@ -17153,7 +17157,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		var rowsel := tailor_sel == j2
 		if rowsel:
 			soft_card(Rect2(cx2 - 12.0, ry2 - 22.0, 160.0 + float(venue_index() + 1) * cellw + 16.0, 34.0),
-				Color(1.0, 0.85, 0.45, 0.07), Color(1.0, 0.88, 0.5, 0.40), 1.2, 8.0, 8.0, 0.04)
+				Color(1.0, 0.85, 0.45, 0.07), Color(1.0, 0.88, 0.5, 0.40), 1.2, 8.0, 8.0)
 		var wst := worn_stage(piece)
 		var nc3 := Color(1.0, 0.9, 0.6) if rowsel else (Color(0.88, 0.82, 0.70) if wst >= 0 else Color(0.62, 0.57, 0.52))
 		# EVERY ROW CARRIES ITS OWN OBJECT (2026-07-29, Louis: "it's not obvious what the
@@ -17350,6 +17354,56 @@ func draw_shop_grid(font: Font, tx: float, py: float, innerw: float, strip_y: fl
 		draw_shop_prop_card(font, i, ci, Rect2(cx0, cy0, cw, ch), ci == shop_sel)
 
 
+func shop_stat_rows(i: int, cost: int, afford: bool) -> Array:
+	# THE FACTS ON A PROP CARD, IN ONE PLACE (2026-07-30, Louis: "I want The cost for 1,
+	# owned: x, and strength >= (nr of objects * object index), where you make it a bit
+	# shorter and fill in the right numbers; so that means i want a clean list of stats for
+	# each item in the store").
+	#
+	# WHAT WENT: four prose lines and a meter - "Str 1 each", "max 15", "score ^3.0 at 3", a
+	# set bar and "a set of 3, fielded". Every one made the reader parse a sentence or do
+	# arithmetic to reach a number, on a card a fifth of the panel wide. THE STRENGTH LINE IS
+	# THE CLEAREST CASE: it printed the per-object unit and left the player to multiply it by
+	# tonight's count, which is exactly the sum Louis is asking the card to do for him.
+	# `prop_req` already does that multiplication AND is the same function the throw gate
+	# checks, so a card cannot advertise a requirement the game does not enforce.
+	#
+	# THIS IS A FUNCTION BECAUSE THERE ARE TWO CARDS. `draw_shop_prop_card` (the grid, which
+	# is what ships) and `draw_shop_row` (the single-row fallback that returns the day gear
+	# comes back) each had their own copy of these lines, worded differently and laid out
+	# differently - and the first attempt at this change edited the FALLBACK, rendered the
+	# shop, and saw nothing move. Two copies of one card is how a shop ends up telling a
+	# player two different things about the same prop depending on a flag.
+	var need := num_balls
+	var req := prop_req(i, need)
+	var short := Color(0.95, 0.6, 0.45)
+	return [
+		["Cost ea.", commafy(cost), Color(1.0, 0.86, 0.5) if afford else short],
+		["Owned", "%d" % prop_count[i], Color(0.75, 0.9, 0.72) if prop_count[i] >= need else Color(0.95, 0.68, 0.35)],
+		["Str for %d" % need, "%d" % req, Color(0.78, 0.72, 0.64) if eff_strength() >= req else short],
+		["Score", "^%.1f" % (float(need) * prop_sig(i)), Color(1.0, 0.82, 0.45)],
+	]
+
+
+func draw_stat_rows(font: Font, x: float, w: float, y0: float, step: float, rows: Array, size: int) -> void:
+	# a stat list drawn as a TABLE - every label on one left edge, every value on one right
+	# edge - because a list of numbers is only readable if the numbers line up; that alignment
+	# is what makes it a list rather than four more sentences.
+	# The LABEL may shorten (it is a phrase, and its meaning survives an ellipsis); the VALUE
+	# never does, because an ellipsised number is not a number - it shrinks through fit_size
+	# instead, which is this file's own rule for anything the player reads as an amount.
+	for ri in rows.size():
+		var row: Array = rows[ri]
+		var lab := String(row[0])
+		var val := String(row[1])
+		var vs := fit_size(font, val, w * 0.55, size, 9)
+		var vw: float = font.get_string_size(val, HORIZONTAL_ALIGNMENT_LEFT, -1, vs).x
+		var ry := y0 + float(ri) * step
+		draw_fit_string(font, Vector2(x, ry), lab, HORIZONTAL_ALIGNMENT_LEFT,
+			maxf(20.0, w - vw - 8.0), size, Color(0.68, 0.62, 0.56))
+		draw_string(font, Vector2(x, ry), val, HORIZONTAL_ALIGNMENT_RIGHT, w, vs, row[2])
+
+
 func draw_shop_prop_card(font: Font, i: int, ci: int, r: Rect2, sel: bool) -> void:
 	# one prop's card at grid size. Same facts, same order of reading (what you own, the object,
 	# what it asks of your arms, what it pays, whether tonight's set is fielded, what it costs).
@@ -17360,7 +17414,7 @@ func draw_shop_prop_card(font: Font, i: int, ci: int, r: Rect2, sel: bool) -> vo
 	var own := prop_count[i]
 	if sel:
 		soft_card(r, Color(pcol.r * 0.17, pcol.g * 0.17, pcol.b * 0.17, 0.96),
-			Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
+			Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0)
 	else:
 		hud_card(r, Color(pcol.r, pcol.g, pcol.b, 0.45))
 	# THE NICHE: the goods in a recessed, lit window, which is the same plate the skill cards
@@ -17387,46 +17441,13 @@ func draw_shop_prop_card(font: Font, i: int, ci: int, r: Rect2, sel: bool) -> vo
 	# a lit thing in a glass case ought to spill), but they are placed relative to the PROP, so
 	# with "own 15" sitting above the niche they were printing themselves through the digits. The
 	# air above the niche is now deliberately empty and belongs to whatever a prop throws off.
-	var oc := Color(0.75, 0.9, 0.72) if own > 0 else Color(0.6, 0.55, 0.5, 0.8)
-	draw_string(font, Vector2(lx, r.position.y + 26.0), "own %d" % own,
-		HORIZONTAL_ALIGNMENT_LEFT, lw * 0.6, 12, oc)
 	if available(i):
 		draw_string(font, Vector2(lx, r.position.y + 26.0), "ready",
 			HORIZONTAL_ALIGNMENT_RIGHT, lw, 12, Color(0.6, 0.9, 0.62))
 	var nm := String(PROPS[i]["name"])
 	draw_string(font, Vector2(lx, r.position.y + 60.0), nm, HORIZONTAL_ALIGNMENT_CENTER, lw,
 		fit_size(font, nm, lw - 4.0, 20, 12), Color(1.0, 0.88, 0.6))
-	var can := max_count(i)
-	var reqcol := Color(0.75, 0.68, 0.6)
-	var l1 := "Str %d each" % prop_str_unit(i)
-	var l2 := "max %d" % can
-	if i == PROP_EGGS:
-		l2 = "fragile"
-	if can < MIN_BALLS:
-		# not strong enough for a routine: say so in red, before any money changes hands
-		reqcol = Color(0.95, 0.6, 0.45)
-		l1 = "needs Str %d" % prop_req(i, MIN_BALLS)
-		l2 = "for three"
-	draw_fit_string(font, Vector2(lx, r.position.y + 86.0), l1, HORIZONTAL_ALIGNMENT_CENTER, lw, 12, reqcol)
-	draw_fit_string(font, Vector2(lx, r.position.y + 103.0), l2, HORIZONTAL_ALIGNMENT_CENTER, lw, 12, reqcol)
-	# the REWARD, quantified: this prop's signature is an EXPONENT, so the honest thing to print
-	# is what it does to the exponent at the count in hand, not a multiplier
-	var sig := "score ^%.1f at %d" % [float(num_balls) * prop_sig(i), num_balls]
-	draw_fit_string(font, Vector2(lx, r.position.y + 128.0), sig, HORIZONTAL_ALIGNMENT_CENTER, lw,
-		fit_size(font, sig, lw - 2.0, 12, 10), Color(1.0, 0.82, 0.45))
-	# THE SET, against YOUR count rather than the raw number owned: you need one prop per object
-	# you juggle, so what matters at the counter is whether tonight's routine is fielded.
-	var need := num_balls
-	var setf := clampf(float(own) / float(maxi(need, 1)), 0.0, 1.0)
-	var setc := Color(0.55, 0.85, 0.55) if own >= need else Color(0.95, 0.68, 0.35)
-	draw_meter(lx, r.position.y + 140.0, lw, 7.0, setf, setc)
-	# ...and it keeps the row's own wording. "3 short of 3" saved eight characters and cost the
-	# sentence: the second number is the SET, so dropping the words between them leaves a line
-	# that reads as three short of three. It SHRINKS to fit instead, the rule for any phrase
-	# whose last word carries the sense.
-	var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
-	draw_fit_string(font, Vector2(lx, r.position.y + 168.0), setline, HORIZONTAL_ALIGNMENT_CENTER, lw,
-		fit_size(font, setline, lw - 2.0, 11, 8), setc)
+	draw_stat_rows(font, lx, lw, r.position.y + 92.0, 20.0, shop_stat_rows(i, cost, afford), 12)
 	draw_price_plate(font, Rect2(r.position.x + 10.0, r.position.y + r.size.y - 44.0, cw - 20.0, 38.0),
 		shop_key_label(ci), commafy(cost), afford)
 
@@ -17459,12 +17480,9 @@ func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
 		var afford := money >= cost
 		if sel:
 			soft_card(Rect2(cx0, cy0, cw, ch), Color(pcol.r * 0.17, pcol.g * 0.17, pcol.b * 0.17, 0.96),
-				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
+				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0)
 		else:
 			hud_card(Rect2(cx0, cy0, cw, ch), Color(pcol.r, pcol.g, pcol.b, 0.45))
-		var own := prop_count[i]
-		var oc := Color(0.75, 0.9, 0.72) if own > 0 else Color(0.6, 0.55, 0.5, 0.8)
-		draw_string(font, Vector2(cx0 + 12.0, cy0 + 24.0), "own %d" % own, HORIZONTAL_ALIGNMENT_LEFT, cw - 70.0, 13, oc)
 		if available(i):
 			draw_string(font, Vector2(cx0, cy0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
 		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, cy0 + 82.0), 1.0, sel)
@@ -17473,39 +17491,10 @@ func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
 		draw_line(Vector2(cx0 + 16.0, cy0 + 130.0), Vector2(cx0 + cw - 16.0, cy0 + 130.0),
 			Color(pcol.r, pcol.g, pcol.b, 0.22), 1.0)
 		draw_fit_string(font, Vector2(cx0, cy0 + 156.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
-		# WHAT YOUR ARMS SAY, at the point of choice. A prop costs PROP_STR_UNIT per OBJECT
-		# now, so the useful number on a shop card is not "Str 48 to hold one torch" but how
-		# many of them you could actually field, and what the next one would cost. A card
-		# whose answer is "none" says so in red before any money changes hands.
-		# KEPT SHORT ON PURPOSE. The first wording was "Str 1 each - you can throw 15", which
-		# needs more width than a seventh of the panel has, so fit_text ellipsised it to "you
-		# can thro..." - and an ellipsised line whose last word is the NUMBER has thrown away
-		# the only part worth reading (CLAUDE.md's own rule about numbers, met from the other
-		# direction: the fix is fewer words, not a smaller font).
-		var can := max_count(i)
-		var reqline := "Str %d each  ·  max %d" % [prop_str_unit(i), can]
-		if i == PROP_EGGS:
-			reqline = "Str %d each  ·  fragile" % prop_str_unit(i)
-		var reqcol := Color(0.75, 0.68, 0.6)
-		if can < MIN_BALLS:
-			reqcol = Color(0.95, 0.6, 0.45)   # not strong enough for a routine: flag it
-			reqline = "needs Str %d for three" % prop_req(i, MIN_BALLS)
-		# draw_fit_string, NOT draw_string with a width: `width` CLIPS mid-glyph, which is how
-		# this line came out reading "you can throw 1" for a player who can throw 15.
-		draw_fit_string(font, Vector2(cx0, cy0 + 178.0), reqline, HORIZONTAL_ALIGNMENT_CENTER, cw - 10.0, 11, reqcol)
-		# the REWARD, quantified: this prop's signature is an EXPONENT, so the honest thing
-		# to print is what it does to the exponent at the count in hand, not a multiplier
-		draw_string(font, Vector2(cx0, cy0 + 198.0), "score ^%.1f at %d" % [float(num_balls) * prop_sig(i), num_balls], HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.45))
-		# THE SET: you need one prop per object you juggle, so what actually matters at
-		# the counter is stock against YOUR count - not the raw number owned. A short
-		# meter and one line say whether tonight's routine is fielded, and the top-up key
-		# below buys the whole shortfall in one press.
-		var need := num_balls
-		var setf := clampf(float(own) / float(maxi(need, 1)), 0.0, 1.0)
-		var setc := Color(0.55, 0.85, 0.55) if own >= need else Color(0.95, 0.68, 0.35)
-		draw_meter(cx0 + 14.0, cy0 + 208.0, cw - 28.0, 7.0, setf, setc)
-		var setline := "a set of %d, fielded" % need if own >= need else "%d short of a set of %d" % [need - own, need]
-		draw_fit_string(font, Vector2(cx0, cy0 + 232.0), setline, HORIZONTAL_ALIGNMENT_CENTER, cw, 11, setc)
+		# the SAME table the grid card draws, off the same `shop_stat_rows` - see there for why
+		# that is a function and not two copies of four lines
+		draw_stat_rows(font, cx0 + 14.0, cw - 28.0, cy0 + 176.0, 18.0,
+			shop_stat_rows(i, cost, afford), 12)
 		# THE GLOWING SET IS NOT ON THE CARD. It was, for exactly one render, and it landed
 		# straight through the price plate: the card is full from its icon to its foot and
 		# there is no row left in it. It lives in the detail strip instead, which is where a
@@ -17556,7 +17545,7 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 		var gcount := int(e.get("count", 0))
 		if gsel:
 			soft_card(Rect2(cx0, gy0, gw, gh), Color(cc.r * 0.17, cc.g * 0.17, cc.b * 0.17, 0.96),
-				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0, 0.07)
+				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0)
 		else:
 			hud_card(Rect2(cx0, gy0, gw, gh), Color(cc.r, cc.g, cc.b, 0.4))
 		var plate_top := gy0 + gh - 46.0
@@ -17646,7 +17635,7 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 		# the same raised, rounded card the shop and the day hub use for a cursor -
 		# a flat outlined rectangle was the last bare draw_rect on this screen
 		soft_card(Rect2(x - 12.0, y - 23.0, w, 38.0), Color(1.0, 0.85, 0.45, 0.09),
-			Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0, 0.05)
+			Color(1.0, 0.88, 0.5, 0.55), 1.5, 8.0, 10.0)
 	var nc := Color(1.0, 0.9, 0.6) if sel else (Color(0.86, 0.8, 0.68) if unlocked else Color(0.55, 0.5, 0.46))
 	if not unlocked:
 		# a little face-down card and a row of dots where the name was. The card mark is
@@ -18391,7 +18380,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var e: Dictionary = ledger[i]
 		var r := Rect2(lx, ly + float(i) * 80.0, lw, 72.0)
 		var ec: Color = e["col"]
-		soft_card(r, Color(0.07, 0.045, 0.06, 0.86), Color(ec.r, ec.g, ec.b, 0.30), 1.0, 11.0, 12.0, 0.04)
+		soft_card(r, Color(0.07, 0.045, 0.06, 0.86), Color(ec.r, ec.g, ec.b, 0.30), 1.0, 11.0, 12.0)
 		draw_rect(Rect2(r.position.x + 1.0, r.position.y + 12.0, 3.0, r.size.y - 24.0), Color(ec.r, ec.g, ec.b, 0.8))
 		var eic := Vector2(r.position.x + 30.0, r.position.y + 34.0)
 		draw_circle(eic, 14.0, Color(ec.r, ec.g, ec.b, 0.18))
@@ -18400,7 +18389,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 		draw_fit_string(font, Vector2(r.position.x + 54.0, r.position.y + 45.0), String(e["big"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 130.0, 18, ec)
 		draw_fit_string(font, Vector2(r.position.x + 54.0, r.position.y + 62.0), String(e["note"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 11, Color(0.74, 0.70, 0.64, 0.9))
 	var sr := Rect2(lx, ly + 160.0, lw, 72.0)
-	soft_card(sr, Color(0.07, 0.045, 0.06, 0.86), Color(scol.r, scol.g, scol.b, 0.30), 1.0, 11.0, 12.0, 0.04)
+	soft_card(sr, Color(0.07, 0.045, 0.06, 0.86), Color(scol.r, scol.g, scol.b, 0.30), 1.0, 11.0, 12.0)
 	draw_rect(Rect2(sr.position.x + 1.0, sr.position.y + 12.0, 3.0, sr.size.y - 24.0), Color(scol.r, scol.g, scol.b, 0.8))
 	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 24.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, 120.0, 11, Color(0.80, 0.84, 0.80, 0.9))
 	draw_string(font, Vector2(sr.position.x + lw - 108.0, sr.position.y + 24.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 11, Color(0.80, 0.84, 0.80, 0.9))
@@ -18420,7 +18409,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var pr := Rect2(lx, ly + 240.0, lw, 60.0)
 		var pulse := 0.5 + 0.5 * sin(atick() * 0.055)
 		var pc := Color(1.0, 0.86, 0.42)
-		soft_card(pr, Color(0.13, 0.10, 0.04, 0.92), Color(pc.r, pc.g, pc.b, 0.35 + 0.5 * pulse), 1.5, 11.0, 12.0, 0.05)
+		soft_card(pr, Color(0.13, 0.10, 0.04, 0.92), Color(pc.r, pc.g, pc.b, 0.35 + 0.5 * pulse), 1.5, 11.0, 12.0)
 		draw_rect(Rect2(pr.position.x + 1.0, pr.position.y + 10.0, 3.0, pr.size.y - 20.0), Color(pc.r, pc.g, pc.b, 0.7 + 0.3 * pulse))
 		var pic := Vector2(pr.position.x + 30.0, pr.position.y + 30.0)
 		draw_circle(pic, 15.0, Color(pc.r, pc.g, pc.b, 0.14 + 0.14 * pulse))
@@ -18519,7 +18508,7 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 	if not ok:
 		ac = ac.lerp(Color(0.45, 0.42, 0.40), 0.65)
 	var fill := Color(ac.r * 0.16, ac.g * 0.16, ac.b * 0.16, 0.94) if sel else Color(0.07, 0.045, 0.06, 0.82)
-	soft_card(box, fill, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.26), 2.0 if sel else 1.0, 11.0, 12.0, 0.06 if sel else 0.0)
+	soft_card(box, fill, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.26), 2.0 if sel else 1.0, 11.0, 12.0)
 	var ic := Vector2(box.position.x + 32.0, box.position.y + 23.0)
 	draw_circle(ic, 15.0, Color(ac.r, ac.g, ac.b, 0.20))
 	draw_arc(ic, 15.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.45), 1.5, true)
@@ -19233,8 +19222,16 @@ func drape_cord(ex: float, ty: float, band: float, side: float) -> void:
 		var wrap := clampf((u - 0.93) / 0.135, 0.0, 1.0)   # 0 across the front, 1 round the back
 		var x := ex + side * band * u
 		# the sag across the front, plus the dive as it turns round the edge
-		var y := ty + 3.4 * sin(PI * minf(u, 1.0)) + 8.0 * wrap * wrap
-		var h := lerpf(4.6, 0.5, wrap)
+		# IT CURLS UP, AND IT DOES NOT COME TO A POINT (2026-07-30, Louis: "the golden string is
+		# pointy, make sure it points upwards instead of down and make it less pointy by filling
+		# in the string above the point/below it"). Two separate faults in one shape. Diving
+		# DOWN put the end below the cord's own line, which is where a loose hanging tail would
+		# be - so it read as a second, droopy tassel rather than as the cord turning behind the
+		# drape; going UP is the near side of a loop rising over the bundle, which is the read
+		# wanted. And tapering to 0.5px made a spike: a cord has THICKNESS all the way to where
+		# it disappears, so it keeps most of it (2.6 of 4.6) and simply stops.
+		var y := ty + 3.4 * sin(PI * minf(u, 1.0)) - 7.0 * wrap * wrap
+		var h := lerpf(4.6, 2.6, wrap)
 		top.append(Vector2(x, y - h))
 		bot.append(Vector2(x, y + h))
 		dim.append(wrap)
@@ -19417,8 +19414,7 @@ func menu_rows(font: Font, s: Vector2, oy: float) -> void:
 		var cy := oy + float(i) * (ch + gap) - (3.0 if sel else 0.0)
 		soft_card(Rect2(cx0, cy, cw, ch),
 			Color(ac.r * 0.19, ac.g * 0.19, ac.b * 0.19, 0.94) if sel else Color(0.085, 0.055, 0.065, 0.80),
-			Color(ac.r, ac.g, ac.b, 0.92 if sel else 0.28), 2.0 if sel else 1.0, 11.0, 12.0,
-			0.06 if sel else 0.0)
+			Color(ac.r, ac.g, ac.b, 0.92 if sel else 0.28), 2.0 if sel else 1.0, 11.0, 12.0)
 		var ic := Vector2(cx0 + 36.0, cy + ch * 0.5)
 		draw_circle(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22))
 		draw_arc(ic, 16.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.5), 1.5, true)
@@ -19508,7 +19504,13 @@ func draw_menu(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(s.x - 140.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 12, Color(0.6, 0.55, 0.5, 0.7))   # screen never shows one
 
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+	# NO GOLD FRAME ON THE TITLE SCREEN (2026-07-30, Louis: "Why is there a thin light
+	# brown rectangle around the titlepage?"). It is `draw_frame`, a decorative double border
+	# with corner ticks that nine screens share - and on the other eight it is doing a real
+	# job, giving a flat UI page an edge. This screen is not a page, it is a ROOM, and it now
+	# has a proscenium: the pelmet across the top and a leg down each side ALREADY frame the
+	# picture, in perspective, out of the set itself. A rectangle ruled over that is a second
+	# frame around the first, which is why it read as a stray line rather than as decoration.
 
 
 func _cascade_pos(t: float, i: int, count: int, hl: Vector2, hr: Vector2, T: float, peak: float) -> Vector2:
@@ -20562,7 +20564,7 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 		var cx := sx + float(i) * (cw + gap)
 		var accent := Color(1.0, 0.82, 0.42) if crowned else (Color(0.9, 0.62, 0.36) if exists else Color(0.55, 0.5, 0.48))
 		var fillc := Color(accent.r * 0.16, accent.g * 0.15, accent.b * 0.14, 0.95) if sel else Color(0.10, 0.07, 0.085, 0.9)
-		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(accent.r, accent.g, accent.b, 0.9 if sel else 0.32), 2.0 if sel else 1.0, 14.0, 16.0, 0.06 if sel else 0.0)
+		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(accent.r, accent.g, accent.b, 0.9 if sel else 0.32), 2.0 if sel else 1.0, 14.0, 16.0)
 		# a small three-ball cascade motif as the card's art (a crown for a finished save)
 		var mc := Vector2(cx + cw * 0.5, cy + 74.0)
 		if crowned:
@@ -20666,7 +20668,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 			var ac: Color = r["col"]
 			var card := Rect2(px, y, pw, card_h)
 			var fillc := Color(ac.r * 0.16, ac.g * 0.16, ac.b * 0.17, 0.92) if sel else Color(0.10, 0.08, 0.10, 0.82)
-			soft_card(card, fillc, Color(ac.r, ac.g, ac.b, 0.85 if sel else 0.28), 1.5 if sel else 1.0, 9.0, 9.0, 0.05 if sel else 0.0)
+			soft_card(card, fillc, Color(ac.r, ac.g, ac.b, 0.85 if sel else 0.28), 1.5 if sel else 1.0, 9.0, 9.0)
 			# a rounded accent tab on the left edge marks the row's colour without tinting all of it
 			var tab := StyleBoxFlat.new()
 			tab.bg_color = ac if sel else Color(ac.r, ac.g, ac.b, 0.55)
