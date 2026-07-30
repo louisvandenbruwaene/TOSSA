@@ -574,12 +574,12 @@ const PROPS := [
 	# by weight) said "heavier is harder to CATCH", which is no longer true of anything: a
 	# prop you are strong enough to throw catches like any other. Heaviness is priced once,
 	# at the arms, and it is not charged twice.
-	{"name": "Balls",   "weight": 1, "cost": 20,   "stam": 1, "spins": false, "pwin": 0,  "trait": "the honest baseline - cheapest, lightest on the arms, and the count is all yours"},
-	{"name": "Eggs",    "weight": 1, "cost": 1,    "stam": 2, "spins": false, "pwin": 0,  "trait": "a gamble - nearly free and worth a touch more, but ONE drop and it is gone for good"},
-	{"name": "Rings",   "weight": 2, "cost": 200,  "stam": 2, "spins": false, "pwin": 0,  "trait": "low stamina for their weight - the endurance prop, built for the longest sets"},
-	{"name": "Clubs",   "weight": 3, "cost": 500,  "stam": 4, "spins": true,  "pwin": 1,  "trait": "one extra frame on every catch - the forgiving prop, and the only one that gives timing back"},
-	{"name": "Knives",  "weight": 4, "cost": 1000, "stam": 5, "spins": true,  "pwin": 0,  "trait": "danger the room can see - a knife act holds a crowd's patience far longer"},
-	{"name": "Torches", "weight": 5, "cost": 2000, "stam": 6, "spins": true,  "pwin": 0,  "trait": "self-lit and thrilling - they hold a crowd like knives AND they shine when the stage goes dark"},
+	{"name": "Ball",    "weight": 1, "cost": 20,   "stam": 1, "spins": false, "pwin": 0,  "trait": "the honest baseline - cheapest, lightest on the arms, and the count is all yours"},
+	{"name": "Egg",     "weight": 1, "cost": 1,    "stam": 2, "spins": false, "pwin": 0,  "trait": "a gamble - nearly free and worth a touch more, but ONE drop and it is gone for good"},
+	{"name": "Ring",    "weight": 2, "cost": 200,  "stam": 2, "spins": false, "pwin": 0,  "trait": "low stamina for their weight - the endurance prop, built for the longest sets"},
+	{"name": "Club",    "weight": 3, "cost": 500,  "stam": 4, "spins": true,  "pwin": 1,  "trait": "one extra frame on every catch - the forgiving prop, and the only one that gives timing back"},
+	{"name": "Knife",   "weight": 4, "cost": 1000, "stam": 5, "spins": true,  "pwin": 0,  "trait": "danger the room can see - a knife act holds a crowd's patience far longer"},
+	{"name": "Torch",   "weight": 5, "cost": 2000, "stam": 6, "spins": true,  "pwin": 0,  "trait": "self-lit and thrilling - they hold a crowd like knives AND they shine when the stage goes dark"},
 	# THE CHAINSAW (2026-07-28, Louis: "a new object: the chainsaw. make it actually move
 	# around and work"). The top of the ladder and deliberately the end of it: heaviest,
 	# dearest, and the only prop that is RUNNING while it flies - the chain really travels
@@ -1456,8 +1456,11 @@ const UCARD_READ := 16.0   # ...then it ignores keys again for this long, so the
 var sheet_open := false
 var shop_open := false
 # the card CURSOR on the sheet and the shop (Louis: select with arrows / sticks / dpad,
-# so a pad player can spend points and buy props). The number keys remain the fast path
-# on a keyboard; arrows move the gold highlight and Enter (pad A) acts on it.
+# so a pad player can spend points and buy props). Arrows move the gold highlight and Enter
+# (pad A) acts on it. THE SHEET still keeps its number keys as a fast path, and the SHOP no
+# longer does (2026-07-30) - the difference is what a mispress costs: a stat point is
+# earned back by playing, where a prop is up to 9,000 flowers gone on one keystroke aimed
+# at the wrong digit.
 var sheet_sel := 0        # 0..3 across the four stat cards
 var shop_sel := 0         # the prop cards, then the gear row - see shop_gear0()
 var shop_room := 0        # which half of the shop is showing - see SHOP_ROOM_FRONT/BACK
@@ -4139,10 +4142,6 @@ func shop_on_door() -> bool:
 # happened when a seventh prop took the 7 key and every gear card went on advertising the
 # one above it. Past the end of this list a card simply prints no shortcut rather than a
 # wrong one - the arrows and Enter already reach every card.
-const SHOP_KEYS: Array[String] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-"]
-
-func shop_key_label(i: int) -> String:
-	return SHOP_KEYS[i] if i >= 0 and i < SHOP_KEYS.size() else ""
 
 func shop_buy_sel() -> void:
 	# Enter (pad A) acts on whichever card the cursor lights, prop or gear - or walks
@@ -4164,13 +4163,18 @@ func try_buy_gear(_id: String) -> void:
 
 
 func shop_input(kc: int) -> void:
-	# the shop's keys, shared by the play overlay and the day hub. The number on
-	# each card is its buy key: 1-7 the props (balls included), 8 glasses, 9 pie,
-	# 0 the Glow Kit, - the helmet (then Energy Drinks once it's owned). Arrows
-	# (dpad, stick) walk the cards - left/right along a row, up/down between the
-	# prop row and the four-card gear row (each prop column hops to its nearest
-	# gear card) - and Enter buys the lit one, so a pad shops as freely as the
-	# keyboard. A number key also pulls the cursor onto its card.
+	# the shop's keys, shared by the play overlay and the day hub. Arrows (dpad, stick)
+	# walk the cards - left/right along a row, up/down between rows - and Enter buys the
+	# lit one.
+	#
+	# THE NUMBER KEYS ARE GONE (2026-07-30, Louis: "Remove the shortcuts: eg 5 buys a
+	# knive, make sure the player goes over there with arrows / thumbstick, and presses
+	# enter"). 1-7 used to jump the cursor onto a card AND buy in the same press, which is
+	# a purchase with no cursor movement to confirm it - the one input in the game that
+	# could spend 9,000 flowers off a single keystroke aimed at the wrong digit. It also
+	# forced every card to print its key, which is a number on a card that is not a stat.
+	# With them gone the shop has ONE way to buy and it is the same on keyboard and pad,
+	# and `SHOP_KEYS`/`shop_key_label` went with them.
 	match kc:
 		KEY_TAB, KEY_ESCAPE, KEY_S:
 			shop_open = false
@@ -4220,14 +4224,6 @@ func shop_input(kc: int) -> void:
 			# the fact.
 			if shop_sel < shop_gear0():
 				try_top_up_glow(shop_props()[shop_sel])
-		# THE NUMBER KEYS ADDRESS THE ROOM YOU ARE STANDING IN, in card order, which is
-		# the only scheme that survives the goods being split across two rooms - and it
-		# is what the printed key on each card already says (see SHOP_KEYS).
-		KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS:
-			var idx := SHOP_KEYS.find(OS.get_keycode_string(kc).to_lower())
-			if idx >= 0 and idx < shop_cards():
-				shop_sel = idx
-				shop_buy_sel()
 
 
 func skills_input(kc: int) -> void:
@@ -4503,7 +4499,7 @@ func try_top_up_glow(kind: int) -> void:
 		return
 	money -= cost * can
 	glow_count[kind] += can
-	shop_msg = "%d glowing %s" % [can, String(PROPS[kind]["name"]).to_lower()]
+	shop_msg = "%d glowing %s" % [can, prop_plural(kind)]
 	shop_msg_ms = int(Time.get_ticks_msec())
 	shop_msg_warn = false
 	shop_buy_ms = int(Time.get_ticks_msec())
@@ -4538,7 +4534,7 @@ func try_top_up(kind: int) -> void:
 	shop_buy_ms = int(Time.get_ticks_msec())
 	save_progress()
 	play_sfx("money", -4.0)
-	shop_msg = "%d %s  -  %s %s" % [can, String(PROPS[kind]["name"]).to_lower(), commafy(cost * can), coin_word()]
+	shop_msg = "%d %s  -  %s %s" % [can, prop_plural(kind), commafy(cost * can), coin_word()]
 	if can < want:
 		shop_msg += "  (all the purse would take)"
 	shop_msg_ms = int(Time.get_ticks_msec())
@@ -7435,12 +7431,19 @@ func prop_str_unit(kind: int = -1) -> int:
 
 
 func prop_plural(kind: int = -1) -> String:
-	# a prop's name as it reads AFTER A COUNT, lower case. Six of the seven names are already
-	# plural ("Balls", "Knives", "Torches") and the seventh is not, so the Strength track was
-	# printing "15 chainsaw" beside "15 torches". One place, because both ladders on that track
-	# and anything that later names a quantity of a prop want the same answer.
+	# a prop's name as it reads AFTER A COUNT, lower case. EVERY name in PROPS is singular as
+	# of 2026-07-30 (Louis: "Rename all objects to singular: eggs -> egg"), which is the right
+	# way round - a card shows ONE object and the shop sells them one at a time - but it moves
+	# the whole burden of "15 of them" here, and English does not add an s to `knife` or to
+	# `torch`. Three rules cover the seven props and any eighth that is an ordinary noun:
+	# -fe becomes -ves, a sibilant ending takes -es, everything else takes -s. Before this the
+	# function only had to leave six already-plural names alone.
 	var n := String(PROPS[prop_type if kind < 0 else kind]["name"]).to_lower()
-	return n if n.ends_with("s") else n + "s"
+	if n.ends_with("fe"):
+		return n.substr(0, n.length() - 2) + "ves"      # knife -> knives
+	if n.ends_with("ch") or n.ends_with("sh") or n.ends_with("s") or n.ends_with("x") or n.ends_with("z"):
+		return n + "es"                                 # torch -> torches
+	return n + "s"
 
 
 func prop_req(kind: int = -1, n: int = -1) -> int:
@@ -13243,9 +13246,9 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	# flame burning outside it.
 	#
 	# So the ambient halo is gone for every other prop, and the torch gets the real thing:
-	# `torch_fire_center` puts the pool where the fire actually is, on the same partial-
-	# straightening the flame layers themselves use (see CAP_FLAME_UPRIGHT), so it tracks
-	# the tumble instead of orbiting the handle. Cheaper as well as truer - one glow quad
+	# `torch_fire_center` puts the pool where the fire actually is - straight above the wick,
+	# since the flame is drawn upright at every angle - so it tracks the tumble instead of
+	# orbiting the handle. Cheaper as well as truer - one glow quad
 	# on the torches instead of one disc per prop.
 	#
 	if b.kind == PROP_TORCHES:
@@ -13627,7 +13630,10 @@ const CSAW_BODY_BOT := 15.0    # ...and where the rear handle ends
 const CSAW_BODY_W := 5.4       # half-width of the block
 const CSAW_TIP := -30.0        # the far end of the guide bar
 const CSAW_BAR_W := 2.6        # half-width of the bar
-const CSAW_TEETH := 13         # links drawn round the bar. THE COST OF THIS PROP is here:
+const CSAW_TEETH := 18         # links drawn round the bar. Raised from 13 on 2026-07-30:
+                               # the loop gained the nose arc, so the same count would have
+                               # spread the same links over a longer path.
+                               # THE COST OF THIS PROP is here:
 							   # one link is one quad, and at fifteen props in the air that
 							   # is ~200 shapes a frame. They go through the _soup_*
 							   # batcher, so the whole chain of one saw is ONE draw call
@@ -13753,19 +13759,42 @@ func _saw_bake() -> void:
 	# side, round the nose, back down the other - on a phase that advances every tick, so
 	# the teeth are visibly MOVING rather than a texture painted on the edge. One draw
 	# call for the lot.
+	# THE CHAIN GOES ROUND THE NOSE TOO (2026-07-30, Louis: "the very end needs some more
+	# teeth. right now only the sides have teeth, the end should also have them"). The old
+	# loop was two straight runs and a fold: `u < 0.5` picked a side and `v` walked the bar,
+	# so a link teleported from the top of one side to the top of the other and the nose - the
+	# part of a chainsaw everybody pictures - was bare steel. It is a real PERIMETER walk now:
+	# up the right side, round the nose sprocket, back down the left, with distance measured in
+	# the same units all the way round so the links stay evenly spaced through the turn instead
+	# of bunching in it.
 	var run := t * CSAW_CHAIN_RATE
-	var span := CSAW_TIP - 2.0
+	var span := CSAW_TIP - 2.0                     # the tip; CSAW_TIP is negative, so this is UP
+	var side_len := absf(span - 2.0)
+	var nose_len := PI * CSAW_BAR_W
+	var total := side_len * 2.0 + nose_len
 	for i in CSAW_TEETH:
-		var u := fposmod(float(i) + run, float(CSAW_TEETH)) / float(CSAW_TEETH)   # 0..1 round the loop
-		var side := 1.0 if u < 0.5 else -1.0
-		var v: float = (u * 2.0) if u < 0.5 else (2.0 - u * 2.0)                  # 0..1 along the bar
-		var y := lerpf(2.0, span, v)
-		var x := side * CSAW_BAR_W
-		# a tooth leans the way it is travelling, which is what makes the direction read
-		# a tooth is SMALL. At 1.9 long and 1.9 wide they read as the teeth of a comb
-		# sticking out of a ruler; a real chain's cutters barely stand proud of the bar,
-		# and the movement is what sells it, not the size.
-		_soup_line(Vector2(x, y), Vector2(x + side * 1.25, y - side * 1.1), 1.5, steel)
+		var d := fposmod((float(i) + run) / float(CSAW_TEETH), 1.0) * total
+		var at := Vector2.ZERO
+		var nrm := Vector2.ZERO
+		var tang := Vector2.ZERO
+		if d < side_len:                            # up the right side
+			at = Vector2(CSAW_BAR_W, lerpf(2.0, span, d / side_len))
+			nrm = Vector2(1.0, 0.0)
+			tang = Vector2(0.0, -1.0)
+		elif d < side_len + nose_len:               # round the nose, right to left over the tip
+			var th := -PI * (d - side_len) / nose_len
+			nrm = Vector2(cos(th), sin(th))
+			at = Vector2(0.0, span) + nrm * CSAW_BAR_W
+			tang = Vector2(sin(th), -cos(th))
+		else:                                       # ...and back down the left
+			at = Vector2(-CSAW_BAR_W, lerpf(span, 2.0, (d - side_len - nose_len) / side_len))
+			nrm = Vector2(-1.0, 0.0)
+			tang = Vector2(0.0, 1.0)
+		# a tooth leans the way it is travelling, which is what makes the direction read.
+		# A tooth is SMALL: at 1.9 long and 1.9 wide they read as the teeth of a comb stuck
+		# in a ruler; a real chain's cutters barely stand proud of the bar, and the movement
+		# is what sells it, not the size.
+		_soup_line(at, at + nrm * 1.25 + tang * 1.1, 1.5, steel)
 	# the nose sprocket, so the chain has something to go round
 	_soup_ellipse(Vector2(0.0, CSAW_TIP + 2.4), CSAW_BAR_W * 0.55, CSAW_BAR_W * 0.55, 0.0, 10, steel_dk)
 	# THE ENGINE BLOCK: a real casing with a pull cord, vents and a rear handle
@@ -13783,6 +13812,21 @@ func _saw_bake() -> void:
 		Vector2(-CSAW_BODY_W * 1.35, 8.6), Vector2(CSAW_BODY_W * 1.30, 8.6),
 		Vector2(CSAW_BODY_W * 1.30, 10.4), Vector2(-CSAW_BODY_W * 1.35, 10.4)]), Color(0.18, 0.16, 0.16))
 	_soup_ellipse(Vector2(CSAW_BODY_W * 0.55, -0.4), 1.5, 1.5, 0.0, 8, Color(0.20, 0.18, 0.18))
+	# THE FRONT HANDLE (2026-07-30, Louis: "Perhaps also add a handle to them"). The saw had a
+	# rear grip and nothing to hold with the other hand, which is the bar every photograph of a
+	# chainsaw shows: a loop rising off the near side of the casing, arcing over the top of the
+	# engine and coming down the far side. Drawn as a stroked path rather than a filled shape
+	# because it IS a bar - a tube seen side-on - and it has to read as something you could put
+	# a hand through, which means the gap under the arc has to stay open.
+	var grip := Color(0.16, 0.15, 0.15)
+	var grip_hi := Color(0.42, 0.40, 0.40)
+	var bow := PackedVector2Array([
+		Vector2(-CSAW_BODY_W * 0.95, 9.6), Vector2(-CSAW_BODY_W * 1.62, 5.6),
+		Vector2(-CSAW_BODY_W * 1.30, 1.2), Vector2(-CSAW_BODY_W * 0.10, -0.6),
+		Vector2(CSAW_BODY_W * 1.02, 1.4)])
+	for k in bow.size() - 1:
+		_soup_line(bow[k], bow[k + 1], 2.0, grip)
+		_soup_line(bow[k] + Vector2(-0.5, -0.5), bow[k + 1] + Vector2(-0.5, -0.5), 0.6, grip_hi)
 	_saw_pts = _soup_pts.duplicate()
 	_saw_cols = _soup_cols.duplicate()
 	_saw_idx = _soup_idx.duplicate()
@@ -13819,6 +13863,14 @@ const FIRE_STILL_T := 137.0  # the phase every flame freezes at with fire motion
 							  # caught mid-burn rather than one at a stretched extreme
 const TORCH_BUTT := 16.0    # the handle's far end
 const TORCH_WICK := -3.0    # where the fire starts
+# A TORCH SPINS ABOUT ITS MIDDLE, NOT ITS HEAD (2026-07-30, Louis: "make the torch swing
+# around its center, not the flame"). The local origin is the WICK - it has to be, because the
+# fire is built up from it and the sim throws the prop by its grip - so a torch turned about
+# the origin pivoted around the one point a real one never does, and read as a flame with a
+# stick being whirled beneath it. This is the offset from that origin to the middle of the
+# handle; `cap_torch` moves its transform's origin by it so the geometry turns about the
+# balance point while `p` still means what it always meant to the sim.
+const TORCH_MID := (TORCH_WICK + TORCH_BUTT) * 0.5
 const TORCH_FLAME_H := 22.0 # ...and how far it reaches above that
 const TORCH_FLAME_W := 4.4  # its peak half-width
 const FLAME_PROFILE := [Vector2(0.00, 0.00), Vector2(0.52, -0.07), Vector2(0.62, -0.26),
@@ -13878,21 +13930,35 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 			Color(1.0, 0.60, 0.22, 0.34 * dk))
 
 
+func torch_pivot(p: Vector2, ang: float, sc: float) -> Vector2:
+	# where to put the transform's origin so the handle turns about TORCH_MID while the point
+	# the sim calls `p` stays exactly where it was. Shared, because the fire and its glow have
+	# to be placed off the SAME shifted frame - offset one and not the other and the flame
+	# detaches from the wick on every tumble.
+	return p - Vector2(0.0, TORCH_MID).rotated(ang) * sc
+
+
+func torch_fire_anchor(p: Vector2, ang: float, sc: float) -> Vector2:
+	# the wick's world position, in the pivoted frame: where the fire starts and the embers
+	# leave from
+	return torch_pivot(p, ang, sc) + Vector2(0.0, TORCH_WICK).rotated(ang) * sc
+
+
 func torch_fire_center(pos: Vector2, ang: float, sc: float) -> Vector2:
 	# WHERE THE FIRE ACTUALLY IS, in world space, for anything that has to be centred on
 	# it rather than on the prop (2026-07-28). `pos` is the sim origin, i.e. the grip;
 	# the wick sits at TORCH_WICK above it and the flame's visible mass a little over a
 	# third of its height above that.
 	#
-	# The offset is only PARTLY rotated, and that is the point. A leaning torch's flame
-	# comes back most of the way to vertical (CAP_FLAME_UPRIGHT is how far), so a fully
-	# rotated offset swings the pool of light out sideways past the fire it is supposed to
-	# be coming from - most visibly on a tumbling throw, where the torch passes through
-	# every angle. The wick end rides the prop exactly; the flame's mass above it is lifted
-	# mostly straight up, the same compromise the flame layers themselves are drawn with.
-	var wick := pos + Vector2(0.0, TORCH_WICK).rotated(ang) * sc
+	# The rise is NOT rotated, and as of 2026-07-30 that is simply true rather than a
+	# compromise: the flame is drawn upright at every angle (see cap_torch), so the pool of
+	# light it casts sits straight above the wick. It used to be rotated by
+	# `ang * CAP_FLAME_UPRIGHT` to track a flame that leaned 80% of the way back to vertical.
+	# The wick itself comes from the same `torch_fire_anchor` the fire is drawn at, so the
+	# light cannot drift off the thing emitting it.
+	var wick := torch_fire_anchor(pos, ang, sc)
 	var rise := TORCH_FLAME_H * 0.38 * sc
-	return wick + Vector2(0.0, -rise).rotated(ang * CAP_FLAME_UPRIGHT)
+	return wick + Vector2(0.0, -rise)
 
 
 func prop_spin_angle(b: Ball) -> float:
@@ -17341,6 +17407,8 @@ func draw_shop_grid(font: Font, tx: float, py: float, innerw: float, strip_y: fl
 	var cw := minf((innerw - gap * float(cols - 1)) / float(cols), 300.0)
 	draw_string(font, Vector2(tx, py + 96.0), "PROPS",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+	var hover_card := Rect2()
+	var hover_prop := -1
 	for ci in np:
 		var i: int = room_props[ci]
 		var row := ci / cols
@@ -17351,44 +17419,38 @@ func draw_shop_grid(font: Font, tx: float, py: float, innerw: float, strip_y: fl
 		var row_w := cw * float(in_row) + gap * float(in_row - 1)
 		var cx0 := tx + (innerw - row_w) * 0.5 + float(col) * (cw + gap)
 		var cy0 := band_top + float(row) * (ch + gap) - (6.0 if ci == shop_sel else 0.0)
-		draw_shop_prop_card(font, i, ci, Rect2(cx0, cy0, cw, ch), ci == shop_sel)
+		var cr := Rect2(cx0, cy0, cw, ch)
+		draw_shop_prop_card(font, i, cr, ci == shop_sel)
+		if ci == shop_sel:
+			hover_card = cr
+			hover_prop = i
+	# LAST, so it may cover a neighbour but never the card it describes - see draw_shop_hover
+	if hover_prop >= 0:
+		draw_shop_hover(font, hover_prop, hover_card, get_viewport_rect().size)
 
 
-func shop_stat_rows(i: int, cost: int, afford: bool) -> Array:
-	# THE FACTS ON A PROP CARD, IN ONE PLACE (2026-07-30, Louis: "I want The cost for 1,
-	# owned: x, and strength >= (nr of objects * object index), where you make it a bit
-	# shorter and fill in the right numbers; so that means i want a clean list of stats for
-	# each item in the store").
+func shop_stat_rows(i: int) -> Array:
+	# THE THREE FACTS ABOUT A PROP, and only three (2026-07-30, Louis: "To know more about it
+	# (the strength, max number of objects you can juggle with, owned) you should hover over
+	# it"). Score came off the card entirely - it is a reward, not a stat you shop by, and the
+	# detail strip below already names what each prop is FOR in words.
 	#
-	# WHAT WENT: four prose lines and a meter - "Str 1 each", "max 15", "score ^3.0 at 3", a
-	# set bar and "a set of 3, fielded". Every one made the reader parse a sentence or do
-	# arithmetic to reach a number, on a card a fifth of the panel wide. THE STRENGTH LINE IS
-	# THE CLEAREST CASE: it printed the per-object unit and left the player to multiply it by
-	# tonight's count, which is exactly the sum Louis is asking the card to do for him.
-	# `prop_req` already does that multiplication AND is the same function the throw gate
-	# checks, so a card cannot advertise a requirement the game does not enforce.
-	#
-	# THIS IS A FUNCTION BECAUSE THERE ARE TWO CARDS. `draw_shop_prop_card` (the grid, which
-	# is what ships) and `draw_shop_row` (the single-row fallback that returns the day gear
-	# comes back) each had their own copy of these lines, worded differently and laid out
-	# differently - and the first attempt at this change edited the FALLBACK, rendered the
-	# shop, and saw nothing move. Two copies of one card is how a shop ends up telling a
-	# player two different things about the same prop depending on a flag.
-	var need := num_balls
-	var req := prop_req(i, need)
-	var short := Color(0.95, 0.6, 0.45)
+	# STRENGTH IS PER OBJECT AGAIN ("change str for 3 into strength (and then divide the number
+	# by 3)"), which is the honest reading of the number: `PROP_STR_UNIT` is a property OF THE
+	# PROP, where "Str for 3" was a property of the prop and tonight's count together and
+	# changed under the player when they stepped the count. The count-dependent answer is the
+	# row below it, which is the one a player actually acts on.
 	return [
-		["Cost ea.", commafy(cost), Color(1.0, 0.86, 0.5) if afford else short],
-		["Owned", "%d" % prop_count[i], Color(0.75, 0.9, 0.72) if prop_count[i] >= need else Color(0.95, 0.68, 0.35)],
-		["Str for %d" % need, "%d" % req, Color(0.78, 0.72, 0.64) if eff_strength() >= req else short],
-		["Score", "^%.1f" % (float(need) * prop_sig(i)), Color(1.0, 0.82, 0.45)],
+		["Strength", "%d" % prop_str_unit(i), Color(0.86, 0.80, 0.72)],
+		["max objects", "%d" % max_count(i), Color(0.72, 0.88, 0.70) if max_count(i) >= MIN_BALLS else Color(0.95, 0.6, 0.45)],
+		["Owned", "%d" % prop_count[i], Color(0.75, 0.9, 0.72) if prop_count[i] >= num_balls else Color(0.95, 0.68, 0.35)],
 	]
 
 
 func draw_stat_rows(font: Font, x: float, w: float, y0: float, step: float, rows: Array, size: int) -> void:
 	# a stat list drawn as a TABLE - every label on one left edge, every value on one right
 	# edge - because a list of numbers is only readable if the numbers line up; that alignment
-	# is what makes it a list rather than four more sentences.
+	# is what makes it a list rather than three more sentences.
 	# The LABEL may shorten (it is a phrase, and its meaning survives an ellipsis); the VALUE
 	# never does, because an ellipsised number is not a number - it shrinks through fit_size
 	# instead, which is this file's own rule for anything the player reads as an amount.
@@ -17399,57 +17461,107 @@ func draw_stat_rows(font: Font, x: float, w: float, y0: float, step: float, rows
 		var vs := fit_size(font, val, w * 0.55, size, 9)
 		var vw: float = font.get_string_size(val, HORIZONTAL_ALIGNMENT_LEFT, -1, vs).x
 		var ry := y0 + float(ri) * step
-		draw_fit_string(font, Vector2(x, ry), lab, HORIZONTAL_ALIGNMENT_LEFT,
-			maxf(20.0, w - vw - 8.0), size, Color(0.68, 0.62, 0.56))
+		var ind: float = 14.0 if lab.begins_with("max ") else 0.0
+		draw_fit_string(font, Vector2(x + ind, ry), lab, HORIZONTAL_ALIGNMENT_LEFT,
+			maxf(20.0, w - ind - vw - 8.0), size, Color(0.68, 0.62, 0.56))
 		draw_string(font, Vector2(x, ry), val, HORIZONTAL_ALIGNMENT_RIGHT, w, vs, row[2])
 
 
-func draw_shop_prop_card(font: Font, i: int, ci: int, r: Rect2, sel: bool) -> void:
-	# one prop's card at grid size. Same facts, same order of reading (what you own, the object,
-	# what it asks of your arms, what it pays, whether tonight's set is fielded, what it costs).
+func draw_enter_arrow(x: float, y0: float, y1: float, run: float, col: Color) -> void:
+	# THE ENTER SYMBOL, drawn rather than typed (2026-07-30, Louis: "add a line that puts a
+	# arrow from the strength line towards this one (like an enter symbol)"). It is a
+	# CONSEQUENCE mark: the max-objects row is what the Strength row leads to, and an arrow
+	# turning out of one line into the next is the shortest way to say so.
+	# Drawn, because the game's UI font is not guaranteed to carry an arrow glyph and a
+	# missing one renders as a tofu box in the middle of a stat list - the same reason every
+	# other mark in this file (the coin, the crescent, the star) is geometry and not a
+	# character.
+	draw_line(Vector2(x, y0), Vector2(x, y1), col, 1.6)
+	draw_line(Vector2(x, y1), Vector2(x + run, y1), col, 1.6)
+	# THE HEAD HAS TO OUTWEIGH THE SHAFT or the mark reads as the letter L, which is what the
+	# first one did at a 3.4px head on a 7px run - the same "detail is a function of size"
+	# trap draw_coin records, met on a glyph instead of an icon.
+	var tip := Vector2(x + run + 4.6, y1)
+	draw_colored_polygon(PackedVector2Array([
+		tip, tip + Vector2(-4.6, -3.4), tip + Vector2(-4.6, 3.4)]), col)
+
+
+func draw_shop_hover(font: Font, i: int, card: Rect2, s: Vector2) -> void:
+	# THE STATS, IN A WINDOW BESIDE THE CARD (2026-07-30, Louis: "make sure that window doesn't
+	# overlap with the hovered object. It is allowed to overlap with other objects, because it
+	# should be directly to the right or to the left of the hovered card, depending on which
+	# side of the screen has more room to display").
+	#
+	# The rule is a comparison, not a constant: whichever side of the SCREEN has more room
+	# takes the panel, so the leftmost column opens right and the rightmost opens left without
+	# either being special-cased. It is drawn AFTER every card - that is what buys the licence
+	# to cover a neighbour, and it is the whole reason the popup lives in the grid rather than
+	# in the card function that would draw it mid-row and be painted over by the next card.
+	var rows := shop_stat_rows(i)
+	var w := 176.0
+	var h := 44.0 + float(rows.size()) * 21.0 + 8.0
+	var room_l := card.position.x
+	var room_r := s.x - card.end.x
+	var x := (card.end.x + 14.0) if room_r >= room_l else (card.position.x - 14.0 - w)
+	# ...and it is clamped to the screen VERTICALLY only. Clamping x too would let it slide
+	# back over the card it is describing, which is the one thing it may never cover.
+	var y := clampf(card.get_center().y - h * 0.5, 12.0, s.y - h - 12.0)
+	var box := Rect2(x, y, w, h)
+	soft_card(box, Color(0.10, 0.065, 0.085, 0.98), Color(1.0, 0.86, 0.5, 0.75), 1.6, 11.0, 16.0)
+	var nm := String(PROPS[i]["name"])
+	draw_string(font, Vector2(x, y + 26.0), nm, HORIZONTAL_ALIGNMENT_CENTER, w,
+		fit_size(font, nm, w - 20.0, 18, 12), Color(1.0, 0.88, 0.6))
+	draw_line(Vector2(x + 14.0, y + 36.0), Vector2(x + w - 14.0, y + 36.0), Color(1.0, 0.86, 0.5, 0.22), 1.0)
+	var lx := x + 16.0
+	var rw := w - 32.0
+	var y0 := y + 56.0
+	draw_stat_rows(font, lx, rw, y0, 21.0, rows, 12)
+	# the arrow, from the Strength row down into the one it decides. `max objects` is indented
+	# past it so the turn has somewhere to land.
+	draw_enter_arrow(lx + 4.0, y0 + 4.0, y0 + 17.0, 4.0, Color(0.92, 0.78, 0.50, 0.85))
+
+
+func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
+	# THE CARD IS THE OBJECT (2026-07-30, Louis: "I want the entire card to be the objects
+	# picture. Right above it should be a small cardlike window with its price").
+	#
+	# What came off: the name, the "ready" badge, the four stat rows, the set meter and the
+	# buy-key plate. What is left is the thing you are buying, as big as the card will carry,
+	# and what it costs. That is the whole of a shop stall - **you do not read a market stall,
+	# you look at it** - and the numbers a buyer needs before committing are one hover away in
+	# `draw_shop_hover` rather than printed seven times over whether or not anyone is asking.
+	# The prop was previously drawn at about 60px inside a niche taking a fifth of the card;
+	# it is now the card.
 	var pcol := prop_color(i)
 	var cost := int(PROPS[i]["cost"])
 	var afford := money >= cost
-	var cw := r.size.x
-	var own := prop_count[i]
 	if sel:
-		soft_card(r, Color(pcol.r * 0.17, pcol.g * 0.17, pcol.b * 0.17, 0.96),
+		soft_card(r, Color(pcol.r * 0.19, pcol.g * 0.18, pcol.b * 0.19, 0.97),
 			Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0)
 	else:
 		hud_card(r, Color(pcol.r, pcol.g, pcol.b, 0.45))
-	# THE NICHE: the goods in a recessed, lit window, which is the same plate the skill cards
-	# hang their picture in. A prop drawn on the bare card had no edge to be read against and
-	# no reason to be where it was; in a window it is being SHOWN to you.
-	var niche := Rect2(r.position.x + 10.0, r.position.y + 34.0, cw * 0.455, r.size.y - 82.0)
-	soft_card(niche, Color(pcol.r * 0.10, pcol.g * 0.09, pcol.b * 0.11, 0.92),
-		Color(pcol.r, pcol.g, pcol.b, 0.30), 1.0, 9.0, 0.0)
-	# A NICHE DOES NOT CLIP, SO IT HAS TO BE GIVEN HEADROOM. The torch is drawn with its halo and
-	# its rising embers, and those are placed relative to the PROP, which knows nothing about the
-	# window it is standing in - at the first size and centring, its embers came up out of the
-	# niche and printed themselves across the "own 15" above it. Sitting the object a tenth of the
-	# niche low and taking the magnification down a notch keeps the whole of the tallest, liveliest
-	# prop in the game inside its case. Anything added to a prop that reaches further UP than a
-	# torch's embers has to be checked here again.
-	draw_prop_icon(i, niche.get_center() + Vector2(0.0, niche.size.y * 0.10), 1.33, sel)
-	# ...and the numbers in a column beside it, one fact to a line. At 102px a line has room for
-	# about eighteen characters at 11pt, which is why the arms' two numbers are two lines here
-	# where the narrow card had to jam them onto one with a middle dot between them.
-	var lx := niche.position.x + niche.size.x + 14.0
-	var lw := r.position.x + cw - 12.0 - lx
-	# THE STOCK LINE LIVES IN THIS COLUMN, NOT ACROSS THE CARD'S TOP, and that is the niche's
-	# fault in a way worth recording. A torch's embers rise out of the case (which looks right -
-	# a lit thing in a glass case ought to spill), but they are placed relative to the PROP, so
-	# with "own 15" sitting above the niche they were printing themselves through the digits. The
-	# air above the niche is now deliberately empty and belongs to whatever a prop throws off.
-	if available(i):
-		draw_string(font, Vector2(lx, r.position.y + 26.0), "ready",
-			HORIZONTAL_ALIGNMENT_RIGHT, lw, 12, Color(0.6, 0.9, 0.62))
-	var nm := String(PROPS[i]["name"])
-	draw_string(font, Vector2(lx, r.position.y + 60.0), nm, HORIZONTAL_ALIGNMENT_CENTER, lw,
-		fit_size(font, nm, lw - 4.0, 20, 12), Color(1.0, 0.88, 0.6))
-	draw_stat_rows(font, lx, lw, r.position.y + 92.0, 20.0, shop_stat_rows(i, cost, afford), 12)
-	draw_price_plate(font, Rect2(r.position.x + 10.0, r.position.y + r.size.y - 44.0, cw - 20.0, 38.0),
-		shop_key_label(ci), commafy(cost), afford)
+	# THE PRICE, in its own small window at the top. Bigger than any number on the old card
+	# and centred, because on a stall the price IS the second thing you look at - and it is a
+	# number, so it goes through fit_size and never through fit_text.
+	var price := commafy(cost)
+	var psz := fit_size(font, price, r.size.x * 0.46, 21, 11)
+	var pwid: float = font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz).x
+	var mr := 7.0
+	var chw := minf(pwid + mr * 2.0 + 30.0, r.size.x - 24.0)
+	var chh := 30.0
+	var chip := Rect2(r.position.x + r.size.x * 0.5 - chw * 0.5, r.position.y + 9.0, chw, chh)
+	soft_card(chip, Color(0.06, 0.04, 0.05, 0.92),
+		Color(0.55, 0.85, 0.5, 0.55) if afford else Color(0.7, 0.35, 0.3, 0.45), 1.2, 8.0, 6.0)
+	var pcol_t := Color(1.0, 0.92, 0.62) if afford else Color(0.86, 0.52, 0.46)
+	draw_string(font, Vector2(chip.position.x + 13.0, chip.position.y + chh * 0.5 + float(psz) * 0.36),
+		price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz, pcol_t)
+	draw_coin_mark(Vector2(chip.end.x - 13.0 - mr, chip.position.y + chh * 0.5), mr, Color(1, 1, 1, 1), true)
+	# ...and the goods, filling everything under it. `mag` comes off the space actually left
+	# rather than a fixed number, so the same card body works at the grid's 250px and at the
+	# fallback row's 141 without a prop growing out through its own card.
+	var pic := Rect2(r.position.x + 6.0, chip.end.y + 4.0, r.size.x - 12.0, r.end.y - chip.end.y - 12.0)
+	var mag := clampf(minf(pic.size.x / 132.0, pic.size.y / 106.0), 0.62, 1.72)
+	draw_prop_icon(i, pic.get_center() + Vector2(0.0, pic.size.y * 0.06), mag, sel)
 
 
 func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
@@ -17467,40 +17579,26 @@ func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
 	var cw := (innerw - gap * float(np - 1)) / float(np)
 	var ch := SHOP_ROW_H
 	var y0 := py + SHOP_ROW_TOP
+	var hover_card := Rect2()
+	var hover_prop := -1
 	for ci in np:
 		var i: int = room_props[ci]   # balls included: every prop is bought stock now (Louis)
 		var sel := ci == shop_sel
-		# the SELECTED card lifts off the row and lights its own border, instead of the
-		# old flashing rectangle drawn just outside it: a raised card is how every other
-		# card screen in the game shows the cursor now, and it never fights the artwork
+		# the SELECTED card lifts off the row, the same cursor every card screen uses.
+		# ONE CARD BODY FOR BOTH LAYOUTS (2026-07-30): this loop used to carry its own copy of
+		# the card - a differently-worded, differently-placed twin of the grid's - which is the
+		# duplication that cost a whole render pass when the stat table landed in the fallback
+		# and nothing moved on screen. `draw_shop_prop_card` sizes its picture off the rect it
+		# is handed, so a 141px row card and a 250px grid card are the same drawing.
 		var cx0 := tx + float(ci) * (cw + gap)
 		var cy0 := y0 - (6.0 if sel else 0.0)
-		var pcol := prop_color(i)
-		var cost := int(PROPS[i]["cost"])
-		var afford := money >= cost
+		var cr := Rect2(cx0, cy0, cw, ch)
+		draw_shop_prop_card(font, i, cr, sel)
 		if sel:
-			soft_card(Rect2(cx0, cy0, cw, ch), Color(pcol.r * 0.17, pcol.g * 0.17, pcol.b * 0.17, 0.96),
-				Color(1.0, 0.88, 0.5, 0.95), 2.5, 11.0, 18.0)
-		else:
-			hud_card(Rect2(cx0, cy0, cw, ch), Color(pcol.r, pcol.g, pcol.b, 0.45))
-		if available(i):
-			draw_string(font, Vector2(cx0, cy0 + 24.0), "ready", HORIZONTAL_ALIGNMENT_RIGHT, cw - 12.0, 12, Color(0.6, 0.9, 0.62))
-		draw_prop_icon(i, Vector2(cx0 + cw * 0.5, cy0 + 82.0), 1.0, sel)
-		# a hairline under the goods, so the card reads as a lit object above and its
-		# NUMBERS below, rather than as one column of loose rows
-		draw_line(Vector2(cx0 + 16.0, cy0 + 130.0), Vector2(cx0 + cw - 16.0, cy0 + 130.0),
-			Color(pcol.r, pcol.g, pcol.b, 0.22), 1.0)
-		draw_fit_string(font, Vector2(cx0, cy0 + 156.0), String(PROPS[i]["name"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 19, Color(1.0, 0.88, 0.6))
-		# the SAME table the grid card draws, off the same `shop_stat_rows` - see there for why
-		# that is a function and not two copies of four lines
-		draw_stat_rows(font, cx0 + 14.0, cw - 28.0, cy0 + 176.0, 18.0,
-			shop_stat_rows(i, cost, afford), 12)
-		# THE GLOWING SET IS NOT ON THE CARD. It was, for exactly one render, and it landed
-		# straight through the price plate: the card is full from its icon to its foot and
-		# there is no row left in it. It lives in the detail strip instead, which is where a
-		# prop's identity already lives and which only ever describes the SELECTED prop.
-		draw_price_plate(font, Rect2(cx0 + 10.0, cy0 + ch - 44.0, cw - 20.0, 38.0),
-			shop_key_label(ci), commafy(cost), afford)
+			hover_card = cr
+			hover_prop = i
+	if hover_prop >= 0:
+		draw_shop_hover(font, hover_prop, hover_card, get_viewport_rect().size)
 
 
 func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: float, innerw: float) -> void:
@@ -17568,7 +17666,7 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 			if gcount > 0:
 				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % gcount, HORIZONTAL_ALIGNMENT_RIGHT, gw - 12.0, 12, Color(0.75, 0.9, 0.72))
 			draw_price_plate(font, Rect2(cx0 + 10.0, plate_top, gw - 20.0, 38.0),
-				shop_key_label(shop_gear0() + i), commafy(gcost), money >= gcost,
+				"", commafy(gcost), money >= gcost,
 				"walk through" if gcost == 0 else "")
 
 	# ---------------- detail strip: the SELECTED item explained in a sentence ----------------
@@ -19968,23 +20066,13 @@ func cap_knife(p: Vector2, ang: float, sc: float) -> void:
 
 const CAP_FLAME_STEPS := 26      # a still frame can afford a smooth silhouette; the stage
 								 # flame's 7-point profile is what makes it look faceted
-const CAP_FLAME_UPRIGHT := 0.80  # HOW FAR A LEANING TORCH'S FLAME COMES BACK TO VERTICAL.
-								 # 0 burns straight out of the torch, 1 is dead upright.
-								 # **RAISED FROM 0.25 TO 0.80 ON 2026-07-29, and the entry it
-								 # replaces was right for the letter it was written against
-								 # and wrong for this one.** It used to argue that upright
-								 # flames "splay apart at the top instead of converging",
-								 # which was true while the two torches stood a fifth of a
-								 # letter apart at the wick: from two separated wicks, only a
-								 # flame that follows its torch can lean in far enough to
-								 # meet its neighbour. The A's wicks now MEET, so the whole
-								 # argument inverts - two fires leaning out of one point
-								 # cross each other and open into a butterfly, which is
-								 # exactly what the first render of the rebuilt letter did.
-								 # From a shared wick it is the UPRIGHT flame that merges,
-								 # and the pair reads as one apex fire with a little life in
-								 # it. **The lesson worth keeping: this number is not a
-								 # property of fire, it is a property of where the wicks
+# THE FLAME NO LONGER LEANS AT ALL, so `CAP_FLAME_UPRIGHT` is deleted (2026-07-30, Louis:
+# "do make sure the flame stays upright"). It was a partial straightening - 0.80 of the way
+# back to vertical - and it existed for ONE caller: the wordmark's A, whose two leaning
+# torches met at their wicks and needed flames that leaned with the strokes. The A is two
+# clubs now and nothing in the mark burns, so the constant outlived its only beneficiary.
+# The fire is drawn in an UNROTATED frame anchored at the wick instead (see cap_torch),
+# which is both what Louis asked for and less code than the compromise it replaces.
 								 # are, so it has to be re-derived whenever the letter moves.**
 
 func cap_flame_shape(base: Vector2, h: float, w: float, sway: float, wob: float, ph: float) -> PackedVector2Array:
@@ -20086,7 +20174,7 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool
 	# shimmered on every tumble - the same sub-pixel band the round props and the juggler's
 	# face were both rebuilt to escape. Baked as filled bands they hold still.
 	_torch_bake()
-	draw_set_transform(p, ang, Vector2.ONE * sc)
+	draw_set_transform(torch_pivot(p, ang, sc), ang, Vector2.ONE * sc)
 	if handle:
 		RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _torch_idx, _torch_pts, _torch_cols)
 	if not flame:
@@ -20101,7 +20189,17 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool
 	# to its own HEIGHT and to the lean: the wick end sits square on the torch, the tip
 	# comes back most of the way to true vertical, and the flame bends between them the
 	# way a real one dragged upright by its own draught does.
-	var wick := Vector2(0.0, -3.0)
+	# THE FIRE IS DRAWN IN A FRAME THAT MOVES WITH THE TORCH AND NEVER TURNS WITH IT
+	# (2026-07-30, Louis: "but do make sure the flame stays upright"). It used to be built
+	# inside the rotated frame with a straightening term per layer (`CAP_FLAME_UPRIGHT`, 0.80),
+	# a compromise that existed for ONE caller: the wordmark's A, whose two leaning torches met
+	# at their wicks and needed their flames to lean with the strokes. The A is two clubs now
+	# and nothing in the mark burns, so the compromise has no beneficiary left and the honest
+	# answer is available - fire goes UP, at every angle, on every tumble. Resetting the
+	# transform to the wick's world position with zero rotation is also simpler than the term
+	# it replaces, and `sway` stops fighting a lean that is no longer there.
+	draw_set_transform(torch_fire_anchor(p, ang, sc), 0.0, Vector2.ONE * sc)
+	var wick := Vector2.ZERO
 	# A FLAME IS TALL AND NARROW, and getting that ratio wrong is what turned the first
 	# rebuild into two orange balloons. The width formula peaks at `w`, so `w` is a HALF
 	# width and the shape is 2w across against h tall: at w 10.4 and h 30 that is 21 wide
@@ -20131,12 +20229,12 @@ func cap_torch(p: Vector2, ang: float, sc: float, halo: bool = true, flame: bool
 		layers.remove_at(0)   # the wide faint aura is overdraw, not shape - see above
 	for lay in layers:
 		var lh: float = float(lay["h"]) * fl
-		var lsway: float = sway * float(lay["sw"]) - sin(ang) * lh * CAP_FLAME_UPRIGHT
+		var lsway: float = sway * float(lay["sw"])
 		draw_colored_polygon(cap_flame_shape(wick, lh, float(lay["w"]), lsway,
 			float(lay["wob"]), float(lay["ph"])), Color(lay["col"]))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# the embers leaving it, in WORLD space: smoke rises however the torch is held
-	var wpos := p + wick.rotated(ang) * sc
+	var wpos := torch_fire_anchor(p, ang, sc)
 	for i in (9 if halo else 0):
 		var sd := float(i) * 12.9898
 		var rise := fposmod(t * 0.010 + fposmod(sin(sd) * 43758.5, 1.0), 1.0)
