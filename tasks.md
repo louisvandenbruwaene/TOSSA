@@ -539,3 +539,42 @@ The three losing title backdrops (FIRELIGHT, NIGHT, THE CURTAIN) are deleted alo
 re-rendered for the new mark.
 
 **Still open:** Records and history prints the clipped INT64 sentinel for two venues.
+
+## 20. The tutorial pause, and every lesson speaking (2026-07-30, night)
+
+Louis: "The tutorial is still not pausing when it should ... it should pause the game when the
+thrown ball comes near the perfect catch timing; that makes sure the beginning player doesn't drop
+during the tutorial ... and with it i want you to fix the 'learn something new' tutorials, which
+should be given in the same style and layout as the actual tutorial." Plus, on the title screen:
+the wordmark centred between the top and Play, the divider tight to Play, and the two little box
+windows replaced by proscenium curtains.
+
+**The pause bug was real, and instrumenting it printed the proof.** A beat whose goal is already
+MET sets `tut_advance_at` and asks for Enter - and `tut_do_step()` returns false in that state, so
+nothing was frozen while the ball you had just thrown flew on. The log line was `tick=649 step=8
+goal=throw_r adv=629`: a ball arriving, a satisfied throw beat, no freeze. Catch beats were no
+better - they held at the arrival tick itself, so the whole flight ran at full speed and any press
+on the way in was read as an ordinary catch, which can whiff or drop.
+
+There is a catch guard now: during any HELPED stretch (everything except a `free` beat, where you
+asked for dropping to be possible) the world stops as soon as a prop is within 14 ticks of landing,
+wherever the script has got to, and the press that follows always lands. Helped catches are graded
+PERFECT rather than on raw timing - freezing early was putting "LATE" over a beginner's hand for a
+press the game had stopped itself to demand.
+
+**The peak hold works now too.** The `peak` flag had been sitting on the three-ball step unread
+since the script was written, which is why that beat froze the instant it began and asked for the
+second throw while the first was still leaving the hand - the game contradicting its own line.
+
+**All five lesson families speak.** The blocker was plumbing: there was no builder for "a line, and
+the goal `trick_on`", so trick/pattern/prop/count/advanced were stuck with the intro card, the
+banner and the three-pass slow-motion ladder. `tut_beat()` is that builder. Every goal, need and
+reward is identical; the drills run one pass at what the old ladder's last pass asked. `tut_paced`,
+`tut_pace_line`, `tut_intro`, `TRICK_TUT_SLOW` and the banner's pace pips are deleted.
+
+**Still worth a human pass:** I verified all nine lessons run end to end headless with no errors and
+that the guard engages where it should, but the FEEL of the pause - whether 14 ticks is the right
+distance, whether it stops too often in the three-ball section - is a hands-on judgement I cannot
+make from screenshots.
+
+**Still open:** Records and history prints the clipped INT64 sentinel for two venues.

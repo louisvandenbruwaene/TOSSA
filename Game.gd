@@ -887,6 +887,19 @@ const TUT_EXCHANGE_LEAD := 14  # ticks before a prop lands that its hand is stop
 								# catch. Small enough that the prop is visibly AT the hand,
 								# and far inside a lesson's Perfect window (W_LATE), so the
 								# guided press always scores Perfect.
+const TUT_PEAK_WINDOW := 6     # how near the top of its arc a prop counts as AT its peak, for the
+								# three-ball beat that asks for the second throw to go under the
+								# first at its apex. Wide enough that a frame cannot fall between
+								# the two halves of a parabola and miss it.
+const TUT_CATCH_GUARD := 14    # THE CATCH GUARD (2026-07-30, Louis: "it should pause the game
+								# when the thrown ball comes near the perfect catch timing; that
+								# makes sure the beginning player doesn't drop during the
+								# tutorial"). Ticks before a prop's arrival at which a HELPED
+								# stretch of a lesson stops the world, wherever the script has
+								# got to. The same 14 as TUT_EXCHANGE_LEAD deliberately: it is
+								# the number the older lessons' guided beat already uses for "a
+								# prop is about to land, stop", and two mechanisms pausing at
+								# different distances would look like a bug in one of them.
 const TUT_HOLD_GAP := 8        # ticks of real motion after a satisfied beat before the
 								# next one may stop the world - so the throw and the catch
 								# the player just made are actually SEEN happening
@@ -2377,6 +2390,20 @@ func _physics_process(delta: float) -> void:
 			cine_tick += 1
 			if _demo:
 				tut_do_autoplay()
+			else:
+				_read_inputs()
+			update_hands()
+			return
+		# THE CATCH GUARD, which is the same stopped world again and covers the gaps the two
+		# branches above cannot reach: a beat whose goal is already met and is waiting on Enter,
+		# and a `say` line that happens to be on screen with a prop in the air. Those two are
+		# where a beginner's balls were actually hitting the boards. Only during HELPED stretches
+		# - a `free` beat is left running, because trying it out and dropping it is what a free
+		# beat is for.
+		if tut_catch_hold():
+			cine_tick += 1
+			if _demo:
+				on_catch(tut_guard_hand())   # the autoplayer has no hands either
 			else:
 				_read_inputs()
 			update_hands()
@@ -4524,44 +4551,15 @@ func offer_prop_tutorial(kind: int) -> void:
 #endregion
 
 #region TUTORIAL SYSTEM
-func tut_paced(base: Dictionary, needs: Array, after: String) -> Array:
-	# THE ladder every lesson runs (see TUT_PHASES): one drill, three times over, at
-	# half speed, then quarter speed, then full speed. The first two passes are
-	# GUIDED - the world freezes at each action and the asked-for press always lands -
-	# and only the last one is played unaided. `needs` is the goal count per pass
-	# (the slow ones are short: they are a rehearsal, not a grind), and `after` is
-	# what Enter promises once the whole ladder is behind the player.
-	#
-	# `juggle` (only-counts-if-something-else-is-airborne) and any other strictness is
-	# stripped from the guided passes on purpose: those passes deal the beats
-	# themselves, so failing one is not a thing a player did, and the drill would
-	# scold them for the script's own rhythm.
-	var out: Array = []
-	var last := TUT_PHASES.size() - 1
-	for i in TUT_PHASES.size():
-		var st: Dictionary = base.duplicate(true)
-		st["slow"] = TUT_PHASES[i]
-		st["phase"] = i
-		st["guide"] = i < last
-		if i < needs.size():
-			st["need"] = int(needs[i])
-		if i < last:
-			st.erase("juggle")
-			st["next"] = "the same, at quarter speed" if i == 0 else "the same, at FULL speed"
-		else:
-			st["next"] = after
-		out.append(st)
-	return out
-
-
-func tut_pace_line(step: Dictionary) -> String:
-	# the one line that says where on the ladder this step sits, in the words the
-	# player experiences rather than a phase number
-	var sl := float(step.get("slow", 0.0))
-	if not bool(step.get("guide", false)):
-		return "FULL SPEED  -  on your own now" if sl <= 0.001 else "%d%% slow" % int(round(sl * 100.0))
-	return "%d%% slow  -  guided, one press at a time" % int(round(sl * 100.0))
-
+# THE PACE LADDER IS GONE, and with it tut_paced() and tut_pace_line() (2026-07-30). Every drill
+# in every lesson used to run three times over - half speed, quarter speed, full speed - and the
+# basics were rewritten out of that in July on Louis's "remove all slowmo from the tutorial": slow
+# motion teaches the player to juggle in a world that does not exist and then hands them the real
+# one. The trick, pattern, prop, count and advanced lessons kept running it for another day, and
+# now they speak like the basics instead (see tut_beat), so the builder had no callers left. One
+# honest pass at full speed asks what the ladder's LAST pass asked, so nothing got easier.
+# TUT_PHASES itself survives only as the guided beat's own note above; draw_tutorial_banner's pace
+# pips are unreachable along with the rest of that banner - see the `say` early-out in it.
 
 func tut_lesson(id: String) -> Array:
 	if id.begins_with("prop_"):
@@ -4576,13 +4574,12 @@ func tut_lesson(id: String) -> Array:
 		}
 		var quirk := String(quirks.get(k, "A new prop. Feel out its weight and timing."))
 		var need := 6 if k >= PROP_TORCHES else 5
-		var pout: Array = [tut_intro("%s" % String(PROPS[k]["name"]).to_upper(),
-			"%s\n\n%s swaps which object you juggle, any time you are practising. The pattern and the keys do not change - only what is in the air." % [quirk, String(k_object()[0])],
-			String(k_object()[0]))]
-		pout += tut_paced({"prop": k, "balls": 3, "hand": RIGHT, "goal": "catch", "need": need,
-			"text": "New prop: %s" % String(PROPS[k]["name"]), "sub": quirk},
-			[4, 4, need], "finish the lesson")
-		return pout
+		# spoken, like every other lesson now - see trick_lesson_steps for what came out and why
+		return [
+			tut_say("%s. %s" % [String(PROPS[k]["name"]), quirk]),
+			tut_say("%s swaps which object you juggle, any time you are practising. The pattern and the keys do not change - only what is in the air." % String(k_object()[0])),
+			tut_beat("Land %d of them." % need, "catch", need, 3, {"prop": k, "prompt": "catch"}),
+		]
 	if id.begins_with("trick_"):
 		return trick_lesson_steps(trick_by_id(id.substr(6)))
 	if id.begins_with("count_"):
@@ -4691,6 +4688,27 @@ func tut_do(line: String, act: String, h: int, keyname: String, n: int, stack: i
 		"text": "%s  [%s]" % [line, keyname]}
 
 
+func tut_beat(line: String, goal: String, need: int, n: int, extra: Dictionary = {}) -> Dictionary:
+	# A SPOKEN BEAT WITH ANY GOAL, and its absence is why half the lessons in the game still
+	# looked like the old ones (2026-07-30, Louis: "fix the 'learn something new' tutorials, which
+	# should be given in the same style and layout as the actual tutorial"). The basics have three
+	# builders - tut_say (a line and Enter), tut_do (a line and one named key), tut_free (a line
+	# and a real count) - and a trick or pattern lesson needs a line and a goal like `trick_on` or
+	# `press_p`, which none of them could express. So those lessons had no way to SPEAK, and fell
+	# back on the banner, the full-screen intro card, the paragraph-long `sub` and the three-pass
+	# slow-motion ladder that the basics were deliberately rewritten out of.
+	#
+	# `say` is the one flag that switches the whole HUD over (see draw_tutorial_banner), so with
+	# this in hand every step of every lesson can carry it and the game has ONE lesson style.
+	# `extra` carries whatever the goal needs - `trick`, `pattern`, `prop`, `prompt`, `key` - so
+	# no goal, need, count or reward changed in the conversion: only the presentation moved.
+	var d := {"goal": goal, "prop": PROP_BALLS, "balls": n, "hand": RIGHT, "need": need,
+		"slow": 0.0, "say": true, "next": "go on", "text": line}
+	for k in extra:
+		d[k] = extra[k]
+	return d
+
+
 func tut_free(line: String, n: int, throws: int, catches: int, sub: String,
 		stack: int = 0) -> Dictionary:
 	# FREE PLAY, held open until the player has actually done it - and with no goal at all
@@ -4713,140 +4731,99 @@ func advanced_lesson_steps() -> Array:
 	var kf := OS.get_keycode_string(K_LT)
 	var kd := OS.get_keycode_string(K_LC)
 	var kk := OS.get_keycode_string(K_RC)
-	var out: Array = [tut_intro("TWO WAYS TO JUGGLE",
-		"You already know the BEGINNER cascade: two props rest in your hands, one is in the air, and as it falls you throw first and catch second.\n\nThe ADVANCED cascade is the mirror of it. Every prop goes up at the start and your hands stay EMPTY, so each beat is catch first, throw second - the same two keys, the opposite order.\n\nIt is harder to start and smoother to hold, and the big counts are impossible without it.",
-		kk)]
-	out += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 10,
-		"juggle": true, "style": TUT_ADVANCED, "pattern": CASCADE,
-		"text": "The ADVANCED cascade - empty hands",
-		"sub": "Put ALL THREE up first, spaced how you judge it, then keep your hands empty: every ball you catch goes straight back up. %s then %s, or %s then %s - the same keys as the beginner cascade, in the opposite order. It is harder to start and smoother to hold, and it is what the high counts need." % [kk, kj, kd, kf]},
-		[6, 6, 10], "finish the lesson")
-	return out
+	return [
+		tut_say("You already know the beginner cascade: two props rest in your hands, one is in the air, and as it falls you throw first and catch second."),
+		tut_say("This is the mirror of it. Every prop goes up at the start and your hands stay EMPTY, so each beat is catch first, throw second - the same two keys, the opposite order."),
+		tut_say("It is harder to start and smoother to hold, and the big counts are impossible without it."),
+		tut_beat("Put all three up, then keep your hands empty: %s then %s, or %s then %s. Ten clean catches." % [kk, kj, kd, kf],
+			"catch", 10, 3, {"juggle": true, "style": TUT_ADVANCED, "pattern": CASCADE, "prompt": "catch"}),
+	]
 
 
-const TRICK_TUT_SLOW := 0.55   # flat, generous slow motion for every trick-lesson step
-								# (2026-07-18, Louis: "too cumbersome... don't break it
-								# down into hundreds of small steps, that's only for the
-								# first tutorial") - a trick lesson teaches ONE new button,
-								# not the input system itself, so there is nothing to build
-								# UP to across steps and no reason to ramp the world back
-								# toward real speed the way the basics lesson does.
+# TRICK_TUT_SLOW is deleted with the ladder: a trick lesson has no slow motion in it now.
 
 func trick_lesson_steps(t: int) -> Array:
-	# a trick lesson mirrors the three INPUT GRAMMARS the game has, because the grammar
-	# is what confuses people, not the trick: a toggle switches on and off, an arm shot
-	# empowers one throw, a live trick acts on what is already in the air. Taught with
-	# plain balls (the trick shaping is prop-independent).
+	# A trick lesson mirrors the three INPUT GRAMMARS the game has, because the grammar is what
+	# confuses people, not the trick: a toggle switches on and off, an arm shot empowers one throw,
+	# a live trick acts on what is already in the air. Taught with plain balls, since the shaping
+	# is prop-independent.
 	#
-	# The SWITCH steps (on / off) are single presses of a key that is already named dead
-	# centre on screen, so they stay one-off and unguided at TRICK_TUT_SLOW - freezing
-	# the world to ask for a press the player is already staring at teaches nothing. It
-	# is the DRILL - the trick actually being used inside a running weave - that runs the
-	# full TUT_PHASES ladder, guided twice and then alone.
+	# SPOKEN, LIKE THE BASICS (2026-07-30). This used to open on a full-screen intro card and then
+	# run its drill three times over - half speed guided, quarter speed guided, full speed alone -
+	# with a paragraph of `sub` under each. All of that is what the basics were rewritten out of in
+	# July, for reasons recorded at tut_lesson: slow motion teaches a world that does not exist,
+	# and a line of dialogue is one sentence. The grammar is now the thing SAID first, one line at
+	# a time, and the drill is one honest pass at full speed - the same need the old ladder's LAST
+	# pass asked for, so nothing got easier, only shorter.
 	if t < 0 or t >= TRICKS.size():
-		return tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
-			"text": "Keep the cascade going", "sub": "Land three."}, [3, 3, 3], "finish the lesson")
+		return [tut_beat("Keep the cascade going: land three.", "catch", 3, 3, {"prompt": "catch"})]
 	var td: Dictionary = TRICKS[t]
 	var nm := String(td["name"])
 	var kb := String(k_trick()[0])
 	var kcy := String(k_cycle()[0])
-	# what SPACE actually does depends on the trick's grammar, and that is the one thing
-	# worth saying before anything moves - a toggle stays on, an arm shot empowers one
-	# throw, a live trick fires now. Said on the opening card, not buried in a drill.
 	var grammar := "%s performs it right now, on whatever is already in the air." % kb
 	if String(td["kind"]) == "toggle":
 		grammar = "%s switches it ON, and switches it OFF again. While it runs, EVERY throw is reshaped." % kb
 	elif String(td["kind"]) == "arm":
 		grammar = "%s arms your next throw and only that one. Press, throw, catch - a fresh press every time." % kb
-	var intro := tut_intro(nm.to_upper(),
-		"%s\n\n%s\n\n%s swaps which trick %s carries, whenever you are juggling." % [String(td.get("desc", "")), grammar, kcy, kb],
-		kb)
+	var out: Array = [
+		tut_say("%s. %s" % [nm, String(td.get("desc", ""))]),
+		tut_say(grammar),
+	]
 	match String(td["kind"]):
 		"toggle":
-			var out: Array = [intro,
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_on", "need": 1,
-					"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
-					"next": "catch a few with it running",
-					"text": "%s: switch it ON" % nm,
-					"sub": "Press %s ONCE - not repeatedly. Every throw reshapes into %s until you switch it off." % [kb, nm]},
-			]
-			out += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
-				"prompt": "catch",
-				"text": "Now catch them with %s running" % nm,
-				"sub": "Watch the weave change shape. The bottom-right card reads '%s - ON' whenever it runs." % nm.to_upper()},
-				[3, 3, 4], "switch it off again")
-			out.append({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_off", "need": 1,
-				"trick": t, "prompt": "trick", "slow": TRICK_TUT_SLOW,
-				"next": "finish the lesson",
-				"text": "And switch it OFF",
-				"sub": "Press %s once more. One press ON, one press OFF - that is the whole toggle. %s swaps which trick %s carries." % [kb, kcy, kb]})
-			return out
+			out.append(tut_beat("Switch it on.  [%s]" % kb, "trick_on", 1, 3,
+				{"trick": t, "prompt": "trick", "key": kb}))
+			out.append(tut_beat("Now catch four with it running - watch the weave change shape.",
+				"catch", 4, 3, {"trick": t, "prompt": "catch"}))
+			out.append(tut_beat("And switch it off again. One press on, one press off - that is the whole toggle.  [%s]" % kb,
+				"trick_off", 1, 3, {"trick": t, "prompt": "trick", "key": kb}))
 		"arm":
-			var outa: Array = [intro]
-			outa += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
-				"trick": t, "prompt": "trick",
-				"text": "%s: arm it, then throw" % nm,
-				"sub": "Press %s once, then throw. Just that ONE next throw flies over the top, and it lands the trick - so it is a fresh press every single time. The bottom-right card says READY while one is armed; %s swaps tricks." % [kb, kcy]},
-				[1, 1, 2], "finish the lesson")
-			return outa
+			out.append(tut_beat("Arm it, then throw. Only that one next throw carries it, so it is a fresh press every time.  [%s]" % kb,
+				"trick_use", 2, 3, {"trick": t, "prompt": "trick", "key": kb}))
 		_:  # live (Spin): acts on the balls already airborne
-			var out2: Array = [intro,
-				{"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 2,
-					"prompt": "catch", "slow": TRICK_TUT_SLOW,
-					"next": "call the %s" % nm.to_lower(),
-					"text": "First get all three weaving",
-					"sub": "%s acts on the balls already in the air, so fill the air before you call it." % nm},
-			]
-			out2 += tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "trick_use", "need": 1,
-				"trick": t, "prompt": "trick",
-				"text": "Now press it, and catch through the turn",
-				"sub": "Press %s once - it fires the moment you press, and it is landed the moment it fires. Catches come while you spin; the bottom-right card shows its cooldown. %s swaps tricks." % [kb, kcy]},
-				[1, 1, 2], "finish the lesson")
-			return out2
+			out.append(tut_beat("Get all three weaving first - it acts on what is already in the air.",
+				"catch", 2, 3, {"prompt": "catch"}))
+			out.append(tut_beat("Now call it, and catch through the turn.  [%s]" % kb,
+				"trick_use", 2, 3, {"trick": t, "prompt": "trick", "key": kb}))
+	out.append(tut_say("%s swaps which trick %s carries, whenever you are juggling." % [kcy, kb]))
+	return out
 
 
 func count_lesson_steps(n: int) -> Array:
-	# a new ball count: the same load felt three times over, half speed guided, quarter
-	# guided, then full speed alone. Whatever pattern is already running keeps running;
-	# Cascade itself reads either way (crossing odd, same-hand even), so a count change
-	# never strands it.
-	var out: Array = [tut_intro("%d PROPS" % n,
-		"Your Strength carries another one.\n\n%s and %s step the count down and up whenever you are practising, so you can always drop back to a load you can hold.\n\nMore props climb higher and move faster. Throw a touch higher than feels right." % [String(k_count()[0]), String(k_count()[1])],
-		String(k_count()[1]))]
-	out += tut_paced({"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "catch", "need": 6,
-		"prompt": "catch",
-		"text": "%d balls now" % n,
-		"sub": "Your Strength carries another. It climbs higher and moves faster than before - throw a touch higher than feels right."},
-		[5, 5, 10], "finish the lesson")
-	return out
+	# a new ball count, spoken (see trick_lesson_steps for why the intro card and the three-pass
+	# ladder went). Whatever pattern is already running keeps running; Cascade reads either way
+	# (crossing odd, same-hand even), so a count change never strands it.
+	return [
+		tut_say("Your Strength carries another one. That makes %d." % n),
+		tut_say("More props climb higher and move faster. Throw a touch higher than feels right."),
+		tut_beat("Keep it going: ten clean catches.", "catch", 10, n, {"prompt": "catch"}),
+		tut_say("%s and %s step the count down and up whenever you are practising, so you can always drop back to a load you can hold." % [String(k_count()[0]), String(k_count()[1])]),
+	]
 
 
 func pattern_lesson_steps(p: int) -> Array:
-	# a new pattern: forced via the "pattern" step key, run down the whole pace ladder
-	# with the PATTERNS table's own desc as the teaching text (one source of truth).
+	# a new pattern, spoken (see trick_lesson_steps). The PATTERNS table's own desc is the teaching
+	# text, so there is one source of truth for what a pattern is.
 	if p < 0 or p >= PATTERNS.size():
-		return tut_paced({"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "catch", "need": 3,
-			"text": "Keep the cascade going", "sub": "Land three."}, [3, 3, 3], "finish the lesson")
+		return [tut_beat("Keep the cascade going: land three.", "catch", 3, 3, {"prompt": "catch"})]
 	var pd: Dictionary = PATTERNS[p]
 	var nm := String(pd["name"])
 	var desc := String(pd.get("desc", "Feel out its shape."))
-	var n := 3   # every pattern lesson reads at 3 (Cascade's own even-count face isn't
-				# taught as a separate lesson any more - it's the same skill, see PATTERNS)
-	var out: Array = [tut_intro(nm.to_upper(),
-		"%s\n\n%s is the PATTERN key. One press steps to the next routine you know, any time you are practising - the card at the bottom left always names the one running.\n\nA pattern is the whole shape of the juggle, not a flourish: it needs no timing of its own, it just changes where every throw goes." % [desc, String(k_pattern()[0])],
-		String(k_pattern()[0]))]
-	out += tut_paced({"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "pattern": p,
-		"goal": "catch", "need": 5, "prompt": "catch",
-		"text": "New pattern: %s" % nm, "sub": desc},
-		[4, 4, 8], "see the key patterns live on")
-	# the last step TEACHES the key that owns patterns: one press of P visibly hands
-	# the routine back to the plain weave. The lesson never touches pattern_sel, so
-	# what the player chose before the lesson is exactly what they keep after it.
-	out.append({"prop": PROP_BALLS, "balls": n, "hand": RIGHT, "goal": "press_p", "need": 1,
-		"prompt": "pattern", "slow": 0.4, "next": "finish the lesson",
-		"text": "Patterns live on the P key",
-		"sub": "Press P once: the routine swaps back to the plain weave. In any practice, P chooses your pattern - the bottom-left card always names the one running."})
-	return out
+	var kp := String(k_pattern()[0])
+	var n := 3   # every pattern lesson reads at 3 (Cascade's own even-count face isn't taught as a
+				# separate lesson any more - it's the same skill, see PATTERNS)
+	return [
+		tut_say("%s. %s" % [nm, desc]),
+		tut_say("A pattern is the whole shape of the juggle, not a flourish: it needs no timing of its own, it just changes where every throw goes."),
+		tut_beat("Try it: eight clean catches.", "catch", 8, n, {"pattern": p, "prompt": "catch"}),
+		# the last beat TEACHES the key that owns patterns: one press visibly hands the routine
+		# back to the plain weave. The lesson never touches pattern_sel, so what the player chose
+		# before the lesson is exactly what they keep after it.
+		tut_beat("Patterns live on the pattern key. Press it once and the routine swaps back to the plain weave.  [%s]" % kp,
+			"press_p", 1, n, {"pattern": p, "prompt": "pattern", "key": kp}),
+		tut_say("In any practice, %s chooses your pattern - the card at the bottom left always names the one running." % kp),
+	]
 
 
 func begin_tutorial(id: String) -> void:
@@ -5063,7 +5040,7 @@ func tut_frozen() -> bool:
 	# DO (a frozen beat's catch must always land), and its own tut_hold_names check
 	# would silently swallow every press during a "do" freeze, since tut_hold is empty
 	# for it. This is purely for drawing "is the world visibly stopped right now".
-	return tut_holding() or (tut_active and tut_do_step() and tut_do_ready())
+	return tut_holding() or (tut_active and tut_do_step() and tut_do_ready()) or tut_catch_hold()
 
 
 func tut_style() -> String:
@@ -5319,14 +5296,83 @@ func tut_do_step() -> bool:
 
 func tut_do_ready() -> bool:
 	# should the world actually be held right now, this frame?
-	var g := String(tut_step_data().get("goal", ""))
+	var step := tut_step_data()
+	var g := String(step.get("goal", ""))
 	if g == "throw_l" or g == "throw_r":
+		# THE PEAK HOLD (2026-07-30). The `peak` flag has been carried on the three-ball step
+		# since the script was written and nothing read it - Louis's "pause and highlight the
+		# first ball at its peak and prompt the second throw". Without it this beat froze the
+		# world the instant it began, which is the WRONG instant: it asks the player to throw
+		# the second ball UNDER the first, and the first has only just left the hand. So they
+		# were taught to fire both at once, which is not a cascade, and the line telling them
+		# to wait was contradicted by the game stopping and demanding a key.
+		if bool(step.get("peak", false)):
+			return tut_at_peak()
 		return true
+	# A CATCH BEAT HOLDS AS THE PROP COMES IN, not once it has arrived. It used to be
+	# `tick >= b.land_tick`: the world ran at full speed for the whole flight and only stopped
+	# at the arrival tick itself, so every press a beginner made on the way in was read as a
+	# real, ungraded, un-helped catch - a whiff, or a mistimed one that dropped the ball. The
+	# guard is the same TUT_CATCH_GUARD the stretch-wide hold below uses, so the two cannot
+	# disagree about when a prop is "coming in".
 	var h := LEFT if g == "catch_l" else RIGHT
 	for b in balls:
-		if b.state == STATE_FLIGHT and b.to_hand == h:
-			return tick >= b.land_tick
+		if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball):
+			return tick >= b.land_tick - TUT_CATCH_GUARD
 	return false
+
+
+func tut_at_peak() -> bool:
+	# is a prop sitting at the top of its arc right now? Read off the SIM (half way between the
+	# throw and the arrival is the apex of a parabola, whatever the height or the airtime), so
+	# it is true for any throw the player actually made rather than for a scripted one.
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		var apex := b.launch_tick + int(round(float(b.land_tick - b.launch_tick) * 0.5))
+		if absi(tick - apex) <= TUT_PEAK_WINDOW:
+			return true
+	return false
+
+
+func tut_helped() -> bool:
+	# IS THE PLAYER BEING HELPED RIGHT NOW, as opposed to trying it out? Everything in a lesson
+	# is helped except a `free` beat - which is where Louis explicitly wants dropping to be
+	# possible ("he may try out and drop during the 'try it out and press enter when ready'
+	# phases"). This is deliberately NOT gated on tut_advance_at the way tut_do_step is: the
+	# window where a satisfied beat waits for Enter is exactly where the drops were happening.
+	# The player throws, the beat is met, the banner asks for Enter - and the ball they just
+	# threw goes on flying, unhelped, while they read the line.
+	if not tut_active or collapsing or results_open:
+		return false
+	return String(tut_step_data().get("goal", "")) != "free"
+
+
+func tut_guard_hand() -> int:
+	# which hand has a prop coming in inside TUT_CATCH_GUARD, or -1. The odd-count middle ball
+	# belongs to whichever hand takes it, so it guards the one it is nominally flying to.
+	var best := -1
+	var best_d := TUT_CATCH_GUARD + 1
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		var d := b.land_tick - tick
+		if d < -MISS_GRACE or d > TUT_CATCH_GUARD:
+			continue
+		if d < best_d:
+			best_d = d
+			best = clampi(b.to_hand, 0, 1)
+	return best
+
+
+func tut_catch_hold() -> bool:
+	# THE STRETCH-WIDE HOLD. A helped lesson stops the world whenever a prop is about to land,
+	# whatever the script is currently asking for - so a beginner cannot drop while they are
+	# being taught, which is the whole of Louis's note. A `do` catch beat reaches the same state
+	# through tut_do_ready above; this covers the two cases that one cannot, and they are the
+	# two that were actually losing balls: a beat already satisfied and waiting on Enter, and a
+	# `say` beat that happens to be on screen while something is in the air.
+	return tut_helped() and tut_guard_hand() >= 0
 
 
 func tut_do_autoplay() -> void:
@@ -5629,18 +5675,12 @@ func tut_kind_col() -> Color:
 	return Color(0.85, 0.75, 0.6)
 
 
-func tut_intro(title: String, body: String, cap: String) -> Dictionary:
-	# THE OPENING CARD every lesson now starts on (2026-07-27, Louis: "start it by saying
-	# press P to switch pattern / use space to do the trick"). The live banner is
-	# deliberately tiny and carries no prose - which left the one sentence that says
-	# WHICH KEY this lesson is even about with nowhere to be said. So it gets a card of
-	# its own, before the drill, held open until Enter: the key on a big cap, what it
-	# does, and what the lesson is about to ask for. Nothing is happening on stage yet,
-	# so there is room, and it costs the player exactly one keypress to move past.
-	return {"prop": PROP_BALLS, "balls": 3, "hand": RIGHT, "goal": "read", "need": 0,
-		"slow": 0.5, "intro": true, "cap": cap, "next": "start the drill",
-		"text": title, "sub": body}
-
+# tut_intro() IS GONE TOO (2026-07-30): the full-screen card that opened every non-basics lesson.
+# Same reason as the ladder above - the basics dropped it in July ("Remove all unnecessary text
+# from the current tutorial, the player only needs the buttons that are on the bottom of the
+# screen") and the other lessons now open on spoken lines instead. draw_tut_intro_card and the rest
+# of draw_tutorial_banner are unreachable while every step carries `say`, and are kept as the
+# fallback for a step that somehow carries none rather than deleted blind.
 
 func draw_tut_keyrow(font: Font, s: Vector2) -> void:
 	# THE ONE PIECE OF FURNITURE THE REWRITE KEPT (Louis: "the player only needs the buttons
@@ -5865,20 +5905,9 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(bx + 18.0, by + 22.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, 10, Color(kind_col.r, kind_col.g, kind_col.b, 0.95))
 	draw_fit_string(title_font(), Vector2(bx + 18.0, by + 46.0), String(step["text"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, 19, Color(1.0, 0.92, 0.68))
 	var done := tut_advance_at >= 0
-	# the PACE pips, bottom left: three notches for the three passes, the live one lit and
-	# wider. This is "50% slow, guided" said as a picture, and it also shows at a glance
-	# that there IS a third pass coming where the hand-holding stops.
-	var ph_i := int(step.get("phase", -1))
-	if ph_i >= 0:
-		var pxx := bx + 18.0
-		for i in TUT_PHASES.size():
-			var live := i == ph_i
-			var pw2 := 22.0 if live else 14.0
-			draw_rect(Rect2(pxx, by + bh - 18.0, pw2, 4.0),
-				Color(kind_col.r, kind_col.g, kind_col.b, 0.95) if live else Color(0.62, 0.58, 0.54, 0.45 if i > ph_i else 0.8))
-			pxx += pw2 + 4.0
-		draw_string(font, Vector2(pxx + 6.0, by + bh - 13.0), tut_pace_line(step), HORIZONTAL_ALIGNMENT_LEFT, bw - (pxx - bx) - 24.0, 10,
-			Color(0.72, 0.88, 1.0) if bool(step.get("guide", false)) else Color(1.0, 0.84, 0.5))
+	# THE PACE PIPS CAME OUT WITH THE LADDER (2026-07-30). Three notches for the three passes, the
+	# live one lit - a good picture of a system that no longer exists: no step has a `phase` any
+	# more, so this drew nothing, and it read `tut_pace_line`, which is deleted.
 	# the GOAL pips, bottom right: one dot per catch the step wants, filling as they land.
 	# Capped at twelve dots so a ten-catch finale reads and nothing wider ever could.
 	var need_n := int(step.get("need", 0))
@@ -7600,12 +7629,18 @@ func on_catch(h: int) -> void:
 		# a stamina bar or a chance roll on a press the script demanded teaches nothing.
 		sure = true
 	elif tut_do_step() and tut_do_ready():
-		# THE BASICS' OWN "do" BEAT, held at the ball's own land_tick (tut_do_ready): the
-		# same guarantee as the older tut_hold catch just above, and the same reason - the
-		# beat paused the world at the perfect instant itself, so a stamina bar or a chance
-		# roll must not be allowed to fail a press the script froze the game to demonstrate.
+		# THE BASICS' OWN "do" BEAT, held as the ball comes in (tut_do_ready): the same
+		# guarantee as the older tut_hold catch just above, and the same reason - the beat
+		# paused the world for this press, so a stamina bar or a chance roll must not be
+		# allowed to fail a press the script froze the game to demonstrate.
 		if String(tut_step_data()["goal"]) != ("catch_l" if h == LEFT else "catch_r"):
 			return   # not the hand this beat is holding for
+		sure = true
+	elif tut_catch_hold() and tut_guard_hand() == h:
+		# THE CATCH GUARD's own press. The world is stopped because a prop is arriving during a
+		# helped stretch of the lesson, so the catch lands for exactly the reason the two
+		# branches above land: the game stopped to ask for it. A press on the OTHER hand falls
+		# through to the ordinary path, where it is a whiff and costs nothing but pride.
 		sure = true
 	# a hand that already HOLDS a ball may still catch (Louis): the stack takes
 	# another. The old "hand occupied, no catch" traffic rule is gone - traffic
@@ -7632,6 +7667,14 @@ func on_catch(h: int) -> void:
 		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
 		play_sfx("whiff", -12.0)
 		return
+	if sure:
+		# A HELPED CATCH IS A PERFECT ONE (2026-07-30). Every branch below is skipped for a sure
+		# catch, so it could never be lost - but it was still GRADED on the raw timing, and the
+		# guard now stops the world up to TUT_CATCH_GUARD ticks before the arrival. That put
+		# "LATE" over a beginner's hand for a press the game had frozen itself to demand, which
+		# is the opposite of what the pause is for. Pulled to 1 rather than 0: zero is the
+		# frame-perfect tick that pays an Amazing! burst, and that is a thing to be earned.
+		best_d = mini(best_d, 1)
 	if best_d > late_window() and not sure:
 		# way off the arrival: a genuine mistime, the ball drops
 		drop_ball(best, "MISTIME")
@@ -18708,11 +18751,90 @@ const MENU_FLOOR := 0.80     # where the stage lip sits, so the menu rows can st
 # becomes a magic 27 sitting a hundred lines from the 54 it came from.
 const MENU_ROW_H := 54.0
 const MENU_ROW_GAP := 11.0
+const MENU_ORN_LIFT := 20.0  # how far the gold divider sits ABOVE the first menu card. It used to
+							 # hang 14px under the wordmark, which put it in the middle of the empty
+							 # band between the two - Louis wants it tight to the menu instead.
+
+func menu_swags(s: Vector2) -> void:
+	# THE SWAGS, top left and top right (2026-07-30, Louis: "remove the little decor window on the
+	# left and right along with that little light. You are supposed to add the curtains of the
+	# theater podium on the left and right top instead, you can add nice details there"). This is
+	# the proscenium the boxes were standing in for, and it is the better object for the corner:
+	# a swag FRAMES the picture where a box competes with it, since two lit windows out at the
+	# edges pull the eye away from a wordmark in the middle.
+	#
+	# A SWAG IS A FAN OF FOLDS, and that is the one idea this drawing rests on. Gathered velvet is
+	# pinned at ONE point and every fold runs back to it, so the whole shape is a fan of wedges
+	# sharing an apex, with a scalloped hem where the lobes hang. Drawing it that way means the
+	# folds cannot be wrong: they converge because the cloth does.
+	# **The first attempt drew a few very dark triangles over a plain shape instead**, and they
+	# read as black spikes clawing inward - and it hung a gold tieback rope at the swag's inner
+	# corner, which at that width landed right over the T and the A and looked like two fishing
+	# rods propped against the letters. Alternating CLOSE tones per wedge is what makes cloth;
+	# a big tonal jump makes a hole.
+	var drop := s.y * 0.30          # how far the outer edge of each swag hangs
+	var wide := s.x * 0.18          # ...and how far in from its own side it reaches
+	var lobes := 5
+	var velvet := Color(0.34, 0.070, 0.095)
+	var velvet_lo := Color(0.26, 0.052, 0.074)
+	var gold := Color(0.86, 0.68, 0.32)
+	# THE VALANCE, across the top of the whole frame, so both swags hang off one pelmet rather
+	# than floating in two corners. Brighter than the back wall because it is nearer.
+	var val_h := s.y * 0.055
+	draw_rect(Rect2(0.0, 0.0, s.x, val_h), velvet)
+	for i in 24:
+		var vx := s.x * (float(i) + 0.5) / 24.0
+		fill_ellipse(Vector2(vx, val_h), s.x / 48.0, val_h * 0.34, velvet if i % 2 == 0 else velvet_lo)
+	draw_rect(Rect2(0.0, val_h - 2.0, s.x, 2.0), Color(gold.r, gold.g, gold.b, 0.30))
+	# `side` IS THE DIRECTION INWARD, not which half of the screen. Written the other way round
+	# first, and the left swag's inner corner came out at x = -384: off screen, so only the valance
+	# drew and the corners looked empty. A swag hangs from its own OUTER edge and is pulled toward
+	# the middle, so the sign that matters is the one pointing at the middle.
+	for side: float in [1.0, -1.0]:
+		var ox := 0.0 if side > 0.0 else s.x
+		var pin := Vector2(ox, val_h * 0.35)          # where the cloth is gathered and pinned
+		# the hem: `lobes` + 1 points sweeping from the outer edge up to the inner corner, each
+		# pair of them bellying DOWN in between
+		var hem: Array[Vector2] = []
+		for i in lobes + 1:
+			var f := float(i) / float(lobes)
+			hem.append(Vector2(lerpf(ox, ox + side * wide, f), lerpf(drop, val_h * 1.15, f * f)))
+		# one wedge per fold, all of them back to the pin, in alternating close tones
+		for i in lobes:
+			var a := hem[i]
+			var b := hem[i + 1]
+			var mid := (a + b) * 0.5 + Vector2(0.0, drop * 0.075)   # the belly of this lobe
+			draw_colored_polygon(PackedVector2Array([pin, a, mid, b]),
+				velvet if i % 2 == 0 else velvet_lo)
+		# the gold hem, drawn along the same bellies so it cannot come off the cloth
+		var edge := PackedVector2Array()
+		for i in lobes:
+			edge.append(hem[i])
+			edge.append((hem[i] + hem[i + 1]) * 0.5 + Vector2(0.0, drop * 0.075))
+		edge.append(hem[lobes])
+		# ...faint, because a bright zigzag along a scalloped hem stops reading as a fringe and
+		# starts reading as a lightning bolt. It is here to catch the hem, not to draw it.
+		draw_polyline(edge, Color(gold.r, gold.g, gold.b, 0.26), 1.6)
+		# ...and the ONE piece of jewellery, at the PIN rather than at the inner corner: a boss
+		# where the cloth is gathered, and a short tassel under it. At the corner it overhung the
+		# lettering; at the pin it is what a real swag actually has, and it is out of the way.
+		draw_circle(pin, 7.0, Color(gold.r * 0.9, gold.g * 0.9, gold.b * 0.9))
+		draw_circle(pin + Vector2(-2.0, -2.0), 2.6, Color(1.0, 0.94, 0.72, 0.65))
+		draw_line(pin, pin + Vector2(0.0, drop * 0.10), Color(gold.r, gold.g, gold.b, 0.85), 2.0)
+		var tas := pin + Vector2(0.0, drop * 0.10)
+		draw_colored_polygon(PackedVector2Array([
+			tas + Vector2(-5.0, 0.0), tas + Vector2(5.0, 0.0),
+			tas + Vector2(3.0, drop * 0.06), tas + Vector2(-3.0, drop * 0.06)]), gold)
+		for f2 in 4:
+			var fx := tas.x - 3.0 + float(f2) * 2.0
+			draw_line(Vector2(fx, tas.y + drop * 0.055), Vector2(fx, tas.y + drop * 0.09),
+				Color(gold.r * 0.8, gold.g * 0.8, gold.b * 0.8, 0.85), 1.2)
+
 
 func menu_backdrop(s: Vector2) -> void:
 	# THE HOUSE: the game's own stage, seen from the audience. A title screen's job is to say what
 	# the game IS before a word is read, and this game is a performer walking out in front of a
-	# room - so the room is here: hung velvet, a box either side with heads leaning on the rail,
+	# room - so the room is here: hung velvet, swagged curtains across the top corners,
 	# footlights along the lip, boards for the menu to stand on. What it replaced was a gradient,
 	# one spotlight cone and a row of bulbs floating at the very bottom edge attached to nothing,
 	# which is a lit VOID rather than a theatre.
@@ -18730,7 +18852,6 @@ func menu_backdrop(s: Vector2) -> void:
 	var fy := s.y * MENU_FLOOR
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.135, 0.058, 0.078), Color(0.045, 0.022, 0.032), 22)
 	draw_curtain_wall(s, fy, 0.0, Color(0.150, 0.038, 0.055), 26)
-	draw_theatre_boxes(s, fy)
 	# THE VEIL, the same move draw_backdrop makes over a venue's set dressing and for the same
 	# reason: this cloth is BEHIND the mark and has to lose to it. The first pass had the curtain
 	# at 0.255 red with no veil, and the S's warm balls sat on warm cloth of nearly their own
@@ -18739,6 +18860,11 @@ func menu_backdrop(s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
 	draw_spotlight_cone(s, s.x * 0.5, 0.15)
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
+	# THE SWAGS GO IN FRONT OF THE VEIL AND THE LIGHT, where draw_theatre_boxes used to be (see
+	# menu_swags for why the boxes went). Order is the whole difference between cloth and a stain:
+	# they are the proscenium, the nearest thing in the room, so the veil that pushes the back wall
+	# behind the mark must not also wash them out, and the spotlight cone must not lie over them.
+	menu_swags(s)
 	draw_footlights(s, fy)
 	# the boards, painted LAST over the dressing, with the warm lip draw_backdrop uses - anything
 	# drawn at the floor line itself is buried under them, which is the trap the theatre's own
@@ -18833,23 +18959,32 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# computed off mark_height() at the top end, so a taller A pushes them down instead of drawing
 	# through them - the bug that rule exists for.
 	# THE TAGLINE IS GONE (2026-07-30, Louis: "Remove 'a juggler's climb'"), on the capsule too.
-	var mark_top := s.y * 0.10
-	# ...and the title's mark is width-clamped too, for the same reason the capsules are: MENU_MARK
-	# is a pixel height chosen against a 1280-wide window, and the game does not promise to be
-	# 1280 wide.
-	var msz := int(round(mark_fit_size(s, float(MENU_MARK))))
-	var mark_bot := mark_top + mark_height(float(msz))
-	draw_wordmark(mark_top, msz, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(cx, mark_bot + 14.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
+	# THE MENU IS PLACED FIRST NOW, AND THE MARK IS CENTRED IN WHAT IS LEFT (2026-07-30, Louis: "i
+	# like the tossa word, but move it down a little, so it's centered between the top of the
+	# screen and the Play button. There shouldn't be much room between the yellow thin line and
+	# the play button itself"). The order matters and it is the whole fix: the mark used to be
+	# pinned at 0.10 of the screen with the rows hung off ITS bottom, so the mark could not be
+	# centred against the rows without knowing where the rows were - and they depended on it. Rows
+	# from the stage lip, mark centred above them, divider tucked up against the rows.
 	var nrows := menu_options().size()
 	var rows_h := MENU_ROW_H * float(nrows) + MENU_ROW_GAP * float(nrows - 1)
-	# ...and they stand ON the boards with their feet clear of the lip, not straddling it. The lip
-	# is a bright 3px line with the footlights burning just above it, so a card crossing it gets a
-	# hot line and a row of bulbs showing through its own bottom edge. The clearance is 16px plus
-	# HALF A CARD (2026-07-30, Louis: "move the titlescreen menu: with 3 options a tiny bit higher:
-	# about half the height of one of those option windows, such as Play") - written as
-	# MENU_ROW_H * 0.5 rather than as 27, so a taller row lifts the block by the same proportion.
-	var oy := maxf(s.y * MENU_FLOOR - rows_h - 16.0 - MENU_ROW_H * 0.5, mark_bot + 40.0)
+	# the rows stand ON the boards with their feet clear of the lip, not straddling it. The lip is a
+	# bright 3px line with the footlights burning just above it, so a card crossing it gets a hot
+	# line and a row of bulbs showing through its own bottom edge. The clearance is 16px plus HALF A
+	# CARD (Louis: "move the titlescreen menu ... about half the height of one of those option
+	# windows, such as Play") - written as MENU_ROW_H * 0.5 rather than as 27, so a taller row lifts
+	# the block by the same proportion.
+	var oy := s.y * MENU_FLOOR - rows_h - 16.0 - MENU_ROW_H * 0.5
+	# ...and the title's mark is width-clamped, for the same reason the capsules are: MENU_MARK is a
+	# pixel height chosen against a 1280-wide window, and the game does not promise to be 1280 wide.
+	var msz := int(round(mark_fit_size(s, float(MENU_MARK))))
+	var mark_top := maxf((oy - mark_height(float(msz))) * 0.5, 6.0)
+	var mark_bot := mark_top + mark_height(float(msz))
+	draw_wordmark(mark_top, msz, Color(1.0, 0.88, 0.5), s)
+	# the divider belongs to the MENU, not to the word: it sits MENU_ORN_LIFT above the first card
+	# rather than hanging off the mark's bottom, which is what "not much room between the yellow
+	# thin line and the play button" asks for.
+	draw_ornament(cx, oy - MENU_ORN_LIFT, 300.0, Color(0.82, 0.62, 0.34, 0.85))
 	menu_rows(font, s, oy)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
 	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))

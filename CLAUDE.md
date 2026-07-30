@@ -598,6 +598,68 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
   act resolved, which made the one path only a perfect act can reach impossible to test
   or screenshot at all.
+- **THE CATCH GUARD: A BEGINNER CANNOT DROP WHILE BEING HELPED** (2026-07-30, Louis: "The tutorial
+  is still not pausing when it should ... it should pause the game when the thrown ball comes near
+  the perfect catch timing; that makes sure the beginning player doesn't drop during the tutorial").
+  The bug was real and the log pins it exactly. `tut_do_step()` returns false while
+  `tut_advance_at >= 0` - the window where a beat's goal is MET and the banner is asking for Enter -
+  so instrumenting the guard printed `tick=649 step=8 goal=throw_r adv=629`: a ball arriving during
+  a satisfied throw beat, with nothing frozen, while the player reads the line. **That is where the
+  balls were going.** A catch beat was no better: it held at `tick >= b.land_tick`, so the world ran
+  at full speed for the whole flight and every press a beginner made on the way in was read as an
+  ordinary catch - a whiff, or a mistimed one that dropped the prop.
+  `tut_catch_hold()` stops the world whenever a prop is inside `TUT_CATCH_GUARD` (14 ticks, the same
+  number the older lessons' guided beat already uses, so two mechanisms cannot pause at different
+  distances) **during a HELPED stretch** - `tut_helped()`, which is every beat except a `free` one,
+  because a free beat is exactly where Louis wants dropping to be possible. It is deliberately not
+  gated on `tut_advance_at`. A press on the guarded hand is `sure`, like the other two frozen paths.
+  **AND A HELPED CATCH IS GRADED PERFECT.** `sure` already skipped every branch that could lose the
+  prop, but the catch was still graded on raw timing - so freezing 14 ticks early put "LATE" over a
+  beginner's hand for a press the game had stopped itself to demand. Pulled to 1, not 0: zero is the
+  frame-perfect tick that pays an Amazing! burst, and that is a thing to be earned.
+  **THE PEAK HOLD IS FINALLY READ.** The `peak` flag has ridden on the three-ball step since the
+  script was written and nothing looked at it. Without it that beat froze the instant it began,
+  which is the wrong instant: it asks for the second ball to go UNDER the first and the first has
+  only just left the hand, so the game was teaching both at once - and contradicting its own line.
+  `tut_at_peak()` reads the apex off the sim (half way between launch and arrival is the top of any
+  parabola), so it is true for the throw the player actually made rather than a scripted one.
+- **EVERY LESSON SPEAKS NOW** (2026-07-30, Louis: "fix the 'learn something new' tutorials, which
+  should be given in the same style and layout as the actual tutorial"). The basics were rewritten
+  into a conversation in July; the trick, pattern, prop, count and advanced lessons kept the old
+  presentation for another day - a full-screen intro card, the three-pass slow-motion ladder, a
+  paragraph of `sub` under a top banner. The reason they could not follow was missing plumbing:
+  `tut_say` is a line and Enter, `tut_do` a line and one named key, `tut_free` a line and a count,
+  and none of them can express "a line, and the goal `trick_on`". **`tut_beat(line, goal, need, n,
+  extra)` is that missing builder**, and `say` is the single flag that switches the whole HUD over
+  (see the early-out in `draw_tutorial_banner`), so one helper converted all five families.
+  Every goal, need, count, prop, pattern and reward is unchanged - only the presentation moved. The
+  drills run ONE honest pass at the need the ladder's LAST pass asked for, so nothing got easier,
+  only shorter. **`tut_paced`, `tut_pace_line`, `tut_intro` and `TRICK_TUT_SLOW` are deleted** with
+  the banner's pace pips, which drew a picture of a system that no longer exists. `draw_tut_intro_card`
+  and the rest of the banner are unreachable while every step carries `say` and are kept as the
+  fallback for a step that somehow carries none.
+- **THE PROSCENIUM SWAGS** (2026-07-30, Louis: "remove the little decor window on the left and right
+  along with that little light. You are supposed to add the curtains of the theater podium on the
+  left and right top instead"). `draw_theatre_boxes` was framing the title screen with two lit
+  windows out at the edges, which pull the eye AWAY from a wordmark in the middle - the one thing
+  that screen exists to show. **A SWAG IS A FAN OF FOLDS**, and that is the whole drawing: gathered
+  velvet is pinned at one point and every fold runs back to it, so the shape is a fan of wedges
+  sharing an apex with a scalloped hem where the lobes hang. Drawn that way the folds cannot be
+  wrong, because they converge for the reason the cloth does. Three passes to get there: `side` was
+  written as "which half of the screen" rather than "which way is inward", so the left swag's inner
+  corner landed at x = -384 and only the valance drew; the folds were a few very dark triangles over
+  a plain shape and read as black spikes clawing inward (alternating CLOSE tones per wedge is what
+  makes cloth - a big tonal jump makes a hole); and the gold tieback hung at the inner corner, right
+  over the T and the A, looking like two fishing rods propped against the letters. It is at the PIN
+  now, which is where a real one is. **They draw AFTER the veil and the spotlight**: they are the
+  nearest thing in the room, so the wash that pushes the back wall behind the mark must not also
+  wash them out.
+  **The mark is placed off the MENU now, not the other way round** (Louis: "move it down a little,
+  so it's centered between the top of the screen and the Play button. There shouldn't be much room
+  between the yellow thin line and the play button itself"). The rows come off the stage lip, the
+  mark is centred in the space above them, and the divider sits `MENU_ORN_LIFT` above the first card
+  instead of hanging off the mark's bottom. The order is the fix: the mark could not be centred
+  against rows that were positioned from the mark.
 - **THE A IS TWO CLUBS, AND NOTHING IN THE MARK BURNS ANY MORE** (2026-07-30, Louis: "change the
   two torches into clubs and change to four balls to the two middle balls for the dash of the A").
   Say the consequence out loud, because it is the largest single change the logo has had: **the
