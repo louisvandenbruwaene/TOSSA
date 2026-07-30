@@ -415,3 +415,49 @@ CLAUDE.md's verification section already warns about ("a `--demo` lesson run nev
 itself, so give it a `--shotat`"). It was killed. It also polluted the first round of
 performance numbers here, which is a good argument for checking `pgrep godot` before measuring
 anything.
+
+## 17. The wordmark and the stat milestones (2026-07-30, later)
+
+Louis: "fix the title screen: move the letters closer together to seem more like the word
+tossa, remove the middle torch at the end (in A), also replace the horizontal club with a
+ball. AND: the middle ball in both s's are missing. Remove 'a juggler's climb'. fix the stat
+milestones: they should be nicely spread. right now they look ugly and cramped. (you are
+allowed to change the tricks actual location, the rest you should choose what to show or not,
+don't move other stats around)"
+
+**All five title-screen notes are done, and two of them were bugs.** The S's waist ball was
+being dropped by both loops at once (each loop drops its first and last, and the top loop's
+last IS the bottom loop's first), so every S was cut in half. The A's apex fire was a whole
+third torch, which hung an upright handle down the middle of the letter. `CAP_GAP` went from
+0.13 to 0.045, the crossbar is a ball, and the tagline is off the title screen.
+
+**One thing followed from the third-torch fix and is worth knowing.** `CAP_TORCH_SC`'s comment
+had been complaining for two passes that the A's strokes and its flame could not be sized
+independently, because the flame rode on a handle. Now that the apex fire is drawn WITHOUT a
+handle it has its own scale, so the strokes reach the cap line exactly (0.99 of a letter
+height, up from 0.75) while the flame keeps the size it had. The A reads as a letter rather
+than a bonfire, which is the same goal as moving the letters closer.
+
+**The stat milestones are thinned for DISPLAY only**, in a second function. The important part
+is why it is not a filter inside `stat_milestones`: that list also answers "what does my next
+point buy", and thinning it would make the screen misreport the game (with clubs at Strength
+20 the true next threshold is 24 for a sixth club). So the pips are a summary ladder and the
+line under the track is a fact.
+
+Strength also needed CONTENT, not just thinning: a full set of the prop in hand is Strength 60
+with clubs and 15 with balls, so the top of that track was empty whatever was done to the
+pips. It now carries one row per heavier prop at its full set (15 knives at 90, 15 torches at
+120, 15 chainsaws at 195), which is the same rule and reads as a real ladder of props. The
+three trick walls moved to fill gaps rather than sit on other marks. No prop, count or pattern
+requirement was touched.
+
+**Left alone deliberately, say the word if you want them:**
+- The **store capsule keeps "a juggler's climb"** - the ask was about the title screen, and a
+  storefront capsule usually wants a line under the logo.
+- The **S's still read as clusters more than strokes.** Each loop is 0.45 letter-widths across
+  with balls 0.238 wide, so only three or four fit round a curve and the eye gets a rough
+  diamond. Fixing that properly means smaller balls or a wider loop, i.e. redesigning the
+  letter, not a nudge.
+- **Records and history prints 9,223,372,0...** for the Backyard and the Circus - the INT64
+  sentinel is reaching that board and being clipped mid-number by the column width. It was
+  fixed for goals in an earlier commit; this is a different reader of the same value.
