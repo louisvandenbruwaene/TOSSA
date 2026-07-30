@@ -506,3 +506,36 @@ every window.
 
 **Still open from before:** the S's read as clusters more than strokes (a real letter redesign,
 not a nudge), and Records and history still prints the clipped INT64 sentinel for two venues.
+
+## 19. The A becomes clubs, and the logo loses its fire (2026-07-30, evening)
+
+Louis: "remove the concepts except the current one (for the title screen). i'd like you to change
+the two torches into clubs and change to four balls to the two middle balls for the dash of the
+A. You can add one extra ball to each S, in order to make it smoother and slightly larger." Then:
+"move the titlescreen menu: with 3 options a tiny bit higher: about half the height of one of
+those option windows, such as Play."
+
+All done. **The headline, said plainly: nothing in the wordmark burns any more.** The A's two
+torches are clubs, so the flame at the apex went with them, and `CAP_TORCH_SHAFT` /
+`CAP_TORCH_SC` / `CAP_A_FIRE_SC` are deleted. That is the biggest change the logo has had, and it
+is worth knowing it can be undone in one line (a `cap_torch` call at the apex) if you miss the
+fire.
+
+**Two good things fell out of it.** The A's scale is now solved rather than tuned - a club is all
+stroke, so `CLUB_LEN * cos(lean) * 0.0277` puts the noses exactly on the cap line, where the
+torch version needed three attempts and a separate flame scale to approximate. And the mark got
+half again as big for free: it used to reserve 2.45 letter heights of height for a flame at its
+flicker peak, so a letter height of 108 already ate 280px of a 720px screen. The picture is 1.23
+letter heights now, so `MENU_MARK` went to 168 and the capsule's to 185.
+
+**One bug found on the way.** The 600x900 portrait store capsule was cutting the T and the A off
+at the frame edges. Nothing about that slot had changed - the letters had simply grown (the wider
+S), and every caller was sizing the mark off the frame's HEIGHT with nothing measuring its width.
+There is a `mark_fit_size()` now and all five capsules, the key art and the title screen go
+through it, so a portrait slot can never do that again.
+
+The three losing title backdrops (FIRELIGHT, NIGHT, THE CURTAIN) are deleted along with the
+`--menu N` selector, and `store/concepts/` keeps one current `title_screen.png`. `store/` was
+re-rendered for the new mark.
+
+**Still open:** Records and history prints the clipped INT64 sentinel for two venues.
