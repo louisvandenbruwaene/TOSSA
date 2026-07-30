@@ -461,3 +461,48 @@ requirement was touched.
 - **Records and history prints 9,223,372,0...** for the Backyard and the Circus - the INT64
   sentinel is reaching that board and being clipped mid-number by the column width. It was
   fixed for goals in an earlier commit; this is a different reader of the same value.
+
+## 18. The title screen, four ways (2026-07-30, later still)
+
+Louis: "storefront capsule : jugglers climbs remove it. the ball between the torches should have
+the same size as the other balls in the s, if it's too small to bridge the gap, just use more
+balls. Make the title screen look better!, perhaps just add some of your own ideas in the
+concepts folder, next to the rest"
+
+**The tagline is off the capsule and `store/` was re-rendered.** Removing the string from the
+code does not change the PNG anybody uploads, so `./render_store.sh` ran the whole six-slot set
+again - which also picks up the new club and the new mark, both of which the store art still
+had the old versions of.
+
+**The A's crossbar is four balls at the S's own size.** Sizing one ball to the gap had made it
+the biggest ball in the picture, and a mark built out of props has to be built out of the same
+props or the odd one reads as a different object. One thing to know if it is ever retuned: the
+count is intervals PLUS ONE. Sizing n to the span and spreading n balls across it leaves n-1
+gaps each wider than a ball, which is how the first try came out as three balls with daylight
+between them rather than a bar.
+
+**The title screen: the menu was the last bare `draw_string` list in the game.** Settings and
+Pause were both rebuilt into the card language in July for the reason recorded there, and the
+screen that makes the first impression was still three lines of centred text with `> Play <`
+round the lit one. It has the pause menu's language now - an icon disc, the name, a line saying
+where it goes - and the cards stand on the boards rather than floating over a picture. Nothing
+about the list or the input moved.
+
+**Four backdrops, one layout, in `store/concepts/title_v1..4.png` beside the capsule concepts.**
+Only the set changes between them, the same discipline the capsules follow, so picking is about
+the picture. **1 THE HOUSE ships** - velvet, a box either side with heads on the rail,
+footlights, boards - because a title screen's job is to say what the game is before a word is
+read, and this game is a performer walking out in front of a room. 2 is FIRELIGHT (no set, the
+mark's own torches), 3 is NIGHT (the Midnight Show's language, a roofline and lit windows), 4 is
+THE CURTAIN, CLOSED. Say which one you want and it is a one-line change; `--menu N` shows any of
+them live.
+
+All four are built out of stage furniture the game already owns. Three of this file's own
+lessons came back while doing it and are written up in CLAUDE.md: the curtain needed the same
+VEIL `draw_backdrop` puts over set dressing or it out-shouted the wordmark; FIRELIGHT's embers
+were centred on the mark and scattered sparks through the lettering, where they read as stray
+balls; and NIGHT's roofline was invisible until it got a proper value ladder plus a halo on
+every window.
+
+**Still open from before:** the S's read as clusters more than strokes (a real letter redesign,
+not a nudge), and Records and history still prints the clipped INT64 sentinel for two venues.

@@ -598,6 +598,49 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
   act resolved, which made the one path only a perfect act can reach impossible to test
   or screenshot at all.
+- **THE TITLE SCREEN IS A ROOM** (2026-07-30, Louis: "Make the title screen look better!, perhaps
+  just add some of your own ideas in the concepts folder, next to the rest"). Two halves, and the
+  first is not taste. **THE MENU WAS THE LAST BARE `draw_string` LIST IN THE GAME.** Settings and
+  Pause were both rebuilt off centred text rows into the shared card language in July for the
+  reason written down there - a flat row of text reads as cheap beside the shop and the sheet -
+  and the TITLE screen, the one that makes the first impression, was still doing it. `menu_rows`
+  gives the three options the pause menu's own language: an icon disc saying what the row does,
+  the name, a line under it saying where it goes, the lit one raised on its own colour. Nothing
+  about the list moved: `menu_options()` still decides what the rows ARE and `menu_input` still
+  drives `menu_sel`, so the dressing is a lookup keyed on the option's name and a name it does not
+  know simply draws plain.
+  **THE ROWS STAND ON THE BOARDS.** `oy` used to be a flat fraction of the screen with a
+  `mark_height()` floor under it; the cards are now laid so their FEET land just above the stage
+  lip (`MENU_FLOOR`), which is what makes them furniture in the room instead of text floating over
+  a picture of one. Clear of the lip by 16px on purpose - it is a bright 3px line with the
+  footlights burning right above it, and a card crossing it gets a hot line and a row of bulbs
+  showing through its own bottom edge.
+  **FOUR PICTURES, ONE LAYOUT** (`menu_backdrop`, `--menu N`, rendered to
+  `store/concepts/title_v1..4.png` beside the capsule concepts). Only the SET changes between
+  them - mark, rows and frame are identical in all four, the same discipline the five store
+  capsules follow, so a comparison is about the picture rather than about four layouts. **1 THE
+  HOUSE ships**: hung velvet, a box either side with heads on the rail, footlights along the lip,
+  boards for the menu to stand on. A title screen's job is to say what the game IS before a word
+  is read, and this game is a performer walking out in front of a room - the old picture was a
+  gradient, one cone and a row of bulbs floating at the bottom edge attached to nothing, which is
+  a lit VOID rather than a theatre. 2 FIRELIGHT (no set, the mark's own torches the only light),
+  3 NIGHT (the Midnight Show's language), 4 THE CURTAIN, CLOSED. Every one is built out of
+  furniture the stage already owns, which is the point: the title screen should be a room this
+  game already has, not a fifth art style.
+  **Three things went wrong on the way and all three are this file's own lessons, met again.**
+  (1) The curtain went in at 0.255 red with no veil, so the S's warm balls sat on warm cloth of
+  nearly their own value - the wordmark, the one thing that has to read instantly, had the least
+  contrast on the screen. It takes the same veil `draw_backdrop` washes over a venue's set
+  dressing, for the same reason: cloth behind the mark has to lose to it. (2) FIRELIGHT centred
+  `capsule_embers` on the mark and scattered thirty sparks THROUGH the lettering, where they read
+  as stray balls among the S's - the one thing a mark made of balls cannot afford. Dropped: the A
+  already sheds real embers off its own torches, placed by the fire that makes them. (3) NIGHT's
+  roofline was near-black on a sky that gets DARKER toward the horizon, so the bottom third went
+  to one flat black and only the lit windows showed, floating like tan bricks. That is the
+  Midnight Show's value-ladder rule and it is a LADDER: a wash of town light just above the
+  roofline first so the sky is brightest exactly where the roofs cut into it, then roofs clearly
+  above the sky's value, then windows well above both - and each window gets a halo, because a
+  lamp without one is just a brighter rectangle.
 - **THE WORDMARK READS AS A WORD** (2026-07-30, Louis: "move the letters closer together to seem
   more like the word tossa; remove the middle torch at the end (in A); replace the horizontal
   club with a ball; the middle ball in both s's are missing; remove 'a juggler's climb'"). Five
@@ -623,21 +666,32 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   is recomputed from the same arithmetic that is written out beside it - the two terms moved in
   OPPOSITE directions and the total still grew, which is exactly why that block is arithmetic and
   not a nudge.
-  **THE CROSSBAR IS A BALL**, which is the right object by the game's own naming: the mark is
-  TOSS plus the letter a real juggling ball stands in for, which is what `TITLE_MARK` has said
-  from the start. It also solves what a club could not - a club is a LONG thing laid across two
-  strokes, so it had to be scaled to the gap, angled to the strokes and centred on its own
-  balance point, and it still read as a stick resting against the letter. `CAP_A_BALL` (0.46) is
-  its radius as a fraction of the GAP between the strokes: half would touch both exactly, which
-  reads as a ball in a vice. **The whole `CAP_CLUB_KNOB/_TIP/_LEN/_MID` block is deleted** - it
-  existed only because the LAYOUT needed the club's extent out there, and the club's own
-  measurements are `CLUB_BUTT_Y` / `CLUB_NOSE_Y` beside the profile that draws it.
+  **THE CROSSBAR IS BALLS**, which is the right object by the game's own naming: the mark is TOSS
+  plus the letter a real juggling ball stands in for, which is what `TITLE_MARK` has said from the
+  start. It also solves what a club could not - a club is a LONG thing laid across two strokes, so
+  it had to be scaled to the gap, angled to the strokes and centred on its own balance point, and
+  it still read as a stick resting against the letter. **And it is the S's ball at the S's size,
+  as many as it takes** (Louis, same day: "the ball between the torches should have the same size
+  as the other balls in the s, if it's too small to bridge the gap, just use more balls"). The
+  first version sized ONE ball to the gap, which made it far and away the biggest ball in the
+  picture - and a wordmark built out of props has to be built out of the SAME props, or the eye
+  reads the odd one as a different object rather than as the same material spelling a different
+  letter. So the radius is `CAP_BALL_R`, exactly what each ball in an S gets, and the COUNT does
+  the bridging: four at every size the mark is drawn. **The count is intervals PLUS ONE** - sizing
+  n to the span and then spreading n balls across it divides the span into n-1 gaps, each wider
+  than a ball, which laid three balls with daylight between them. `CAP_A_BALL` went with that, and
+  so did the whole `CAP_CLUB_KNOB/_TIP/_LEN/_MID` block: it existed only because the LAYOUT needed
+  the club's extent out there, and the club's own measurements are `CLUB_BUTT_Y` / `CLUB_NOSE_Y`
+  beside the profile that draws it.
   **`CAP_GAP` is 0.045**, down from 0.20 then 0.13. Third time on the same note, so a decisive
   cut rather than another shave: `cap_letter_width` measures each letter's real extent, so a gap
   here is true daylight between two objects rather than slack in a bounding box, and a word is
-  letters that nearly touch. The tagline came off the title screen and the menu rows moved UP
-  into the room it left, still measured off `mark_height()` - **the store capsule keeps it**,
-  since the ask was about the title screen and a storefront capsule wants a line.
+  letters that nearly touch. **The tagline is off both screens** - it came off the title screen
+  first and the capsule was left for one commit on the argument that a storefront capsule wants a
+  line under the logo. It does not want THIS one (Louis: "storefront capsule : jugglers climbs
+  remove it"), and the mark is the same mark in both places. **`store/` was re-rendered**, because
+  removing a string from the code does not change a PNG somebody uploads: `./render_store.sh` is
+  the whole set in one command and it must be run after anything that changes the key art.
 - **THE STAT MILESTONES ARE THINNED FOR DISPLAY, AND THAT IS A SECOND FUNCTION** (2026-07-30,
   Louis: they "look ugly and cramped ... you are allowed to change the tricks actual location,
   the rest you should choose what to show or not, don't move other stats around"). Strength
