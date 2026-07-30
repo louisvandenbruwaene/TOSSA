@@ -731,8 +731,43 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   hanging in the dark beside the curtain is the opposite of the read wanted. The tie row moved from
   0.47 to 0.56 down the leg ("a bit lower"), which is one number in `DRAPE_SILHOUETTE` because the
   cord, the bow and the pinch all read that table.
+  **A CURTAIN DOES NOT FLARE BACK OUT BELOW ITS TIEBACK - "that's just physics"** (Louis). The
+  silhouette ran 0.58 at the tie back up to 0.96 at the boards, a 65% widening, which is a curtain
+  that somehow finds cloth it does not have. Below the tie the drape hangs FROM the tie and falls
+  nearly straight, spreading only a little as it pools: 0.58 -> 0.63 -> 0.69. It is the same table,
+  so nothing else had to know.
+  **THE NICKS IN THE OUTLINE WERE TWO DIFFERENT FAULTS, and neither was aliasing.** (1) FACETING:
+  `DRAPE_ROWS` was 20, and 20 straight segments across a curve that turns as hard as a tieback does
+  shows its corners. The bake runs ONCE, so rows are free - it is 44. (2) THE FEATHER WAS OFFSET
+  SIDEWAYS. A flat 2.2px horizontal offset is a 2.2px feather only where the edge is VERTICAL; where
+  the silhouette turns hardest - right at the tieback, which is exactly where the eye is - the edge
+  is steeply slanted and the true perpendicular width of that same offset collapses, so the
+  softening thinned out precisely at the corners that needed it most. It is measured off the
+  neighbouring rows' normal now, so it follows whatever the silhouette table says without being told.
   **They draw AFTER the veil and the spotlight**: they are the nearest thing in the room, so the
   wash that pushes the back wall behind the mark must not also wash them out.
+- **THE APP ICON IS A LOGO TOO, and it does not follow the code** (2026-07-30, Louis: "the logo of
+  tossa still has the old ball logo's"). The title-screen wordmark had been `cap_ball` all along -
+  the stale one was `icon.svg`, three bare `<circle>` elements, which is the flat disc `cap_ball`
+  replaced, and behind it `export/icons/icon_1024.png`, `TOSSA.icns` and `TOSSA.ico`. **The store
+  capsules were fine** precisely because they are RE-RENDERED from the running game; the icon is the
+  one piece of TOSSA's identity that is hand-authored art, so it is the one piece that silently keeps
+  whatever it was drawn as. The store/ set is dated after the ball landed and the icon is dated
+  before it - checking the two dates against the commit that added `cap_ball` is what pinned it in
+  seconds.
+  It is generated now, from `cap_ball`'s own numbers - body, the tapered S-seam polygon, the broad
+  dim sheen, the concentric rim - and `ball_color(0..2)`, so the icon is the same object the game
+  draws. **The rim is the one value that could not be copied literally**: the game floors it at 1.7
+  SCREEN pixels, and a vector icon has no screen pixels, so a floor written as `1.7 * (r/11)` came
+  out proportionally heavier than any ball in the game. `r * 0.14` sits inside the range the real
+  ball actually occupies (0.155r when the floor binds at r=11, 0.13r at the shop's r=45).
+  **No rasteriser on this Mac** (no rsvg/inkscape/ImageMagick - the same hole the Brave-to-PDF note
+  records): Brave headless renders the SVG with `--default-background-color=00000000` for real
+  transparency, `iconutil` builds the `.icns` from a `sips`-resized iconset, and the `.ico` is
+  written directly - since Vista an ICO entry may be a whole PNG, so it is a 6-byte header, a
+  16-byte directory entry per size and the PNGs concatenated. `file` confirms all three.
+  **The Dock will keep showing the old one** until `./install_apps.sh` runs (it copies the icns into
+  the wrapper and busts macOS's icon cache) - that writes outside the repo, so it is Louis's call.
 - **ONE BALL, EVERYWHERE - and how to find the next one of these** (2026-07-30, Louis: "check the
   rest of the program for inconsistent artstyle: because i noticed that the game save file cards had
   a different, older, ball design"). He was right, and it was in three places, not one. `cap_ball`
