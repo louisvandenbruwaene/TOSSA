@@ -598,6 +598,49 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   **`--demo` now waits for the ovation before quitting**: it used to quit the frame the
   act resolved, which made the one path only a perfect act can reach impossible to test
   or screenshot at all.
+- **THE A IS TWO CLUBS, AND NOTHING IN THE MARK BURNS ANY MORE** (2026-07-30, Louis: "change the
+  two torches into clubs and change to four balls to the two middle balls for the dash of the A").
+  Say the consequence out loud, because it is the largest single change the logo has had: **the
+  fire is gone.** The A was two torch shafts with a flame at the apex, and the flame is what the
+  letter kept being read as - a bonfire, then a campfire, across three passes and two rebuilds.
+  `CAP_TORCH_SHAFT`, `CAP_TORCH_SC` and `CAP_A_FIRE_SC` are deleted with it. A torch is 19 units
+  of handle under 22 of fire, so the strokes could never be lengthened without the flame growing
+  with them; a club is all stroke and has a NOSE where a torch has a wick, so the apex is a POINT
+  and `CAP_A_CLUB_SC` is SOLVED rather than tuned - `CLUB_LEN * cos(CAP_A_LEAN) * 0.0277 = 1.000`,
+  the strokes reach the cap line exactly. The lean is unchanged, which is why the letter's
+  proportions did not move when the object inside it did. If a flame is ever wanted back it is one
+  `cap_torch` call at the apex.
+  **THE DASH IS THE TWO MIDDLE BALLS OF THE FOUR.** Four spanning stroke to stroke made a solid
+  bar wedged into the letter; two leave daylight either side, which is what a stencilled A's
+  crossbar looks like. Done by dropping the first and last of the row rather than by placing two
+  balls at hand-picked fractions - the same trick each S loop uses on its tips - so the count still
+  comes off the gap and the dash cannot drift into the strokes at another size.
+  **AND THE MARK GOT HALF AGAIN AS BIG FOR FREE.** `MARK_RISE` fell from 2.45 letter heights to
+  1.06: a flame at its flicker peak reached 1.42 above a wick already a letter height up, so for
+  three passes the picture reserved two and a half letter heights for something whose LETTERS only
+  filled one. Everything places the mark off `mark_height()` - the title screen, all five capsules,
+  the credits, the key art - so the whole composition tightened the moment that number came down,
+  which is exactly why those callers were made to read it. `MENU_MARK` went 108 -> 168 and the
+  capsule's own size 112 -> 185 with its block CENTRED off `mark_height()` instead of a
+  hand-picked 0.30, and **the capsule's little juggling cascade came off**: on a still storefront
+  thumbnail it read as three stray balls and a brown streak over the word, which is
+  indistinguishable from a rendering fault.
+  **A WORDMARK NEEDS A WIDTH CLAMP, and this is how that got found.** Every caller sized the mark
+  off the frame's HEIGHT, which is fine at 16:9 and wrong the moment a slot is portrait: the
+  600x900 store capsule, rendered at 840x1006, put an 865px word through an 840px frame and cut
+  the T and the A off at the edges. **Nothing about that slot had changed** - the letters had grown
+  (a wider S) and a width nobody measured went over. `mark_width()` is the layout loop factored
+  out so a caller can ASK, and `mark_fit_size()` returns the largest letter height that fits, which
+  is exact rather than a search because width scales linearly with size. All five capsules, the key
+  art and the title screen go through it now.
+  **The S's carry one more ball each and a bigger loop** (Louis: "You can add one extra ball to
+  each S, in order to make it smoother and slightly larger"), and the two halves of that note are
+  one change: the extra ball is what buys the room to grow the loop without the balls parting
+  company. The spacing is arithmetic - a loop carries its balls over a 1.5PI arc, so the gap
+  between neighbours is `1.5 * PI * CAP_S_R / (CAP_S_BALLS - 1)` against a ball `2 * CAP_BALL_R`
+  across: at 6 and 0.245 that is 0.231 against 0.238, a 3% overlap, where the old 5 and 0.225 gave
+  0.265 against 0.238 and a visible gap between every pair. Seven was tried once and closed the
+  stroke into a solid ring.
 - **THE TITLE SCREEN IS A ROOM** (2026-07-30, Louis: "Make the title screen look better!, perhaps
   just add some of your own ideas in the concepts folder, next to the rest"). Two halves, and the
   first is not taste. **THE MENU WAS THE LAST BARE `draw_string` LIST IN THE GAME.** Settings and
@@ -615,18 +658,20 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   a picture of one. Clear of the lip by 16px on purpose - it is a bright 3px line with the
   footlights burning right above it, and a card crossing it gets a hot line and a row of bulbs
   showing through its own bottom edge.
-  **FOUR PICTURES, ONE LAYOUT** (`menu_backdrop`, `--menu N`, rendered to
-  `store/concepts/title_v1..4.png` beside the capsule concepts). Only the SET changes between
-  them - mark, rows and frame are identical in all four, the same discipline the five store
-  capsules follow, so a comparison is about the picture rather than about four layouts. **1 THE
-  HOUSE ships**: hung velvet, a box either side with heads on the rail, footlights along the lip,
-  boards for the menu to stand on. A title screen's job is to say what the game IS before a word
-  is read, and this game is a performer walking out in front of a room - the old picture was a
-  gradient, one cone and a row of bulbs floating at the bottom edge attached to nothing, which is
-  a lit VOID rather than a theatre. 2 FIRELIGHT (no set, the mark's own torches the only light),
-  3 NIGHT (the Midnight Show's language), 4 THE CURTAIN, CLOSED. Every one is built out of
-  furniture the stage already owns, which is the point: the title screen should be a room this
-  game already has, not a fifth art style.
+  **FOUR PICTURES WERE BUILT AND ONE SURVIVES** (`menu_backdrop`). They were `--menu N` variants
+  rendered to `store/concepts/`, only the SET changing between them - mark, rows and frame
+  identical in all four, the same discipline the five store capsules follow, so the choice was
+  about the picture rather than about four layouts. Louis picked **THE HOUSE**: hung velvet, a box
+  either side with heads on the rail, footlights along the lip, boards for the menu to stand on. A
+  title screen's job is to say what the game IS before a word is read, and this game is a
+  performer walking out in front of a room - the old picture was a gradient, one cone and a row of
+  bulbs floating at the bottom edge attached to nothing, which is a lit VOID rather than a
+  theatre. FIRELIGHT, NIGHT and THE CURTAIN, CLOSED **were deleted with the selector** (Louis:
+  "remove the concepts except the current one"), the same rule the F9 panel follows - an
+  experiment that wins leaves the panel and the version it beat is deleted rather than stranded
+  behind a switch nobody will flip. They are in git, with their renders, in the commit that added
+  them. Every one was built out of furniture the stage already owns, which is the point: the title
+  screen should be a room this game already has, not a fifth art style.
   **Three things went wrong on the way and all three are this file's own lessons, met again.**
   (1) The curtain went in at 0.255 red with no veil, so the S's warm balls sat on warm cloth of
   nearly their own value - the wordmark, the one thing that has to read instantly, had the least

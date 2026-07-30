@@ -1799,9 +1799,6 @@ var _collcheck := false   # dev: --collcheck measures the tightest mid-air clear
 						  # of the session (throw inaccuracy zeroed, so it audits the
 						  # IDEAL pattern geometry), printed on the --shot capture
 var _capsule_variant := 0   # dev: which --capsule picture (0 = the original)
-# WHICH TITLE PICTURE SHIPS. Not a debug variable: 1 is the shipped look and `--menu N` only
-# overrides it for a concept render, so a release build always draws the one chosen here.
-var _menu_look := 1
 var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
 var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
 # ...AND THE SAME MEASUREMENT AT DRAWN SIZE (2026-07-28, Louis, of the Half Shower's two
@@ -1972,11 +1969,9 @@ func _ready() -> void:
 	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
 		_handlog = true
 	var skip_menu := _demo or _shot or _collcheck or _handlog or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
-	var mni := ua.find("--menu")   # dev: hold the title screen (it is what --shot skips past),
-	if mni != -1:                  # and an optional 1..MENU_LOOKS picks one of its four pictures,
-		skip_menu = false          # the same shape --capsule already uses for its five
-		if mni + 1 < ua.size() and not ua[mni + 1].begins_with("--"):
-			_menu_look = clampi(int(ua[mni + 1]), 1, MENU_LOOKS)
+	if ua.has("--menu"):   # dev: hold the title screen, which is what --shot otherwise skips past.
+		skip_menu = false  # It briefly took a 1..4 variant while the four backdrops were being
+						   # compared; there is one picture again, so there is nothing to pick.
 	if skip_menu:
 		save_slot = 0
 		load_progress()
@@ -13219,8 +13214,9 @@ const CLUB_PROF := [
 	[-14.0, 4.10], [-17.0, 4.02], [-19.0, 3.74],                           # widest at -14, held to -17
 	[-20.6, 3.20], [-21.7, 2.40], [-22.3, 1.40], [-22.5, 0.0],             # then the dome
 ]
-const CLUB_BUTT_Y := 17.8     # = CAP_CLUB_KNOB
-const CLUB_NOSE_Y := -22.5    # = CAP_CLUB_TIP
+const CLUB_BUTT_Y := 17.8     # the knob's far edge
+const CLUB_NOSE_Y := -22.5    # ...and the nose's, so the club's whole extent is these two
+const CLUB_LEN := CLUB_BUTT_Y - CLUB_NOSE_Y   # 40.3, and the wordmark's A is built off it
 const CLUB_COLLAR_Y := 2.0    # where the pale handle gives way to the coloured body
 const CLUB_BAND_Y := -11.0    # the decorated band round the body, the mark that says "juggling club"
 
@@ -18705,108 +18701,55 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 #endregion
 
 #region MAIN MENU SCREEN
-const MENU_LOOKS := 4        # how many title pictures exist; `--menu N` renders one of them
 const MENU_FLOOR := 0.80     # where the stage lip sits, so the menu rows can stand ON it
+# ONE ROW'S SIZE, named because THREE places measure off it: menu_rows draws with it, draw_menu
+# sizes the block from it, and the block's clearance above the stage lip is half of it. Written as
+# literals in two of those three for one commit, which is how a "lift it by half a card" note
+# becomes a magic 27 sitting a hundred lines from the 54 it came from.
+const MENU_ROW_H := 54.0
+const MENU_ROW_GAP := 11.0
 
-func menu_backdrop(s: Vector2, look: int) -> void:
-	# THE FOUR TITLE PICTURES (2026-07-30, Louis: "Make the title screen look better!, perhaps
-	# just add some of your own ideas in the concepts folder, next to the rest"). Only the SET
-	# changes between them - the mark, the rows and the frame are identical in all four, the same
-	# discipline the five store capsules already follow, so a comparison is about the picture
-	# rather than about four different layouts. Rendered to `store/concepts/title_v1..4.png` by
-	# `--menu N`, beside the capsule concepts.
+func menu_backdrop(s: Vector2) -> void:
+	# THE HOUSE: the game's own stage, seen from the audience. A title screen's job is to say what
+	# the game IS before a word is read, and this game is a performer walking out in front of a
+	# room - so the room is here: hung velvet, a box either side with heads leaning on the rail,
+	# footlights along the lip, boards for the menu to stand on. What it replaced was a gradient,
+	# one spotlight cone and a row of bulbs floating at the very bottom edge attached to nothing,
+	# which is a lit VOID rather than a theatre.
 	#
-	# Every one of them is built out of furniture the stage already owns (`draw_curtain_wall`,
-	# `draw_theatre_boxes`, `draw_footlights`, `draw_stars`, `draw_spotlight_cone`). That is the
-	# point: the title screen should be a room this game already has, not a fifth art style.
+	# THREE OTHER PICTURES WERE BUILT AND ARE DELETED (2026-07-30, Louis: "remove the concepts
+	# except the current one"). FIRELIGHT (no set, the mark's own light), NIGHT (the Midnight
+	# Show's language, a roofline and lit windows) and THE CURTAIN, CLOSED were rendered to
+	# store/concepts/ as `--menu N` variants, Louis picked this one, and the losers came out with
+	# the selector - the same rule the F9 panel follows, where an experiment that wins leaves the
+	# panel and the version it beat is deleted rather than left stranded behind a switch nobody
+	# will ever flip. They are in git, and the renders are in the commit that added them.
+	#
+	# Every piece of this is furniture the stage already owns, which is the point: the title screen
+	# should be a room this game already has, not a fifth art style.
 	var fy := s.y * MENU_FLOOR
-	match look:
-		2:
-			# FIRELIGHT. No set at all: the mark's own two torches are the only light in the
-			# room, and what they light is smoke and embers. The one that trusts the logo.
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.085, 0.042, 0.032), Color(0.012, 0.008, 0.011), 22)
-			draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.62, Color(1.0, 0.52, 0.20, 0.22))
-			draw_glow(Vector2(s.x * 0.5, s.y * 0.24), s.y * 0.34, Color(1.0, 0.74, 0.34, 0.17))
-			# NO SECOND SET OF EMBERS. `capsule_embers` centred on the mark was the first try and
-			# it scattered thirty sparks THROUGH the lettering - they came out reading as stray
-			# balls among the S's, which is the one thing a mark made of balls cannot afford. The A
-			# already sheds real embers off its own two torches, and those are placed by the fire
-			# that makes them, so they can never land somewhere the fire is not.
-			draw_dust(s, 20, Color(1.0, 0.85, 0.55))
-		3:
-			# NIGHT. The Midnight Show's language on the title screen: a cold sky, a rooftop
-			# line, and the torches as the only warm thing in the frame. Needs its VALUE LADDER
-			# kept (see the dark-scene note in CLAUDE.md) - sky darkest, roofs above it, windows
-			# well above both - or it is one blue smudge.
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.030, 0.048, 0.082), Color(0.010, 0.016, 0.030), 22)
-			draw_stars(s, 54, 0.78)
-			draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.50, Color(1.0, 0.62, 0.26, 0.10))
-			# A SILHOUETTE IS READ AGAINST SOMETHING, and the first pass forgot to give it
-			# anything: near-black roofs on a sky that gets DARKER toward the horizon, so the
-			# whole bottom third went to one flat black and the only things visible were the lit
-			# windows, floating like tan bricks in a void. This is the value-ladder rule from the
-			# Midnight Show, and it is a LADDER: a wash of town light just above the roofline
-			# first, so the sky is at its brightest exactly where the roofs cut into it; then the
-			# roofs clearly above the sky's own value rather than below it; then the windows well
-			# above both. Brightening the roofs alone would only have made grey fog.
-			draw_glow(Vector2(s.x * 0.5, fy - s.y * 0.02), s.y * 0.42, Color(0.42, 0.55, 0.90, 0.16))
-			var roof := Color(0.052, 0.062, 0.098)
-			var rx := 0.0
-			var ri := 0
-			while rx < s.x:
-				var rw := s.x * (0.11 + 0.055 * float((ri * 7) % 3))
-				var rh := s.y * (0.055 + 0.028 * float((ri * 5) % 4))
-				draw_rect(Rect2(rx, fy - rh, rw + 1.0, rh + s.y), roof)
-				if ri % 2 == 0:
-					draw_rect(Rect2(rx + rw * 0.62, fy - rh - s.y * 0.030, rw * 0.16, s.y * 0.030), roof)
-				# one lit window per third block, and it gets a HALO - a lamp without one is just
-				# a brighter rectangle, which is exactly what the first pass drew. Small, too: at
-				# the size the first try used they read as bricks rather than as windows.
-				if ri % 3 == 1:
-					var wc := Vector2(rx + rw * 0.34, fy - rh * 0.58)
-					draw_glow(wc, s.y * 0.055, Color(1.0, 0.78, 0.40, 0.16))
-					draw_rect(Rect2(wc.x, wc.y, rw * 0.085, s.y * 0.017), Color(1.0, 0.82, 0.46, 0.80))
-				rx += rw
-				ri += 1
-			draw_dust(s, 14, Color(0.75, 0.85, 1.0))
-		4:
-			# THE CURTAIN, CLOSED. Velvet floor to ceiling and the mark hanging on it like a
-			# poster in a foyer. The quietest of the four, and the only one with no floor.
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.055), Color(0.035, 0.016, 0.026), 20)
-			draw_curtain_wall(s, s.y + 8.0, -8.0, Color(0.30, 0.070, 0.10), 28)
-			draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.012, 0.02, 0.32))
-			draw_spotlight_cone(s, s.x * 0.5, 0.13)
-			draw_glow(Vector2(s.x * 0.5, s.y * 0.34), s.y * 0.58, Color(1.0, 0.72, 0.34, 0.16))
-			draw_dust(s, 20, Color(1.0, 0.85, 0.55))
-		_:
-			# 1. THE HOUSE, and this is the one that ships. A title screen's job is to say what
-			# the game IS before a word is read, and this game is a performer walking out in
-			# front of a room: so the room is here - hung velvet, a box either side with heads
-			# leaning on the rail, footlights along the lip, boards for the menu to stand on.
-			# The old picture had a gradient, one cone and a row of bulbs floating at the very
-			# bottom edge attached to nothing, which is a lit VOID, not a theatre.
-			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.135, 0.058, 0.078), Color(0.045, 0.022, 0.032), 22)
-			draw_curtain_wall(s, fy, 0.0, Color(0.150, 0.038, 0.055), 26)
-			draw_theatre_boxes(s, fy)
-			# THE VEIL, the same move draw_backdrop makes over a venue's set dressing and for the
-			# same reason: this cloth is BEHIND the mark and has to lose to it. The first pass had
-			# the curtain at 0.255 red with no veil, and the S's warm balls were sitting on warm
-			# cloth of nearly their own value - the wordmark, the one thing on the screen that
-			# must read instantly, had the least contrast on it.
-			draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
-			draw_spotlight_cone(s, s.x * 0.5, 0.15)
-			draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
-			draw_footlights(s, fy)
-			# the boards, painted LAST over the dressing, with the warm lip draw_backdrop uses -
-			# anything drawn at the floor line itself is buried under them, which is the trap
-			# the theatre's own furniture note already records
-			draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.20, 0.105, 0.085))
-			draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(1.0, 0.72, 0.34, 0.13), Color(1.0, 0.72, 0.34, 0.0), 8)
-			draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(1.0, 0.74, 0.36, 0.5), 3.0)
-			for i in 9:   # plank seams, faint: texture without pattern
-				var px2 := s.x * (float(i) + 0.5) / 9.0
-				draw_line(Vector2(px2, fy + 2.0), Vector2(px2 + s.x * 0.04, s.y), Color(0.0, 0.0, 0.0, 0.10), 1.5)
-			draw_dust(s, 22, Color(1.0, 0.85, 0.55))
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.135, 0.058, 0.078), Color(0.045, 0.022, 0.032), 22)
+	draw_curtain_wall(s, fy, 0.0, Color(0.150, 0.038, 0.055), 26)
+	draw_theatre_boxes(s, fy)
+	# THE VEIL, the same move draw_backdrop makes over a venue's set dressing and for the same
+	# reason: this cloth is BEHIND the mark and has to lose to it. The first pass had the curtain
+	# at 0.255 red with no veil, and the S's warm balls sat on warm cloth of nearly their own
+	# value - the wordmark, the one thing on the screen that must read instantly, had the least
+	# contrast on it.
+	draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
+	draw_spotlight_cone(s, s.x * 0.5, 0.15)
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
+	draw_footlights(s, fy)
+	# the boards, painted LAST over the dressing, with the warm lip draw_backdrop uses - anything
+	# drawn at the floor line itself is buried under them, which is the trap the theatre's own
+	# furniture note already records
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.20, 0.105, 0.085))
+	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(1.0, 0.72, 0.34, 0.13), Color(1.0, 0.72, 0.34, 0.0), 8)
+	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(1.0, 0.74, 0.36, 0.5), 3.0)
+	for i in 9:   # plank seams, faint: texture without pattern
+		var px2 := s.x * (float(i) + 0.5) / 9.0
+		draw_line(Vector2(px2, fy + 2.0), Vector2(px2 + s.x * 0.04, s.y), Color(0.0, 0.0, 0.0, 0.10), 1.5)
+	draw_dust(s, 22, Color(1.0, 0.85, 0.55))
 
 
 func menu_rows(font: Font, s: Vector2, oy: float) -> void:
@@ -18825,8 +18768,8 @@ func menu_rows(font: Font, s: Vector2, oy: float) -> void:
 	}
 	var opts := menu_options()
 	var cw := 340.0
-	var ch := 54.0
-	var gap := 11.0
+	var ch := MENU_ROW_H
+	var gap := MENU_ROW_GAP
 	var cx0 := s.x * 0.5 - cw * 0.5
 	for i in opts.size():
 		var nm := String(opts[i])
@@ -18864,7 +18807,7 @@ func menu_rows(font: Font, s: Vector2, oy: float) -> void:
 
 func draw_menu(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
-	menu_backdrop(s, _menu_look)
+	menu_backdrop(s)
 
 	# THE TITLE, and everything under it placed off the MARK'S REAL BOTTOM rather than off
 	# a guess (2026-07-28). The prop mark is a picture, not a line of type: the A's torch
@@ -18890,16 +18833,23 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# computed off mark_height() at the top end, so a taller A pushes them down instead of drawing
 	# through them - the bug that rule exists for.
 	# THE TAGLINE IS GONE (2026-07-30, Louis: "Remove 'a juggler's climb'"), on the capsule too.
-	var mark_top := s.y * 0.075
-	var mark_bot := mark_top + mark_height(float(MENU_MARK))
-	draw_wordmark(mark_top, MENU_MARK, Color(1.0, 0.88, 0.5), s)
+	var mark_top := s.y * 0.10
+	# ...and the title's mark is width-clamped too, for the same reason the capsules are: MENU_MARK
+	# is a pixel height chosen against a 1280-wide window, and the game does not promise to be
+	# 1280 wide.
+	var msz := int(round(mark_fit_size(s, float(MENU_MARK))))
+	var mark_bot := mark_top + mark_height(float(msz))
+	draw_wordmark(mark_top, msz, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(cx, mark_bot + 14.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
 	var nrows := menu_options().size()
-	var rows_h := 54.0 * float(nrows) + 11.0 * float(nrows - 1)
+	var rows_h := MENU_ROW_H * float(nrows) + MENU_ROW_GAP * float(nrows - 1)
 	# ...and they stand ON the boards with their feet clear of the lip, not straddling it. The lip
 	# is a bright 3px line with the footlights burning just above it, so a card crossing it gets a
-	# hot line and a row of bulbs showing through its own bottom edge.
-	var oy := maxf(s.y * MENU_FLOOR - rows_h - 16.0, mark_bot + 40.0)
+	# hot line and a row of bulbs showing through its own bottom edge. The clearance is 16px plus
+	# HALF A CARD (2026-07-30, Louis: "move the titlescreen menu: with 3 options a tiny bit higher:
+	# about half the height of one of those option windows, such as Play") - written as
+	# MENU_ROW_H * 0.5 rather than as 27, so a taller row lifts the block by the same proportion.
+	var oy := maxf(s.y * MENU_FLOOR - rows_h - 16.0 - MENU_ROW_H * 0.5, mark_bot + 40.0)
 	menu_rows(font, s, oy)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
 	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
@@ -18966,17 +18916,26 @@ func capsule_embers(c: Vector2, r: float, n: int, col: Color) -> void:
 # 6.9th and a 9.6th - a pea beside them - and BOTH references independently said the ball
 # should be about 1.44x bigger, which is CAP_BALL_R below. Louis spotted it by eye first.
 const CAP_BALL_R := 0.119     # a ball's radius, in units of the mark's letter height
-const CAP_S_R := 0.225        # the radius of each of the S's two loops. FIVE balls run round
-							   # each loop now, not seven: at seven the balls overlapped by
-							   # more than a sixth of themselves, so the stroke closed into a
-							   # solid ring and the two S's read as one cluster of balls
-							   # rather than as two letters. At five they very nearly touch,
-							   # which is what makes the eye follow the curve.
-const CAP_S_BALLS := 5    # ...of which the first and last are NOT drawn (Louis, 2026-07-29),
-						   # so three land on each loop. The two dropped ones are the ends of
-						   # the arcs, where an S doubles back on itself and the balls crowd:
-						   # the letter is carried by the middle of each curve and the tips
-						   # were only ever making the pair of S's read as a cluster.
+const CAP_S_R := 0.245        # the radius of each of the S's two loops. Up from 0.225 on
+							   # 2026-07-30 (Louis: "You can add one extra ball to each S, in
+							   # order to make it smoother and slightly larger") - the extra ball
+							   # is what buys the room to grow the loop without the balls parting
+							   # company, so the two halves of that note are one change.
+							   # THE SPACING IS THE WHOLE POINT and it is arithmetic, not taste.
+							   # A loop carries its balls over a 1.5PI arc, so the gap between
+							   # neighbours is 1.5 * PI * CAP_S_R / (CAP_S_BALLS - 1) letter
+							   # heights against a ball 2 * CAP_BALL_R across: at 6 balls and
+							   # 0.245 that is 0.231 against 0.238, so they overlap by 3% and the
+							   # eye follows one curve. At the old 5 and 0.225 it was 0.265
+							   # against 0.238 - a visible gap between every pair, which is why
+							   # each S read as a cluster of separate balls. Seven was tried once
+							   # and closed the stroke into a solid ring instead.
+const CAP_S_BALLS := 6    # ...of which the first of each loop and the last of the BOTTOM loop are
+						   # not drawn, so five land on the top loop and four on the bottom. The
+						   # dropped ones are the outer TIPS, where an S doubles back on itself and
+						   # the balls crowd; the top loop keeps its last ball because that one is
+						   # the WAIST where the two loops meet, not a tip, and dropping it from
+						   # both loops (as happened until 2026-07-30) cuts the letter in half.
 # THE KNIFE'S OWN MEASUREMENTS, so the layout never has to guess them. Local units, the
 # same ones cap_knife draws in: the point is at -26 and the butt cap ends at +16.3.
 const CAP_KNIFE_TIP := -26.0
@@ -18988,38 +18947,26 @@ const CAP_KNIFE_MID := (CAP_KNIFE_TIP + CAP_KNIFE_BUTT) * 0.5  # -4.85, the bala
 # had no reader left but each other. The club's own extent is `CLUB_BUTT_Y` / `CLUB_NOSE_Y`,
 # beside the profile table that draws it, which is where a prop's measurements belong anyway -
 # this block only ever existed because the LAYOUT needed them out here.
-# THE TORCH's, likewise. The A is built off these three numbers and nothing else.
-const CAP_TORCH_SHAFT := TORCH_BUTT - TORCH_WICK             # 19, butt to wick
-const CAP_TORCH_LEAN := 0.46   # how far each of the A's strokes leans off vertical, radians.
-							   # The two shafts MEET at their wicks, so this angle and the
-							   # shaft length together decide how wide the letter stands: any
-							   # bigger and the A splays, any smaller and it is a candle.
-const CAP_TORCH_SC := 0.058    # the A's torch scale, in units of the mark's letter height.
-							   # THE NUMBER THIS LETTER LIVES OR DIES ON, and the first three
-							   # tries all had it wrong. A torch is 19 units of shaft under
-							   # 22 of fire, so the shaft could not be sized without sizing the
-							   # flame with it, and the two want opposite things: the SHAFTS
-							   # are the letter's strokes and want to reach the cap line, the
-							   # FLAME is the apex and gets away with overshooting it. At
-							   # 0.032 the strokes stood at 0.55 of a letter height against
-							   # the T, O and S at 0.92 to 1.00, so the word read as "TOSS"
-							   # with a campfire after it; 0.044 got the strokes to 0.75, which
-							   # was better and still a campfire.
-							   # THE CONFLICT IS GONE as of 2026-07-30, and it went as a side
-							   # effect of removing the A's third torch: the apex fire no
-							   # longer needs a handle to stand on, so it is drawn at its OWN
-							   # scale (CAP_A_FIRE_SC) and the strokes are free to be as long
-							   # as the letter needs. At 0.058 the shafts rise 19 * cos(0.46)
-							   # * 0.058 = 0.99 of a letter height - they reach the cap line
-							   # exactly, which is what makes the A a letter rather than a
-							   # bonfire with a ball in it.
-const CAP_A_FIRE_SC := 0.72    # the apex fire's scale, as a fraction of the strokes' own. Set
-							   # so 0.058 * 0.72 = 0.0418 against the 0.044 the fire was drawn
-							   # at before: the flame keeps the size it had and the strokes grew
-							   # by a third under it. Deliberately NOT taken further down - the
-							   # fire is the brightest thing in the mark and the reason the
-							   # letter is torches at all.
-const CAP_CROSSBAR_AT := 0.34  # how far up the shafts the crossbar sits, 0 butt, 1 wick
+# THE A IS TWO CLUBS AND A DASH OF BALLS (2026-07-30, Louis). It was two TORCHES with a fire at
+# the apex, and `CAP_TORCH_SHAFT` / `CAP_TORCH_SC` / `CAP_A_FIRE_SC` are deleted with them - three
+# constants that between them tuned a flame this letter no longer has. Their history is in git and
+# the short version is worth keeping, because it is why the letter is clubs now: a torch is 19
+# units of handle under 22 of fire, so for three passes the strokes could not be lengthened
+# without the flame growing with them, and every version read as a campfire rather than a letter.
+# A club is all stroke and has a NOSE where a torch has a wick, so the apex is a point.
+const CAP_A_LEAN := 0.46       # how far each of the A's strokes leans off vertical, radians. The
+							   # two clubs MEET at their noses, so this angle and the club's own
+							   # length together decide how wide the letter stands: any bigger and
+							   # the A splays, any smaller and it is a candle. Unchanged from the
+							   # torch version, which is why the letter's proportions did not move
+							   # when the object inside it did.
+const CAP_A_CLUB_SC := 0.0277  # the A's club scale, in units of the mark's letter height. Solved,
+							   # not tuned: a club is CLUB_LEN (40.3) units knob to nose, so the
+							   # strokes rise CLUB_LEN * cos(CAP_A_LEAN) * this = 40.3 * 0.8961 *
+							   # 0.0277 = 1.000 letter heights. They reach the cap line EXACTLY,
+							   # which is what the torch version needed three attempts and a
+							   # separate flame scale to approximate.
+const CAP_CROSSBAR_AT := 0.34  # how far up the strokes the crossbar sits, 0 knob, 1 nose
 # THE CROSSBAR'S OWN SIZE CONSTANT IS GONE (2026-07-30). It was CAP_A_BALL, the ball's radius as
 # a fraction of the gap between the strokes - which is exactly the wrong way round to size it. A
 # ball in this mark is a BALL, so its radius is CAP_BALL_R like every other one, and the gap is
@@ -19566,7 +19513,7 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 		"T": return gsz * 0.86
 		"O": return gsz * 1.00
 		"S": return gsz * (CAP_S_R * 2.0 + CAP_BALL_R * 2.0)
-		"A": return gsz * (CAP_TORCH_SHAFT * CAP_TORCH_SC * sin(CAP_TORCH_LEAN) * 2.0 + 0.16)
+		"A": return gsz * (CLUB_LEN * CAP_A_CLUB_SC * sin(CAP_A_LEAN) * 2.0 + 0.16)
 		_: return gsz * 0.60
 
 
@@ -19575,27 +19522,61 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 # established). The letters are `size` tall and sit on a baseline; the A's torch FLAMES
 # climb well above the cap line and its HANDLES hang below it, so the picture is a good
 # deal taller than the lettering it is standing in for.
-const MARK_RISE := 2.45   # above the baseline, in units of letter height
-const MARK_DROP := 0.14   # ...and below it
-# RECOMPUTED 2026-07-30, when the strokes lengthened and the fire got its own scale. The
+const MARK_RISE := 1.06   # above the baseline, in units of letter height
+const MARK_DROP := 0.17   # ...and below it
+# RECOMPUTED 2026-07-30, when the A's torches became clubs and its fire went with them. The
 # arithmetic is written out so the next change to the letter can redo it rather than guess:
-#   rise = shaft * cos(lean) * CAP_TORCH_SC     = 19 * 0.8961 * 0.058 = 0.988  (the wick)
-#        + flame height * widest layer * flicker * CAP_TORCH_SC * CAP_A_FIRE_SC
-#                                               = 22 * 1.29 * 1.20 * 0.0418 = 1.424
-#        = 2.412, taken to 2.45 for the flame's sway.
-#   drop = the S's lowest ball  = 0.46 - CAP_S_R + CAP_BALL_R = 0.11, taken to 0.14.
-# Note the two terms moved in OPPOSITE directions this time (the wick up by a third, the
-# flame down by 5%) and the total still grew, which is why this is arithmetic and not a nudge.
+#   rise = CLUB_LEN * cos(CAP_A_LEAN) * CAP_A_CLUB_SC = 40.3 * 0.8961 * 0.0277 = 1.000
+#        (the noses, which are now the highest thing in the mark), taken to 1.06 for the club's
+#        own width either side of the apex.
+#   drop = the S's lowest ball's bottom edge, which is its loop centre plus a radius plus a ball:
+#        -0.46 + 2 * CAP_S_R + CAP_BALL_R = -0.46 + 0.49 + 0.119 = 0.149, taken to 0.17.
+# **THE RISE MORE THAN HALVED**, from 2.45, and that is the single biggest consequence of losing
+# the fire: a flame at its flicker peak reached 1.42 letter heights above a wick that was already
+# a letter height up, so for three passes the mark reserved two and a half letter heights of
+# height for a picture whose LETTERS only ever filled one. Everything that places the mark reads
+# mark_height() (the title screen, all five capsules, the credits, the key art), so the whole
+# composition tightened up the moment this number came down - which is the reason those callers
+# were made to read it in the first place.
 # The drop HALVED because the A's torches now stand ON the baseline instead of hanging
 # their butts a third of a letter below it, and the rise grew because the apex is a merged
 # fire rather than two separate ones. Embers are deliberately allowed past the rise: they
 # are sparse sparks and leaving the frame is the point of them.
-const MENU_MARK := 108    # the title screen's letter height. The prop mark is far WIDER
-						   # than the word it replaced (five objects and their gaps against
-						   # five glyphs) and a good deal taller, so it is sized by the room
-						   # it has to fill rather than by the point size of the text that
-						   # used to sit here. At 108 the mark runs about half the screen
-						   # width, which is what a title screen wants.
+const MENU_MARK := 168    # the title screen's letter height. The prop mark is far WIDER than the
+						   # word it replaced (five objects and their gaps against five glyphs), so
+						   # it is sized by the room it has to fill rather than by the point size
+						   # of the text that used to sit here.
+						   # UP FROM 108 ON 2026-07-30, and it is the fire's doing. The mark used
+						   # to reserve 2.45 letter heights of vertical space for a flame at its
+						   # flicker peak, so a letter height of 108 already ate 280px of a 720px
+						   # screen and could not grow. With the A's torches gone the picture is
+						   # 1.23 letter heights - it is nearly all LETTERS now - so the same
+						   # 200-odd pixels of title buys a word half again as large. At 168 it
+						   # runs about two thirds of the screen width, which is what a title
+						   # wants; much past that and the T's knife tip reaches the gold frame.
+
+func mark_width(size: float) -> float:
+	# THE WHOLE WORD'S WIDTH at a given letter height, out of the same loop capsule_mark lays it
+	# out with (see there). Factored out 2026-07-30 because a caller has to be able to ASK: the
+	# mark is sized off the frame's HEIGHT everywhere, which is fine at 16:9 and wrong the moment
+	# a slot is portrait - the 600x900 store capsule, rendered at 840x1006, put the mark's 865px
+	# through an 840px frame and cut the T and the A off at the edges. Nothing had changed about
+	# that slot: the letters had simply grown (a wider S), and a width nobody measured went over.
+	var gap := size * CAP_GAP
+	var total := -gap
+	for i in GAME_TITLE.length():
+		total += cap_letter_width(GAME_TITLE[i], size * cap_nudge(i).z) + gap
+	return total
+
+
+func mark_fit_size(s: Vector2, want: float, frac := 0.88) -> float:
+	# the largest letter height at or under `want` whose whole word fits `frac` of the frame's
+	# width. Width scales linearly with the letter height, so this is exact rather than a search -
+	# the same job fit_size does for a line of text, and used for the same reason: a wordmark that
+	# runs off the frame is worse than a slightly smaller one at every size.
+	var w := mark_width(want)
+	return want if w <= s.x * frac else want * (s.x * frac) / w
+
 
 func mark_height(size: float) -> float:
 	# the whole picture's height, flame tips to handle butts
@@ -19698,74 +19679,53 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 					var a2 := lerpf(-0.5 * PI, PI, float(j) / float(nb - 1))
 					cap_ball(c2 + Vector2(cos(a2), sin(a2)) * s_r, cap_s_color(j + nb), br)
 			"A":
-				# TWO TORCHES THAT MEET, AND A CLUB ACROSS THEM (2026-07-29, Louis: "the
-				# torches not coming together to form the top of the A"). They used to stand
-				# 0.21 letter-heights apart at the tip with nothing between them, so the
-				# picture was two torches side by side and the eye had no letter to find.
+				# TWO CLUBS THAT MEET, AND A DASH OF BALLS ACROSS THEM (2026-07-30, Louis: "change the
+				# two torches into clubs and change to four balls to the two middle balls for the dash of
+				# the A"). The letter was two torch shafts with a fire at the apex, and the fire is what
+				# it kept being read as - a bonfire, then a campfire, over three passes and two rebuilds.
+				# **THE FIRE IS GONE WITH THE TORCHES**, which is the whole point of the change and worth
+				# saying plainly: nothing in the mark burns any more. What that buys is a letter made of
+				# the same four objects as the rest of the word - knives, a ring, balls, clubs - and an
+				# apex that is a POINT, because a club has a nose where a torch has a wick with a flame
+				# standing on it. If a flame is ever wanted back, it is one cap_torch call at `apex`.
 				#
-				# Now the two shafts are the A's two STROKES: their butts stand on the
-				# baseline at the outer corners and they lean in until their WICKS meet on
-				# the centre line, so the fires start from the same point and burn as one
-				# apex. Every number comes off CAP_TORCH_SHAFT / _LEAN / _SC, so the letter
-				# cannot come apart if the torch is redrawn.
-				var tsc := size_l * CAP_TORCH_SC
-				var shaft := CAP_TORCH_SHAFT * tsc          # butt to wick, in pixels
-				var dx := shaft * sin(CAP_TORCH_LEAN)       # how far out each butt stands
+				# THE STROKES ARE PLACED EXACTLY AS THE TORCHES WERE, off the club's own two ends rather
+				# than off any new number: knobs on the baseline at the outer corners, noses meeting on
+				# the centre line. `CLUB_BUTT_Y` / `CLUB_NOSE_Y` are the club's extent and they live
+				# beside the profile that draws it, so the letter cannot come apart if the club is
+				# reshaped again - which is exactly what happened to it this morning.
+				var csc := size_l * CAP_A_CLUB_SC
+				var reach := CLUB_LEN * csc                 # knob to nose, in pixels
+				var lean := CAP_A_LEAN
+				var dx := reach * sin(lean)                 # how far out each knob stands
 				var cxa := x + w * 0.5
-				var lean := CAP_TORCH_LEAN
-				# the origin cap_torch draws from is the GRIP, and the butt hangs TORCH_BUTT
-				# below it along the shaft, so each torch is placed by where its butt has to
-				# land rather than by where its origin happens to fall
-				var foot_l := Vector2(cxa - dx, base) - Vector2(0.0, TORCH_BUTT).rotated(lean) * tsc
-				var foot_r := Vector2(cxa + dx, base) - Vector2(0.0, TORCH_BUTT).rotated(-lean) * tsc
-				# THE CROSSBAR, and it is drawn FIRST so both shafts lie over it - a bar
-				# painted on top of the strokes reads as a stick resting against them.
-				var bar_l := foot_l + Vector2(0.0, TORCH_BUTT - CAP_TORCH_SHAFT * CAP_CROSSBAR_AT).rotated(lean) * tsc
-				var bar_r := foot_r + Vector2(0.0, TORCH_BUTT - CAP_TORCH_SHAFT * CAP_CROSSBAR_AT).rotated(-lean) * tsc
-				var bar_c := (bar_l + bar_r) * 0.5
-				cap_torch(foot_l, lean, tsc, true, false)
-				cap_torch(foot_r, -lean, tsc, true, false)
-				# ...and ONE fire at the apex, WITH NO TORCH UNDER IT (2026-07-30, Louis: "remove
-				# the middle torch at the end (in A)"). It used to be a third complete cap_torch,
-				# placed so its own wick landed where the two strokes meet - which hung a whole
-				# upright HANDLE down the middle of the letter, between the two leaning ones. That
-				# third handle is what he could see. The fire needs a position and a scale, not a
-				# torch, and it is still placed by asking a torch where its own wick is rather
-				# than by repeating the arithmetic, so it cannot come adrift from the strokes.
-				# ...at its OWN scale, which only became possible once it stopped needing a
-				# handle: the origin is placed so the FIRE's wick lands on the point the two
-				# strokes arrive at, so `fsc` and not `tsc` is what steps back from it.
-				var fsc := tsc * CAP_A_FIRE_SC
-				var wick := foot_l + Vector2(0.0, TORCH_WICK).rotated(lean) * tsc
-				cap_torch(wick - Vector2(0.0, TORCH_WICK) * fsc, 0.0, fsc, true, true, false)
-				# THE CROSSBAR IS A BALL (2026-07-30, Louis: "replace the horizontal club with a
-				# ball"). It is the right object by this game's own naming - the wordmark is TOSS
-				# plus the letter a real juggling ball stands in for, which is what TITLE_MARK has
-				# said from the start. It also solves what the club could not: a club is a LONG
-				# thing laid across two strokes, so it had to be scaled to the gap, angled to the
-				# strokes and centred on its own balance point, and it still read as a stick
-				# resting against the letter rather than as part of it. A ball has no angle to get
-				# wrong, and sized to the gap it WEDGES between the two strokes, which is what a
-				# crossbar does. Drawn OVER the shafts for the same reason the club was: behind
-				# them it disappeared between two dark handles.
-				# ...AND IT IS THE S's BALL, AT THE S's SIZE, AS MANY AS IT TAKES (2026-07-30,
-				# Louis: "the ball between the torches should have the same size as the other
-				# balls in the s, if it's too small to bridge the gap, just use more balls"). The
-				# first version sized one ball to the gap, which made it far and away the biggest
-				# ball in the picture - and a wordmark built out of props has to be built out of
-				# the SAME props, or the eye reads the odd one as a different object rather than
-				# as the same material spelling a different letter. So the radius is CAP_BALL_R,
-				# exactly what each of the six balls in an S gets, and the COUNT does the
-				# bridging: however many fit the gap at a 0.90 overlap, which is three at every
-				# size the mark is drawn at. Spread from stroke to stroke, so the outer two tuck
-				# behind the handles and the row reads as a bar laid across the letter.
-				# ...and the count is INTERVALS PLUS ONE. Sizing n to the span and then spreading
-				# n balls across it divides the span into n-1 gaps, each wider than a ball, so the
-				# first try laid three balls with daylight between them - three balls, not a bar.
+				# the origin cap_club draws from is the GRIP, and the knob hangs CLUB_BUTT_Y below it
+				# along the shaft, so each club is placed by where its KNOB has to land rather than by
+				# where its origin happens to fall - the same trap the torch version already recorded.
+				var foot_l := Vector2(cxa - dx, base) - Vector2(0.0, CLUB_BUTT_Y).rotated(lean) * csc
+				var foot_r := Vector2(cxa + dx, base) - Vector2(0.0, CLUB_BUTT_Y).rotated(-lean) * csc
+				var bar_off := CLUB_BUTT_Y - CLUB_LEN * CAP_CROSSBAR_AT
+				var bar_l := foot_l + Vector2(0.0, bar_off).rotated(lean) * csc
+				var bar_r := foot_r + Vector2(0.0, bar_off).rotated(-lean) * csc
+				cap_club(foot_l, lean, csc)
+				cap_club(foot_r, -lean, csc)
+				# THE DASH IS THE TWO MIDDLE BALLS OF THE FOUR (2026-07-30, Louis). Four balls spanning
+				# stroke to stroke made the crossbar a solid bar wedged into the letter; the two middle
+				# ones leave daylight either side, which is what the crossbar of a stencilled A looks
+				# like - a DASH floating in the counter rather than a beam bolted across it.
+				#
+				# Done by dropping the first and last of the row rather than by placing two balls at
+				# hand-picked fractions, which is the same trick each S loop already uses on its tips:
+				# the count still comes off the gap, so at any size the mark is drawn the dash stays two
+				# ball-widths of daylight short of both strokes instead of drifting into them.
+				# The count itself is INTERVALS PLUS ONE - sizing n to the span and then spreading n
+				# balls across it divides the span into n-1 gaps, each wider than a ball, which is how an
+				# earlier version came out as three balls with daylight between them rather than a bar.
+				# Floored at 4 so there are always two left after the ends come off.
 				var abr := size_l * CAP_BALL_R
 				var bar_len := bar_l.distance_to(bar_r)
-				var nab := clampi(int(round(bar_len / maxf(abr * 2.0 * 0.90, 0.001))) + 1, 2, 7)
-				for j in nab:
+				var nab := clampi(int(round(bar_len / maxf(abr * 2.0 * 0.90, 0.001))) + 1, 4, 7)
+				for j in range(1, nab - 1):
 					var t := float(j) / float(nab - 1)
 					cap_ball(bar_l.lerp(bar_r, t), cap_s_color(j + 1), abr)
 			_:
@@ -19779,14 +19739,16 @@ func capsule_one(font: Font, s: Vector2, k: float) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.05, 0.045), Color(0.02, 0.013, 0.017), 24)
 	draw_spotlight_cone(s, s.x * 0.5, 0.30)
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.72, Color(1.0, 0.62, 0.26, 0.20))
-	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
+	var msz := mark_fit_size(s, s.y * CAP_SIZE)
+	capsule_mark(s, mark_cy_centred(s.y, msz), msz)
 	draw_vignette(s, 0.56)
 
 
 func capsule_two(font: Font, s: Vector2, k: float) -> void:
 	# 2. NOTHING AT ALL. Near-black, no light source, no frame: the props are the picture.
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.035, 0.028, 0.032), Color(0.008, 0.007, 0.010), 20)
-	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
+	var msz := mark_fit_size(s, s.y * CAP_SIZE)
+	capsule_mark(s, mark_cy_centred(s.y, msz), msz)
 	draw_vignette(s, 0.70)
 
 
@@ -19795,7 +19757,8 @@ func capsule_three(font: Font, s: Vector2, k: float) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.12, 0.045, 0.028), Color(0.018, 0.011, 0.013), 24)
 	draw_glow(Vector2(s.x * 0.72, s.y * 0.46), s.y * 0.60, Color(1.0, 0.50, 0.18, 0.30))
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.40, Color(1.0, 0.72, 0.32, 0.20))
-	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
+	var msz := mark_fit_size(s, s.y * CAP_SIZE)
+	capsule_mark(s, mark_cy_centred(s.y, msz), msz)
 	capsule_embers(Vector2(s.x * 0.5, s.y * 0.44), s.y * 0.52, 30, Color(1.0, 0.70, 0.32, 0.5))
 	draw_vignette(s, 0.58)
 
@@ -19806,7 +19769,8 @@ func capsule_four(font: Font, s: Vector2, k: float) -> void:
 	draw_curtain_wall(s, s.y * 1.02, s.y * 0.02, Color(0.28, 0.065, 0.095), 26)
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.012, 0.02, 0.35))
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.70, Color(1.0, 0.72, 0.34, 0.18))
-	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
+	var msz := mark_fit_size(s, s.y * CAP_SIZE)
+	capsule_mark(s, mark_cy_centred(s.y, msz), msz)
 	draw_vignette(s, 0.60)
 
 
@@ -19816,7 +19780,8 @@ func capsule_five(font: Font, s: Vector2, k: float) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.025, 0.045, 0.075), Color(0.008, 0.012, 0.022), 22)
 	draw_stars(s, 46, 0.85)
 	draw_glow(Vector2(s.x * 0.5, s.y * 0.50), s.y * 0.62, Color(0.35, 0.62, 1.0, 0.16))
-	capsule_mark(s, mark_cy_centred(s.y, s.y * CAP_SIZE), s.y * CAP_SIZE)
+	var msz := mark_fit_size(s, s.y * CAP_SIZE)
+	capsule_mark(s, mark_cy_centred(s.y, msz), msz)
 	draw_vignette(s, 0.62)
 
 
@@ -19858,19 +19823,27 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 		draw_circle(Vector2(lx, s.y - 20.0 * k), 12.0 * k, Color(1.0, 0.7, 0.3, 0.09 * fl))
 		draw_circle(Vector2(lx, s.y - 20.0 * k), 4.0 * k, Color(1.0, 0.72, 0.32, 0.65 * fl))
 	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
-	# same rule as the title screen: the cascade sits above the mark, and everything below
-	# is placed off mark_height() rather than off a hand-picked offset, so the picture
-	# cannot grow into its own subtitle
-	var cap_sz := int(round(112.0 * k))
-	var cap_top := s.y * 0.30
+	# THE MARK IS BIGGER AND THE BLOCK IS CENTRED (2026-07-30), both for the same reason the title
+	# screen's grew: with the A's fire gone the picture is 1.23 letter heights instead of 2.45, so
+	# a hand-picked `cap_top` of 0.30 left the word small in the upper third with half the frame
+	# empty under it. The block (mark plus its ornament) is centred off mark_height() now, so the
+	# next change to the letter moves the whole composition instead of stranding it.
+	# **AND THE CASCADE CAME OFF.** A little juggling loop used to arc above the mark, which is
+	# exactly what the title screen dropped in July for competing with a mark that was alive. This
+	# mark is not alive any more - no fire - but the cascade still lost: on a STILL store capsule
+	# it reads as three stray balls and a brown streak floating over the word, which on a
+	# storefront thumbnail is indistinguishable from a rendering fault.
+	var cap_sz := int(round(mark_fit_size(s, 185.0 * k)))
+	var orn_gap := 26.0 * k
+	var block_h := mark_height(float(cap_sz)) + orn_gap
+	var cap_top := s.y * 0.5 - block_h * 0.5
 	var cap_bot := cap_top + mark_height(float(cap_sz))
-	draw_menu_cascade(Vector2(cx, s.y * 0.15), 1.2 * k)
 	draw_wordmark(cap_top, cap_sz, Color(1.0, 0.88, 0.5), s)
 	# NO TAGLINE, HERE EITHER (2026-07-30, Louis: "storefront capsule : jugglers climbs remove
 	# it"). It came off the title screen first and this was left for one commit on the argument
 	# that a storefront capsule wants a line under the logo. It does not want THIS one, and the
 	# mark is the same mark in both places, so the two screens agree again.
-	draw_ornament(cx, cap_bot + 22.0 * k, 300.0 * k, Color(0.82, 0.62, 0.34, 0.85))
+	draw_ornament(cx, cap_bot + orn_gap, 300.0 * k, Color(0.82, 0.62, 0.34, 0.85))
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0 * k, Color(0.82, 0.62, 0.34, 0.55))
 
