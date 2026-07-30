@@ -774,6 +774,72 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   16-byte directory entry per size and the PNGs concatenated. `file` confirms all three.
   **The Dock will keep showing the old one** until `./install_apps.sh` runs (it copies the icns into
   the wrapper and busts macOS's icon cache) - that writes outside the repo, so it is Louis's call.
+- **THE SHOP IS A STALL NOW** (2026-07-30, Louis, in one brief: hide score, strength per object
+  with a max-objects line under it, no buy shortcuts, singular names, no cost row, no "ready", "I
+  want the entire card to be the objects picture. Right above it should be a small cardlike window
+  with its price. To know more about it ... you should hover over it").
+  **YOU DO NOT READ A MARKET STALL, YOU LOOK AT IT.** The card carried a name, a ready badge, four
+  stat rows, a set meter and a buy-key plate around an object drawn at about 60px. It is the object
+  now, as big as the card will carry, with the price in a small window above it - and the numbers a
+  buyer needs before committing are one hover away instead of printed seven times whether or not
+  anyone is asking.
+  **THE HOVER PANEL'S SIDE IS A COMPARISON, NOT A CONSTANT.** Whichever side of the SCREEN has more
+  room takes it (`room_l` vs `room_r`), so the leftmost column opens right and the rightmost opens
+  left with nothing special-cased. It is drawn AFTER every card - that is what buys the licence to
+  cover a neighbour - which is also why it lives in the grid loop's tail and not inside the card
+  function, where it would be painted over by the next card drawn. It is clamped VERTICALLY only:
+  clamping x too would let it slide back over the card it describes, the one thing it may never do.
+  **STRENGTH IS PER OBJECT AGAIN, WITH ITS CONSEQUENCE UNDER IT.** `PROP_STR_UNIT` is a property of
+  the PROP; "Str for 3" was a property of the prop and tonight's count together and changed under
+  the player when they stepped the count. The count-dependent answer is the row below it - `max
+  objects` - joined to it by a drawn enter-arrow, because that row is what the Strength row leads
+  to. **The arrow is geometry, not a character**: the UI font is not guaranteed to carry one and a
+  missing glyph renders as a tofu box in the middle of a stat list. Its head has to outweigh its
+  shaft or it reads as the letter L, which is what a 3.4px head on a 7px run gave.
+  **THE BUY-BY-NUMBER SHORTCUTS ARE GONE.** 1-7 jumped the cursor onto a card AND bought in the
+  same press - a purchase with no cursor movement to confirm it, and the only input in the game
+  that could spend 9,000 flowers off one keystroke aimed at the wrong digit. It also forced every
+  card to print its key, which is a number on a card that is not a stat. `SHOP_KEYS` and
+  `shop_key_label` went with it. **The SHEET keeps its number keys** and the difference is what a
+  mispress costs: a stat point is earned back by playing.
+  **EVERY PROP NAME IS SINGULAR** ("Rename all objects to singular: eggs -> egg"), which is the
+  right way round - a card shows ONE object and the shop sells them one at a time - and it moves
+  the whole burden of "15 of them" onto `prop_plural`, which now has to know that English does not
+  add an s to `knife` or to `torch`. Three rules cover the seven props: -fe becomes -ves, a sibilant
+  ending takes -es, everything else takes -s. It also FIXED a grammar bug in passing: the glow
+  price line read "a glowing torches is 2,000".
+  **AND THERE WERE STILL TWO SHOP CARDS.** The grid and the single-row fallback each had a body.
+  They are one function now (`draw_shop_prop_card`, taking a Rect2 and sizing its picture off it),
+  so a 141px row card and a 250px grid card are the same drawing.
+- **THE TORCH SPINS ABOUT ITS MIDDLE AND ITS FIRE GOES UP** (2026-07-30, Louis: "make the torch
+  swing around its center, not the flame. but do make sure the flame stays upright"). The local
+  origin is the WICK - it has to be, because the fire builds up from it and the sim throws the prop
+  by its grip - so a torch turned about the origin pivoted around the one point a real one never
+  does, and read as a flame with a stick being whirled underneath it. `TORCH_MID` is the offset to
+  the handle's balance point and `torch_pivot` moves the transform's origin by it, so the geometry
+  turns about the middle while `p` still means to the sim exactly what it always meant. Everything
+  that has to find a part of the torch - the fire, the embers, the glow pool - goes through
+  `torch_pivot`/`torch_fire_anchor`, because offsetting one and not another detaches the flame from
+  the wick on every tumble.
+  **AND `CAP_FLAME_UPRIGHT` IS DELETED.** The flame used to be drawn inside the rotated frame with a
+  straightening term per layer, 0.80 of the way back to vertical - a compromise that existed for ONE
+  caller: the wordmark's A, whose two leaning torches met at their wicks and needed flames that
+  leaned with the strokes. **The A is two clubs now and nothing in the mark burns**, so the
+  compromise had no beneficiary left and the honest answer was available. The fire is drawn in an
+  unrotated frame anchored at the wick, which is both what was asked for and less code than the
+  thing it replaces. Worth keeping as a pattern: when a shared value is a compromise struck for one
+  caller, deleting that caller is the moment to re-ask whether the compromise is still earning.
+- **THE CHAINSAW'S CHAIN GOES ROUND THE NOSE** (2026-07-30, Louis: "the very end needs some more
+  teeth. right now only the sides have teeth ... Perhaps also add a handle to them"). The old loop
+  was two straight runs and a fold - `u < 0.5` picked a side and `v` walked the bar - so a link
+  teleported from the top of one side to the top of the other and the nose, the part of a chainsaw
+  everybody pictures, was bare steel. It is a real PERIMETER walk now (right side, nose arc, left
+  side) with distance measured in the same units all the way round, so links stay evenly spaced
+  through the turn instead of bunching in it; `CSAW_TEETH` went 13 -> 18 because the path got
+  longer. It also gained the FRONT HANDLE every photograph of a chainsaw shows - a loop off the near
+  side of the casing, over the engine and down the far side - drawn as a stroked path and not a
+  filled shape, because the gap under the arc has to stay open or it is not something you could put
+  a hand through.
 - **THE UI PASS OF 2026-07-30 - four things Louis asked for, and what each one turned out to be.**
   **(1) NO GOLD FRAME ON THE TITLE SCREEN** ("Why is there a thin light brown rectangle around the
   titlepage?"). It is `draw_frame`, the decorative double border with corner ticks that nine screens
