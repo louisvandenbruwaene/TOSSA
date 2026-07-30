@@ -1799,6 +1799,9 @@ var _collcheck := false   # dev: --collcheck measures the tightest mid-air clear
 						  # of the session (throw inaccuracy zeroed, so it audits the
 						  # IDEAL pattern geometry), printed on the --shot capture
 var _capsule_variant := 0   # dev: which --capsule picture (0 = the original)
+# WHICH TITLE PICTURE SHIPS. Not a debug variable: 1 is the shipped look and `--menu N` only
+# overrides it for a concept render, so a release build always draws the one chosen here.
+var _menu_look := 1
 var _coll_min := 1000000.0  # dev: min clearance seen (px between prop EDGES; <0 = overlap)
 var _coll_at := ""          # dev: where/when the minimum happened, for diagnosis
 # ...AND THE SAME MEASUREMENT AT DRAWN SIZE (2026-07-28, Louis, of the Half Shower's two
@@ -1969,8 +1972,11 @@ func _ready() -> void:
 	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
 		_handlog = true
 	var skip_menu := _demo or _shot or _collcheck or _handlog or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
-	if ua.has("--menu"):
-		skip_menu = false
+	var mni := ua.find("--menu")   # dev: hold the title screen (it is what --shot skips past),
+	if mni != -1:                  # and an optional 1..MENU_LOOKS picks one of its four pictures,
+		skip_menu = false          # the same shape --capsule already uses for its five
+		if mni + 1 < ua.size() and not ua[mni + 1].begins_with("--"):
+			_menu_look = clampi(int(ua[mni + 1]), 1, MENU_LOOKS)
 	if skip_menu:
 		save_slot = 0
 		load_progress()
@@ -18699,17 +18705,166 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 #endregion
 
 #region MAIN MENU SCREEN
+const MENU_LOOKS := 4        # how many title pictures exist; `--menu N` renders one of them
+const MENU_FLOOR := 0.80     # where the stage lip sits, so the menu rows can stand ON it
+
+func menu_backdrop(s: Vector2, look: int) -> void:
+	# THE FOUR TITLE PICTURES (2026-07-30, Louis: "Make the title screen look better!, perhaps
+	# just add some of your own ideas in the concepts folder, next to the rest"). Only the SET
+	# changes between them - the mark, the rows and the frame are identical in all four, the same
+	# discipline the five store capsules already follow, so a comparison is about the picture
+	# rather than about four different layouts. Rendered to `store/concepts/title_v1..4.png` by
+	# `--menu N`, beside the capsule concepts.
+	#
+	# Every one of them is built out of furniture the stage already owns (`draw_curtain_wall`,
+	# `draw_theatre_boxes`, `draw_footlights`, `draw_stars`, `draw_spotlight_cone`). That is the
+	# point: the title screen should be a room this game already has, not a fifth art style.
+	var fy := s.y * MENU_FLOOR
+	match look:
+		2:
+			# FIRELIGHT. No set at all: the mark's own two torches are the only light in the
+			# room, and what they light is smoke and embers. The one that trusts the logo.
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.085, 0.042, 0.032), Color(0.012, 0.008, 0.011), 22)
+			draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.62, Color(1.0, 0.52, 0.20, 0.22))
+			draw_glow(Vector2(s.x * 0.5, s.y * 0.24), s.y * 0.34, Color(1.0, 0.74, 0.34, 0.17))
+			# NO SECOND SET OF EMBERS. `capsule_embers` centred on the mark was the first try and
+			# it scattered thirty sparks THROUGH the lettering - they came out reading as stray
+			# balls among the S's, which is the one thing a mark made of balls cannot afford. The A
+			# already sheds real embers off its own two torches, and those are placed by the fire
+			# that makes them, so they can never land somewhere the fire is not.
+			draw_dust(s, 20, Color(1.0, 0.85, 0.55))
+		3:
+			# NIGHT. The Midnight Show's language on the title screen: a cold sky, a rooftop
+			# line, and the torches as the only warm thing in the frame. Needs its VALUE LADDER
+			# kept (see the dark-scene note in CLAUDE.md) - sky darkest, roofs above it, windows
+			# well above both - or it is one blue smudge.
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.030, 0.048, 0.082), Color(0.010, 0.016, 0.030), 22)
+			draw_stars(s, 54, 0.78)
+			draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.50, Color(1.0, 0.62, 0.26, 0.10))
+			# A SILHOUETTE IS READ AGAINST SOMETHING, and the first pass forgot to give it
+			# anything: near-black roofs on a sky that gets DARKER toward the horizon, so the
+			# whole bottom third went to one flat black and the only things visible were the lit
+			# windows, floating like tan bricks in a void. This is the value-ladder rule from the
+			# Midnight Show, and it is a LADDER: a wash of town light just above the roofline
+			# first, so the sky is at its brightest exactly where the roofs cut into it; then the
+			# roofs clearly above the sky's own value rather than below it; then the windows well
+			# above both. Brightening the roofs alone would only have made grey fog.
+			draw_glow(Vector2(s.x * 0.5, fy - s.y * 0.02), s.y * 0.42, Color(0.42, 0.55, 0.90, 0.16))
+			var roof := Color(0.052, 0.062, 0.098)
+			var rx := 0.0
+			var ri := 0
+			while rx < s.x:
+				var rw := s.x * (0.11 + 0.055 * float((ri * 7) % 3))
+				var rh := s.y * (0.055 + 0.028 * float((ri * 5) % 4))
+				draw_rect(Rect2(rx, fy - rh, rw + 1.0, rh + s.y), roof)
+				if ri % 2 == 0:
+					draw_rect(Rect2(rx + rw * 0.62, fy - rh - s.y * 0.030, rw * 0.16, s.y * 0.030), roof)
+				# one lit window per third block, and it gets a HALO - a lamp without one is just
+				# a brighter rectangle, which is exactly what the first pass drew. Small, too: at
+				# the size the first try used they read as bricks rather than as windows.
+				if ri % 3 == 1:
+					var wc := Vector2(rx + rw * 0.34, fy - rh * 0.58)
+					draw_glow(wc, s.y * 0.055, Color(1.0, 0.78, 0.40, 0.16))
+					draw_rect(Rect2(wc.x, wc.y, rw * 0.085, s.y * 0.017), Color(1.0, 0.82, 0.46, 0.80))
+				rx += rw
+				ri += 1
+			draw_dust(s, 14, Color(0.75, 0.85, 1.0))
+		4:
+			# THE CURTAIN, CLOSED. Velvet floor to ceiling and the mark hanging on it like a
+			# poster in a foyer. The quietest of the four, and the only one with no floor.
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.04, 0.055), Color(0.035, 0.016, 0.026), 20)
+			draw_curtain_wall(s, s.y + 8.0, -8.0, Color(0.30, 0.070, 0.10), 28)
+			draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.012, 0.02, 0.32))
+			draw_spotlight_cone(s, s.x * 0.5, 0.13)
+			draw_glow(Vector2(s.x * 0.5, s.y * 0.34), s.y * 0.58, Color(1.0, 0.72, 0.34, 0.16))
+			draw_dust(s, 20, Color(1.0, 0.85, 0.55))
+		_:
+			# 1. THE HOUSE, and this is the one that ships. A title screen's job is to say what
+			# the game IS before a word is read, and this game is a performer walking out in
+			# front of a room: so the room is here - hung velvet, a box either side with heads
+			# leaning on the rail, footlights along the lip, boards for the menu to stand on.
+			# The old picture had a gradient, one cone and a row of bulbs floating at the very
+			# bottom edge attached to nothing, which is a lit VOID, not a theatre.
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.135, 0.058, 0.078), Color(0.045, 0.022, 0.032), 22)
+			draw_curtain_wall(s, fy, 0.0, Color(0.150, 0.038, 0.055), 26)
+			draw_theatre_boxes(s, fy)
+			# THE VEIL, the same move draw_backdrop makes over a venue's set dressing and for the
+			# same reason: this cloth is BEHIND the mark and has to lose to it. The first pass had
+			# the curtain at 0.255 red with no veil, and the S's warm balls were sitting on warm
+			# cloth of nearly their own value - the wordmark, the one thing on the screen that
+			# must read instantly, had the least contrast on it.
+			draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
+			draw_spotlight_cone(s, s.x * 0.5, 0.15)
+			draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
+			draw_footlights(s, fy)
+			# the boards, painted LAST over the dressing, with the warm lip draw_backdrop uses -
+			# anything drawn at the floor line itself is buried under them, which is the trap
+			# the theatre's own furniture note already records
+			draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.20, 0.105, 0.085))
+			draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(1.0, 0.72, 0.34, 0.13), Color(1.0, 0.72, 0.34, 0.0), 8)
+			draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(1.0, 0.74, 0.36, 0.5), 3.0)
+			for i in 9:   # plank seams, faint: texture without pattern
+				var px2 := s.x * (float(i) + 0.5) / 9.0
+				draw_line(Vector2(px2, fy + 2.0), Vector2(px2 + s.x * 0.04, s.y), Color(0.0, 0.0, 0.0, 0.10), 1.5)
+			draw_dust(s, 22, Color(1.0, 0.85, 0.55))
+
+
+func menu_rows(font: Font, s: Vector2, oy: float) -> void:
+	# THE MENU AS CARDS, which is the part of this that is not taste (2026-07-30). Settings and
+	# Pause were both rebuilt off bare `draw_string` rows into the shared card language in July,
+	# for the reason written down there - a flat row of centred text reads as cheap next to the
+	# shop and the sheet. The TITLE screen was the last one still doing it, on the screen that
+	# makes the first impression. Same three options, same `menu_sel`, same `menu_input`: an icon
+	# disc saying what the row does, the name, a line under it saying where it goes, and the lit
+	# one raised on its own colour. Nothing here touches the list - `menu_options()` is still the
+	# only place that decides what the rows ARE.
+	var dress := {
+		"Play":     {"note": "take the stage", "col": Color(0.60, 0.90, 0.55), "icon": "play"},
+		"Settings": {"note": "sound, feel, controls", "col": Color(0.66, 0.80, 1.0), "icon": "dials"},
+		"Quit":     {"note": "leave the theatre", "col": Color(0.92, 0.46, 0.40), "icon": "quit"},
+	}
+	var opts := menu_options()
+	var cw := 340.0
+	var ch := 54.0
+	var gap := 11.0
+	var cx0 := s.x * 0.5 - cw * 0.5
+	for i in opts.size():
+		var nm := String(opts[i])
+		var d: Dictionary = dress.get(nm, {"note": "", "col": Color(0.9, 0.8, 0.6), "icon": "play"})
+		var ac: Color = d["col"]
+		var sel := i == menu_sel
+		var cy := oy + float(i) * (ch + gap) - (3.0 if sel else 0.0)
+		soft_card(Rect2(cx0, cy, cw, ch),
+			Color(ac.r * 0.19, ac.g * 0.19, ac.b * 0.19, 0.94) if sel else Color(0.085, 0.055, 0.065, 0.80),
+			Color(ac.r, ac.g, ac.b, 0.92 if sel else 0.28), 2.0 if sel else 1.0, 11.0, 12.0,
+			0.06 if sel else 0.0)
+		var ic := Vector2(cx0 + 36.0, cy + ch * 0.5)
+		draw_circle(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22))
+		draw_arc(ic, 16.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.5), 1.5, true)
+		match String(d["icon"]):
+			"play":
+				draw_colored_polygon(PackedVector2Array([
+					ic + Vector2(-5, -7), ic + Vector2(-5, 7), ic + Vector2(8, 0)]), ac)
+			"dials":
+				# two sliders, which is what the settings screen's own pill toggles look like -
+				# a cog would be a mark this game draws nowhere else
+				for r2 in 2:
+					var ry := ic.y - 4.0 + float(r2) * 8.0
+					draw_line(Vector2(ic.x - 7.0, ry), Vector2(ic.x + 7.0, ry), Color(ac.r, ac.g, ac.b, 0.75), 1.6)
+					draw_circle(Vector2(ic.x + (3.0 if r2 == 0 else -3.0), ry), 2.6, ac)
+			"quit":
+				draw_line(ic + Vector2(-6, -6), ic + Vector2(6, 6), ac, 2.5)
+				draw_line(ic + Vector2(6, -6), ic + Vector2(-6, 6), ac, 2.5)
+		draw_fit_string(font, Vector2(cx0 + 64.0, cy + 25.0), nm, HORIZONTAL_ALIGNMENT_LEFT,
+			cw - 84.0, 20, Color(1.0, 0.96, 0.86) if sel else Color(0.87, 0.82, 0.75))
+		draw_fit_string(font, Vector2(cx0 + 64.0, cy + 43.0), String(d["note"]),
+			HORIZONTAL_ALIGNMENT_LEFT, cw - 84.0, 12,
+			Color(ac.r, ac.g, ac.b, 0.95) if sel else Color(0.62, 0.58, 0.54))
+
+
 func draw_menu(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
-	# a deep theatre backdrop: warm gradient, one spotlight, a row of footlights
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.11, 0.05, 0.07), Color(0.03, 0.02, 0.03), 22)
-	draw_spotlight_cone(s, cx, 0.10)
-	for i in 16:
-		var lx := s.x * (float(i) + 0.5) / 16.0
-		var fl := 0.6 + 0.4 * sin(float(cine_tick) * 0.06 + float(i))
-		draw_circle(Vector2(lx, s.y - 28.0), 14.0, Color(1.0, 0.7, 0.3, 0.08 * fl))
-		draw_circle(Vector2(lx, s.y - 28.0), 5.0, Color(1.0, 0.72, 0.32, 0.6 * fl))
-	draw_dust(s, 22, Color(1.0, 0.85, 0.55))
+	menu_backdrop(s, _menu_look)
 
 	# THE TITLE, and everything under it placed off the MARK'S REAL BOTTOM rather than off
 	# a guess (2026-07-28). The prop mark is a picture, not a line of type: the A's torch
@@ -18729,21 +18884,23 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	# underneath sat at a flat `s.y * 0.62` - so the moment the A grew, the subtitle was
 	# drawn straight through the word Play. Half a layout computed and half of it guessed
 	# is the same bug as guessing all of it, it just waits longer to show up.
-	var mark_top := s.y * 0.10
+	# THE ROWS STAND ON THE BOARDS. `oy` was a flat fraction of the screen with a mark_height()
+	# floor under it; now the three cards are laid so their FEET land on the stage lip, which is
+	# what makes them furniture in the room rather than text floating over a picture of one. Still
+	# computed off mark_height() at the top end, so a taller A pushes them down instead of drawing
+	# through them - the bug that rule exists for.
+	# THE TAGLINE IS GONE (2026-07-30, Louis: "Remove 'a juggler's climb'"), on the capsule too.
+	var mark_top := s.y * 0.075
 	var mark_bot := mark_top + mark_height(float(MENU_MARK))
 	draw_wordmark(mark_top, MENU_MARK, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(cx, mark_bot + 16.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
-	# THE TAGLINE IS GONE (2026-07-30, Louis: "Remove 'a juggler's climb'"). The rows move UP into
-	# the room it leaves rather than sitting under a hole, and they are still measured off
-	# mark_height() rather than dropped back to a flat fraction of the screen - that guess is
-	# exactly what drew the old subtitle through the word Play the moment the A grew.
-	var opts := menu_options()   # the same live list menu_input drives, so cursor and drawing agree
-	var oy := maxf(s.y * 0.62, mark_bot + 78.0)
-	for i in opts.size():
-		var sel := i == menu_sel
-		var txt := ("%s" % opts[i]) if not sel else (">    %s    <" % opts[i])
-		var col := Color(1.0, 0.9, 0.55) if sel else Color(0.72, 0.66, 0.6)
-		draw_string(font, Vector2(0, oy + float(i) * 44.0), txt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 28, col)
+	draw_ornament(cx, mark_bot + 14.0, 300.0, Color(0.82, 0.62, 0.34, 0.85))
+	var nrows := menu_options().size()
+	var rows_h := 54.0 * float(nrows) + 11.0 * float(nrows - 1)
+	# ...and they stand ON the boards with their feet clear of the lip, not straddling it. The lip
+	# is a bright 3px line with the footlights burning just above it, so a card crossing it gets a
+	# hot line and a row of bulbs showing through its own bottom edge.
+	var oy := maxf(s.y * MENU_FLOOR - rows_h - 16.0, mark_bot + 40.0)
+	menu_rows(font, s, oy)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
 	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
 	if OS.is_debug_build():   # a build number is dev-only furniture - a shipped title
@@ -18863,14 +19020,12 @@ const CAP_A_FIRE_SC := 0.72    # the apex fire's scale, as a fraction of the str
 							   # fire is the brightest thing in the mark and the reason the
 							   # letter is torches at all.
 const CAP_CROSSBAR_AT := 0.34  # how far up the shafts the crossbar sits, 0 butt, 1 wick
-const CAP_A_BALL := 0.46       # the crossbar ball's radius, as a fraction of the GAP between the
-							   # two strokes at that height. Half the gap would have it touching
-							   # both exactly, which at these line weights reads as a ball jammed
-							   # in a vice; a hair under leaves the daylight either side that says
-							   # "resting between them". Its predecessor CAP_CROSSBAR_OVER (1.22)
-							   # is deleted: a club had to reach PAST the strokes to be seen at
-							   # all between two dark handles, and a round object of this size
-							   # does not.
+# THE CROSSBAR'S OWN SIZE CONSTANT IS GONE (2026-07-30). It was CAP_A_BALL, the ball's radius as
+# a fraction of the gap between the strokes - which is exactly the wrong way round to size it. A
+# ball in this mark is a BALL, so its radius is CAP_BALL_R like every other one, and the gap is
+# bridged by using more of them. Its predecessor CAP_CROSSBAR_OVER (1.22) went the same way: a
+# club had to reach PAST the strokes to be seen at all between two dark handles, and a row of
+# round objects does not.
 # THE PICTURE HAS A LIGHT SOURCE IN IT, so everything obeys it (2026-07-28, Louis: "a
 # sharper image with everything on it that would be in real life"). Two torches burn at
 # the right-hand end of the word. In a dark room that is the brightest thing in frame by
@@ -19593,7 +19748,26 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				# wrong, and sized to the gap it WEDGES between the two strokes, which is what a
 				# crossbar does. Drawn OVER the shafts for the same reason the club was: behind
 				# them it disappeared between two dark handles.
-				cap_ball(bar_c, cap_s_color(0), bar_l.distance_to(bar_r) * CAP_A_BALL)
+				# ...AND IT IS THE S's BALL, AT THE S's SIZE, AS MANY AS IT TAKES (2026-07-30,
+				# Louis: "the ball between the torches should have the same size as the other
+				# balls in the s, if it's too small to bridge the gap, just use more balls"). The
+				# first version sized one ball to the gap, which made it far and away the biggest
+				# ball in the picture - and a wordmark built out of props has to be built out of
+				# the SAME props, or the eye reads the odd one as a different object rather than
+				# as the same material spelling a different letter. So the radius is CAP_BALL_R,
+				# exactly what each of the six balls in an S gets, and the COUNT does the
+				# bridging: however many fit the gap at a 0.90 overlap, which is three at every
+				# size the mark is drawn at. Spread from stroke to stroke, so the outer two tuck
+				# behind the handles and the row reads as a bar laid across the letter.
+				# ...and the count is INTERVALS PLUS ONE. Sizing n to the span and then spreading
+				# n balls across it divides the span into n-1 gaps, each wider than a ball, so the
+				# first try laid three balls with daylight between them - three balls, not a bar.
+				var abr := size_l * CAP_BALL_R
+				var bar_len := bar_l.distance_to(bar_r)
+				var nab := clampi(int(round(bar_len / maxf(abr * 2.0 * 0.90, 0.001))) + 1, 2, 7)
+				for j in nab:
+					var t := float(j) / float(nab - 1)
+					cap_ball(bar_l.lerp(bar_r, t), cap_s_color(j + 1), abr)
 			_:
 				pass
 		x += w + gap - size * n.x
@@ -19692,8 +19866,11 @@ func draw_capsule_art(font: Font, s: Vector2) -> void:
 	var cap_bot := cap_top + mark_height(float(cap_sz))
 	draw_menu_cascade(Vector2(cx, s.y * 0.15), 1.2 * k)
 	draw_wordmark(cap_top, cap_sz, Color(1.0, 0.88, 0.5), s)
+	# NO TAGLINE, HERE EITHER (2026-07-30, Louis: "storefront capsule : jugglers climbs remove
+	# it"). It came off the title screen first and this was left for one commit on the argument
+	# that a storefront capsule wants a line under the logo. It does not want THIS one, and the
+	# mark is the same mark in both places, so the two screens agree again.
 	draw_ornament(cx, cap_bot + 22.0 * k, 300.0 * k, Color(0.82, 0.62, 0.34, 0.85))
-	draw_string(font, Vector2(0, cap_bot + 68.0 * k), "a juggler's climb", HORIZONTAL_ALIGNMENT_CENTER, s.x, int(round(27.0 * k)), Color(0.88, 0.76, 0.62))
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0 * k, Color(0.82, 0.62, 0.34, 0.55))
 
