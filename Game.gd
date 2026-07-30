@@ -18922,15 +18922,15 @@ const MENU_ORN_LIFT := 20.0  # how far the gold divider sits ABOVE the first men
 							 # hang 14px under the wordmark, which put it in the middle of the empty
 							 # band between the two - Louis wants it tight to the menu instead.
 
-func _swag_arc_pts(a: Vector2, ctrl: Vector2, b: Vector2, n: int) -> PackedVector2Array:
-	# a quadratic bezier, a to b, sampled at n+1 points - the smooth-hem primitive
-	# menu_swags builds every curved edge from, so the fill and the gold trace over it
-	# can never disagree about where the curve actually runs.
+func _arc_ring_pts(c: Vector2, r: float, a0: float, a1: float, n: int) -> PackedVector2Array:
+	# n+1 points on a true circle of radius r about c, swept from angle a0 to a1 (Godot's
+	# screen convention: angle 0 = +x, PI*0.5 = +y = straight down). menu_swags builds every
+	# curved edge from this now, so a fold's fill and the gold trace over it are always
+	# points on the SAME circle, never an approximation of one.
 	var pts := PackedVector2Array()
 	for i in range(n + 1):
-		var t := float(i) / float(n)
-		var u := 1.0 - t
-		pts.append(a * (u * u) + ctrl * (2.0 * u * t) + b * (t * t))
+		var ang := lerpf(a0, a1, float(i) / float(n))
+		pts.append(c + Vector2(cos(ang), sin(ang)) * r)
 	return pts
 
 
@@ -18942,24 +18942,26 @@ func menu_swags(s: Vector2) -> void:
 	# a swag FRAMES the picture where a box competes with it, since two lit windows out at the
 	# edges pull the eye away from a wordmark in the middle.
 	#
-	# A SWAG IS A FAN OF FOLDS, and that is the one idea this drawing rests on. Gathered velvet is
-	# pinned at ONE point and every fold runs back to it, so the whole shape is a fan of wedges
-	# sharing an apex, with a scalloped hem where the lobes hang. Drawing it that way means the
-	# folds cannot be wrong: they converge because the cloth does.
-	# **The first attempt drew a few very dark triangles over a plain shape instead**, and they
-	# read as black spikes clawing inward - and it hung a gold tieback rope at the swag's inner
-	# corner, which at that width landed right over the T and the A and looked like two fishing
-	# rods propped against the letters. Alternating CLOSE tones per wedge is what makes cloth;
-	# a big tonal jump makes a hole.
-	# THE HEM IS A CURVE NOW, NOT A ZIGZAG (2026-07-30, Louis: "make them look more natural:
-	# smooth edges like a real curtain"). Each lobe used to belly to a single hard vertex - a
-	# straight line down to a point and straight back up, which is a triangle wave, i.e. a paper
-	# fan rather than gathered velvet. `_swag_arc_pts` sweeps a real quadratic arc through that
-	# same belly point instead, so a lobe's fill and its gold trace both follow one continuous
-	# curve rather than a fold with a crease sewn into it.
-	var drop := s.y * 0.30          # how far the outer edge of each swag hangs
-	var wide := s.x * 0.18          # ...and how far in from its own side it reaches
-	var lobes := 5
+	# THE FOLDS ARE RINGS NOW, NOT A FAN OF STRAIGHT WEDGES (2026-07-30, Louis, on the second
+	# pass: "they should be flowing along circlelike segments centered around the top corners
+	# and flowing down the sides"). The first two versions both radiated STRAIGHT lines out from
+	# one pinned point - first to hard hem vertices, then to a curved hem - which is a fan, and a
+	# fan does not read as fabric hanging off a fixed corner and falling down the side of the
+	# frame: it reads as spreading sideways FROM the corner. A real gathered curtain's folds are
+	# concentric about the point it is tied at, each one a bit further out (and looser) than the
+	# last, and the whole mass falls along the wall it is fixed to. So every fold here is a true
+	# circular RING SEGMENT about the same centre `c` - the corner where the pelmet meets the
+	# wall - swept from angle 0 (straight in along the top, the SAME distance out as it reaches
+	# down) to angle PI/2 (straight down the side). One radius, two directions: that is what
+	# makes the shape read as flowing down the wall rather than draped across the ceiling.
+	# Growth per ring is EASED (`pow(f, 1.3)`), not linear, so the gather is tight near the
+	# corner and the folds loosen as they fall - a real pinned point does not hold every layer
+	# at an even spacing.
+	# ALTERNATING CLOSE TONES PER RING is what makes cloth (carried over from the very first
+	# version): a big tonal jump between neighbours makes a hole rather than a fold.
+	var rmax := s.y * 0.30          # how far the swag reaches, in BOTH directions at once -
+									 # the whole point of a true circle over an ellipse
+	var folds := 6
 	var velvet := Color(0.34, 0.070, 0.095)
 	var velvet_lo := Color(0.26, 0.052, 0.074)
 	var gold := Color(0.86, 0.68, 0.32)
@@ -18973,53 +18975,42 @@ func menu_swags(s: Vector2) -> void:
 	draw_rect(Rect2(0.0, val_h - 2.0, s.x, 2.0), Color(gold.r, gold.g, gold.b, 0.30))
 	# `side` IS THE DIRECTION INWARD, not which half of the screen. Written the other way round
 	# first, and the left swag's inner corner came out at x = -384: off screen, so only the valance
-	# drew and the corners looked empty. A swag hangs from its own OUTER edge and is pulled toward
-	# the middle, so the sign that matters is the one pointing at the middle.
+	# drew and the corners looked empty.
 	for side: float in [1.0, -1.0]:
-		var ox := 0.0 if side > 0.0 else s.x
-		var pin := Vector2(ox, val_h * 0.35)          # where the cloth is gathered and pinned
-		# the hem: `lobes` + 1 points sweeping from the outer edge up to the inner corner, each
-		# pair of them bellying DOWN in between
-		var hem: Array[Vector2] = []
-		for i in lobes + 1:
-			var f := float(i) / float(lobes)
-			hem.append(Vector2(lerpf(ox, ox + side * wide, f), lerpf(drop, val_h * 1.15, f * f)))
-		# one curved lobe per fold, all of them back to the pin, in alternating close tones
-		var edge := PackedVector2Array()
-		for i in lobes:
-			var a := hem[i]
-			var b := hem[i + 1]
-			var belly := (a + b) * 0.5 + Vector2(0.0, drop * 0.075)   # where the lobe hangs lowest
-			# the control point is solved so the arc PASSES THROUGH `belly` at its own
-			# midpoint, not merely toward it: a quadratic sits at t=0.5 exactly halfway
-			# between the midpoint of (a,b) and the control point, so the control has to
-			# overshoot the target by the same distance to land the curve on it.
-			var ctrl := belly * 2.0 - (a + b) * 0.5
-			var arc := _swag_arc_pts(a, ctrl, b, 8)
-			var wedge := PackedVector2Array([pin])
-			wedge.append_array(arc)
-			draw_colored_polygon(wedge, velvet if i % 2 == 0 else velvet_lo)
-			if i > 0:
-				arc.remove_at(0)   # shared with the previous lobe's own last point
-			edge.append_array(arc)
-		# the gold hem, one continuous sweep along the same arcs so it can never come off
-		# the cloth. Faint, because a bright line along a scalloped hem reads as a fringe
-		# only at low alpha - any brighter and it reads as a lightning bolt.
-		draw_polyline(edge, Color(gold.r, gold.g, gold.b, 0.26), 1.6)
-		# THE TIEBACK IS A BOWTIE NOW, NEAR THE PIN (2026-07-30, Louis: "a small golden
+		var c := Vector2(0.0 if side > 0.0 else s.x, val_h)   # the gather point: the pelmet's own corner
+		var a_top := 0.0 if side > 0.0 else PI   # along the top edge, inward
+		var a_side := PI * 0.5                    # straight down the side, always
+		for k in folds:
+			var r0 := rmax * pow(float(k) / float(folds), 1.3)
+			var r1 := rmax * pow(float(k + 1) / float(folds), 1.3)
+			var outer := _arc_ring_pts(c, r1, a_top, a_side, 10)
+			var band := PackedVector2Array()
+			if r0 <= 0.5:
+				band.append(c)   # the innermost fold is a true pie slice, not a ring
+				band.append_array(outer)
+			else:
+				band.append_array(outer)
+				band.append_array(_arc_ring_pts(c, r0, a_side, a_top, 10))   # reversed, to close the ring
+			draw_colored_polygon(band, velvet if k % 2 == 0 else velvet_lo)
+		# the gold hem, one smooth sweep along the OUTERMOST circle only - the one edge that is
+		# actually visible cloth rather than a seam between two folds. Faint, because a bright
+		# line along a curved hem reads as a fringe only at low alpha - any brighter and it
+		# reads as a lightning bolt.
+		draw_polyline(_arc_ring_pts(c, rmax, a_top, a_side, 24), Color(gold.r, gold.g, gold.b, 0.26), 1.6)
+		# THE TIEBACK IS A BOWTIE, NEAR THE GATHER POINT (2026-07-30, Louis: "a small golden
 		# bowtie holding them to the side"). A real curtain tieback gathers the cloth with
 		# a bow, not a doorknob with a fringe hanging off it - two ribbon loops pinched at
 		# a knot, with two short tails dropping below.
-		# OFFSET FROM THE PIN, NOT ON IT: the pin sits almost exactly on the screen's own
+		# OFFSET FROM `c`, NOT ON IT: the gather point sits almost exactly on the screen's own
 		# corner, which is the single darkest patch on the whole title screen once
-		# draw_vignette lands on it (measured: a bow drawn AT the pin rendered as a
+		# draw_vignette lands on it (measured: a bow drawn AT the corner rendered as a
 		# barely-there smudge). `orn` pulls it down into the body of the swag instead,
-		# along the same inward direction the fan already opens on, where it has more
+		# along the same inward direction the rings already open on, where it has more
 		# room to read against mid-tone velvet - and its own gold is a shade brighter
 		# than the hem trace's, which is deliberately faint (see above), because a small
 		# accent this close to the corner still has to punch through what vignette
 		# remains at its new spot.
-		var orn := pin + Vector2(side * 12.0, 15.0)
+		var orn := c + Vector2(side * 12.0, 18.0)
 		var bgold := Color(1.0, 0.85, 0.46)
 		var bdk := Color(0.78, 0.60, 0.27)
 		draw_circle(orn, 8.0, Color(0.0, 0.0, 0.0, 0.22))   # a soft dark backing, so the
