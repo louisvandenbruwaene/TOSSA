@@ -730,7 +730,13 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   it** - the first curl ran to 1.10 of the bundle's width, i.e. into open air, and a gold tongue
   hanging in the dark beside the curtain is the opposite of the read wanted. The tie row moved from
   0.47 to 0.56 down the leg ("a bit lower"), which is one number in `DRAPE_SILHOUETTE` because the
-  cord, the bow and the pinch all read that table.
+  cord, the bow and the pinch all read that table. **AND THE OVERHANG CURLS UP, NOT DOWN** (Louis:
+  "make sure it points upwards instead of down and make it less pointy by filling in the string above
+  the point/below it"): two faults in one shape. Diving DOWN put the end below the cord's own line,
+  which is where a loose hanging tail would be, so it read as a second droopy tassel rather than as
+  the cord turning behind the drape; going UP is the near side of a loop rising over the bundle.
+  And tapering to 0.5px made a spike - a cord has THICKNESS all the way to where it disappears, so
+  it now keeps most of it (2.6 of 4.6) and simply stops.
   **A CURTAIN DOES NOT FLARE BACK OUT BELOW ITS TIEBACK - "that's just physics"** (Louis). The
   silhouette ran 0.58 at the tie back up to 0.96 at the boards, a 65% widening, which is a curtain
   that somehow finds cloth it does not have. Below the tie the drape hangs FROM the tie and falls
@@ -768,6 +774,50 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   16-byte directory entry per size and the PNGs concatenated. `file` confirms all three.
   **The Dock will keep showing the old one** until `./install_apps.sh` runs (it copies the icns into
   the wrapper and busts macOS's icon cache) - that writes outside the repo, so it is Louis's call.
+- **THE UI PASS OF 2026-07-30 - four things Louis asked for, and what each one turned out to be.**
+  **(1) NO GOLD FRAME ON THE TITLE SCREEN** ("Why is there a thin light brown rectangle around the
+  titlepage?"). It is `draw_frame`, the decorative double border with corner ticks that nine screens
+  share, and on the other eight it is doing a real job - giving a flat UI page an edge. The title
+  screen stopped being a page the day it became a ROOM: the pelmet across the top and a leg down each
+  side already frame the picture, in perspective, out of the set itself. A rectangle ruled over that
+  is a second frame around the first, which is exactly why it read as a stray line rather than as
+  decoration. Removed from `draw_menu` only.
+  **(2) ONE COLOUR PER CARD** ("each selected window has a certain horizontal line of color change,
+  i don't like that; just choose one color, not two"). `soft_card` carried a `top_sheen`: a lighter
+  StyleBoxFlat over the top 42%, faking the gradient StyleBoxFlat cannot fill. **A box has an EDGE**,
+  so the "gradient" was two flat tones meeting at a hard horizontal line 42% down the card - a seam
+  across every lit menu row, every selected slot, every shop card. A fake gradient made of two
+  rectangles is not a gradient, it is a stripe. The parameter is DELETED, not defaulted to zero, and
+  all 22 call sites lost their trailing argument, so nobody can reintroduce it by passing a number.
+  **(3) THE ACCENT BAR IS GONE** ("remove the weird colored horizontal line on the top of the item
+  cards ... if there is another location with that weird horizontal bar near the top of the card, get
+  rid of it"). One 2px rect of the accent colour just inside `hud_card`'s top edge, meant as
+  Balatro-ish chunk, reading as a coloured rule laid across the card - a line the eye must account
+  for that means nothing. Because `hud_card` is shared it was doing that on the shop's prop cards,
+  the gear cards, the sheet's cards and every rail card at once, which is the whole of Louis's
+  "another location": ONE deletion covered all of them. The accent still identifies the card - it is
+  the BORDER colour, i.e. the whole outline, rather than one arbitrary edge. (Swept for others: the
+  only surviving thin bar is the wardrobe rack's underline under TONIGHT'S column, which is
+  information, not decoration.)
+  **(4) THE SHOP CARD IS A TABLE NOW** ("I want The cost for 1, owned: x, and strength >= (nr of
+  objects * object index), where you make it a bit shorter and fill in the right numbers; so that
+  means i want a clean list of stats for each item in the store"). Four prose lines and a meter -
+  "Str 1 each", "max 15", "score ^3.0 at 3", a set bar, "a set of 3, fielded" - became four rows of
+  `Cost ea. / Owned / Str for N / Score`, labels on one left edge and values on one right edge,
+  because a list of numbers is only readable if the numbers line up; that alignment is what makes it
+  a list rather than four more sentences. **The Strength row is the point of the whole request**: it
+  used to print the per-object unit and leave the player to multiply by tonight's count. `prop_req`
+  already does that multiplication AND is the same function the throw gate checks, so the card cannot
+  advertise a requirement the game does not enforce. Labels may ellipsise (a phrase survives it);
+  values go through `fit_size` and never `fit_text`, because an ellipsised number is not a number.
+  **AND THERE WERE TWO SHOP CARDS.** `draw_shop_prop_card` (the grid, what ships) and `draw_shop_row`
+  (the single-row fallback that returns the day gear comes back) each carried their own copy of those
+  lines, worded and laid out differently. The first attempt edited the FALLBACK, rendered the shop and
+  saw nothing move - the accent bars had vanished, proving the build was live, while the card body was
+  untouched. `shop_stat_rows` and `draw_stat_rows` are now the single source both call. **Two copies
+  of one card is how a shop ends up telling a player two different things about the same prop
+  depending on a flag**, and a rendered screenshot that changes in one respect and not another is the
+  tell that you edited a sibling.
 - **ONE BALL, EVERYWHERE - and how to find the next one of these** (2026-07-30, Louis: "check the
   rest of the program for inconsistent artstyle: because i noticed that the game save file cards had
   a different, older, ball design"). He was right, and it was in three places, not one. `cap_ball`
