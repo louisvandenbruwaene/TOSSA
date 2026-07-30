@@ -18942,7 +18942,10 @@ const DRAPE_FOLDS := 4.25    # fold periods across one leg. The .25 is load-bear
 							 # eye follows down the picture is a LIT crest and not whatever
 							 # tone the arithmetic happened to land on.
 const DRAPE_COLS := 30       # samples across a leg - this is the SHADING resolution
-const DRAPE_ROWS := 20       # samples down it - this is the SILHOUETTE resolution
+const DRAPE_ROWS := 44       # samples down it - this is the SILHOUETTE resolution. It was 20,
+							 # and 20 straight segments across a curve that turns as hard as a
+							 # tieback does is what the "small nicks" in the outline were: not
+							 # aliasing, FACETING. The bake runs once, so rows are free.
 const DRAPE_HEADER := 0.026  # the gathered heading over the rail, above the swags, x s.y
 const DRAPE_SAG := 0.070     # how deep a swag hangs at its middle, x s.y
 const DRAPE_SWAGS := 6       # swags across the pelmet
@@ -18956,7 +18959,7 @@ const DRAPE_BANDS := 6       # fold arcs nested inside one swag
 # inner corner over the T and the A like a fishing rod propped against the letters).
 const DRAPE_SILHOUETTE := [
 	Vector2(0.00, 1.00), Vector2(0.19, 1.06), Vector2(0.56, 0.58),
-	Vector2(0.78, 0.78), Vector2(1.00, 0.96)]
+	Vector2(0.80, 0.63), Vector2(1.00, 0.69)]
 const DRAPE_TIE_KEY := 2
 const DRAPE_DEEP := Color(0.098, 0.019, 0.030)   # the trough, near enough the back wall
 const DRAPE_LIT := Color(0.545, 0.115, 0.142)    # the crest, full in the stage light
@@ -19076,9 +19079,27 @@ func drape_leg(s: Vector2, fy: float, side: float) -> void:
 			var cc := drape_velvet(ph, u, lift, warm)
 			if feather:
 				cc.a = 0.0
-			pos.append(Vector2(ex + side * (w * u * sway + (2.2 if feather else 0.0)), y))
+			pos.append(Vector2(ex + side * w * u * sway, y))
 			col.append(cc)
 	var stride := DRAPE_COLS + 2
+	# THE FEATHER RUNS PERPENDICULAR TO THE EDGE, and getting that wrong is the other half of
+	# the nicks. Offsetting it a flat 2.2px sideways is only a 2.2px feather where the edge
+	# happens to be VERTICAL; where the silhouette turns hardest - right at the tieback, which
+	# is exactly where the eye is - the edge is steeply slanted and the true perpendicular
+	# width of that same offset collapses, so the softening thinned out precisely at the
+	# corners that needed it. Measured off the neighbouring rows, so it follows whatever the
+	# silhouette table says without being told about it.
+	for i in DRAPE_ROWS + 1:
+		var e := i * stride + DRAPE_COLS
+		var a := pos[maxi(i - 1, 0) * stride + DRAPE_COLS]
+		var b := pos[mini(i + 1, DRAPE_ROWS) * stride + DRAPE_COLS]
+		var tan := b - a
+		if tan.length_squared() < 0.0001:
+			tan = Vector2(0.0, 1.0)
+		var nrm := Vector2(tan.y, -tan.x).normalized()
+		if nrm.x * side < 0.0:
+			nrm = -nrm            # always the INWARD side, whichever way the edge is running
+		pos[e + 1] = pos[e] + nrm * 2.2
 	for i in DRAPE_ROWS:
 		for j in DRAPE_COLS + 1:
 			var a := i * stride + j
@@ -19193,22 +19214,27 @@ func drape_cord(ex: float, ty: float, band: float, side: float) -> void:
 	#      back, which is the only view you ever get of the far side of a loop.
 	# ...and a shadow under it on the velvet, because the cloth is being squeezed.
 	var n := 18
-	# IT VANISHES AT THE EDGE, IT DOES NOT POKE OUT OF IT. The first curl ran to 1.10 of the
-	# bundle's width, i.e. past the cloth into open air, and a gold tongue hanging in the dark
-	# beside the curtain is the opposite of the read wanted: the far side of a loop is HIDDEN
-	# by the thing it goes around. Ending at the leading edge, narrowing and darkening over
-	# the last tenth, is the whole of "it turned away behind the drape".
-	var over := 1.0
+	# HOW FAR PAST THE RED IT REACHES, and this went wrong in both directions before it was
+	# right (2026-07-30, Louis: "should extend inwards a bit more: just past the red, right now
+	# it stops too early and doesn't seem to loop around the curtains"). At 1.10 it was a long
+	# gold tongue hanging in the dark beside the curtain; cut back to 1.00 it stopped exactly ON
+	# the edge, which reads as a cord that ends at the cloth rather than one that goes round it.
+	# **A loop is only legible if a little of its FAR side shows**, and "a little" is the whole
+	# specification: enough to turn, not enough to hang in the air. 1.065 is about 7px at 1280,
+	# and it only reads as behind-the-drape because the overhang also dives, narrows to a point
+	# and drops to a third of its brightness across those 7px - a bright, level, blunt stub the
+	# same size would read as a peg sticking out.
+	var over := 1.065
 	var top := PackedVector2Array()
 	var bot := PackedVector2Array()
 	var dim := PackedFloat32Array()
 	for k in n + 1:
 		var u := float(k) / float(n) * over
-		var wrap := clampf((u - 0.88) / 0.12, 0.0, 1.0)   # 0 across the front, 1 turning away
+		var wrap := clampf((u - 0.93) / 0.135, 0.0, 1.0)   # 0 across the front, 1 round the back
 		var x := ex + side * band * u
-		# the sag across the front, plus the turn downward as it goes round the edge
-		var y := ty + 3.4 * sin(PI * minf(u, 1.0)) + 3.0 * wrap * wrap
-		var h := lerpf(4.6, 1.2, wrap)
+		# the sag across the front, plus the dive as it turns round the edge
+		var y := ty + 3.4 * sin(PI * minf(u, 1.0)) + 8.0 * wrap * wrap
+		var h := lerpf(4.6, 0.5, wrap)
 		top.append(Vector2(x, y - h))
 		bot.append(Vector2(x, y + h))
 		dim.append(wrap)
@@ -19219,8 +19245,8 @@ func drape_cord(ex: float, ty: float, band: float, side: float) -> void:
 		_soup_line(bot[k] + Vector2(0.0, 1.0), bot[k + 1] + Vector2(0.0, 1.0), 5.0,
 			Color(0.0, 0.0, 0.0, 0.26 * (1.0 - dim[k])))
 	for k in n:
-		var f := 1.0 - 0.62 * dim[k]          # the back of the loop is in shadow
-		var g := 1.0 - 0.62 * dim[k + 1]
+		var f := 1.0 - 0.70 * dim[k]          # the back of the loop is in shadow
+		var g := 1.0 - 0.70 * dim[k + 1]
 		_soup_quad(top[k], top[k + 1], bot[k + 1], bot[k],
 			DRAPE_BOW.darkened(1.0 - f), DRAPE_BOW.darkened(1.0 - g),
 			DRAPE_BOW_DK.darkened(1.0 - g), DRAPE_BOW_DK.darkened(1.0 - f))
