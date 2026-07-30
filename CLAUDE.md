@@ -717,8 +717,51 @@ rather than an implementation - see the foot of `tasks.md` for the two candidate
   size: a strand that faint is below the threshold where the eye assembles a row of them into an
   edge - the Midnight Show's house lights ("a lamp needs a halo or it is just a brighter
   rectangle"), from the other direction.
+  **THE CORD GOES ALL THE WAY ROUND** (Louis, on the first version: "the golden string / bow looks
+  off: it should be a bit lower and completely surround the red drapes, they are what is holding the
+  curtains / drapes to the side"). It ran from the wall and STOPPED at the knot, which is why it read
+  as a stick pushed into the curtain: **a thing that ends halfway across an object is lying on it,
+  not around it.** Three things say encircling and all three are needed - it crosses the WHOLE bundle
+  and emerges on BOTH sides of the bow, so the eye joins the two halves into one cord passing behind
+  the knot; it SAGS across the middle, because a band round a soft bundle follows the bundle and a
+  dead-straight line is a rod every time; and it CURLS AWAY at the leading edge, narrowing and
+  darkening, which is the only view you ever get of the far side of a loop. Plus a shadow under it on
+  the velvet, because the cloth is being squeezed. **It vanishes AT the edge and does not poke out of
+  it** - the first curl ran to 1.10 of the bundle's width, i.e. into open air, and a gold tongue
+  hanging in the dark beside the curtain is the opposite of the read wanted. The tie row moved from
+  0.47 to 0.56 down the leg ("a bit lower"), which is one number in `DRAPE_SILHOUETTE` because the
+  cord, the bow and the pinch all read that table.
   **They draw AFTER the veil and the spotlight**: they are the nearest thing in the room, so the
   wash that pushes the back wall behind the mark must not also wash them out.
+- **ONE BALL, EVERYWHERE - and how to find the next one of these** (2026-07-30, Louis: "check the
+  rest of the program for inconsistent artstyle: because i noticed that the game save file cards had
+  a different, older, ball design"). He was right, and it was in three places, not one. `cap_ball`
+  became the game's ball in July (flat body, ONE wandering seam, broad dim sheen, concentric rim) and
+  three UI screens never moved off the disc that preceded it: the **save-file cards** (a bare
+  `draw_circle`, plus its own hand-typed palette which had already drifted from `ball_color` - the
+  blue was 0.5/0.78/0.95 against the real 0.72/0.86/0.95), the **menu cascade** on the key art and
+  the credits (which sits directly under a wordmark whose S's ARE `cap_ball`s, so one picture held
+  two balls), and the **tutorial's starting-kit panel**. All three route through `cap_ball` now.
+  **The same screen was also drawing the currency of two economies ago**: a gold disc with a white
+  blob, which is exactly the coin `draw_coin_mark` replaced - sitting next to the word "flowers".
+  **THE MECHANICAL WAY TO FIND THE REST, which is the reusable part:** every "old art" site was a
+  `draw_circle` with an OPAQUE colour and a radius in the object range. Scan for `draw_circle` with a
+  literal radius >= 6 and read the alpha - glows, halos and backing discs are all well under 0.5, so
+  what is left is a handful of lines and every one of them is either a real object or a silhouette.
+  That found all four in one pass. The uncalled-function sweep is the other half: `draw_ball_shape`
+  is dead now and joins `draw_egg`, `draw_knife`, `draw_torch` and `draw_club` as the fifth flat prop
+  the rich version superseded. **Deleting that set is not free** - `draw_club_v2` has no other caller
+  and is half of a live F9 experiment - so the note at `draw_club` says settle `club_v2` first.
+  (Same sweep, unrelated and NOT a bug: `safe_pow` is uncalled. The scoring computes in logs through
+  `from_log10` directly, and that is where `SCORE_CEIL` is applied, so the overflow protection this
+  file insists on is intact and `safe_pow` is just a redundant wrapper.)
+  **AND A SHARED SHAPE MUST CARRY THE CALLER'S ALPHA.** `cap_ball` rebuilt its seam and its rim as
+  fresh `Color(r, g, b)` triples, which default to alpha 1 - so a ball asked to draw at 40% (a dimmed
+  empty save slot, `draw_tutdone`'s fade-in) came out as a faint disc wearing a fully opaque seam and
+  a hard black outline. Nothing exercised it while the only callers were the stage and the shop,
+  which pass opaque colours; moving the fading screens onto the shared ball is what surfaced it.
+  `ca()` handles the WORDMARK's fade and the caller's alpha is a SECOND, independent fade - both have
+  to be applied. `cap_egg` has the same latent shape and no caller that fades it yet.
   **The mark is placed off the MENU now, not the other way round** (Louis: "move it down a little,
   so it's centered between the top of the screen and the Play button. There shouldn't be much room
   between the yellow thin line and the play button itself"). The rows come off the stage lip, the

@@ -13322,6 +13322,14 @@ func draw_prop_body(b: Ball, pos: Vector2, ang: float, sc: float) -> void:
 #
 # The other half of "looks bad in the air" was never an art problem at all - see
 # flight_vel for the trail-sampling bug that was actually causing the jitter.
+#
+# NO CALLER SINCE 2026-07-30, and it is the fifth member of the set `draw_club`'s note names
+# (with draw_egg, draw_knife, draw_torch and draw_club itself) - the flat version of a prop
+# that the rich version superseded. Its last two callers were UI: the menu cascade and the
+# tutorial's starting-kit panel, both of which were still showing the pre-`cap_ball` disc
+# while the stage beside them drew the seamed one. Delete the five together or keep the five
+# together. The doctrine above is NOT dead with it - `cap_ball`'s own note builds directly on
+# it, and the ban on painted highlights and sub-pixel features still governs every prop.
 func draw_ball_shape(pos: Vector2, col: Color, sc: float) -> void:
 	draw_circle(pos, BALL_RADIUS_PX * sc, col)
 
@@ -13530,11 +13538,14 @@ func draw_club_v2(pos: Vector2, ang: float, sc: float) -> void:
 func draw_club(pos: Vector2, ang: float, sc: float) -> void:
 	# NO CALLER SINCE 2026-07-30, and that is recorded rather than left to be discovered. Its one
 	# caller was the wordmark's A crossbar, which is a ball now; the stage and the shop both draw
-	# `cap_club` through `draw_prop_rich`. It is kept because `draw_egg`, `draw_knife` and
-	# `draw_torch` are in exactly the same state - the flat version of a prop that the rich
-	# version superseded - and the uncalled-function sweep has been reporting that family for
-	# some time. Delete the four together or keep the four together; one of them going alone is
-	# how a set of siblings quietly stops being a set.
+	# `cap_club` through `draw_prop_rich`. It is kept because `draw_egg`, `draw_knife`,
+	# `draw_torch` and (since 2026-07-30) `draw_ball_shape` are in exactly the same state - the
+	# flat version of a prop that the rich version superseded - and the uncalled-function sweep
+	# has been reporting that family for some time. Delete the five together or keep the five
+	# together; one of them going alone is how a set of siblings quietly stops being a set.
+	# NOTE that deleting this one is not free: `draw_club_v2` has no other caller, and it is
+	# half of a LIVE F9 experiment whose other two readers (glow_silhouette, cap_club) are
+	# still wired up. Anyone doing the cull has to settle club_v2 first.
 	if exp_on("club_v2"):
 		draw_club_v2(pos, ang, sc)
 		return
@@ -18944,8 +18955,8 @@ const DRAPE_BANDS := 6       # fold arcs nested inside one swag
 # the pinch it is supposed to be causing (the mistake the first bow made, hanging at the
 # inner corner over the T and the A like a fishing rod propped against the letters).
 const DRAPE_SILHOUETTE := [
-	Vector2(0.00, 1.00), Vector2(0.17, 1.05), Vector2(0.47, 0.58),
-	Vector2(0.66, 0.76), Vector2(1.00, 0.96)]
+	Vector2(0.00, 1.00), Vector2(0.19, 1.06), Vector2(0.56, 0.58),
+	Vector2(0.78, 0.78), Vector2(1.00, 0.96)]
 const DRAPE_TIE_KEY := 2
 const DRAPE_DEEP := Color(0.098, 0.019, 0.030)   # the trough, near enough the back wall
 const DRAPE_LIT := Color(0.545, 0.115, 0.142)    # the crest, full in the stage light
@@ -19167,6 +19178,54 @@ func drape_pelmet(s: Vector2) -> void:
 		_soup_ellipse(Vector2(px - 1.2, hy - 0.4), 2.4, 2.1, 0.0, 8, Color(1.0, 0.90, 0.58))
 
 
+func drape_cord(ex: float, ty: float, band: float, side: float) -> void:
+	# THE CORD GOES ALL THE WAY ROUND (2026-07-30, Louis: "it should be a bit lower and
+	# completely surround the red drapes, they are what is holding the curtains / drapes to
+	# the side"). The first one ran from the wall and STOPPED at the knot, which is why it
+	# read as a stick pushed into the curtain rather than a tie holding it: a thing that
+	# ends halfway across an object is lying on it, not around it. Three things say
+	# "encircling", and all three matter:
+	#   1. it crosses the WHOLE bundle and emerges on BOTH sides of the bow, so the eye
+	#      joins the two halves into one cord passing behind the knot;
+	#   2. it SAGS across the middle, because a band round a soft bundle follows the
+	#      bundle's roundness - a dead-straight line is a rod every time;
+	#   3. it CURLS AWAY at the leading edge, narrowing and darkening as it turns round the
+	#      back, which is the only view you ever get of the far side of a loop.
+	# ...and a shadow under it on the velvet, because the cloth is being squeezed.
+	var n := 18
+	# IT VANISHES AT THE EDGE, IT DOES NOT POKE OUT OF IT. The first curl ran to 1.10 of the
+	# bundle's width, i.e. past the cloth into open air, and a gold tongue hanging in the dark
+	# beside the curtain is the opposite of the read wanted: the far side of a loop is HIDDEN
+	# by the thing it goes around. Ending at the leading edge, narrowing and darkening over
+	# the last tenth, is the whole of "it turned away behind the drape".
+	var over := 1.0
+	var top := PackedVector2Array()
+	var bot := PackedVector2Array()
+	var dim := PackedFloat32Array()
+	for k in n + 1:
+		var u := float(k) / float(n) * over
+		var wrap := clampf((u - 0.88) / 0.12, 0.0, 1.0)   # 0 across the front, 1 turning away
+		var x := ex + side * band * u
+		# the sag across the front, plus the turn downward as it goes round the edge
+		var y := ty + 3.4 * sin(PI * minf(u, 1.0)) + 3.0 * wrap * wrap
+		var h := lerpf(4.6, 1.2, wrap)
+		top.append(Vector2(x, y - h))
+		bot.append(Vector2(x, y + h))
+		dim.append(wrap)
+	# THE SHADOW IS ITS OWN PASS, and that is not tidiness. Emitted inside the segment loop
+	# it lands AFTER the cord it belongs under, and the soup draws in append order - so
+	# every segment's shadow was painted over the next segment's gold.
+	for k in n:
+		_soup_line(bot[k] + Vector2(0.0, 1.0), bot[k + 1] + Vector2(0.0, 1.0), 5.0,
+			Color(0.0, 0.0, 0.0, 0.26 * (1.0 - dim[k])))
+	for k in n:
+		var f := 1.0 - 0.62 * dim[k]          # the back of the loop is in shadow
+		var g := 1.0 - 0.62 * dim[k + 1]
+		_soup_quad(top[k], top[k + 1], bot[k + 1], bot[k],
+			DRAPE_BOW.darkened(1.0 - f), DRAPE_BOW.darkened(1.0 - g),
+			DRAPE_BOW_DK.darkened(1.0 - g), DRAPE_BOW_DK.darkened(1.0 - f))
+
+
 func drape_bow(p: Vector2, sc: float, side: float) -> void:
 	# THE TIEBACK, at the pinch and not at the corner (2026-07-30, Louis: "a small golden
 	# bowtie holding them to the side"). A tieback is a band round the gathered cloth with
@@ -19187,12 +19246,12 @@ func drape_bow(p: Vector2, sc: float, side: float) -> void:
 	# the two ribbon tails, under everything else - a cut ribbon end is NOTCHED, and at
 	# this size that notch is the whole difference between a ribbon and a spike
 	for tail: float in [-1.0, 1.0]:
-		var dir := Vector2(tail * 0.44, 1.0).normalized()
+		var dir := Vector2(tail * 0.30, 1.0).normalized()
 		var nrm := Vector2(-dir.y, dir.x)
 		var tip := p + dir * sc * 1.30
 		var ring := PackedVector2Array([
 			p - nrm * sc * 0.17, p + nrm * sc * 0.17,
-			tip + nrm * sc * 0.34, tip - dir * sc * 0.30, tip - nrm * sc * 0.34,
+			tip + nrm * sc * 0.26, tip - dir * sc * 0.15, tip - nrm * sc * 0.26,
 			p - nrm * sc * 0.17])
 		_soup_fan_lit(p.lerp(tip, 0.55), ring,
 			DRAPE_BOW if tail * side > 0.0 else DRAPE_BOW_DK.lightened(0.10),
@@ -19212,8 +19271,11 @@ func drape_bow(p: Vector2, sc: float, side: float) -> void:
 	# the knot, sitting proud of both loops with its own little highlight
 	_soup_ellipse(p, 0.30 * sc, 0.36 * sc, 0.0, 12, DRAPE_BOW_DK)
 	_soup_ellipse(p + Vector2(-0.03 * sc, -0.03 * sc), 0.24 * sc, 0.29 * sc, 0.0, 12, DRAPE_BOW)
-	_soup_ellipse(p + Vector2(-0.10 * sc, -0.12 * sc), 0.10 * sc, 0.11 * sc, 0.0, 8,
-		Color(1.0, 0.97, 0.82))
+	# the highlight is a SHEEN, not a pearl - a hard white speck on a 5px knot reads as a
+	# bead stuck to the bow, which is the coin's own "a lighter mark reads as something
+	# stuck on rather than pressed in" finding at a different scale
+	_soup_ellipse(p + Vector2(-0.09 * sc, -0.11 * sc), 0.11 * sc, 0.09 * sc, 0.0, 8,
+		Color(1.0, 0.94, 0.72, 0.72))
 
 
 func drape_bake(s: Vector2, fy: float) -> void:
@@ -19233,17 +19295,8 @@ func drape_bake(s: Vector2, fy: float) -> void:
 		# read off the same two functions the curtain is drawn with. The strap stops at 94%
 		# of it, so a sliver of velvet always shows past the gold.
 		var band := reach * drape_width(tie.x) * drape_sway(tie.x)
-		var knot := Vector2(ex + side * band * 0.70, ty)
-		# the strap, from the wall to the KNOT and no further - it is what the bow is tied
-		# on, so it disappears under it. Thin, because a tieback is a strap and the first
-		# one at 11px read as a plank laid on the cloth, and shaded top-to-bottom so it
-		# wraps the bundle instead of sitting on it.
-		_soup_quad(
-			Vector2(ex, ty - 4.0), Vector2(knot.x, ty - 6.0),
-			Vector2(knot.x, ty + 1.0), Vector2(ex, ty + 3.0),
-			DRAPE_BOW_DK.lightened(0.20), DRAPE_BOW,
-			DRAPE_BOW_DK, DRAPE_BOW_DK.darkened(0.35))
-		drape_bow(knot, reach * 0.098, side)
+		drape_cord(ex, ty, band, side)
+		drape_bow(Vector2(ex + side * band * 0.52, ty), reach * 0.098, side)
 	_drape_pts = _soup_pts.duplicate()
 	_drape_cols = _soup_cols.duplicate()
 	_drape_idx = _soup_idx.duplicate()
@@ -19459,7 +19512,10 @@ func draw_menu_cascade(center: Vector2, sc: float) -> void:
 			var pp := _cascade_pos(t - float(k) * 3.0, i, count, hl, hr, T, peak)
 			var a := 0.11 * (1.0 - float(k) / 11.0)
 			draw_circle(pp, (12.5 - 0.75 * float(k)) * sc, Color(col.r, col.g, col.b, maxf(a, 0.0)))
-		draw_ball_shape(_cascade_pos(t, i, count, hl, hr, T, peak), col, 1.35)
+		# the shared ball - this motif sits directly under the wordmark on the key art and in
+		# the credits, where the S's are made of `cap_ball`s, so a flat disc here put two
+		# different balls in one picture
+		cap_ball(_cascade_pos(t, i, count, hl, hr, T, peak), col, BALL_RADIUS_PX * 1.35)
 
 
 func capsule_embers(c: Vector2, r: float, n: int, col: Color) -> void:
@@ -19592,8 +19648,17 @@ func cap_ball(p: Vector2, col_in: Color, r: float) -> void:
 	# (a wide dim shape cannot shimmer the way a small bright one does), and a concentric
 	# rim, which has no direction and therefore states an edge without claiming a lamp.
 	# No hairlines, no hot point, no partial thick arc anywhere.
+	# EVERY MARK CARRIES THE CALLER'S ALPHA (2026-07-30). The seam and the rim were rebuilt
+	# as fresh `Color(r, g, b)` triples, which default to alpha 1 - so a ball asked to draw
+	# at a third opacity came out as a faint disc wearing a fully opaque seam and a hard
+	# black outline. Nothing exercised it while the only callers were the stage and the
+	# shop, both of which pass opaque colours; it surfaced the moment the fading screens
+	# (the save cards' dimmed empty slots, draw_tutdone's fade-in kit) were moved onto the
+	# shared ball. `ca()` handles the wordmark's fade, `a` handles the caller's - they are
+	# two different fades and both have to be applied.
+	var a := col_in.a
 	var col := ca(col_in)
-	var panel := ca(Color(col_in.r * 0.84, col_in.g * 0.82, col_in.b * 0.86))
+	var panel := ca(Color(col_in.r * 0.84, col_in.g * 0.82, col_in.b * 0.86, a))
 	draw_circle(p, r, col)
 	# ONE SEAM, NOT THREE. The first pass drew three panels meeting at an off-centre hub -
 	# geometrically how a three-panel ball is cut, and on screen a propeller: three chunky
@@ -19614,9 +19679,9 @@ func cap_ball(p: Vector2, col_in: Color, r: float) -> void:
 	seam.append_array(lo)
 	draw_colored_polygon(seam, panel)
 	# one broad, dim sheen - the diffuse fall-off a matte ball has, not a reflection
-	fill_ellipse(p - Vector2(r * 0.22, r * 0.26), r * 0.58, r * 0.46, ca(Color(1, 1, 1, 0.10)))
+	fill_ellipse(p - Vector2(r * 0.22, r * 0.26), r * 0.58, r * 0.46, ca(Color(1, 1, 1, 0.10 * a)))
 	# ...and the rim, all the way round, floored so it never enters the shimmering band
-	draw_arc(p, r * 0.94, 0.0, TAU, 40, ca(Color(col_in.r * 0.46, col_in.g * 0.44, col_in.b * 0.48)),
+	draw_arc(p, r * 0.94, 0.0, TAU, 40, ca(Color(col_in.r * 0.46, col_in.g * 0.44, col_in.b * 0.48, a)),
 		maxf(1.7, r * 0.13), true)
 
 
@@ -20478,11 +20543,18 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 			var cwn := PackedVector2Array([mc + Vector2(-24, 10), mc + Vector2(-24, -10), mc + Vector2(-10, 2), mc + Vector2(0, -16), mc + Vector2(10, 2), mc + Vector2(24, -10), mc + Vector2(24, 10)])
 			draw_colored_polygon(cwn, Color(1.0, 0.84, 0.4))
 		else:
-			var arc_cols := [Color(0.95, 0.8, 0.4), Color(0.9, 0.45, 0.4), Color(0.5, 0.78, 0.95)]
+			# THE SAME BALL THE GAME DRAWS (2026-07-30, Louis: "the game save file cards had a
+			# different, older, ball design"). It was a bare `draw_circle`, so this card was still
+			# showing the flat disc from before `cap_ball` - two art styles for the same object, on
+			# the first screen a new player sees. The colours come from `ball_color` for the same
+			# reason: the palette was typed out here as a THIRD copy and had already drifted off
+			# the real one (0.5/0.78/0.95 against ball_color's 0.72/0.86/0.95).
 			for j in 3:
 				var t := float(j) / 2.0
 				var bp := mc + Vector2(lerpf(-30.0, 30.0, t), -18.0 * sin(t * PI))
-				draw_circle(bp, 9.0, Color(arc_cols[j].r, arc_cols[j].g, arc_cols[j].b, 0.95 if exists else 0.4))
+				var bc := ball_color(j)
+				bc.a = 0.95 if exists else 0.4
+				cap_ball(bp, bc, 9.0)
 		var tcol := Color(1.0, 0.9, 0.6) if sel else (accent if exists else Color(0.7, 0.64, 0.58))
 		draw_string(title_font(), Vector2(cx, cy + 132.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, cw, 22, tcol)
 		if exists:
@@ -20733,13 +20805,17 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		draw_rect(Rect2(kx, ky, kw, 148.0), Color(0.05, 0.03, 0.05, 0.9 * ka))
 		hud_panel(Rect2(kx, ky, kw, 148.0))
 		draw_string(font, Vector2(kx, ky + 30.0), "YOUR STARTING KIT", HORIZONTAL_ALIGNMENT_CENTER, kw, 14, Color(0.95, 0.8, 0.55, ka))
-		draw_circle(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 0.84, 0.4, ka))
-		draw_circle(Vector2(kx + 117.0, ky + 63.0), 2.6, Color(1.0, 0.95, 0.7, ka))
+		# THE MARK IS THE UNIT, and this screen never got the memo (2026-07-30). A disc with a
+		# white blob on it is the exact coin `draw_coin_mark` replaced back in July - so the
+		# purse the player is handed in the last beat of the tutorial was drawn in the currency
+		# art of two economies ago, while the hub they walk into next draws flowers.
+		draw_coin_mark(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 1.0, 1.0, ka))
 		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s %s" % [commafy(money), coin_word()], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
 		for i in 3:
 			var bc := ball_color(i)
 			bc.a = ka
-			draw_ball_shape(Vector2(kx + 104.0 + float(i) * 26.0, ky + 108.0), bc, 0.9)
+			# the shared ball, not the flat disc - see the save cards for the same fix
+			cap_ball(Vector2(kx + 104.0 + float(i) * 26.0, ky + 108.0), bc, BALL_RADIUS_PX * 0.9)
 		draw_string(font, Vector2(kx + 140.0 + 42.0, ky + 114.0), "three juggling balls", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.88, 0.8, 0.68, ka))
 
 	draw_string(font, Vector2(0, s.y * 0.66), "The Backyard is waiting for its first show.",
