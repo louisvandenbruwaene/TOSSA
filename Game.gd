@@ -11295,6 +11295,27 @@ func art_blit_rect(key: String, box: Rect2, tint: Color = Color.WHITE) -> bool:
 	return true
 
 
+func art_blit_prop(kind: int, pos: Vector2, sc: float, ang: float, tint: Color) -> bool:
+	# THE PROP SEAM, and it exists as its own function because of the single rule that
+	# separates crisp pixel art from mush: A SPRITE MUST NEVER BE DRAWN AT A FRACTIONAL
+	# SCALE. Every source pixel has to land on a whole number of screen pixels, the same
+	# whole number for every sprite on screen, or the art crawls and shimmers.
+	#
+	# `prop_scale` is 1.0/1.1/1.5/1.6/1.7/1.75/1.9 - not one of them an integer. Feeding it
+	# to art_blit as a size multiplier would draw a club's pixels at 6.4 screen px each,
+	# beside a ball's at 4, which is exactly the failure above. So prop art carries its own
+	# physical size instead: each sprite is authored at (local extent x prop_scale) /
+	# ART_PIXEL pixels, and is always blitted at ART_PIXEL screen px per source pixel.
+	#
+	# `sc` is then only ever a ZOOM, and it is rounded to an integer. On the stage the
+	# caller passes prop_scale itself, so zoom is 1 and a source pixel is 4 screen px. In
+	# the shop draw_prop_icon passes PROP_ICON_MAG (3.0 for balls), so zoom is 3 and the
+	# icon is a clean 3x magnification - which is how pixel art shows an item close up.
+	var base := prop_scale(kind)
+	var zoom := maxi(1, int(roundf(sc / maxf(base, 0.001))))
+	return art_blit(art_key_prop(kind), pos, float(zoom), ang, tint)
+
+
 func art_key_prop(kind: int) -> String:
 	# One prop -> one art key, derived from the PROPS table rather than from a second
 	# hand-written list, so a prop added to that table can never be missing a key here.
@@ -20732,10 +20753,19 @@ func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, 
 	#
 	# ...and BECAUSE it is one dispatcher, it is also the single seam for all seven props:
 	# stage, shop card, tutorial kit panel and skills preview all arrive here, so one PNG
-	# per prop replaces that prop EVERYWHERE at once. `col` is handed over as the tint, so
-	# per-ball colour variation keeps working on a sprite exactly as it works on the
-	# procedural disc - author the round props WHITE and let the game colour them.
-	if art_blit(art_key_prop(kind), pos, sc, ang, col):
+	# per prop replaces that prop EVERYWHERE at once.
+	#
+	# ONLY THE ROUND PROPS TAKE THE TINT, and the dispatcher below is the proof: cap_egg,
+	# cap_ring and cap_ball are handed `col`, while cap_club, cap_knife, cap_torch and
+	# draw_chainsaw are not - they carry their own painted palettes and ignore it. `col` is
+	# ball_color(i), four colours cycled by INDEX and set on every prop regardless of kind,
+	# so tinting a club by it would repaint the same club gold, orange, red or blue
+	# depending on which slot it happened to be in. So: author ball/egg/ring WHITE and let
+	# the game colour them, author club/knife/torch/chainsaw in their own finished colours.
+	# stated as "everything EXCEPT the painted four", which is how the `_` fallthrough below
+	# behaves - a prop added later with no branch of its own lands on cap_ball and is tinted
+	var tinted := not (kind in [PROP_CLUBS, PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW])
+	if art_blit_prop(kind, pos, sc, ang, col if tinted else Color.WHITE):
 		return
 	match kind:
 		PROP_EGGS:     cap_egg(pos, col, sc)

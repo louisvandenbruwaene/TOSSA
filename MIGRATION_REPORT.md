@@ -178,6 +178,68 @@ Real save data was backed up before any harness run, per the standing rule.
 
 ---
 
+## 4b. First real art: four props (added after the initial pass)
+
+`scripts/gen_prop_art.gd` draws **ball, ring, club and knife** as pixel art matching what the
+game draws today, and they are **registered and live** in `art_manifest.json`. The branch's
+default run is therefore no longer identical to `main` by design: those four props are sprites
+now, everything else is still code.
+
+The art is **source, not binary**. Each sprite is a block of text you can edit:
+
+```gdscript
+"club": {
+    "pivot": [0.5, 0.558],
+    "rows": [".r.", "rrr", "rrr", "rrR", "www", "rrR", "www", ...],
+    "pal":  { "r": Color(0.90, 0.35, 0.38), "w": Color(0.96, 0.92, 0.85), ... },
+},
+```
+
+Change a character, re-run, look at it. A 6x6 ball is 36 decisions and they belong in a diff.
+
+### Two real defects this work exposed in the seam
+
+1. **The tint was going to all seven props.** `draw_prop_rich` hands `col` only to the round
+   ones (`cap_ball`/`cap_egg`/`cap_ring`); club, knife, torch and chainsaw carry their own
+   painted palettes and never see it. And `col` is `ball_color(i)`, four colours cycled by
+   *index*, set on every prop regardless of kind. So a club sprite would have been repainted
+   gold, orange, red or blue depending on which slot it was in. Now only the round props are
+   tinted, stated as "everything except the painted four" so a prop added later inherits the
+   right behaviour.
+
+2. **Props were being blitted at fractional scale.** `art_blit` multiplied by `sc`, and for
+   props `sc` is `prop_scale`: 1.0 / 1.1 / 1.5 / 1.6 / 1.7 / 1.75 / 1.9, not one of them an
+   integer. That draws a club's pixels at 6.4 screen px each beside a ball's at 4, which is
+   the classic pixel-art mush. `art_blit_prop` now fixes every prop sprite at exactly
+   `ART_PIXEL` screen px per source pixel and treats `sc` as an **integer zoom** instead, so
+   the stage is 1:1 and the shop is a clean 3x magnification.
+
+### What authoring these four taught, that the next batch should inherit
+
+- **Sizes are derived, never chosen.** Texture size = (local extent x `prop_scale`) /
+  `ART_PIXEL`. The table is in the script's header.
+- **Pivots are derived too, and are not the centre.** `cap_club` and `cap_knife` both
+  `draw_set_transform(p, ang)`, and the shape is not symmetric about `p`: a club spans
+  -22.5..+17.8 (pivot 0.558 down the sprite), a knife -26..+13.2 (0.663). Getting this wrong
+  makes a prop orbit a point instead of spinning about it, and it looks like bad art.
+- **A tint can only darken.** So on a greyscale prop the highlight has to be the brightest
+  value in the file, and everything else sits below it.
+- **Long props are startlingly narrow.** A club is 40 units long and 8 wide, which at this
+  density is **3 pixels across**. Its whole character has to live in the silhouette and the
+  two bands.
+- **The first ball had four tonal values and read as noise.** This file's own doctrine
+  explains why (a painted highlight shimmers on a small moving object and has been reverted
+  twice). Three values, seam kept, sheen dropped.
+
+### One open question for you
+
+The shop magnifies a prop icon 3x, so the **6x6 ball becomes a 6x6 image blown up**, not a
+detailed one. It reads fine on the stage and blocky on a shop card. Two honest options: accept
+it (at a true 320x180 the shop card is small, so 6px is correct), or give the shop a second,
+larger icon per prop. That is a taste call, not a technical one, so I have left it as it is.
+
+---
+
 ## 5. Placeholder artwork
 
 31 PNGs from `scripts/gen_placeholders.gd`: white silhouettes with a grey keyline and **one
