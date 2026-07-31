@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# TOSSA pre-commit hook. Tracked in git (.githooks/, wired via
+# `git config core.hooksPath .githooks` - see scripts/bootstrap.sh) so it
+# travels with the repo instead of living only in the untracked .git/hooks/.
+#
+# Deliberately FAST: only runs if Game.gd is staged, and only blocks the
+# commit on the parse check. Format/lint/the two mechanical sweeps are
+# printed for visibility but never block - see scripts/format.sh,
+# scripts/lint.sh and scripts/validate.sh's own comments for why (gdformat's
+# style conflicts with this file's deliberate comment alignment; gdlint and
+# the mechanical sweeps have known, verified false positives here).
+# Full behavioral validation (booking/daily/collision/screenshot) is
+# scripts/validate.sh - deliberately NOT run here because it launches real
+# Godot processes and can take a minute or more; run it yourself before
+# pushing, or let CI run it.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if ! git diff --cached --name-only | grep -q '^Game\.gd$'; then
+  exit 0
+fi
+
+if [[ ! -x "${GODOT_BIN:-/opt/homebrew/bin/godot}" ]]; then
+  echo "[pre-commit] godot not found - skipping checks (install or set GODOT_BIN)"
+  exit 0
+fi
+
+echo "[pre-commit] Game.gd is staged - running fast checks..."
+
+if command -v gdformat >/dev/null 2>&1; then
+  scripts/format.sh >/tmp/tossa_precommit_format.log 2>&1
+  grep -q "would reformat" /tmp/tossa_precommit_format.log && \
+    echo "[pre-commit] (gdformat has style suggestions - advisory, see scripts/format.sh --write)"
+fi
+
+if command -v gdlint >/dev/null 2>&1; then
+  scripts/lint.sh > /tmp/tossa_precommit_lint.log 2>&1 || true
+  n=$(grep -c ":" /tmp/tossa_precommit_lint.log || true)
+  [[ "${n:-0}" -gt 0 ]] && echo "[pre-commit] ($n gdlint finding(s) - advisory, see scripts/lint.sh)"
+fi
+
+echo "[pre-commit] Parse check (blocking)..."
+if ! "${GODOT_BIN:-/opt/homebrew/bin/godot}" --headless --check-only --script Game.gd >/tmp/tossa_precommit_parse.log 2>&1; then
+  echo "[pre-commit] FAILED parse check:"
+  cat /tmp/tossa_precommit_parse.log
+  echo "[pre-commit] Commit blocked. Fix the above or commit with --no-verify to override."
+  exit 1
+fi
+
+echo "[pre-commit] OK - parse check passed. (Run scripts/validate.sh before pushing for full behavioral checks.)"
+exit 0
