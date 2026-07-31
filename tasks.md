@@ -600,3 +600,258 @@ randomised run says nothing.
 Adding the row also fixed a real latent bug: the settings screen's `sections` listed a row index 9
 that its `rows` array did not have, so `rows[9]` was an out-of-bounds read inside `_draw` - which
 silently abandons the rest of the draw pass.
+
+---
+
+## 22. Louis's brief of 2026-07-31, written down whole before any code moves
+
+Thirteen items, some of them small and some of them a real redesign. Status key as above.
+**Do them in order** unless a note below says otherwise - later items lean on earlier fixes
+(the choreography rewrite in 22.5/22.6 needs 22.2's hand-rest rule and 22.3's peak fix first).
+
+### 22.1 The chainsaw - body length and finish
+
+- [x] **The metal body (between the rotating teeth) is too short.** It should reach all the
+  way to the point where the chain path turns around at each end, not stop short of it.
+- [x] **The body should look less pixelated - no new detail, just a cleaner render** (softer
+  edges / a small gradient rather than hard-edged flat shapes).
+- Found: `_saw_bake()` (Game.gd:13789) drew the bar's tip vertex at the `CSAW_TIP` constant
+  (-30), but the chain's own perimeter walk (the teeth) turns around 2 units further out, at
+  `span := CSAW_TIP - 2.0` (-32) - so the last stretch of the nose, where the teeth actually
+  wrap, was bare steel-coloured background with no bar drawn under it. The bar polygon, its
+  inner highlight, the nose sprocket and the blackout silhouette (Game.gd:13246) now all
+  reach `CSAW_TIP - 2.0` together, one value, so they can't drift apart again.
+- "Less pixelated": tried the two real engine options first and both are dead ends on this
+  project's renderer (`renderer/rendering_method="gl_compatibility"` in project.godot) - 2D
+  MSAA logs `"2D MSAA is not yet supported for GLES3"` and does nothing, and screen-space
+  FXAA logs `"only available when using the Forward+ or Mobile renderer"` and does nothing.
+  Switching the renderer itself would fix this properly but is a whole-project decision
+  (shader compatibility, performance profile) far outside "the chainsaw looks pixelated" -
+  flagging it as a real option, not doing it silently. Landed instead: `_soup_poly_feathered()`
+  (Game.gd, next to `_soup_fan`), a cheap fake - a second copy of the bar's and the engine
+  block's own outer silhouette, expanded ~0.4 units from its centroid and drawn underneath the
+  crisp fill at a third of the alpha, so the hard edge sits on a soft halo instead of bare
+  background. Zero extra draw calls (still one batch), verified by screenshot at
+  `--prop 6 --booking --venue 3` before/after.
+
+### 22.2 Tutorial - hand rest position
+
+- [ ] **At the very start (dominant-hand question), the juggler's hands should rest INWARD,
+  not outward.** Outward is the catch reach, and should only happen when a prop is actually
+  incoming for that hand.
+- Current state: `hand_target()` (Game.gd:7350) already has the rule "holding means inward,
+  empty means outward, nothing else gets a say" (comment at 7357, dated 2026-07-27) - but for
+  an EMPTY hand with nothing incoming, it falls back to `slot_pos(h, hand_catch_rest[h])`,
+  and `hand_catch_rest` is seeded from `catch_slot(h)`, which returns `HAND_OUTER` (Game.gd:
+  7146-7149, 4958). So the true idle default - no ball held, nothing inbound - is OUTWARD
+  everywhere in the game, not just the tutorial's hand-question screen (which has zero balls
+  in play and so is always in this idle state).
+- **Decision:** flip the idle-empty default itself (INNER, not OUTER, when nothing is
+  incoming) rather than special-casing the tutorial, since `hand_catch_rest`/`catch_slot` is
+  one shared function with no lesson-only branch anywhere else in the file. Outward remains
+  exactly what it is today the instant a ball is actually inbound (`inc.to_pos`, already
+  correct). Verify this doesn't read wrong in ordinary play (a juggler standing between
+  throws) before calling it done - if it looks wrong there, fall back to a tutorial-only
+  override instead.
+
+### 22.3 Tutorial - dominant-hand selection needs a real confirm step
+
+- [ ] **Left/Right arrow should only move a HOVER/preview selection. Enter commits it.**
+  Right now arrow keys commit immediately.
+- [ ] **Bug: pressing Enter while hovering the default (right) does nothing.**
+- Current state, Game.gd:2726-2731: the instant an arrow key is pressed, it directly sets
+  `dominant_hand`, `tut_hand_picked = true`, saves settings and calls `tut_check()` - there is
+  no preview state at all. If a player never touches an arrow key (right being whatever the
+  screen shows as the default) and just presses Enter, `tut_hand_picked` was never set, so
+  `tut_check()` never marked the "hand" goal done, so `tut_advance_at` is still -1, so
+  `KEY_ENTER`'s handler (`tut_advance()`, which no-ops while `tut_advance_at < 0`) does
+  nothing - exactly the reported bug.
+- Fix shape: add a `tut_hand_hover` (or reuse `dominant_hand` as the live preview and only
+  write it to the SAVED setting on confirm) that arrow keys change with no side effects, and
+  move the `tut_hand_picked = true` / `save_settings()` / `tut_check()` block onto Enter,
+  reading the hovered side at that point.
+
+### 22.4 Tutorial - the post-catch pause frame
+
+- [ ] **The "PERFECT" popup should disappear after a while, not linger.**
+- [ ] **The catch ring + key icon (J/F/D/K) next to the ball is drawn at the old OUTWARD
+  position after the ball has already (correctly) moved inward.**
+- Current state: `add_popup(outer_pos(h), "PERFECT", ...)` at Game.gd:7840 always anchors on
+  the fixed outward slot, never on where the hand actually ends up holding the prop (inward).
+  `draw_popups()` (Game.gd:22641) fades a popup by `tick - born`, over 46 ticks - but while a
+  guided tutorial beat is frozen (`tut_do_step()`/`tut_hold`, the branches at Game.gd:2417-2434
+  that return before advancing `tick`), `tick` does not move, so an already-fading popup's age
+  stops advancing and it visually hangs on screen for as long as the freeze lasts. That is
+  almost certainly why "PERFECT" reads as stuck: it isn't lingering forever, it's paused along
+  with everything else, but a popup that was already old when the freeze began should have
+  finished fading before the freeze needs to hold the ring/key steady.
+  Fix shape: (a) anchor the PERFECT popup at the hand's actual rest point (`inner_pos(h)` /
+  `hand_target(h)` at catch time) instead of `outer_pos(h)`; (b) either let popups age off
+  real time (`atick()`/msec) instead of sim `tick` so a freeze doesn't pin them, or fade any
+  popup out immediately when a tutorial freeze begins if it's already past some age. The
+  ring/key prompt itself (`draw_tut_prompts`, Game.gd:6247) already reads live `hpos[h]`, so
+  once (a) fixes where PERFECT lands, check whether the ring/key still looks wrong - it may
+  be that `hpos` itself is what's frozen mid-lerp the instant the catch triggers the freeze,
+  in which case the fix is snapping `hpos[h]` straight to its target the moment a freeze
+  begins, not leaving it to ease there over ticks that no longer advance.
+
+### 22.5 Tutorial - two balls
+
+- [ ] **"Throw the first ball" pauses too early - it should pause only once the ball is at
+  its peak**, exactly like the three-ball step already does correctly.
+- Current state: Game.gd:4657-4659, the two `tut_do(...)` calls for the two-ball throws pass
+  no `peak` argument (defaults false), so `tut_do_ready()` (Game.gd:5321) freezes the world
+  the INSTANT the step opens rather than waiting for `tut_at_peak()`. The three-ball step
+  right below it (Game.gd:4665, `tut_do("Wait for it to reach the top...", ..., true)`) is the
+  reference: `true` as the seventh (peak) argument to `tut_do`. Add it to the second two-ball
+  throw the same way.
+- [ ] **Hands should only go outward when a ball is actually incoming for them, not a moment
+  before.** Same fix as 22.2 - once the idle default is inward, this should mostly fall out
+  of that change for the two-ball section specifically; verify it here after 22.2 lands.
+- [ ] **After both balls are thrown, the game should pause frame-by-frame and walk the player
+  through catching them one at a time - right now it just resumes at full speed and lets both
+  drop.**
+- [ ] **The correct order, taught explicitly, one paused step at a time:** catch ball 1 ->
+  throw it right back -> catch ball 2 -> throw it right back, where each "throw it right
+  back" is timed to roughly when the OTHER ball reaches the peak of its own arc. **Repeat
+  this whole exchange twice** (each ball crosses back and forth twice) before the player is
+  allowed to juggle it freely.
+- Current state: Game.gd:4660 replaces all of the above with one `tut_free(...)` step - a
+  single open-ended "catch and throw on one side, then the other, and repeat" with no pausing,
+  no explicit ordering, and no distinction between a guided repeat and free practice. This is
+  the step that needs rebuilding into a short sequence of `tut_do(..., peak=true)` beats (one
+  per catch/throw in the prescribed order, each pausing at its own peak/landing) run twice,
+  THEN a `tut_free` for open practice - mirroring the shape the three-ball section below it
+  already gets right.
+
+### 22.6 Tutorial - three balls
+
+- [ ] **You already do this section decently** (per Louis) - it is the reference for 22.5's
+  rewrite.
+- [ ] **One bug shared with 22.4: the circle/key icon is misplaced (old outward position)
+  once the arms and ball have already moved inward.** Same root cause and same fix as 22.4;
+  fixing 22.4 should fix this too, but verify specifically in the three-ball section since
+  Louis called it out separately.
+
+### 22.7 Tutorial extends into the first performance
+
+- [ ] **Louis asked for this once already** (see section 15/20 above, and his own 2026-07-29
+  evening notes preserved verbatim starting line 320) - a guided walk through the first
+  Backyard act: the flower/goal meter explained and highlighted, sub-goals explained, a
+  standing-ovation-if-no-drops warning, and one of three closing reactions depending on how
+  it went ("well done, keep going" / "not bad, room for improvement" / "pretty bad, at least
+  there's tomatoes to eat"), followed by guided text through the rest of the menus the first
+  time the player sees them.
+- Current state, checked directly: it was NOT built. `tut_finish()` (Game.gd:5642) ends the
+  basics lesson by setting `game_state = ST_TUTDONE` - a small congrats card (`draw_tutdone`,
+  Game.gd:20971) - and nothing scripts the Backyard act that follows it. No "tut" state exists
+  inside a live performance at all. This needs the same `tut_say`/`tut_beat`-style speech
+  system extended to run DURING a real act (not a scripted lesson deal), triggered the first
+  time a Backyard performance begins post-tutorial, pointing at the real HUD elements
+  (`draw_goal_stem`, the applause meter) as they update live rather than a scripted fake.
+  This is the single largest item in this batch - budget it its own pass.
+
+### 22.8 Subgoal flowers, redesigned
+
+- [ ] **Flowers should be yellow and look like they sprout from the stem itself**, not a
+  flower icon floating beside a line.
+- [ ] **Remove the indicator lines.**
+- [ ] **Multiple subgoals: two on the stem as now, plus one or two more at the top.**
+- [ ] **The flower changes colour at a higher score - make that transition slower, and give
+  a bonus when it happens.**
+- [ ] **Give the flower a special/beautiful look if the act is on track for a standing
+  ovation** (no drops).
+- [ ] **Prefer drawings over text/numbers wherever this can be shown visually.**
+- Current state: `draw_goal_stem(box, frac, over, marks, accent)`, Game.gd:14163-14227,
+  already draws ONE stem per act with each subgoal as a notch that sprouts a small flower
+  once passed (alternating sides, Game.gd:14200-14202) - so "sprouts from the stem" is close
+  to already true for the two lower goals; what's missing is the colour (needs to check
+  whatever colour it draws today against "yellow"), the "lines" Louis wants removed (need to
+  find - likely `goal_bar_pos` tick marks or a separate meter line elsewhere in `draw_hud`,
+  not yet located), and the one-or-two-at-the-top goals (`NUM_GOALS := 3`, Game.gd:934 - all
+  three currently live ON the one stem via `marks[]`, none "at the top" separately).
+  Hook points already in the file: `won_the_room` (Game.gd:1295, latches true once
+  `applause >= FLOWER_GREEN`) for the colour-tier logic, and the existing standing-ovation
+  system (`OVATION_TICKS`/`RAIN_BEAT`/`BONUS_PCT`/`BONUS_MIN`, Game.gd:1089-1100,
+  `ovation_left` at 1404, driven off `dropped == 0` - see `drop_ball`'s `dropped += 1` at
+  Game.gd:10396) for the "beautiful if no drops" special look - use `dropped == 0` live
+  during the act, not just at the results card.
+
+### 22.9 Gloves - still look bad
+
+- [ ] **Redesign the glove shape**, on stage and in the tailor.
+- Current state: on-stage `draw_hand(h)`, Game.gd:12798-~12870 - a plain ellipse mitt with a
+  bolted-on 5-point thumb polygon and 3 stitch lines (12841-12854). Tailor icon,
+  `draw_gear_icon()` case `"gloves"`, Game.gd:16938-16964 - the comment there already admits
+  it was redrawn once before because "they looked strange": a 13-point hand-fitted arc
+  (`for i in 13: a := PI + PI*i/12`) plus a separate thumb blob, same shape family as the
+  stage version. Both read as a crude two-piece mitt-plus-thumb rather than a glove. This
+  wants an actual shape redesign, not a tweak - budget it real attention rather than a
+  five-minute pass, same as the club got in section 16.
+
+### 22.10 Catching to end a performance without a forced drop
+
+- [ ] **Let the player stop juggling without every performance ending in a drop.** Either:
+  (a) let them keep catching but not throw again, or (b) better: detect that the player wants
+  to stop and cash in / catch everything at once automatically.
+- Current state: cashing in already exists (Enter, "finish/cash in" per CLAUDE.md's input
+  list) once past goal 1 - so the mechanic Louis wants may already be reachable and the real
+  gap is that it isn't obvious/guided (ties into 22.7's "press Enter to stop, shown as a
+  symbol" line from his own notes at line 333). Needs checking against the current Enter/
+  cash-in handler in ST_PLAY before deciding whether this is a new mechanic or a discoverability
+  fix - don't build a second stop-mechanic if one already exists and just isn't taught.
+
+### 22.11 Live score display, top right
+
+- [ ] **The figure should read clearly as "amount per catch"** - Louis's own example,
+  `16/catch` - rather than numbers with no unit.
+- [ ] **It should fall after a drop**, and the object-count part of its math should stay
+  live as the count changes.
+- Current state: the right-rail card Louis means is almost certainly the existing "A CATCH"
+  figure (Game.gd:14878-14888): a big number (`seg_per_catch()`, Game.gd:8832-8846) with "A
+  CATCH" printed below it and "%d in this run" under that. `seg_per_catch()` already computes
+  off the live `num_balls`-driven `seg_n`/prop signature and already resets low the moment a
+  drop closes the segment (`drop_ball` -> `close_run()` -> `seg_open("drop")`) - so the FALL
+  Louis wants is probably already true of this number; what's missing is that it doesn't read
+  as `16/catch` at a glance. **Not the same thing as the big cumulative SCORE card** (left
+  rail, Game.gd:14698), which is explicitly documented (Game.gd:8821, "it no longer costs the
+  score directly") as NOT falling on a drop - a deliberate, dated design decision. **ASK**:
+  confirm Louis means the per-catch rail (reformat only) and not a reversal of that
+  documented decision to make the cumulative score itself fall. Proceeding on the per-catch
+  reading; flag clearly if that's wrong.
+
+### 22.12 Lock the shop and loadout during a performance
+
+- [ ] **Make it impossible to open the shop, or change props/count, mid-performance.** Both
+  stay changeable right before the act begins; the shop should not be reachable at all once
+  playing.
+- Current state: no guard exists today. `KEY_S: shop_open = true` fires unconditionally at
+  Game.gd:2819-2820 (and again at 2765-2766 on the results-card branch, which likely doesn't
+  need the guard since the act has already ended there). Compare `KEY_R` two lines below
+  (2835-2837), which IS already guarded with `if not performing:` - `performing := mode ==
+  MODE_PERFORM` is computed locally right above at Game.gd:2812, so the fix is applying that
+  same guard to the shop key. Prop/count changes go through the same ST_PLAY key handling and
+  need the identical check. The day-hub PREPARE-drawer shop path (Game.gd:3894-3898) is a
+  different, legitimate entry point and must stay untouched.
+
+### 22.13 Stats sheet - drop the number-key shortcuts
+
+- [ ] **Remove the 1/2/3/4 buttons.** Increase a stat only by arrow-selecting it and pressing
+  Enter to confirm.
+- [ ] **Holding the key should fast-repeat the increase.**
+- Current state: `sheet_input(kc)`, Game.gd:4023-4071. `KEY_1..KEY_4` (4040-4051) jump-select
+  AND immediately spend in one press - delete this block. Arrow+Enter already exists and
+  needs no new plumbing: `KEY_LEFT`/`KEY_RIGHT` (4032-4037) already cycle `sheet_sel` and
+  `KEY_ENTER`/`KEY_KP_ENTER` (4038-4039) already calls `_sheet_invest(ids[sheet_sel])`. Hold-
+  to-repeat does NOT exist for real play today: `sheet_repeat(dt)` (~9994-10060) and its
+  `SHEET_REPEAT_DELAY`/`RATE` constants (Game.gd:1557-1558) are debug-only, gated on
+  `debug_mode` at its only call site (Game.gd:2386-2391) and polling `Input.
+  is_physical_key_pressed` for KEY_1-4/R/Q/W/E/M/N, none of which apply to a real player.
+  Needs a parallel always-on repeat block keyed off Enter (and/or the arrows, if holding an
+  arrow should also fast-cycle selection - Louis only asked for the increase to repeat, so
+  scope this to Enter unless it reads wrong without arrow-repeat too).
+
+---
+
+**Executing now, in the order above.** Marking each `[x]` here as it lands; anything that
+turns out to need a real design call gets its own note rather than a silent guess.
