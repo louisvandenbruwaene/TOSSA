@@ -13188,7 +13188,7 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 			draw_colored_polygon(PackedVector2Array([
 				Vector2(-CSAW_BODY_W, CSAW_BODY_TOP), Vector2(CSAW_BODY_W, CSAW_BODY_TOP),
 				Vector2(CSAW_BODY_W, CSAW_BODY_BOT), Vector2(-CSAW_BODY_W, CSAW_BODY_BOT)]), col)
-			draw_line(Vector2(0, CSAW_BODY_TOP), Vector2(0, CSAW_TIP), col, CSAW_BAR_W * 2.0)
+			draw_line(Vector2(0, CSAW_BODY_TOP), Vector2(0, CSAW_TIP - 2.0), col, CSAW_BAR_W * 2.0)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		_:
 			draw_circle(pos, BALL_RADIUS_PX * sc, col)   # flat, same reason as the egg
@@ -13747,14 +13747,19 @@ func _saw_bake() -> void:
 	var body_dk := Color(0.62, 0.32, 0.06)
 	var steel := Color(0.72, 0.76, 0.84)
 	var steel_dk := Color(0.38, 0.42, 0.50)
-	# THE GUIDE BAR, first so the engine block sits over its root
-	_soup_poly(PackedVector2Array([
+	# THE GUIDE BAR, first so the engine block sits over its root. Its tip vertex has to
+	# land exactly on `span` below - the same "up one side, round the nose, back down the
+	# other" turnaround the chain's own perimeter walk uses (Louis: "make sure it reaches
+	# until the point where the teeth turn around") - not on the CSAW_TIP constant, which
+	# is 2 units short of it: the chain already walks past the drawn steel to get there.
+	var bar_tip := CSAW_TIP - 2.0   # == `span`, computed again below for the chain path
+	_soup_poly_feathered(PackedVector2Array([
 		Vector2(-CSAW_BAR_W, 2.0), Vector2(CSAW_BAR_W, 2.0),
-		Vector2(CSAW_BAR_W * 0.72, CSAW_TIP + 1.6), Vector2(0.0, CSAW_TIP),
-		Vector2(-CSAW_BAR_W * 0.72, CSAW_TIP + 1.6)]), steel_dk)
+		Vector2(CSAW_BAR_W * 0.72, bar_tip + 1.6), Vector2(0.0, bar_tip),
+		Vector2(-CSAW_BAR_W * 0.72, bar_tip + 1.6)]), steel_dk, 0.4)
 	_soup_poly(PackedVector2Array([
 		Vector2(-CSAW_BAR_W * 0.46, 1.0), Vector2(CSAW_BAR_W * 0.46, 1.0),
-		Vector2(CSAW_BAR_W * 0.30, CSAW_TIP + 3.0), Vector2(-CSAW_BAR_W * 0.30, CSAW_TIP + 3.0)]), steel)
+		Vector2(CSAW_BAR_W * 0.30, bar_tip + 3.0), Vector2(-CSAW_BAR_W * 0.30, bar_tip + 3.0)]), steel)
 	# THE CHAIN, and it really travels. Each link walks the bar's perimeter - up one
 	# side, round the nose, back down the other - on a phase that advances every tick, so
 	# the teeth are visibly MOVING rather than a texture painted on the edge. One draw
@@ -13768,7 +13773,7 @@ func _saw_bake() -> void:
 	# the same units all the way round so the links stay evenly spaced through the turn instead
 	# of bunching in it.
 	var run := t * CSAW_CHAIN_RATE
-	var span := CSAW_TIP - 2.0                     # the tip; CSAW_TIP is negative, so this is UP
+	var span := bar_tip                            # the true tip the bar was just drawn to
 	var side_len := absf(span - 2.0)
 	var nose_len := PI * CSAW_BAR_W
 	var total := side_len * 2.0 + nose_len
@@ -13795,13 +13800,14 @@ func _saw_bake() -> void:
 		# in a ruler; a real chain's cutters barely stand proud of the bar, and the movement
 		# is what sells it, not the size.
 		_soup_line(at, at + nrm * 1.25 + tang * 1.1, 1.5, steel)
-	# the nose sprocket, so the chain has something to go round
-	_soup_ellipse(Vector2(0.0, CSAW_TIP + 2.4), CSAW_BAR_W * 0.55, CSAW_BAR_W * 0.55, 0.0, 10, steel_dk)
+	# the nose sprocket, so the chain has something to go round - centred on the same
+	# turnaround point (span) the chain and the bar's own tip now agree on
+	_soup_ellipse(Vector2(0.0, span), CSAW_BAR_W * 0.55, CSAW_BAR_W * 0.55, 0.0, 10, steel_dk)
 	# THE ENGINE BLOCK: a real casing with a pull cord, vents and a rear handle
-	_soup_poly(PackedVector2Array([
+	_soup_poly_feathered(PackedVector2Array([
 		Vector2(-CSAW_BODY_W, CSAW_BODY_TOP), Vector2(CSAW_BODY_W, CSAW_BODY_TOP),
 		Vector2(CSAW_BODY_W * 1.05, 7.0), Vector2(CSAW_BODY_W * 0.72, CSAW_BODY_BOT),
-		Vector2(-CSAW_BODY_W * 0.72, CSAW_BODY_BOT), Vector2(-CSAW_BODY_W * 1.05, 7.0)]), body)
+		Vector2(-CSAW_BODY_W * 0.72, CSAW_BODY_BOT), Vector2(-CSAW_BODY_W * 1.05, 7.0)]), body, 0.45)
 	_soup_poly(PackedVector2Array([                              # the lit side
 		Vector2(-CSAW_BODY_W, CSAW_BODY_TOP + 0.3), Vector2(-CSAW_BODY_W * 0.30, CSAW_BODY_TOP + 0.3),
 		Vector2(-CSAW_BODY_W * 0.30, CSAW_BODY_BOT - 0.4), Vector2(-CSAW_BODY_W * 0.70, CSAW_BODY_BOT - 0.4),
@@ -22245,6 +22251,35 @@ func _soup_clear() -> void:
 func _soup_fan(c: Vector2, ring: PackedVector2Array, col: Color) -> void:
 	# a filled shape as a triangle fan: centre, then the ring, then indices round it
 	_soup_fan_lit(c, ring, col, col)
+
+
+func _soup_poly_feathered(pts: PackedVector2Array, col: Color, feather: float = 0.5) -> void:
+	# a cheap fake for the antialiasing this renderer can't give the soup batch: this
+	# project runs the GLES3/Compatibility backend everywhere (project.godot), which
+	# supports neither 2D MSAA nor screen-space FXAA - both were tried directly on the
+	# viewport and both log a hard engine warning and do nothing (see the chainsaw's own
+	# section history). Immediate-mode `draw_polygon`'s own `antialiased` flag would work,
+	# but only by giving up the batching this exact prop was measured and rebuilt around
+	# (draw_chainsaw's header comment: 383 calls unbatched vs one). So instead: a second
+	# copy of the same silhouette, expanded outward from its centroid by `feather` units
+	# and drawn at a third alpha UNDERNEATH the crisp fill - a soft halo the crisp edge
+	# sits on top of, blending into whatever is actually behind it (the alpha composites
+	# live, so it never hardcodes a background colour). Not real AA - a convex shape's
+	# centroid-expansion isn't a true per-edge outward normal - but it softens exactly the
+	# hard silhouette edge that reads as "pixelated" at zero extra draw calls.
+	if pts.size() < 3:
+		return
+	var c := Vector2.ZERO
+	for q in pts:
+		c += q
+	c /= float(pts.size())
+	var soft := PackedVector2Array()
+	for q in pts:
+		soft.append(q + (q - c).normalized() * feather)
+	var halo := col
+	halo.a *= 0.35
+	_soup_poly(soft, halo)
+	_soup_poly(pts, col)
 
 
 func _soup_fan_lit(c: Vector2, ring: PackedVector2Array, mid: Color, rim: Color) -> void:
