@@ -12327,6 +12327,22 @@ func fill_ellipse(c: Vector2, rx: float, ry: float, col: Color) -> void:
 	draw_colored_polygon(pts, col)
 
 
+func mitt_shape(c: Vector2, rx: float, ry: float, thumb_ang: float, thumb_amt: float) -> PackedVector2Array:
+	# ONE SILHOUETTE, thumb included - not a triangle glued onto a circle (2026-07-31,
+	# Louis: "the gloves still look horrible" - the shape they had bolted a separate
+	# 5-point thumb polygon onto the palm ellipse, which never reads as one hand no
+	# matter how the seam is dressed). `thumb_amt` 0 gives back a plain ellipse; >0
+	# bulges the SAME outline toward `thumb_ang` with a bell falloff, so the palm and
+	# the thumb are one continuous edge with nowhere for the two pieces to disagree.
+	var pts := PackedVector2Array()
+	for i in 20:
+		var a := TAU * float(i) / 20.0
+		var d := absf(angle_difference(a, thumb_ang))
+		var bump := thumb_amt * exp(-pow(d / 0.85, 2.0))
+		pts.append(c + Vector2(cos(a) * rx * (1.0 + bump), sin(a) * ry * (1.0 + bump)))
+	return pts
+
+
 # --- PERFORMANCE: what actually costs, MEASURED (2026-07-27) ------------------
 # The first version of this helper replaced `draw_circle` with a hand-built low-poly
 # polygon, on the theory that primitives were the cost. Measured with --fps, that made
@@ -12822,29 +12838,25 @@ func draw_hand(h: int) -> void:
 		sk = glove_cloth()
 	var openf := 1.0 - close
 	var stretch := lerpf(0.0, 6.0, openf)
-	fill_ellipse(pos + Vector2(inward * openf * 1.5, -stretch * 0.5), 11.5, 11.5 + stretch, sk)
+	var mitt_c := pos + Vector2(inward * openf * 1.5, -stretch * 0.5)
+	if gloved:
+		# SILK GLOVES, third pass (2026-07-31, Louis: "the gloves still look horrible on the
+		# player and in the tailor"). The second pass added a thumb, which was the right
+		# instinct - a glove has a shape a bare hand does not - but drew it as its own
+		# 5-point polygon glued to the palm ellipse, so the two pieces never quite agreed at
+		# the seam and it read as a blob with a fin on it. mitt_shape draws the thumb as a
+		# bulge in the SAME outline the palm is, one continuous edge, no seam to disagree at.
+		draw_colored_polygon(mitt_shape(mitt_c, 11.5, 11.5 + stretch, inward * -1.15, 0.62), sk)
+	else:
+		fill_ellipse(mitt_c, 11.5, 11.5 + stretch, sk)
 	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
 	if gloved:
-		# SILK GLOVES, second pass (2026-07-29, Louis: "make the boots and gloves look better
-		# tho"). The first one drew a scalloped hem and one seam and left it there, which at
-		# 23px is a pale blob with a frill under it. What was missing is the thing that makes
-		# a glove a glove and not a mitten: **the THUMB**. A glove has a shape a bare hand
-		# does not, and the thumb is the whole of it - so it gets drawn even though the bare
-		# hand deliberately has no fingers, because here it is the identifying mark rather
-		# than a detail.
 		var hem := sk.darkened(0.18)
 		var seam := sk.darkened(0.30)
-		# the thumb, up and inward - toward the body, the way a hand held to catch sits
-		draw_colored_polygon(PackedVector2Array([
-			pos + Vector2(inward * 6.0, 1.0), pos + Vector2(inward * 12.4, -3.4),
-			pos + Vector2(inward * 13.6, -7.6), pos + Vector2(inward * 9.2, -8.0),
-			pos + Vector2(inward * 4.6, -3.4)]), sk)
-		# THREE STITCH LINES fanning from the wrist over the back of the hand - the
-		# "pointing" a real dress glove has, and the second thing that says glove
-		for fa in [-0.36, 0.0, 0.36]:
-			var d := Vector2(sin(fa), -cos(fa))
-			draw_line(pos + d * 2.4 + Vector2(0.0, 1.0), pos + d * 9.2 - Vector2(0.0, stretch * 0.3),
-				Color(seam.r, seam.g, seam.b, 0.55), 1.2)
+		# ONE stitch line along the thumb ridge - the bulge itself now says "glove", so this
+		# is the seam a real one would show there, not three lines pretending to be several
+		draw_line(pos + Vector2(inward * 5.4, -1.6), pos + Vector2(inward * 11.6, -9.0),
+			Color(seam.r, seam.g, seam.b, 0.5), 1.1)
 		# the wrist opening: a band with a scalloped lower edge and a button at the side,
 		# which is what a dress glove closes with
 		var wy := pos.y + 7.2
@@ -12869,6 +12881,20 @@ func draw_hand(h: int) -> void:
 	var st := stack(h)
 	for i in st.size():
 		var bp := pos
+		# THE ONE CASE "drawn in that hand, no exceptions" (above) still needs a beat of
+		# help: Full-Hand-Catch (`set_catch_full`, an accessibility setting, OFF by
+		# default) lets a second ball land into a hand that is still holding the first -
+		# and hand_target deliberately never eases that hand toward an incoming ball
+		# while it holds one (2026-07-27, see hand_target), so the newly-caught ball's
+		# last FLIGHT frame is out at its true landing point while this, its first HELD
+		# frame, is back at the hand's held/throw position. A hard cut between those two
+		# reads as a teleport. This is not the old bug (a ball parked somewhere and left
+		# there) - it settles to `pos` well inside a tenth of a second and only ever
+		# triggers for the ball that was JUST added on top of an already-full hand.
+		if i == st.size() - 1 and st.size() > 1:
+			var settle := clampf(float(tick - catch_flash[h]) / CATCH_SETTLE_TICKS, 0.0, 1.0)
+			if settle < 1.0:
+				bp = flight_pos(st[i]).lerp(pos, 1.0 - (1.0 - settle) * (1.0 - settle))   # ease-out
 		draw_prop(st[i], bp + Vector2(0, -3 - float(i) * 6.0))
 
 
@@ -16948,26 +16974,16 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 				var gsc: float = float(e2[2])
 				glow_silhouette(gp2, int(e2[1]), gsc, 0.5, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.9 * gfl))
 				draw_circle(gp2, 3.2 * gsc, Color(1.0, 1.0, 1.0, 0.6 * gfl))
-		"gloves":   # SILK GLOVES (redrawn 2026-07-28, Louis: they looked strange). The first
-			# version was TALL and NARROW with a thumb stuck out low and three straight
-			# seams up the middle, which reads as a sock with a spur. A glove is WIDER than
-			# it is long above the wrist, its fingers are ROUNDED at the top, its thumb sits
-			# high on the side, and its seams FAN from the wrist rather than running
-			# parallel. Four corrections, and the fourth is what stops it reading as a mitten.
+		"gloves":   # SILK GLOVES, fourth pass (2026-07-31, Louis: "the gloves still look
+			# horrible ... in the tailor" too). The previous pass fixed the stage glove by
+			# giving the thumb and the palm ONE outline instead of two glued-together
+			# shapes (mitt_shape, see draw_hand) - this icon had its own separate hand-fit
+			# version of the same idea and the same flaw. Drawing the actual mitt_shape()
+			# here instead is also the standing rule stated two passes ago and then not
+			# followed: "a shop icon that does not match the thing you buy is a small lie."
 			var pad := c + Vector2(0.0, -2.0)
-			var mitt := PackedVector2Array()
-			for i in 13:   # the rounded finger end: an arch, not a flat top
-				var a := PI + PI * float(i) / 12.0
-				mitt.append(pad + Vector2(cos(a) * 13.0, sin(a) * 12.0))
-			mitt.append(pad + Vector2(13.0, 13.0))
-			mitt.append(pad + Vector2(-13.0, 13.0))
-			draw_colored_polygon(mitt, cc)
-			draw_colored_polygon(PackedVector2Array([                       # the thumb, high and out
-				pad + Vector2(-12.0, -3.0), pad + Vector2(-21.0, -8.0),
-				pad + Vector2(-24.0, -1.0), pad + Vector2(-13.0, 6.0)]), cc)
-			for fa in [-0.44, 0.0, 0.44]:                                   # the seams, fanning
-				var d := Vector2(sin(fa), -cos(fa))
-				draw_line(pad + d * 3.0, pad + d * 11.5, Color(0.40, 0.36, 0.34, 0.42), 1.2)
+			draw_colored_polygon(mitt_shape(pad, 13.0, 13.0, -1.15, 0.62), cc)
+			draw_line(pad + Vector2(-6.4, -6.8), pad + Vector2(-14.6, -16.4), Color(0.40, 0.36, 0.34, 0.42), 1.2)
 			# the cuff: scalloped along its lower edge, which is the one detail that says
 			# "dress glove" instead of "work glove"
 			draw_colored_polygon(PackedVector2Array([
@@ -18119,9 +18135,22 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit, k)
 	draw_mini_arm(Vector2(o.x + 0.9 * H, sh_y + 0.14 * H), hr, RIGHT, skin, suit, k)
+	# GLOVED HANDS GET THEIR REAL SHAPE HERE TOO NOW (2026-07-31, Louis: "the gloves still
+	# look horrible ... in the tailor"), not the flat circle a bare hand already correctly
+	# is - this preview exists specifically to SHOW a garment, and a glove drawn as a plain
+	# dot is indistinguishable from no glove at all except by colour. Same mitt_shape() the
+	# stage hand and the rack icon use, with the same inward-thumb convention (LEFT bulges
+	# toward +x, RIGHT toward -x) so the mirror agrees with what the stage actually draws.
 	var mitt := glove_cloth() if wearing("gloves") else skin
-	draw_circle(hl, 5.4 * k, mitt)
-	draw_circle(hr, 5.4 * k, mitt)
+	if wearing("gloves"):
+		# a bigger bump than the stage hand's own 0.62 (2026-07-31): at this small a radius
+		# the same proportional bump anti-aliases away to a barely-there wobble, and the
+		# whole point here is that a glove reads as a glove, not just a different colour
+		draw_colored_polygon(mitt_shape(hl, 5.4 * k, 5.4 * k, -1.15, 1.1), mitt)
+		draw_colored_polygon(mitt_shape(hr, 5.4 * k, 5.4 * k, PI + 1.15, 1.1), mitt)
+	else:
+		draw_circle(hl, 5.4 * k, mitt)
+		draw_circle(hr, 5.4 * k, mitt)
 	if turn > 0.0:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# the same sweeping streaks the real Spin lays over the turn, so the little
