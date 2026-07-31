@@ -636,40 +636,34 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.2 Tutorial - hand rest position
 
-- [ ] **At the very start (dominant-hand question), the juggler's hands should rest INWARD,
+- [x] **At the very start (dominant-hand question), the juggler's hands should rest INWARD,
   not outward.** Outward is the catch reach, and should only happen when a prop is actually
   incoming for that hand.
-- Current state: `hand_target()` (Game.gd:7350) already has the rule "holding means inward,
-  empty means outward, nothing else gets a say" (comment at 7357, dated 2026-07-27) - but for
-  an EMPTY hand with nothing incoming, it falls back to `slot_pos(h, hand_catch_rest[h])`,
-  and `hand_catch_rest` is seeded from `catch_slot(h)`, which returns `HAND_OUTER` (Game.gd:
-  7146-7149, 4958). So the true idle default - no ball held, nothing inbound - is OUTWARD
-  everywhere in the game, not just the tutorial's hand-question screen (which has zero balls
-  in play and so is always in this idle state).
-- **Decision:** flip the idle-empty default itself (INNER, not OUTER, when nothing is
-  incoming) rather than special-casing the tutorial, since `hand_catch_rest`/`catch_slot` is
-  one shared function with no lesson-only branch anywhere else in the file. Outward remains
-  exactly what it is today the instant a ball is actually inbound (`inc.to_pos`, already
-  correct). Verify this doesn't read wrong in ordinary play (a juggler standing between
-  throws) before calling it done - if it looks wrong there, fall back to a tutorial-only
-  override instead.
+- Found: `catch_slot(h)` (Game.gd:7314) is called ONLY to seed `hand_catch_rest` at a fresh
+  deal (its two call sites are both "deal the table clean" moments) - a real throw
+  immediately overwrites it with the true landing slot (`do_throw`), so this function is
+  purely the GUESS for "nothing has been thrown yet", and it was guessing `HAND_OUTER`.
+  Changed the plain-pattern fallback to `HAND_INNER`; the Columns case (already INNER) and
+  the over-the-top case (a real throw IS already on its way there) are untouched. Since a
+  real performance always deals its opening balls straight into held hands (state
+  STATE_HAND, caught by `hand_target`'s "holding means inward" branch regardless of this
+  function), the only places this is ever visible are the genuinely-empty-handed idle
+  moments - the tutorial's hand question chief among them. Verified by screenshot
+  (`--tutorial balls`): hands now sit at the narrower inward stance from the first frame.
 
 ### 22.3 Tutorial - dominant-hand selection needs a real confirm step
 
-- [ ] **Left/Right arrow should only move a HOVER/preview selection. Enter commits it.**
+- [x] **Left/Right arrow should only move a HOVER/preview selection. Enter commits it.**
   Right now arrow keys commit immediately.
-- [ ] **Bug: pressing Enter while hovering the default (right) does nothing.**
-- Current state, Game.gd:2726-2731: the instant an arrow key is pressed, it directly sets
-  `dominant_hand`, `tut_hand_picked = true`, saves settings and calls `tut_check()` - there is
-  no preview state at all. If a player never touches an arrow key (right being whatever the
-  screen shows as the default) and just presses Enter, `tut_hand_picked` was never set, so
-  `tut_check()` never marked the "hand" goal done, so `tut_advance_at` is still -1, so
-  `KEY_ENTER`'s handler (`tut_advance()`, which no-ops while `tut_advance_at < 0`) does
-  nothing - exactly the reported bug.
-- Fix shape: add a `tut_hand_hover` (or reuse `dominant_hand` as the live preview and only
-  write it to the SAVED setting on confirm) that arrow keys change with no side effects, and
-  move the `tut_hand_picked = true` / `save_settings()` / `tut_check()` block onto Enter,
-  reading the hovered side at that point.
+- [x] **Bug: pressing Enter while hovering the default (right) does nothing.**
+- Fixed at Game.gd:2723-2739. Arrow keys now only move `dominant_hand` itself (it doubles as
+  the live hover value - nothing reads it as final pre-commit, and the card draw already
+  keys its highlight off it) with a quiet hover tick, no side effects. Enter is now handled
+  specially for the "hand" goal, ahead of the generic `KEY_ENTER` case: it sets
+  `tut_hand_picked = true`, saves, and calls `tut_check()`, which marks the goal met and
+  auto-advances in the same press (matching every other "do" beat's own auto-advance rule).
+  The bug is gone by construction: Enter now always has something real to commit, whether or
+  not an arrow was ever touched, because the default IS a valid hover value from the start.
 
 ### 22.4 Tutorial - the post-catch pause frame
 

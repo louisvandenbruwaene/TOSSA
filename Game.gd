@@ -2708,14 +2708,25 @@ func _input(event: InputEvent) -> void:
 			return          # (the next Space re-pins the taught trick regardless)
 		# THE HAND QUESTION owns Left/Right while it is up, and only while it is up: it is
 		# the one beat that asks something with the arrow keys rather than with a juggling
-		# key, and answering it is what unlocks its Enter.
-		if String(tut_step_data().get("goal", "")) == "hand" and kc in [KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D]:
-			dominant_hand = LEFT if kc in [KEY_LEFT, KEY_A] else RIGHT
-			tut_hand_picked = true
-			save_settings()
-			play_sfx("ui2", -12.0)
-			tut_check()
-			return
+		# key. Left/Right only MOVE the highlight (Louis, 2026-07-31: "don't immediately
+		# select it. wait for the player to confirm with enter") - `dominant_hand` doubles
+		# as the live hover value, since nothing reads it as final until Enter commits it
+		# below, and the card draw (draw_tut_hand_pick) already highlights whichever side
+		# it currently names. The bug this replaces: committing straight off the arrow key
+		# left Enter dead whenever the player never touched an arrow at all (RIGHT is the
+		# default `dominant_hand`, so its card LOOKED chosen from the first frame, but
+		# nothing had ever set `tut_hand_picked` - Enter's own handler no-ops until it has).
+		if String(tut_step_data().get("goal", "")) == "hand":
+			if kc in [KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D]:
+				dominant_hand = LEFT if kc in [KEY_LEFT, KEY_A] else RIGHT
+				play_sfx("ui2", -20.0)   # a quiet tick for the hover, not the confirm chime
+				return
+			if kc in [KEY_ENTER, KEY_KP_ENTER]:
+				tut_hand_picked = true
+				save_settings()
+				play_sfx("ui2", -12.0)
+				tut_check()   # goal is met now, so this both clears the step and advances it
+				return
 		match kc:
 			KEY_ENTER, KEY_KP_ENTER:
 				tut_advance()   # a met goal holds open until the player says done
@@ -5869,6 +5880,8 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 	var cy := by + 44.0
 	for i in 2:
 		var h := LEFT if i == 0 else RIGHT
+		# `dominant_hand` IS the hover here, pre-confirm (see the "hand" goal's input
+		# handler): Left/Right move it live, Enter is what actually commits it.
 		var sel := dominant_hand == h
 		var cx := bx + 24.0 + float(i) * (cw + gap)
 		soft_card(Rect2(cx, cy, cw, 38.0), Color(1.0, 0.86, 0.45, 0.12) if sel else Color(0.14, 0.10, 0.11, 0.9),
@@ -7285,11 +7298,19 @@ func throw_slot(h: int) -> int:
 
 
 func catch_slot(h: int) -> int:
+	# ONLY EVER CALLED TO SEED hand_catch_rest AT A FRESH DEAL (see its own two call
+	# sites) - a real throw immediately overwrites it with the ball's true landing slot
+	# (do_throw), so this is purely the guess for "nothing has been thrown yet". Louis,
+	# 2026-07-31: hands should rest INWARD until something is actually incoming, not
+	# reach out on the strength of a guess - outward is the reach for a real catch, and
+	# at a fresh deal there is no real catch to reach for. The over-the-top branch below
+	# is a genuine exception: that slot is set because a throw the pattern has already
+	# locked in (the OTHER hand's) is truly on its way there.
 	if pattern == COLUMNS:
 		return HAND_INNER
 	if next_throw_over_top(other(h)):
 		return over_top_land_slot(h)
-	return HAND_OUTER
+	return HAND_INNER
 
 
 # where an over-the-top throw COMES DOWN on hand t, and the one rule that keeps the high
