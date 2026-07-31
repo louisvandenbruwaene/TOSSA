@@ -694,41 +694,43 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.5 Tutorial - two balls
 
-- [ ] **"Throw the first ball" pauses too early - it should pause only once the ball is at
+- [x] **"Throw the first ball" pauses too early - it should pause only once the ball is at
   its peak**, exactly like the three-ball step already does correctly.
-- Current state: Game.gd:4657-4659, the two `tut_do(...)` calls for the two-ball throws pass
-  no `peak` argument (defaults false), so `tut_do_ready()` (Game.gd:5321) freezes the world
-  the INSTANT the step opens rather than waiting for `tut_at_peak()`. The three-ball step
-  right below it (Game.gd:4665, `tut_do("Wait for it to reach the top...", ..., true)`) is the
-  reference: `true` as the seventh (peak) argument to `tut_do`. Add it to the second two-ball
-  throw the same way.
-- [ ] **Hands should only go outward when a ball is actually incoming for them, not a moment
-  before.** Same fix as 22.2 - once the idle default is inward, this should mostly fall out
-  of that change for the two-ball section specifically; verify it here after 22.2 lands.
-- [ ] **After both balls are thrown, the game should pause frame-by-frame and walk the player
+- [x] **Hands should only go outward when a ball is actually incoming for them, not a moment
+  before.** Fell out of 22.2's fix, as expected - confirmed on screen (see below).
+- [x] **After both balls are thrown, the game should pause frame-by-frame and walk the player
   through catching them one at a time - right now it just resumes at full speed and lets both
   drop.**
-- [ ] **The correct order, taught explicitly, one paused step at a time:** catch ball 1 ->
+- [x] **The correct order, taught explicitly, one paused step at a time:** catch ball 1 ->
   throw it right back -> catch ball 2 -> throw it right back, where each "throw it right
   back" is timed to roughly when the OTHER ball reaches the peak of its own arc. **Repeat
   this whole exchange twice** (each ball crosses back and forth twice) before the player is
   allowed to juggle it freely.
-- Current state: Game.gd:4660 replaces all of the above with one `tut_free(...)` step - a
-  single open-ended "catch and throw on one side, then the other, and repeat" with no pausing,
-  no explicit ordering, and no distinction between a guided repeat and free practice. This is
-  the step that needs rebuilding into a short sequence of `tut_do(..., peak=true)` beats (one
-  per catch/throw in the prescribed order, each pausing at its own peak/landing) run twice,
-  THEN a `tut_free` for open practice - mirroring the shape the three-ball section below it
-  already gets right.
+- Added `peak=true` to the second two-ball throw. Rebuilt the single open-ended `tut_free`
+  step into: the same two opening throws, then a loop generating exactly the sequence Louis
+  asked for - `catch(off)`, `throw-back(off, peak)`, `catch(dom)`, `throw-back(dom, peak)`,
+  run twice - and only then the `tut_free` for open practice. A loop rather than eight
+  hand-written lines, since the catching hand alternates off/dom/off/dom (the ball thrown
+  first always lands first) and a loop is what keeps two full round trips from drifting out
+  of step with each other by hand. Traced end to end under `--demo --tutorial balls`
+  (headless, so a fixed autoplayer): the step sequence that actually ran was `throw_l,
+  throw_r, catch_r, throw_r, catch_l, throw_l, catch_r, throw_r, catch_l, throw_l, free` -
+  exactly catch/throw-back twice on each side, alternating, matching the design precisely.
+  A windowed screenshot mid-sequence (a "Throw it right back" beat) shows the holding hand
+  resting inward at the key it's about to press, PERFECT sitting right where the last catch
+  actually landed, and the OTHER (empty, ball genuinely incoming) hand out at its catch ring
+  - all three of today's other tutorial fixes visibly correct at once, in real play.
 
 ### 22.6 Tutorial - three balls
 
-- [ ] **You already do this section decently** (per Louis) - it is the reference for 22.5's
-  rewrite.
-- [ ] **One bug shared with 22.4: the circle/key icon is misplaced (old outward position)
-  once the arms and ball have already moved inward.** Same root cause and same fix as 22.4;
-  fixing 22.4 should fix this too, but verify specifically in the three-ball section since
-  Louis called it out separately.
+- [x] **You already do this section decently** (per Louis) - it is the reference for 22.5's
+  rewrite, and needed no choreography change.
+- [x] **One bug shared with 22.4: the circle/key icon is misplaced (old outward position)
+  once the arms and ball have already moved inward.** `on_catch` and `draw_tut_prompts` are
+  shared code with no per-ball-count branch, so 22.4's fix (anchor on `hpos[h]`, age popups
+  on `atick()`) applies identically here - confirmed by reading both functions again with
+  the three-ball section specifically in mind, not just by inference from the two-ball
+  screenshot.
 
 ### 22.7 Tutorial extends into the first performance
 
