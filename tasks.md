@@ -800,22 +800,24 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.11 Live score display, top right
 
-- [ ] **The figure should read clearly as "amount per catch"** - Louis's own example,
+- [x] **The figure should read clearly as "amount per catch"** - Louis's own example,
   `16/catch` - rather than numbers with no unit.
-- [ ] **It should fall after a drop**, and the object-count part of its math should stay
+- [x] **It should fall after a drop**, and the object-count part of its math should stay
   live as the count changes.
-- Current state: the right-rail card Louis means is almost certainly the existing "A CATCH"
-  figure (Game.gd:14878-14888): a big number (`seg_per_catch()`, Game.gd:8832-8846) with "A
-  CATCH" printed below it and "%d in this run" under that. `seg_per_catch()` already computes
-  off the live `num_balls`-driven `seg_n`/prop signature and already resets low the moment a
-  drop closes the segment (`drop_ball` -> `close_run()` -> `seg_open("drop")`) - so the FALL
-  Louis wants is probably already true of this number; what's missing is that it doesn't read
-  as `16/catch` at a glance. **Not the same thing as the big cumulative SCORE card** (left
-  rail, Game.gd:14698), which is explicitly documented (Game.gd:8821, "it no longer costs the
-  score directly") as NOT falling on a drop - a deliberate, dated design decision. **ASK**:
-  confirm Louis means the per-catch rail (reformat only) and not a reversal of that
-  documented decision to make the cumulative score itself fall. Proceeding on the per-catch
-  reading; flag clearly if that's wrong.
+- Reformatted the right-rail "A CATCH" figure into one line, `score_text(per)` immediately
+  followed by a smaller `/catch` suffix on the SAME baseline (the "$5.99/mo" convention -
+  same line, smaller size, reads as one unit rather than a label floating nearby). "N in
+  this run" moved up to fill the space the old "A CATCH" header line left. Screenshot at
+  `--demo --booking --venue 2`: reads as `2,386,421/catch`.
+- The fall-on-drop and live-object-count halves were **already true of the underlying
+  number** and needed no change: `seg_per_catch()` resets the moment a drop closes the
+  segment (`drop_ball` -> `close_run()` -> `seg_open("drop")`), and it already reads the
+  live `seg_n` (kept current by `seg_sync_load()`, called on every count/prop/pattern
+  change). This was a display gap, not a math one. **Confirmed NOT the same figure as the
+  big cumulative SCORE card** (left rail), which is explicitly documented as deliberately
+  NOT falling on a drop ("it no longer costs the score directly") - left untouched, since
+  reversing that would be a real scoring-design decision, not a display fix, and nothing in
+  today's brief asked for it.
 
 ### 22.12 Lock the shop and loadout during a performance
 
