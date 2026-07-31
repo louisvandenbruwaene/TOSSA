@@ -4528,8 +4528,24 @@ func tut_lesson(id: String) -> Array:
 		"When you are ready, press Enter for the second ball.", 1))
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
 	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1))
-	out.append(tut_do("Throw the second before it lands.", "throw", off, TO, 2, 1))
-	out.append(tut_free("Now catch and throw on one side, %s %s, then the other, %s %s. And repeat." % [CD, TD, CO, TO],
+	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true))
+	# THE FIRST EXCHANGE, ONE ACTION AT A TIME (2026-07-31, Louis: "right after throwing
+	# both it should pause frame by frame to tell me to catch them one by one", in this
+	# exact order - "catch first ball, throw it right back, catch second ball, throw it
+	# right back", each throw-back timed to the OTHER ball reaching its own peak, "repeat
+	# this 2 times (each ball has gone back and forth twice)" before free play). Built as a
+	# loop rather than eight near-identical lines: the ball thrown first (from dom) always
+	# lands first, so the catching hand alternates off/dom/off/dom from here on, and a loop
+	# is what keeps that alternation from drifting out of step across two full round trips.
+	var catchers: Array[int] = [off, dom]
+	for _rep in 2:
+		for i in 2:
+			var ch: int = catchers[i]
+			var kt := TD if ch == dom else TO
+			var kc2 := CD if ch == dom else CO
+			out.append(tut_do("Catch it.", "catch", ch, kc2, 2, 1))
+			out.append(tut_do("Throw it right back.", "throw", ch, kt, 2, 1, true))
+	out.append(tut_free("Keep that going: catch, throw it right back, on each side in turn.",
 		2, 6, 6, "Try it out. Enter when you've got it.", 1))
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
 	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, 2))
@@ -14784,9 +14800,21 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var heat := clampf(log_10(maxf(per, 1.0)) / 40.0, 0.0, 1.0)
 		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
 		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if seg_x > 0.0 else 0
-		draw_string(font, Vector2(RX + 14, 52), score_text(per), HORIZONTAL_ALIGNMENT_LEFT, -1, 26 + mpulse, scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "A CATCH", HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 11, Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(RX + RW - 150, 56), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+		# "N/catch", ONE READABLE UNIT (2026-07-31, Louis: "make it a bit more clear what it
+		# means: eg 16/catch"). The old layout spread this over three lines - the number, a
+		# small "A CATCH" label above it, "N in this run" below - none of which said what
+		# the number itself WAS. The suffix sits on the number's own baseline, same trick as
+		# any unit-after-a-figure ("$5.99/mo"): smaller, same line, so it reads as one thing
+		# rather than a label floating nearby. `per` already falls the moment a drop closes
+		# the segment (close_run -> seg_open("drop") resets seg_x/seg_n) and `seg_n` already
+		# tracks the live object count (seg_sync_load, called on every count/prop/pattern
+		# change) - this was a display gap, not a math one.
+		var per_fs := 26 + mpulse
+		var per_txt := score_text(per)
+		draw_string(font, Vector2(RX + 14, 52), per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, per_fs, scol2)
+		var per_w := font.get_string_size(per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, per_fs).x
+		draw_string(font, Vector2(RX + 14.0 + per_w + 4.0, 52), "/catch", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + RW - 150, 40), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
 		# stat points are actionable (Tab), so they get one pulsing line. Gold,
