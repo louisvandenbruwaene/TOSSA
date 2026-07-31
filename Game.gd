@@ -12781,6 +12781,20 @@ func draw_hand(h: int) -> void:
 	var st := stack(h)
 	for i in st.size():
 		var bp := pos
+		# THE ONE CASE "drawn in that hand, no exceptions" (above) still needs a beat of
+		# help: Full-Hand-Catch (`set_catch_full`, an accessibility setting, OFF by
+		# default) lets a second ball land into a hand that is still holding the first -
+		# and hand_target deliberately never eases that hand toward an incoming ball
+		# while it holds one (2026-07-27, see hand_target), so the newly-caught ball's
+		# last FLIGHT frame is out at its true landing point while this, its first HELD
+		# frame, is back at the hand's held/throw position. A hard cut between those two
+		# reads as a teleport. This is not the old bug (a ball parked somewhere and left
+		# there) - it settles to `pos` well inside a tenth of a second and only ever
+		# triggers for the ball that was JUST added on top of an already-full hand.
+		if i == st.size() - 1 and st.size() > 1:
+			var settle := clampf(float(tick - catch_flash[h]) / CATCH_SETTLE_TICKS, 0.0, 1.0)
+			if settle < 1.0:
+				bp = flight_pos(st[i]).lerp(pos, 1.0 - (1.0 - settle) * (1.0 - settle))   # ease-out
 		draw_prop(st[i], bp + Vector2(0, -3 - float(i) * 6.0))
 
 
