@@ -2814,7 +2814,14 @@ func _input(event: InputEvent) -> void:
 		KEY_TAB:
 			sheet_open = true
 		KEY_S:
-			shop_open = true
+			# THE SHOP IS SHUT DURING A PERFORMANCE (2026-07-31, Louis: "make it
+			# impossible to open the shop during performance or to change objects
+			# or amounts during performance"). This closes a real gap: the comment
+			# two screens up already declared "no restart, no ball-count change, no
+			# prop swap" mid-set, but the shop key itself was never actually gated -
+			# it opened unconditionally here, in or out of a live performance.
+			if not performing:
+				shop_open = true
 		KEY_ENTER, KEY_KP_ENTER:
 			if performing:
 				finish_performance()   # end the set on a high note, no drop needed
@@ -2839,27 +2846,22 @@ func _input(event: InputEvent) -> void:
 		# room for more objects) - 1/2 STEP the count by one instead (2026-07-18,
 		# Louis: Minus/Equal were "bad choices" - swapped for 1 and 2, free here
 		# since the shop/sheet/pause handlers that also read the number row all
-		# gate and return well above this match). Both target functions clamp to
-		# [3, max_balls()] on their own, so stepping past either end is always a
-		# safe no-op, not an error.
+		# gate and return well above this match). start_run clamps to [3,
+		# max_balls()] on its own, so stepping past either end is always a safe
+		# no-op, not an error.
+		# THE LOADOUT IS LOCKED DURING A PERFORMANCE TOO (2026-07-31, Louis, same note as
+		# the shop above: "or to change objects or amounts during performance"). Count,
+		# prop and pattern used to have their own LIVE variants for exactly a running
+		# performance (set_count_live/cycle_prop_live/cycle_pattern_live) - that mid-act
+		# path is gone now; all three only ever act in practice, matching KEY_R just above.
 		KEY_1:
-			if performing: set_count_live(num_balls - 1)
-			else: start_run(num_balls - 1)
+			if not performing: start_run(num_balls - 1)
 		KEY_2:
-			if performing: set_count_live(num_balls + 1)
-			else: start_run(num_balls + 1)
+			if not performing: start_run(num_balls + 1)
 		KEY_O:
-			# switch the object either way: live during a performance (re-skins the
-			# props in play, keeps the run), or with a fresh deal in practice
-			if performing:
-				cycle_prop_live(1)
-			else:
-				cycle_prop(1)
+			if not performing: cycle_prop(1)
 		KEY_P:
-			if performing:
-				cycle_pattern_live(1)   # switch the routine live, mid-performance
-			else:
-				cycle_pattern()   # step the juggling pattern (re-deals the hands)
+			if not performing: cycle_pattern()   # step the juggling pattern (re-deals the hands)
 		KEY_F1:
 			if debug_mode: debug_jump_venue(0)   # debug: F1..F7 jump reputation to venues 1..7
 		KEY_F2:
@@ -4328,121 +4330,6 @@ func cycle_prop(dir: int) -> void:
 			prop_type = k
 			break
 	start_run(num_balls)
-
-
-func cycle_prop_live(dir: int) -> void:
-	# switch objects mid-performance WITHOUT restarting (Louis): the props already in
-	# play are re-skinned to the new object and the run, score and streak carry on.
-	# The new weight and spin take effect on the next throw. Only objects you own
-	# enough of for the CURRENT load are offered.
-	var n := PROPS.size()
-	var need := maxi(MIN_BALLS, balls.size())
-	var found := -1
-	var k := prop_type
-	for _i in n:
-		k = (k + dir + n) % n
-		if k != prop_type and have(k) >= need:
-			found = k
-			break
-	if found < 0:
-		set_trick_msg("no other object you own %d of" % need)
-		play_sfx("late", -12.0)
-		return
-	prop_type = found
-	# A SWITCH CLOSES THE SEGMENT (2026-07-29). The prop's signature is an exponent over the
-	# WHOLE segment, so carrying one across a switch would let a player build a long run on
-	# three balls and then rescore every catch of it as chainsaws. See seg_open.
-	seg_sync_load()
-	var i := 0
-	for b in balls:
-		b.kind = prop_type
-		b.color = ball_color(i) if prop_type == PROP_BALLS else prop_color(prop_type)
-		b.spin_dir = 1.0 if i % 2 == 0 else -1.0
-		i += 1
-	set_trick_msg(String(PROPS[prop_type]["name"]).to_upper())
-	play_sfx("ui2", -13.0)
-
-
-func set_count_live(n: int) -> void:
-	# change the LOAD mid-performance without restarting (Louis): extra props are
-	# handed in from offstage into a hand no ball is flying toward, and removing
-	# props takes HELD ones away. The run, score and streak carry on; the streak
-	# cap and object mult simply follow the new count from here.
-	n = clampi(n, MIN_BALLS, max_balls())
-	if n == balls.size():
-		return
-	if have(prop_type) < n:
-		set_trick_msg("you own %d of those  -  the shop sells more" % have(prop_type))
-		play_sfx("late", -12.0)
-		return
-	while balls.size() < n:
-		# a new ball skips any hand something is already flying toward (it would arrive
-		# on top of that catch); between two free hands, top_up_side keeps the DOMINANT
-		# hand holding the odd prop - it used to top up whichever hand held fewer, which
-		# put the extra in the weak hand as often as not
-		var free: Array[int] = []
-		for hh in [LEFT, RIGHT]:
-			var busy := false
-			for b in balls:
-				if b.state == STATE_FLIGHT and b.to_hand == hh:
-					busy = true
-					break
-			if not busy:
-				free.append(hh)
-		var to_h := top_up_side(free)
-		if to_h < 0:
-			set_trick_msg("hands are busy  -  try again between catches")
-			play_sfx("late", -12.0)
-			break
-		var nb := Ball.new()
-		nb.state = STATE_HAND
-		nb.kind = prop_type
-		nb.color = ball_color(balls.size()) if prop_type == PROP_BALLS else prop_color(prop_type)
-		nb.spin_dir = 1.0 if balls.size() % 2 == 0 else -1.0
-		balls.append(nb)
-		stack(to_h).append(nb)
-	while balls.size() > n:
-		var from_h := take_from_side()   # the weak hand gives one up first
-		if from_h < 0 or stack(from_h).is_empty():
-			set_trick_msg("everything is in the air  -  catch one first")
-			play_sfx("late", -12.0)
-			break
-		var gone: Ball = stack(from_h).pop_back()
-		balls.erase(gone)
-	num_balls = balls.size()
-	seg_sync_load()   # n is an exponent over the whole segment - see seg_open
-	# the lane bookkeeping re-seeds for the new count (a middle lane may appear
-	# or vanish); Tennis keeps its mark unless that very ball just left the stage
-	col_air_ref = -1.0
-	col_mid_ball = null
-	if tennis_ball != null and not balls.has(tennis_ball):
-		tennis_ball = null
-	set_trick_msg("%d OBJECTS" % num_balls)
-	play_sfx("ui2", -13.0)
-
-
-func cycle_pattern_live(dir: int) -> void:
-	# switch the routine mid-performance WITHOUT restarting: like a trick toggle, the
-	# new pattern simply shapes every throw from here on. Balls already in flight keep
-	# their own paths; the lane bookkeeping resets so Columns starts clean.
-	var un: Array = []
-	for i in pattern_order():
-		if pattern_unlocked(i):
-			un.append(i)
-	if un.size() <= 1:
-		set_trick_msg("the next pattern (Columns) asks for %s" % skill_req_text(PATTERNS[COLUMNS]))
-		return
-	pattern_once = -1   # the player's own hand on P ends any Skills-practice override
-	var idx := un.find(pattern_sel)
-	pattern_sel = int(un[(idx + dir + un.size()) % un.size()]) if idx >= 0 else int(un[0])
-	pattern = pattern_sel
-	seg_sync_load()   # s multiplies the whole segment - see seg_open
-	col_air_ref = -1.0
-	col_mid_ball = null
-	tennis_ball = null   # Tennis re-marks its ball on the first throw under it
-	redeal_for_pattern()
-	set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
-	play_sfx("ui2", -13.0)
 
 
 func confirm_spend(id: String, cost: int, in_shop: bool) -> bool:

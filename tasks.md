@@ -819,17 +819,22 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.12 Lock the shop and loadout during a performance
 
-- [ ] **Make it impossible to open the shop, or change props/count, mid-performance.** Both
+- [x] **Make it impossible to open the shop, or change props/count, mid-performance.** Both
   stay changeable right before the act begins; the shop should not be reachable at all once
   playing.
-- Current state: no guard exists today. `KEY_S: shop_open = true` fires unconditionally at
-  Game.gd:2819-2820 (and again at 2765-2766 on the results-card branch, which likely doesn't
-  need the guard since the act has already ended there). Compare `KEY_R` two lines below
-  (2835-2837), which IS already guarded with `if not performing:` - `performing := mode ==
-  MODE_PERFORM` is computed locally right above at Game.gd:2812, so the fix is applying that
-  same guard to the shop key. Prop/count changes go through the same ST_PLAY key handling and
-  need the identical check. The day-hub PREPARE-drawer shop path (Game.gd:3894-3898) is a
-  different, legitimate entry point and must stay untouched.
+- Found the shop key really was ungated, exactly as suspected - `KEY_S: shop_open = true`
+  fired unconditionally, two lines under a comment that already CLAIMED "no restart, no
+  ball-count change, no prop swap" mid-set. Now reads `if not performing: shop_open = true`,
+  same shape as `KEY_R` right above it.
+- The bigger find: count/prop/pattern changes were not an oversight, they were a whole
+  deliberate feature - `set_count_live`/`cycle_prop_live`/`cycle_pattern_live` (Game.gd, was
+  ~4349-4461), built specifically to let 1/2/O/P re-skin or re-size the load mid-act without
+  restarting. Louis's brief today reverses that call outright ("or to change objects or
+  amounts during performance"), so all three functions are deleted - they had no other
+  caller - and KEY_1/KEY_2/KEY_O/KEY_P now only act `if not performing`, matching KEY_R.
+  The day-hub PREPARE-drawer shop path (Game.gd:3894-3898) is untouched - a different,
+  legitimate entry point. Verified: parse-clean, `validate.sh --quick` passes including a
+  real `--demo --booking` act resolving end to end with no script errors.
 
 ### 22.13 Stats sheet - drop the number-key shortcuts
 
