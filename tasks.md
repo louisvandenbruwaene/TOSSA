@@ -775,29 +775,42 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.8 Subgoal flowers, redesigned
 
-- [ ] **Flowers should be yellow and look like they sprout from the stem itself**, not a
+- [x] **Flowers should be yellow and look like they sprout from the stem itself**, not a
   flower icon floating beside a line.
-- [ ] **Remove the indicator lines.**
-- [ ] **Multiple subgoals: two on the stem as now, plus one or two more at the top.**
-- [ ] **The flower changes colour at a higher score - make that transition slower, and give
+- [x] **Remove the indicator lines.**
+- [x] **Multiple subgoals: two on the stem as now, plus one or two more at the top.**
+- [x] **The flower changes colour at a higher score - make that transition slower, and give
   a bonus when it happens.**
-- [ ] **Give the flower a special/beautiful look if the act is on track for a standing
+- [x] **Give the flower a special/beautiful look if the act is on track for a standing
   ovation** (no drops).
-- [ ] **Prefer drawings over text/numbers wherever this can be shown visually.**
-- Current state: `draw_goal_stem(box, frac, over, marks, accent)`, Game.gd:14163-14227,
-  already draws ONE stem per act with each subgoal as a notch that sprouts a small flower
-  once passed (alternating sides, Game.gd:14200-14202) - so "sprouts from the stem" is close
-  to already true for the two lower goals; what's missing is the colour (needs to check
-  whatever colour it draws today against "yellow"), the "lines" Louis wants removed (need to
-  find - likely `goal_bar_pos` tick marks or a separate meter line elsewhere in `draw_hud`,
-  not yet located), and the one-or-two-at-the-top goals (`NUM_GOALS := 3`, Game.gd:934 - all
-  three currently live ON the one stem via `marks[]`, none "at the top" separately).
-  Hook points already in the file: `won_the_room` (Game.gd:1295, latches true once
-  `applause >= FLOWER_GREEN`) for the colour-tier logic, and the existing standing-ovation
-  system (`OVATION_TICKS`/`RAIN_BEAT`/`BONUS_PCT`/`BONUS_MIN`, Game.gd:1089-1100,
-  `ovation_left` at 1404, driven off `dropped == 0` - see `drop_ball`'s `dropped += 1` at
-  Game.gd:10396) for the "beautiful if no drops" special look - use `dropped == 0` live
-  during the act, not just at the results card.
+- [x] **Prefer drawings over text/numbers wherever this can be shown visually.**
+- The actual defect matched the gloves' own pattern from 22.9: the subgoal flower was tier
+  0 (`FLOWER_TIERS[0]`, pink), and it was positioned at a fixed offset with no visual tie
+  back to the stem at all - a separate floating icon, not a sprout. Fixed by using the
+  colour system that already exists (`FLOWER_TIERS[2]`, "gold rose", is the yellow one) and
+  `draw_flower`'s own `stem` parameter (already built for the crowd's thrown-flower pile,
+  never used here): aimed the flower's own drawn stem straight back at the main stalk so the
+  two read as one plant, one continuous edge, no floating piece.
+- The goal-line ticks (`draw_line` across the stem at each mark) are deleted outright.
+- **One extra waypoint, not a fourth real goal.** Added ONE purely visual mark at the
+  midpoint between the last real subgoal and the top (`waypoint_i`, inside the same loop the
+  two real marks use, so it's one shape drawn three times rather than new code) - "one or
+  two" landed on one, since NUM_GOALS itself stays untouched (a real fourth goal would be a
+  scoring-mechanic change, not a visual one, and nothing in the brief asked for that). It
+  pays a small one-time `warm_room()` bonus the moment it's first reached
+  (`stem_mid_bonus_given`, a new per-run flag, reset in `start_run()`).
+- **The top bloom's colour-change now takes a real, staged pause rather than firing the
+  instant score crosses the goal**: it holds posy (purple) through the first third of the
+  overflow (`STEM_OVER_GOLD_AT := 0.35`) and only turns gold rose past that, itself paying
+  one `warm_room()` bonus the first time (`stem_gold_bonus_given`).
+- **The standing-ovation look** reads `dropped == 0` live (the same counter the results
+  card's own ovation bonus checks at the very end, asked early instead of waited for): a
+  flawless act's bloom gets an extra soft halo and orbiting sparkles (`draw_star4`, already
+  in the file for the gold rose's own sparkle and otherwise unused here) that a normal act
+  never shows.
+- Verified by screenshot at `--demo --booking --venue 0`: two yellow subgoal flowers,
+  each visibly stemmed back to the main stalk, no lines anywhere on the track. Full
+  `validate.sh` (not `--quick`) passes.
 
 ### 22.9 Gloves - still look bad
 
