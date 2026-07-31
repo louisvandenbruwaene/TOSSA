@@ -871,3 +871,57 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 **Executing now, in the order above.** Marking each `[x]` here as it lands; anything that
 turns out to need a real design call gets its own note rather than a silent guess.
+
+---
+
+## 23. Louis's follow-up, same day (2026-07-31, later)
+
+Corrections on the first pass, all done:
+
+- [x] **Hand rest inward should be everywhere, not just the tutorial.** 22.2's fix only
+  changed the FRESH-DEAL guess (`catch_slot()`); mid-run, an empty hand with nothing
+  incoming still fell back to `hand_catch_rest`, whatever slot the last real throw aimed
+  at - almost always outward, since that's where real catches land. Went further:
+  `hand_target()`'s fallback is now unconditionally `slot_pos(h, HAND_INNER)`, so
+  `hand_catch_rest` had no reader left and came out entirely, along with `catch_slot()`
+  (its only purpose) and the one line in `do_throw` that wrote it. Two `hpos = [outer_pos...]`
+  fresh-deal snaps became `inner_pos` too, so there's no longer even a one-frame outward
+  flash at the start of a run.
+- [x] **The circle around the ball in the tutorial pauses - just remove it, no fixing.**
+  Two different rings, it turned out. 22.4 already fixed the CATCH TIMING ring's position;
+  what Louis was still seeing was a second, unrelated one - the normal-play "Perfect catch"
+  shockwave particle (`spawn_parts(..., "ring")` in `on_catch`), an 18-tick expanding stroke
+  that ages on `tick`. A guided beat freezes `tick` the instant it needs to, which for a
+  ring spawned by the very catch that triggers the freeze means it hangs on screen at
+  whatever radius it had reached, for as long as the pause lasts - the same freeze-vs-tick
+  class of bug as 22.4, on a completely different effect. Per the instruction ("no fixing,
+  just get rid of it"): both ring spawn sites (the Perfect ring and the streak-milestone
+  ring) are skipped outright while `tut_active`. Confirmed removed by screenshot at the
+  same beat that showed it before.
+- [x] **Repeat the two-ball help at least twice as long, and never open free play with a
+  ball still in the air.** The guided catch/throw-back loop went from 2 reps to 4. A
+  trailing catch beat now closes the sequence before `tut_free` opens, since the loop's
+  last action was always a throw (something in flight) - checked the one-ball and
+  three-ball sections too; both already ended on a catch, so only two-ball needed this.
+- [x] **Catch-to-stop doesn't work - can't catch while already holding an object.** Real
+  bug, not a discoverability gap after all: `set_catch_full` defaults OFF, so a full hand
+  refuses any further catch - which blocks exactly the "gather everything to stop" gesture
+  once a hand has already caught its own ball and the other one is still coming down.
+  Fixed narrowly: the full-hand refusal in `on_catch` now has one exception,
+  `balls_airborne() > 1` - the very last ball in the air is always catchable regardless of
+  hand fullness, since once it lands there is nothing left to protect the rule for.
+- [x] **Score HUD: "N/catch" should be "Mult = N" instead.** Swapped the suffix for a
+  leading label on the same baseline - same technique, opposite side.
+- [x] **Stats sheet: the 1-4 buttons don't work, but the UI still tells you to use them.**
+  Two leftover elements, both found and fixed: the points-to-spend banner literally said
+  "press a column's number, or Left / Right then Enter" (now just the second half), and
+  every growth column drew a "1"/"2"/"3"/"4" keycap on its own invest plate regardless of
+  selection - now only the ACTIVE column shows a keycap, and it shows Enter, matching what
+  actually works.
+- [x] **Stats sheet: holding Enter doesn't repeat.** Real bug, and a different one from the
+  UI leftovers above: `sheet_repeat` was only ever reached from the `game_state == ST_PLAY`
+  branch of `_physics_process` - but the sheet is also opened from the day hub, whose
+  `game_state` is `ST_DAY`, and that branch returns earlier in the same function without
+  ever reaching the sheet-repeat call. Added the same call to the `ST_DAY`-and-friends
+  early-return path, so holding Enter now repeats regardless of where the sheet was opened
+  from.
