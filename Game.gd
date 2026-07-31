@@ -7724,10 +7724,20 @@ func on_catch(h: int) -> void:
 			tut_hold_abort()   # the beat asked for a catch and there is nothing to catch:
 			return             # let the world go rather than freeze on an impossible ask
 		# reached for empty air: a whiff. Discourage mashing with a small wobble.
+		# EVERY CATCH-FEEDBACK POPUP/SPARK IN THIS FUNCTION ANCHORS ON `hpos[h]` NOW, not
+		# the fixed `outer_pos(h)` formula (2026-07-31, Louis: "the circle around the ball
+		# ... is wrong: it's on the outward, old position, while the ball has already
+		# correctly moved inward"). `outer_pos(h)` is a constant regardless of what the
+		# hand is actually doing; `hpos[h]` is where it is really drawn THIS frame - inward
+		# the instant a catch lands (hand_target's "holding means inward" rule), and this
+		# is the one thing a tutorial freeze cannot leave stale, since update_hands() keeps
+		# running every rendered frame even while the sim `tick` itself is held (see the
+		# ST_PLAY input loop's guided-beat branches). A popup made from `outer_pos(h)` was
+		# a snapshot of a position the hand was about to leave.
 		applause = maxf(0.0, applause + APPL_WHIFF)
 		catch_flash[h] = tick
 		hclose[h] = 0.0
-		add_popup(outer_pos(h), "whiff", Color(0.7, 0.66, 0.6, 1.0))
+		add_popup(hpos[h], "whiff", Color(0.7, 0.66, 0.6, 1.0))
 		play_sfx("whiff", -12.0)
 		return
 	if sure:
@@ -7799,7 +7809,7 @@ func on_catch(h: int) -> void:
 		# finish only at the very end, after that scoring has happened.
 		if mode == MODE_PERFORM and booking_active and goals_hit >= 1 \
 				and running and not collapsing and balls_airborne() == 0:
-			add_popup(outer_pos(h) + Vector2(0, -30), "CAUGHT THEM ALL", Color(1.0, 0.86, 0.42))
+			add_popup(hpos[h] + Vector2(0, -30), "CAUGHT THEM ALL", Color(1.0, 0.86, 0.42))
 			cashing_in = true
 		else:
 			# otherwise: the player threw one prop and caught it again while the rest sat
@@ -7838,16 +7848,16 @@ func on_catch(h: int) -> void:
 			perfect_chain += 1
 			if best_d == 0:
 				amazing_until = _frames + AMAZING_FRAMES
-				add_popup(outer_pos(h) + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
+				add_popup(hpos[h] + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
 			if perfect_chain >= CHAIN_NEED:
 				perfect_chain = 0
 				chain_until = _frames + CHAIN_FRAMES
 				add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  thirty seconds of thick time", Color(0.75, 0.92, 1.0))
 				play_sfx("record", -8.0)
-		add_popup(outer_pos(h), "PERFECT", Color(1.0, 0.86, 0.42))
+		add_popup(hpos[h], "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
-		spawn_parts(outer_pos(h), Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
-		spawn_parts(outer_pos(h), Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
+		spawn_parts(hpos[h], Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
+		spawn_parts(hpos[h], Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
 		if streak % 10 == 0:
 			# a milestone: a beat of hit-stop, a shock ring, a toast, the crowd lifts -
 			# scaled by tier (Still open: "Escalating streak feedback") so streak 200
@@ -7859,7 +7869,7 @@ func on_catch(h: int) -> void:
 			# spawn_parts), so the milestone still registers without the jolt.
 			var streak_tier := 2 if streak % 100 == 0 else (1 if streak % 50 == 0 else 0)
 			freeze = 1 if reduce_motion else 4 + streak_tier * 2
-			spawn_parts(outer_pos(h), Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
+			spawn_parts(hpos[h], Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
 			var vs := get_viewport_rect().size
 			add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
 			if streak_tier >= 1:
@@ -7884,9 +7894,9 @@ func on_catch(h: int) -> void:
 			seg_add_catch(1)
 		warm_room(APPL_GOOD)
 		add_xp(2)
-		add_popup(outer_pos(h), "GOOD", Color(0.78, 0.92, 0.6))
+		add_popup(hpos[h], "GOOD", Color(0.78, 0.92, 0.6))
 		play_sfx("good", -8.0)
-		spawn_parts(outer_pos(h), Color(0.85, 0.92, 0.6), 4, 2.4, "spark")
+		spawn_parts(hpos[h], Color(0.85, 0.92, 0.6), 4, 2.4, "spark")
 		if streak % 5 == 0:
 			play_sfx("streak", -8.0)
 	else:
@@ -7898,7 +7908,7 @@ func on_catch(h: int) -> void:
 			seg_add_catch(2)   # a Late still counts. It is worth one.
 		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
-		add_popup(outer_pos(h), "late", Color(0.95, 0.62, 0.4))
+		add_popup(hpos[h], "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
 	# the record chase: passing your own best AT this venue mid-act is a moment. The
 	# act is one continuous run now, so its live score IS the number the record
@@ -7917,7 +7927,7 @@ func on_catch(h: int) -> void:
 	# twice, and it is the mechanic the lockout replaced.)
 	# an ARM trick (High Toss / Behind the Back) pays its flourish on a clean catch
 	if best.trick >= 0 and best_d <= good_window():
-		reward_trick(best.trick, outer_pos(h), best.height)
+		reward_trick(best.trick, hpos[h], best.height)
 	# THE ACT: this catch (with any trick bonus above) may carry the score across the
 	# next goal, which arms - or re-arms - the cash-in
 	if booking_active and mode == MODE_PERFORM and not tut_active:
@@ -10661,6 +10671,13 @@ func add_popup(pos: Vector2, text: String, col: Color) -> void:
 	# trick shout, its PERFECT, and a Spin's x2 all fire from one catch) slides up
 	# above it, so a busy moment stacks into a readable little column instead of
 	# three lines of text printed through each other
+	# BORN ON atick(), NOT tick (2026-07-31, Louis: "the PERFECT should disappear after a
+	# while" - it wasn't, during a tutorial freeze). `tick` is exactly what a guided beat
+	# HOLDS while it waits for the player's next press, so a popup timed off it froze
+	# mid-fade for as long as the pause lasted, however long that was. `atick()` is
+	# `tick + cine_tick`, and `cine_tick` is the one clock this codebase already keeps
+	# running through every freeze for precisely this reason (the prompt pulse, the
+	# scenery) - see its own comment ("a stopped SIM must not read as a hung game").
 	var p := pos + Vector2(0, -40)
 	var moved := true
 	var guard := 0
@@ -10668,17 +10685,17 @@ func add_popup(pos: Vector2, text: String, col: Color) -> void:
 		moved = false
 		guard += 1
 		for q in popups:
-			var qpos: Vector2 = q["pos"] + Vector2(0, -float(tick - int(q["born"])) * 0.6)
+			var qpos: Vector2 = q["pos"] + Vector2(0, -(atick() - float(q["born"])) * 0.6)
 			if absf(qpos.x - p.x) < 120.0 and absf(qpos.y - p.y) < 26.0:
 				p.y = qpos.y - 26.0
 				moved = true
-	popups.append({"pos": p, "text": text, "col": col, "born": tick})
+	popups.append({"pos": p, "text": text, "col": col, "born": atick()})
 
 
 func age_popups() -> void:
 	var keep: Array[Dictionary] = []
 	for p in popups:
-		if tick - int(p["born"]) <= 46:
+		if atick() - float(p["born"]) <= 46:
 			keep.append(p)
 	popups = keep
 
@@ -22634,9 +22651,12 @@ func draw_text_shout(font: Font, pos: Vector2, text: String, align: int, width: 
 
 func draw_popups(font: Font) -> void:
 	for p in popups:
-		var age := tick - int(p["born"])
-		var a := clampf(1.0 - float(age) / 46.0, 0.0, 1.0)
-		var pos: Vector2 = p["pos"] + Vector2(0, -float(age) * 0.6)
+		# atick(), not tick - see add_popup/age_popups: this clock keeps moving through a
+		# tutorial freeze, so a popup actually finishes its fade instead of hanging frozen
+		# mid-fade for however long the pause lasts.
+		var age := atick() - float(p["born"])
+		var a := clampf(1.0 - age / 46.0, 0.0, 1.0)
+		var pos: Vector2 = p["pos"] + Vector2(0, -age * 0.6)
 		var c: Color = p["col"]
 		c.a = a
 		var txt := String(p["text"])
@@ -22644,7 +22664,7 @@ func draw_popups(font: Font) -> void:
 		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL") or txt.ends_with("STREAK")
 		var size := 18
 		if big:
-			size = 23 + maxi(0, 6 - age)
+			size = 23 + maxi(0, 6 - int(age))
 		# the box is 240 wide, so its LEFT edge sits half that from the anchor: the
 		# old -60 offset centred every popup 60px right of the hand it belonged to
 		draw_text_shout(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
