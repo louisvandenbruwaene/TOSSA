@@ -667,27 +667,30 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.4 Tutorial - the post-catch pause frame
 
-- [ ] **The "PERFECT" popup should disappear after a while, not linger.**
-- [ ] **The catch ring + key icon (J/F/D/K) next to the ball is drawn at the old OUTWARD
+- [x] **The "PERFECT" popup should disappear after a while, not linger.**
+- [x] **The catch ring + key icon (J/F/D/K) next to the ball is drawn at the old OUTWARD
   position after the ball has already (correctly) moved inward.**
-- Current state: `add_popup(outer_pos(h), "PERFECT", ...)` at Game.gd:7840 always anchors on
-  the fixed outward slot, never on where the hand actually ends up holding the prop (inward).
-  `draw_popups()` (Game.gd:22641) fades a popup by `tick - born`, over 46 ticks - but while a
-  guided tutorial beat is frozen (`tut_do_step()`/`tut_hold`, the branches at Game.gd:2417-2434
-  that return before advancing `tick`), `tick` does not move, so an already-fading popup's age
-  stops advancing and it visually hangs on screen for as long as the freeze lasts. That is
-  almost certainly why "PERFECT" reads as stuck: it isn't lingering forever, it's paused along
-  with everything else, but a popup that was already old when the freeze began should have
-  finished fading before the freeze needs to hold the ring/key steady.
-  Fix shape: (a) anchor the PERFECT popup at the hand's actual rest point (`inner_pos(h)` /
-  `hand_target(h)` at catch time) instead of `outer_pos(h)`; (b) either let popups age off
-  real time (`atick()`/msec) instead of sim `tick` so a freeze doesn't pin them, or fade any
-  popup out immediately when a tutorial freeze begins if it's already past some age. The
-  ring/key prompt itself (`draw_tut_prompts`, Game.gd:6247) already reads live `hpos[h]`, so
-  once (a) fixes where PERFECT lands, check whether the ring/key still looks wrong - it may
-  be that `hpos` itself is what's frozen mid-lerp the instant the catch triggers the freeze,
-  in which case the fix is snapping `hpos[h]` straight to its target the moment a freeze
-  begins, not leaving it to ease there over ticks that no longer advance.
+- Found two real bugs, both in shared (non-tutorial-only) code:
+  1. Every catch-feedback popup and particle in `on_catch` (whiff/PERFECT/GOOD/late/CAUGHT
+     THEM ALL/AMAZING!, plus the sparks and rings and `reward_trick`'s popup - eleven call
+     sites, Game.gd ~7744-7934) anchored on `outer_pos(h)`, a fixed formula, instead of
+     `hpos[h]`, where the hand is actually drawn this frame. `outer_pos(h)` never agreed with
+     "holding means inward" once a catch put a ball in the hand - it was a snapshot of a
+     position the hand was already leaving. All eleven now anchor on `hpos[h]`.
+  2. `add_popup`/`age_popups`/`draw_popups` (Game.gd ~10690-10719, ~22714) aged every popup
+     off `tick`. A guided tutorial beat FREEZES `tick` while it waits for the next press
+     (that's the whole mechanism), so a popup born just before a freeze hung on screen,
+     visually paused mid-fade, for as long as the freeze lasted - not literally forever, but
+     for however long the player took to read the line, which reads as "never disappears."
+     Switched all three to `atick()` (`tick + cine_tick`), the one clock this codebase
+     already keeps running through every freeze for exactly this reason (the prompt pulse,
+     the scenery - see its own standing comment, "a stopped SIM must not read as a hung
+     game"). Verified: parse-clean, `validate.sh --quick` passes, and a `--demo --tutorial
+     balls` screenshot at the first real catch shows the ring/key on the hand that's actually
+     receiving, at its actual drawn position.
+  The ring/key prompt itself (`draw_tut_prompts`) was already reading live `hpos[h]` and
+  needed no change - once (1) stopped feedback from being anchored on a stale formula, both
+  reports trace to the same root cause.
 
 ### 22.5 Tutorial - two balls
 
