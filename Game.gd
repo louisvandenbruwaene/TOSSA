@@ -1640,6 +1640,13 @@ var aid_meal_used := false         # the once-per-career stamina rescue has been
 var post_lesson_show := false   # true for exactly one real act: the Backyard show the
 								  # basics congrats card hands straight into (see the
 								  # ST_TUTDONE key handler and ST_MENUTOUR)
+# THE FIRST SHOW'S OWN GUIDE (2026-07-31): a short, spoken walk through the goal stem, the
+# sub-goals, and the standing-ovation incentive, held before the very first throw of the
+# post_lesson_show act - and a closing reaction on its results card. Never touches the sim
+# or the score, unlike a tut_active lesson: this is a REAL act, just narrated once.
+var show_guide_step := -1        # -1 idle; >=0 is an index into show_guide_lines, holding the world
+var show_guide_lines: Array[String] = []
+var first_show_reaction := ""    # set by resolve_act() for the tagged act; shown on its results card
 var tut_active := false   # a hands-on lesson is running inside ST_PLAY
 var tut_id := ""          # "balls" (the 1->2->3 progression) or "prop_<n>"
 var tut_step := 0         # index into tut_lesson(tut_id)
@@ -2210,6 +2217,17 @@ func _ready() -> void:
 	if ua.has("--menutour"):          # dev: the post-first-show "how the hub works" card
 		game_state = ST_MENUTOUR
 		cine_tick = 0
+	if ua.has("--showguide"):         # dev: the first show's own in-act guide (2026-07-31),
+		# for a screenshot without walking the whole tutorial to reach it - self-contained,
+		# since skip_menu above does not know this flag and would otherwise leave the game
+		# sitting at the title menu with post_lesson_show set and nothing to show it in.
+		post_lesson_show = true
+		booking_active = true
+		goals_hit = 0
+		game_state = ST_PLAY
+		start_run(3)
+		mode = MODE_PERFORM
+		arm_show_guide()
 	var dyi := ua.find("--day")       # dev: jump straight to the day hub for a screenshot,
 	if dyi != -1:                     # optionally --day <work|rest|prep> with that drawer open,
 		enter_day()                   # and a further <sel> to move the cursor onto row N
@@ -2374,6 +2392,23 @@ func _physics_process(delta: float) -> void:
 	if ucard_kind >= 0:
 		cine_tick += 1
 		update_hands()
+		return
+	# THE FIRST SHOW'S OWN GUIDE HOLDS THE WORLD, same shape as the card above (2026-07-31,
+	# Louis: extend the tutorial into the first real performance - explain the goal stem,
+	# the sub-goals, the standing-ovation incentive, before the player's first throw). It
+	# only ever arms once, right as establish_key() starts this exact tagged act
+	# (post_lesson_show), and it sits BEFORE the sheet/shop/pause gate so nothing else can
+	# preempt it - there is nothing to preempt yet, since it holds before the first throw.
+	if show_guide_step >= 0:
+		cine_tick += 1
+		update_hands()
+		# --demo HAS NO HANDS: without this, a demo run that reaches the first show would
+		# hang here forever (see CLAUDE.md's own warning about exactly this class of bug -
+		# a guided card with no auto-dismiss). Same shape as tut_maintain's own advance.
+		if _demo and cine_tick % 90 == 89:
+			show_guide_step += 1
+			if show_guide_step >= show_guide_lines.size():
+				show_guide_step = -1
 		return
 	if sheet_open or shop_open or skills_open or tailor_open or paused or debug_panel_open:
 		if sheet_open:
@@ -2701,8 +2736,19 @@ func _input(event: InputEvent) -> void:
 	# still registers (see _latch_tap). Skipped while the sim is halted (paused /
 	# sheet / shop / results), where reads do not run (or are ignored) and a latch
 	# would otherwise fire stale on resume.
-	if not paused and not sheet_open and not shop_open and not results_open:
+	if not paused and not sheet_open and not shop_open and not results_open and show_guide_step < 0:
 		_latch_tap(kc)
+	# THE FIRST SHOW'S GUIDE OWNS INPUT WHILE IT IS UP: Enter (or Space, matching every
+	# other "read it, then go on" card in the game) steps to the next line, and nothing
+	# else acts - a first-timer must not be able to throw a ball out from under a line
+	# they have not read yet.
+	if show_guide_step >= 0:
+		if kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+			show_guide_step += 1
+			play_sfx("ui2", -11.0)
+			if show_guide_step >= show_guide_lines.size():
+				show_guide_step = -1
+		return
 	# the in-play pause menu owns all input while it is up
 	if paused:
 		pause_input(kc)
@@ -2795,6 +2841,7 @@ func _input(event: InputEvent) -> void:
 					# before the hub is ever shown, never straight back into it (see
 					# ST_TUTDONE and ST_MENUTOUR)
 					post_lesson_show = false
+					first_show_reaction = ""   # a one-act line; never carries into a later card
 					game_state = ST_MENUTOUR
 					cine_tick = 0
 				else:
@@ -3142,6 +3189,21 @@ func begin_daily_challenge() -> void:
 func establish_key() -> void:
 	game_state = ST_PLAY
 	start_run(establish_after)   # the card dismissed: walk out and begin the act
+	# THE FIRST SHOW'S GUIDE ARMS HERE, once, on the exact act post_lesson_show tags -
+	# right after the table is dealt and before the player's first throw (see the
+	# show_guide_step freeze in _physics_process and its input handler in _input).
+	if post_lesson_show:
+		arm_show_guide()
+
+
+func arm_show_guide() -> void:
+	show_guide_lines = [
+		"Let's test out your skills with an actual audience. The goal is to receive as many flowers as you can.",
+		"That stem, growing at your side - that shows your progress toward it. Each notch on it is a smaller goal on the way, and every one you pass sprouts its own flower.",
+		"Lock in a small one if you're not sure of the next - but don't get overconfident either. You lose a standing ovation bonus if you drop, so keep the crowd happy and your hands clean if you can.",
+		"When you're ready to stop: catch everything and hold it, or press %s. Good luck out there." % String(k_finish()[0]),
+	]
+	show_guide_step = 0
 
 
 # --- act maths: the three goals, the deck's live effects, the drop limit -----
@@ -7454,6 +7516,7 @@ func start_run(n: int) -> void:
 	run_venue = play_venue()   # records and the results card key off where you performed
 	results_open = false
 	results_record = false
+	first_show_reaction = ""   # never carries a stale line into an unrelated act's card
 	results_tick = -999
 	results_stamped = false
 	record_broken = false
@@ -9351,6 +9414,17 @@ func resolve_act() -> void:
 	tomatoes += last_tomatoes
 	if last_pay > 0:
 		play_sfx("coin", -8.0)
+	# THE FIRST SHOW'S CLOSING REACTION (2026-07-31, Louis): one of three lines, chosen off
+	# how the tagged act actually went, read on its results card (draw_results). Computed
+	# here rather than there, because everything it depends on (dropped, goals_hit,
+	# set_collapsed) is already final at this point and nowhere else in the file.
+	if post_lesson_show:
+		if dropped == 0 and goals_hit >= 1:
+			first_show_reaction = "Well done - keep going like that."
+		elif goals_hit >= 1:
+			first_show_reaction = "Not bad, but there's room for improvement."
+		else:
+			first_show_reaction = "That was pretty bad - but at least you can eat those tomatoes."
 	# a complete act (all three goals) raises this venue's standing bar for next time
 	if complete and run_venue >= 0 and run_venue < ante.size():
 		ante[run_venue] += 1
@@ -10791,6 +10865,7 @@ func _draw_screen() -> void:
 			draw_routine_hud(font, s)
 	else:
 		draw_hud(font, s)
+	draw_show_guide(font, s)   # the first show's own guide, over the live HUD it explains
 	draw_popups(font)
 	if results_open and not tut_active:
 		if ovation_left > 0:
@@ -15018,7 +15093,12 @@ func draw_results(font: Font, s: Vector2) -> void:
 	# the slot is the gap between the last row and the footer, and it is drawn as a BOX
 	# so a long line stops inside it instead of running down into the footer
 	var word_box := Rect2(px + 34.0, py + ph - 74.0, pw - 68.0, 36.0)
-	if not complete and String(ft[1]) != "" and age > 74:
+	if first_show_reaction != "" and age > 74:
+		# THE FIRST SHOW'S CLOSING REACTION (2026-07-31, Louis) takes this slot over
+		# everything else it would normally hold - it is a one-time event, and outranks
+		# the ordinary fail/coach lines below for exactly this one card.
+		draw_wrap_fit(font, first_show_reaction, word_box, 13, Color(1.0, 0.9, 0.72, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
+	elif not complete and String(ft[1]) != "" and age > 74:
 		draw_wrap_fit(font, String(ft[1]), word_box, 12, Color(0.86, 0.72, 0.64, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
 	elif not set_collapsed and age > 74:
 		# a survived act (all goals, or a chosen bow) gets a coaching line in the same
@@ -20892,6 +20972,49 @@ func draw_purist_legend(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(0, s.y * 0.88), "any key  -  the career plays on, records still to chase",
 			HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.75, 0.7, 0.8, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.7)
+
+
+func draw_show_guide(font: Font, s: Vector2) -> void:
+	# THE FIRST SHOW'S GUIDE (2026-07-31, Louis: extend the tutorial into the first real
+	# performance). Same speech-box language as the basics lesson (draw_tut_speech) - a
+	# head in a lit disc, a line beside it, a tail pointing down - but without that
+	# function's letter-by-letter reveal, since this is not a tut_active lesson and has no
+	# speech-tick of its own: the line simply appears whole, which a four-line, one-time
+	# guide does not need more than.
+	if show_guide_step < 0 or show_guide_step >= show_guide_lines.size():
+		return
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.30))
+	var line := String(show_guide_lines[show_guide_step])
+	var bw := minf(720.0, s.x - 120.0)
+	var bx := s.x * 0.5 - bw * 0.5
+	var by := 24.0
+	var inner := bw - 128.0
+	var lines := _wrap_lines(font, line, inner, 17)
+	var bh := 46.0 + 24.0 * float(maxi(lines.size(), 1))
+	bh = minf(bh, s.y * TUT_SPEECH_BOT - by)
+	soft_card(Rect2(bx, by, bw, bh), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.55), 1.6, 14.0, 18.0)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(bx + 74.0, by + bh - 1.0), Vector2(bx + 104.0, by + bh - 1.0),
+		Vector2(bx + 80.0, by + bh + 13.0)]), Color(0.10, 0.07, 0.09, 0.95))
+	var hc := Vector2(bx + 52.0, by + bh * 0.5)
+	draw_glow(hc, 34.0, Color(1.0, 0.78, 0.42, 0.14))
+	draw_circle(hc, 26.0, Color(0.16, 0.11, 0.12, 0.95))
+	draw_arc(hc, 26.0, 0.0, TAU, 28, Color(1.0, 0.86, 0.55, 0.45), 1.4)
+	draw_head(hc + Vector2(0.0, 3.0), 15.0, Color(0.28, 0.16, 0.11), Color(0.87, 0.64, 0.45), false)
+	var ty := by + 34.0
+	for l in lines:
+		draw_string(font, Vector2(bx + 96.0, ty), String(l), HORIZONTAL_ALIGNMENT_LEFT, inner, 17, Color(1.0, 0.94, 0.80))
+		ty += 24.0
+	var pa := 0.7 + 0.3 * sin(atick() * 0.14)
+	draw_string(font, Vector2(bx + bw - 100.0, by + bh - 10.0), "%s  go on" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 12, Color(1.0, 0.9, 0.7, pa))
+	# THE SECOND LINE POINTS AT THE GOAL STEM, so "that shows your progress" has something
+	# to look at rather than a description in the abstract. LX/tcard_y mirror draw_hud's own
+	# layout constants for the goal card - if that layout ever moves, this glow should move
+	# with it.
+	if show_guide_step == 1:
+		var stem_c := Vector2(18.0 + 152.0 + 17.0, 78.0 + 12.0 + 74.0)
+		var ring_a := 0.5 + 0.5 * sin(atick() * 0.1)
+		draw_arc(stem_c, 90.0, 0.0, TAU, 32, Color(1.0, 0.88, 0.5, 0.35 + 0.25 * ring_a), 2.5, true)
 
 
 func draw_tutdone(font: Font, s: Vector2) -> void:

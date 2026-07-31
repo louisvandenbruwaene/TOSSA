@@ -734,21 +734,44 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.7 Tutorial extends into the first performance
 
-- [ ] **Louis asked for this once already** (see section 15/20 above, and his own 2026-07-29
+- [x] **Louis asked for this once already** (see section 15/20 above, and his own 2026-07-29
   evening notes preserved verbatim starting line 320) - a guided walk through the first
   Backyard act: the flower/goal meter explained and highlighted, sub-goals explained, a
   standing-ovation-if-no-drops warning, and one of three closing reactions depending on how
   it went ("well done, keep going" / "not bad, room for improvement" / "pretty bad, at least
   there's tomatoes to eat"), followed by guided text through the rest of the menus the first
   time the player sees them.
-- Current state, checked directly: it was NOT built. `tut_finish()` (Game.gd:5642) ends the
-  basics lesson by setting `game_state = ST_TUTDONE` - a small congrats card (`draw_tutdone`,
-  Game.gd:20971) - and nothing scripts the Backyard act that follows it. No "tut" state exists
-  inside a live performance at all. This needs the same `tut_say`/`tut_beat`-style speech
-  system extended to run DURING a real act (not a scripted lesson deal), triggered the first
-  time a Backyard performance begins post-tutorial, pointing at the real HUD elements
-  (`draw_goal_stem`, the applause meter) as they update live rather than a scripted fake.
-  This is the single largest item in this batch - budget it its own pass.
+- Found real, existing infrastructure that made this smaller than the "own pass" estimate
+  below suggested: `post_lesson_show` already TAGS the exact Backyard act that
+  `ST_TUTDONE`'s own key handler starts (Louis, 2026-07-29: "immediately put in the backyard
+  for the next performance tutorial") - the act itself just runs unnarrated, and
+  `ST_MENUTOUR` already explains the day hub afterward. So "guided text through the rest of
+  the menus" was already built; only the ACT ITSELF had never been narrated.
+- Built, not scripted-fake: a short, one-time speech overlay (`show_guide_step`/
+  `show_guide_lines`, armed by `arm_show_guide()` from `establish_key()`) that holds the
+  world exactly once, right after the table is dealt and before the first throw, in the
+  same freeze-shape `ucard_kind`/a guided tut beat already use (advance `cine_tick`, poll
+  for Enter, never advance the real sim tick). Four lines: what the goal is, what the goal
+  stem shows (with a pulsing ring drawn over the REAL stem's own screen position while that
+  line is up, not a fake one), the standing-ovation-for-no-drops incentive, and how to stop.
+  Reuses `draw_tut_speech`'s box/head/tail visual language without its letter-by-letter
+  reveal (a four-line one-time card doesn't need it).
+- The closing reaction is real too: `resolve_act()` sets `first_show_reaction` to one of
+  Louis's exact three lines, chosen off `dropped`/`goals_hit` (both already final at that
+  point in the function), and `draw_results()`'s existing "closing word" slot (already used
+  for coach/fail text on every other act) shows it first when set, clearing on dismissal so
+  it never bleeds into a later act's card.
+- `--demo` needed its own fix: nothing auto-dismisses a card-like freeze except
+  `ST_ESTABLISH`, so a guide with no auto-advance would have hung a demo run exactly the way
+  CLAUDE.md's own warning describes. Added a `cine_tick % 90 == 89` auto-step under `_demo`,
+  same shape as `tut_maintain`'s.
+- **Verified two ways**: a new `--showguide` dev flag (mirrors `--tutdone`/`--menutour`'s
+  existing pattern) screenshots the overlay directly, confirmed correctly laid out over the
+  real live HUD with the stem highlight in the right place; and `--showguide --demo` run to
+  completion headless resolved a real act end to end with no script errors
+  (`ACT venue=0 ... goals=3/3 collapsed=false ... ovation=48`, the exact clean-run shape that
+  should produce the positive reaction line). Full `validate.sh` (not `--quick`) passes,
+  including the collision sweep and a real windowed screenshot.
 
 ### 22.8 Subgoal flowers, redesigned
 
