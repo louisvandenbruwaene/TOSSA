@@ -979,3 +979,187 @@ Corrections on the first pass, all done:
   ever reaching the sheet-repeat call. Added the same call to the `ST_DAY`-and-friends
   early-return path, so holding Enter now repeats regardless of where the sheet was opened
   from.
+
+---
+
+## 24. Louis's brief of 2026-07-31, evening (the Sonnet pass's fallout)
+
+Eight items. Every one is done; two of them turned out to be different bugs from the ones
+reported, and one of the reports was a symptom of a third thing entirely.
+
+### 24.1 The loadout locks too early
+
+- [x] **"I can't change the number of objects or the kind of objects in my hands when I
+  start a performance, while that should only be the case once I've begun juggling."**
+- 22.12 gated KEY_1/KEY_2/KEY_O/KEY_P on `performing` (`mode == MODE_PERFORM`), which is
+  true from the moment the establishing card is dismissed - i.e. from BEFORE the first
+  throw. So the one moment the player is meant to be able to change their mind was the
+  moment it was taken away, and you walked out holding whatever the last act left selected.
+- Fixed with a second, narrower flag next to it: `juggling := performing and started`.
+  `started` is exactly "a prop has left a hand" - `do_throw` sets it, `start_run` clears it,
+  and a drop never unsets it. All four keys re-deal through `start_run`, which is safe while
+  nothing has been thrown (score, goals and the segment are all still zero).
+- The SHOP stays on the old, stricter gate: shut for the whole act, per 22.12's own note.
+  Swapping the load you are holding is a decision; opening a store mid-bow is not.
+
+### 24.2 Catch effects that hang across a tutorial pause
+
+- [x] **"Remove the catching special effects while the game pauses - either pause once the
+  effect is gone, or remove the effect for catches that will be paused."**
+- Of the two options only the second is actually available, and it is worth saying why: a
+  guided beat freezes BECAUSE a prop is close to landing, so "wait for the effect to finish
+  first" means waiting past the very arrival the freeze exists to protect.
+- `tut_quiet_fx()` (= `tut_active and tut_helped()`) now suppresses every popup and particle
+  a catch fires - PERFECT / GOOD / late / whiff / AMAZING! / FIFTY PERFECT / the streak
+  toast and its confetti, and the streak milestone's hit-stop with them. Section 23 had
+  already deleted the two `"ring"` particles; this is the rest of the same family, which is
+  what Louis was still seeing.
+- It costs nothing in feedback: a helped catch is graded PERFECT by construction (`sure` in
+  `on_catch`), so the word was never telling the player anything they had done. Sounds all
+  still play, and a `free` beat - not helped, and where a catch is genuinely earned - keeps
+  the full flourish.
+
+### 24.3 "It should always be the first thrown ball that needs to be caught and thrown"
+
+- [x] Real, and the two-ball section was the worst of it exactly as reported.
+- The old hand list was `[off, dom]` repeating - "the catching hand alternates". Traced
+  under `--demo --tutorial balls` with a probe printing EVERY airborne prop at every beat,
+  and half the catch beats opened with two props in the air and named the one **84 ticks**
+  out while a different one was **64 ticks** from the other hand. The beat was talking about
+  a ball that was not the ball coming down.
+- The order is `[dom, off]`, starting on the strong hand. Derivation, since it is not
+  obvious: these two balls DO cross (`do_throw` carries an explicit
+  `if tut_active and tut_id == "balls" and num_balls == 2: cross = true`, overriding
+  Cascade's own even-count parity rule), so arrivals run off(T), dom(1.5T), dom(2T),
+  off(2.5T)... The FIRST of those is not scripted at all - the catch guard takes it while
+  the beat above is still asking for the second throw - so the scripted beats take every
+  OTHER arrival from there, which is a plain dom/off alternation. Under the new order every
+  single catch beat opens with exactly ONE prop in the air and a uniform 34-tick lead.
+- **Do not "simplify" this back to an alternation starting on the other hand.** It looks
+  more natural and it is wrong from the second exchange on.
+
+### 24.4 Emphasise only the ball that currently needs an action
+
+- [x] **"Yellow aura circle around the ball - only the ball that currently requires an
+  action, not the one from the previous action."**
+- Two halves, and the second is what was actually going wrong. `tut_focus_ball()` answers
+  "which prop is the ask" once, for everything: a catch beat means the soonest prop arriving
+  at that hand (`tut_landing_ball`, which also fixed a real bug in `tut_do_ready` - it used
+  to `return` on whichever prop the `balls` array reached first, so with two bound for one
+  hand it could time the freeze off the LATER arrival); a throw beat means the prop that
+  press would send up (`stack(h)[0]`, since `do_throw` pops the front). `draw_tut_focus`
+  draws it: a `draw_glow` body with a thin antialiased ring for an edge, deliberately NOT a
+  hard `draw_arc` - Louis's verdict on the last circle was "jagged or just positioned wrong
+  or both".
+- The second half: `draw_tut_prompts` was drawing a throw key over EVERY holding hand and a
+  catch key over every receiving one, so the hand that had just caught kept a bright key on
+  it after the lesson had moved on. That stale key, sitting on the previous beat's prop, is
+  what read as the wrong ball being emphasised. A `do` beat now prompts only the hand it
+  names.
+- **With one exception, and it is load-bearing:** the catch guard outranks the script,
+  because it outranks it in the sim. A helped stretch stops the world whenever ANY prop
+  comes within `TUT_CATCH_GUARD` of landing, wherever the script has got to - and during the
+  two-ball opening it always does. Whatever the world stopped FOR is by definition the ball
+  that needs an action, so it takes both the aura and its key ahead of the beat's own
+  subject. Without this the player meets a frozen game with the only prompt on the wrong
+  side. Confirmed in the trace: mid-throw-beat the focus visibly hands over to the prop 14
+  ticks from landing, and back again after.
+
+### 24.5 No control while props are in the air
+
+- [x] Louis restating a standing rule. It was being met by COUNTING BEATS until the air
+  happened to be empty, which is not a rule but a coincidence that has to be re-derived
+  every time the choreography changes - and it was already wrong: the three-ball section
+  ended on two catches and still handed over with one prop up (measured: `airborne=1`).
+- A `free` beat now deals itself clean whenever anything is still flying. Same check also
+  re-deals when the HANDS are not where the drill starts from, which fixed a second thing
+  nobody had noticed: the two-ball drill was opening free play with both props in the WEAK
+  hand. Measured after: 1 ball -> R=1, 2 balls -> one each, 3 balls -> 2 in the strong hand
+  and 1 in the other, air empty in all three.
+- The three-ball section also gained a closing catch of its own, so the drill itself ends
+  tidily rather than relying on the re-deal.
+
+### 24.6 The flower meter explains itself instead of being pointed at
+
+- [x] **"Instead of a dumb circle around it, make it fill up very fast and run out again at
+  the same speed - that shows how the meter is supposed to fill up repeatedly."**
+- The 90px ring thrown round the goal card is gone. `guide_stem_demo()` drives the REAL
+  stem from empty to full and back on a symmetric triangle wave (`GUIDE_STEM_CYCLE` 140
+  ticks, ~1.2s at 120/s - a sine was tried and lingers at both ends, which reads as
+  breathing rather than filling), so the explanation and the thing explained are one
+  picture. `draw_goal_stem` took a `live` flag so an animation can never fire the waypoint
+  or gold bonuses.
+- The cycle is anchored to the tick the LINE opened (`show_guide_tick`), not to the free
+  clock: a demonstration that starts halfway up demonstrates nothing.
+
+### 24.7 The flower meter itself
+
+- [x] **"Two flowers on each side and two leaves on each side, alternating. The flower
+  should be bigger and also have a small stem (like a thin leaf). The final subgoal (the
+  third one) should be the big flower on the top being purple, and the actual goal should be
+  the big flower on top changing from purple to yellow."**
+- Flowers and leaves come off ONE ladder now, so the alternation cannot drift: going up the
+  stalk it reads leaf, flower, leaf, flower..., each item on the opposite side to the one
+  below it, four of each, two of each per side. The old leaf rule ("one every 30px of fill")
+  could not do this - it spaced leaves by height with no relationship to the flowers.
+- The four flowers are the two real subgoals plus two visual waypoints, one in each gap
+  BELOW them. Scale 0.85 -> `STEM_FLOWER_SC` 1.25, each with its own stem aimed back at the
+  stalk (`draw_flower`'s `stem` arg puts a little leaf halfway along it for free).
+- **Nothing sits above the last real goal, and that is deliberate.** The first attempt put a
+  waypoint at the midpoint between goal 2 and the top; the bloom that opens there reaches
+  `7.0 * STEM_BLOOM_SC * FLOWER_REACH` = ~28px, more than a fifth of the 148px track, and
+  the two shapes overlapped exactly as that arithmetic says they would.
+- The purple/yellow top bloom is unchanged in behaviour and now says so in its own comment:
+  posy (`FLOWER_TIERS[1]`) when the third and final goal falls, gold rose (`[2]`) once the
+  score is `STEM_OVER_GOLD_AT` past it, each paying its own one-time `warm_room()`.
+- `stem_mid_bonus_given` became `stem_way_given`, a bitmask - with two waypoints a single
+  bool would have let the first one pay for both.
+
+### 24.8 A repeated first show should be a plain performance
+
+- [x] **"For players repeating the tutorial (with R or failing), they shouldn't have to go
+  through the tutorial again - just give them a plain performance."**
+- `post_lesson_show` stays set until the tagged act resolves and hands over to the menu
+  tour, so a failed first act re-entered from the results card came back through
+  `establish_key()` and re-armed the whole four-line talk. `show_guide_seen` is the
+  difference between "the act that is tagged" and "the first time it is walked out to". The
+  closing reaction and the menu tour still key off `post_lesson_show` and still happen; only
+  the narration is one-shot. Neither flag is persisted, so they stay in step.
+
+### 24.9 Found on the way, NOT reported - worth knowing
+
+- [x] **`HEAD` does not parse.** Commit `178cbd9` ("Subgoal flowers...") references
+  `CATCH_SETTLE_TICKS`, `HAND_SPRING_K` and `HAND_SPRING_D`, and declares none of them -
+  those lines were left UNCOMMITTED in the working tree, along with a whole hand-spring
+  rewrite. `godot --check-only` on `git show HEAD:Game.gd` fails outright, so anyone cloning
+  that commit gets a game that will not load. Found while trying to A/B a lesson against the
+  previous state, which is the only reason it surfaced at all. This session's commit carries
+  the missing declarations, so the tip is sound again - but it is worth a habit: run the
+  parse check against what is actually COMMITTED, not against the working tree.
+- [x] **Records and history printed the clipped INT64 sentinel** - open and re-reported in
+  sections 17, 18 AND 19 of this file and never actually fixed. It is one line, twice: the
+  venue board used `commafy(b)` on a float score, and `commafy`'s argument is an int, so a
+  record past 2^63 saturated at 9,223,372,036,854,775,807 and the 90px column clipped it
+  mid-number. Both boards (and the Purist Legend card, a third reader of the same value) go
+  through `score_text` now, which is the standing rule at `commafy`'s own comment.
+
+### 24.10 Verification
+
+- Every one of the nineteen basics steps walks end to end headless with no script errors,
+  and the step sequence was read off the trace rather than assumed: two-ball is
+  `throw_r, throw_l,` then `catch/throw` alternating `r,r,l,l,r,r,...` for eight exchanges,
+  then two closing catches, then free.
+- The airborne probe above (temporary, removed) is the evidence for 24.3 and 24.4.
+- `scripts/validate.sh` (full, not `--quick`) passes, including the collision sweep and a
+  real windowed screenshot. The one `[warn]` about save/load key sets is pre-existing and
+  about wardrobe/glow legacy keys, untouched here.
+- Screenshots on this machine currently need the window FOCUSED or
+  `get_viewport().get_texture().get_image()` hands back a stale frame from seconds earlier -
+  captures that look like the game is stuck on an old screen are that, not a hang.
+  `osascript -e 'tell application "System Events" to set frontmost of (first process whose
+  name contains "Godot") to true'` a few seconds after launch is what makes `--shot` honest.
+- **Not verified to completion: `--tutorial advanced`.** It reaches its one drill step and
+  the autoplayer never satisfies it (the drill only accepts advanced-style catches; the
+  autoplayer juggles beginner-style). No script errors, and it uses no path changed here -
+  but it could not be A/B'd against the previous state either, because that state is the
+  broken `HEAD` above. Flagging rather than claiming it.
