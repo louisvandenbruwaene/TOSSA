@@ -1119,6 +1119,11 @@ const STEM_BLOOM_GROW := 1.2      # ...plus this much again at full overflow
 const STEM_SHED_R := 26.0         # the ring of shed petals orbits at this...
 const STEM_SHED_GROW := 8.0       # ...widening by this much as the overflow grows
 const STEM_SHED_SC := 0.7         # each shed petal's own scale
+# HOW FAR PAST THE FINAL GOAL BEFORE THE BLOOM TURNS GOLD (2026-07-31, Louis: the colour
+# change "should take a bit longer" - it used to be immediate, the instant score crossed
+# the line). Purple (posy) holds through the first third of the overflow; gold (rose)
+# only past it, which is also when its own one-time warm_room() bonus fires.
+const STEM_OVER_GOLD_AT := 0.35
 # ...so this is how far the celebration reaches out from the stem's centre line. The
 # bloom and the ring it sheds race for the outer edge and neither wins by much.
 const STEM_BLOOM_REACH := maxf(
@@ -1398,6 +1403,11 @@ var ovation_left := 0     # ticks of standing ovation still to play BEFORE that 
 						   # it during the ovation - only the card's drawing and its keys
 						   # wait on this counter
 var ovation_bonus := 0    # what the ovation itself paid, so the card can name it
+# THE GOAL STEM'S OWN WAYPOINT AND GOLD-TIER FLOWERS (2026-07-31): each fires its small
+# warm_room() bonus once per run, the moment it is first reached, never again after -
+# per-run flags, reset in start_run() alongside everything else scoped to one act.
+var stem_mid_bonus_given := false
+var stem_gold_bonus_given := false
 var _demo_quit_after_ovation := false   # dev: a --demo act that earned an ovation lets it
 										 # finish before the harness quits
 var results_record := false  # this performance beat the venue's record
@@ -7517,6 +7527,8 @@ func start_run(n: int) -> void:
 	results_open = false
 	results_record = false
 	first_show_reaction = ""   # never carries a stale line into an unrelated act's card
+	stem_mid_bonus_given = false
+	stem_gold_bonus_given = false
 	results_tick = -999
 	results_stamped = false
 	record_broken = false
@@ -14180,6 +14192,26 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# A growing STEM with a bud at its tip and a notch at each goal line: the same
 	# concave curve and the same information as the money hat, in a fifth of the space
 	# and in the flowers' own language, so the rail does not compete with the stage.
+	#
+	# REDRAWN 2026-07-31, Louis: "they should be yellow and look like they sprout from
+	# the [stem], not just a flower icon floating next to the line that indicates the
+	# next subgoal (remove those lines)... I'd prefer if there were multiple subgoals:
+	# two on the stengel as right now, and then one or two on the top: the flower
+	# changes color when getting a higher score: make this take a bit longer and give
+	# bonusses. (give the flower a beautiful look if they should get a standing ovation,
+	# because they made no drops)." Four changes from what was here before:
+	#   - the goal-line ticks are gone outright.
+	#   - every subgoal flower is tier 2 (gold rose - the tier that IS yellow in
+	#     FLOWER_TIERS) and carries its own `stem` (draw_flower's own cut-stem-and-leaf,
+	#     oriented back at the main stalk) instead of floating unattached beside the line.
+	#   - ONE extra waypoint blooms between the last real subgoal and the final goal - a
+	#     purely visual marker, not a fourth NUM_GOALS entry - and pays a small one-time
+	#     warm_room() the moment it is first reached (stem_mid_bonus_given).
+	#   - past the final goal the bloom stays posy (purple) for the first stretch of
+	#     overflow and only turns gold rose past STEM_OVER_GOLD_AT, itself paying one
+	#     warm_room() the moment it does (stem_gold_bonus_given) - "take a bit longer"
+	#     read as a real staged transition, not an instant colour swap the moment score
+	#     crosses the line.
 	var x := box.position.x + box.size.x * 0.5
 	var base := box.position.y + box.size.y
 	var h := box.size.y * clampf(frac, 0.0, 1.0)
@@ -14200,21 +14232,35 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 				var t := TAU * float(k) / 8.0
 				lv.append(Vector2(x + dir * 10.0, ly) + Vector2(cos(t) * 10.0, sin(t) * 4.4).rotated(dir * -0.35))
 			draw_colored_polygon(lv, Color(stem.r, stem.g, stem.b, 0.9))
-	for mi in marks.size():
-		var m: float = marks[mi]
+	# ALL SUBGOALS, THE TWO REAL ONES AND THE ONE VISUAL WAYPOINT, THROUGH ONE LOOP - a
+	# waypoint bud (`gives_bonus` false-by-default handled below) sits at the midpoint
+	# between the last real mark and the top, so "two on the stem, one more near the top"
+	# is one shape drawn twice rather than two different pieces of code.
+	var all_marks: Array[float] = []
+	for m in marks:
+		all_marks.append(float(m))
+	var waypoint_i := -1
+	if all_marks.size() > 0:
+		waypoint_i = all_marks.size()
+		all_marks.append((all_marks[all_marks.size() - 1] + 1.0) * 0.5)
+	for mi in all_marks.size():
+		var m: float = all_marks[mi]
 		var my := base - box.size.y * clampf(m, 0.0, 1.0)
 		var passed := frac >= m
-		draw_line(Vector2(x - 10.0, my), Vector2(x + 10.0, my),
-			Color(1.0, 0.90, 0.55, 0.95) if passed else Color(0.62, 0.56, 0.50, 0.7), 2.2)
-		# A SUBGOAL SPROUTS ITS OWN LITTLE FLOWER (2026-07-29, Louis: "the first subgoal
-		# to sprout a little flower on the side and the second subgoal ... on the other
-		# side"). Same convention the leaves already use just above - even index to one
-		# side, odd to the other - so the stem reads as one consistent plant rather than
-		# two different decorations sharing it. It blooms once, the moment the goal is
-		# banked, and stays: `frac` only climbs during a live act, so there is no flicker.
-		if passed:
-			var fdir := 1.0 if mi % 2 == 0 else -1.0
-			draw_flower(Vector2(x + fdir * 10.0, my), 0, 0.85, atick() * 0.01 + fdir, 0.95)
+		if not passed:
+			continue
+		# A SUBGOAL SPROUTS FROM THE STEM, NOT BESIDE IT: the flower head sits out at its
+		# usual distance, but its own stem (draw_flower's `stem` arg) is aimed straight
+		# back at the main stalk, so the two read as one plant rather than a flower that
+		# happens to be floating near a line. Even index to one side, odd to the other,
+		# same convention the leaves above already use.
+		var fdir := 1.0 if mi % 2 == 0 else -1.0
+		var fp := Vector2(x + fdir * 15.0, my - 5.0)
+		var back := Vector2(x, my) - fp
+		draw_flower(fp, 2, 0.85, back.angle() - PI * 0.5, 0.95, back.length() / 0.85)
+		if mi == waypoint_i and not stem_mid_bonus_given:
+			stem_mid_bonus_given = true
+			warm_room(0.03)
 	# THE BUD OPENS as the goal comes in, and the bloom is deliberately much BIGGER than
 	# the bud was (2026-07-27, Louis: "a bigger flower when done, making it more clear
 	# that you have reached the desired score"). A bud at 7px quietly becoming a flower
@@ -14222,6 +14268,12 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# past the stem's own width is. Past the FINAL goal it opens again, gold, and keeps
 	# growing with the overflow - so the rail says "cleared" and then "still climbing".
 	var bud := Vector2(x, base - maxf(h, 4.0))
+	# A STANDING-OVATION TRACK GETS A VISIBLY BETTER FLOWER (Louis: "give the flower a
+	# beautiful look if they should get a standing ovation, because they made no drops").
+	# `dropped` is live during the act - the same counter the results card's own ovation
+	# bonus reads at the end - so this simply asks the same question early and draws for
+	# it, rather than waiting to find out.
+	var flawless := dropped == 0
 	if over > 0.0:
 		# every size here is a named constant because the rail's takings column is placed
 		# off STEM_BLOOM_REACH, which is derived from them - grow the bloom and the text
@@ -14230,9 +14282,23 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		for i in 6:                                    # petals shed round a finished act
 			var sa := atick() * 0.02 + TAU * float(i) / 6.0
 			draw_flower(bud + Vector2(cos(sa), sin(sa)) * (STEM_SHED_R + STEM_SHED_GROW * over), 0, STEM_SHED_SC, sa, 0.5)
-		draw_flower(bud, 2, STEM_BLOOM_SC + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
+		var gold := over >= STEM_OVER_GOLD_AT
+		if gold and not stem_gold_bonus_given:
+			stem_gold_bonus_given = true
+			warm_room(0.05)
+		draw_flower(bud, 2 if gold else 1, STEM_BLOOM_SC + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
+		if flawless:
+			for i in 5:
+				var ta := atick() * 0.015 + TAU * float(i) / 5.0
+				draw_star4(bud + Vector2(cos(ta), sin(ta)) * (18.0 + 4.0 * over),
+					2.4 + 0.6 * sin(atick() * 0.1 + float(i)), Color(1.0, 0.96, 0.72, 0.85))
 	elif frac >= 0.999:
 		draw_glow(bud, 32.0, Color(1.0, 0.86, 0.45, 0.26))
+		if flawless:
+			draw_glow(bud, 48.0, Color(1.0, 0.98, 0.85, 0.22 + 0.10 * sin(atick() * 0.08)))
+			for i in 5:
+				var ta2 := atick() * 0.015 + TAU * float(i) / 5.0
+				draw_star4(bud + Vector2(cos(ta2), sin(ta2)) * 16.0, 2.2, Color(1.0, 0.97, 0.78, 0.8))
 		draw_flower(bud, 1, 2.8, atick() * 0.008, 1.0)
 	else:
 		# still a bud - and it swells as the goal nears, so the change is a growth and
