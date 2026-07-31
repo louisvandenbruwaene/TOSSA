@@ -704,6 +704,14 @@ const PAD_ACTS := [
 # predicted, in-between spot - and moves to a DIFFERENT one only in direct response
 # to a throw or catch (Louis): no drifting ahead of the ball to meet it.
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
+# hand_spring (F9 experiment): a critically-near-damped spring standing in for the plain
+# lerp above. Picked by simulation, not feel: at K/D below, a 100px reach hits 90% of the
+# way at tick 9 (the exact tick HAND_SMOOTH's own lerp does), then overshoots ~2.7% and
+# settles clean within another ~15 ticks - so catch/throw TIMING is provably unchanged
+# and only the shape of the travel gets the little bit of life a real limb has.
+const HAND_SPRING_K := 0.07
+const HAND_SPRING_D := 0.36
+const CATCH_SETTLE_TICKS := 8.0   # a Full-Hand-Catch rescue's arrival tween - see draw_hand
 const HAND_OUTER := 0        # the catch point, standard
 const HAND_INNER := 1        # the throw point, standard; also the catch point for
 							  # anything riding the over-the-top road, and BOTH points
@@ -1124,6 +1132,17 @@ const STEM_SHED_SC := 0.7         # each shed petal's own scale
 # the line). Purple (posy) holds through the first third of the overflow; gold (rose)
 # only past it, which is also when its own one-time warm_room() bonus fires.
 const STEM_OVER_GOLD_AT := 0.35
+# THE FOUR SUBGOAL FLOWERS ON THE STALK (2026-07-31, Louis: "two flowers on each side and
+# two leaves on each side, alternating... the flower should be bigger and also have a small
+# stem"). The scale was 0.85 and read as a pip rather than a bloom; at 1.25 a tier-2 head is
+# 7.0 * 1.25 * FLOWER_REACH = 10.9px of petal, which still clears the takings column (that
+# column is placed off STEM_BLOOM_REACH, 38px, so there is room) and clears the SCORE figure
+# on the other side by a comfortable margin.
+const STEM_FLOWER_SC := 1.25
+const STEM_FLOWER_OUT := 15.0     # how far the head sits off the stalk's centre line
+const GUIDE_STEM_CYCLE := 140.0   # ticks for one demonstration fill-and-drain of the stem
+								   # while the first show's guide explains it (see
+								   # guide_stem_demo); 120 ticks is a second
 # ...so this is how far the celebration reaches out from the stem's centre line. The
 # bloom and the ring it sheds race for the outer edge and neither wins by much.
 const STEM_BLOOM_REACH := maxf(
@@ -1239,11 +1258,8 @@ var charge_start := [0, 0]
 
 # per-hand animation state
 var hpos := [Vector2.ZERO, Vector2.ZERO]  # smoothed current hand position
+var hvel: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]  # hand_spring only: carried velocity, px/tick
 var hclose := [0.0, 0.0]                  # 0 open (ready), 1 closed (holding)
-# an EMPTY hand's fixed waiting point (HAND_OUTER/HAND_INNER). Set exactly once
-# per incoming ball, the instant it is thrown (see do_throw), and held there
-# untouched until the catch resolves - it never creeps toward a predicted landing.
-var hand_catch_rest := [HAND_OUTER, HAND_OUTER]
 var catch_flash := [-999, -999]
 var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
 var last_drop_tick := -999               # for the juggler's wince expression
@@ -1406,7 +1422,9 @@ var ovation_bonus := 0    # what the ovation itself paid, so the card can name i
 # THE GOAL STEM'S OWN WAYPOINT AND GOLD-TIER FLOWERS (2026-07-31): each fires its small
 # warm_room() bonus once per run, the moment it is first reached, never again after -
 # per-run flags, reset in start_run() alongside everything else scoped to one act.
-var stem_mid_bonus_given := false
+var stem_way_given := 0   # a BITMASK over the stalk's flower slots: there are two visual
+						   # waypoints now, not one, so a single bool could not say which of
+						   # them had already paid (both would have fired on the first)
 var stem_gold_bonus_given := false
 var _demo_quit_after_ovation := false   # dev: a --demo act that earned an ovation lets it
 										 # finish before the harness quits
@@ -1537,7 +1555,8 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # What is here is what still has two real sides and wants Louis's eye on it. The
 # dictionary IS the shipped default for each - keep every reader's fallback equal to the
 # value here, or a missing key silently ships the other look.
-var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop_v2": true}
+var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop_v2": true,
+	"hand_spring": true, "gaze_track": true}
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
@@ -1549,6 +1568,10 @@ const EXPERIMENT_DEFS := [
 	 "desc": "ON frames the illustration in a recessed window, puts a kind index in two corners, balances the words in the room left under the picture, and turns the backlight into tapered beams that start behind the card. OFF is the old card: the picture floating on bare paper, a third of the card empty under the text, and twelve constant-width lines beginning in mid-air round the edge. Affects the unlock card, both card backs and the Skills screen's YOUR CARD."},
 	{"id": "shop_v2", "name": "Shop, laid out as a grid",
 	 "desc": "ON deals the props as a two-row grid of big cards with a real lit niche for the goods, filling the panel instead of leaving 300px of it empty under one squeezed row - and up/down walks between the rows. OFF is the single row of seven narrow cards, which is what the panel looked like once the gear row emptied out. Same cards, same numbers, same buy keys either way."},
+	{"id": "hand_spring", "name": "Hands carry momentum",
+	 "desc": "ON replaces the flat per-tick lerp that chases a hand toward its target with a small critically-near-damped spring (velocity carried between frames), so a big reach overshoots by a couple of percent and settles instead of just decelerating into place. Tuned to reach 90% of the way in the same 9 ticks the old lerp took, so catch/throw timing reads exactly as before - this only changes how the hand gets there, never when. OFF is the plain lerp (HAND_SMOOTH). Stage figure only; the Skills preview and Tailor mirror are untouched."},
+	{"id": "gaze_track", "name": "Eyes track the next catch",
+	 "desc": "ON aims the eyes (and their catchlight) at the soonest-landing airborne prop, the same one hand_target already has each empty hand reaching for - a small, clamped nudge, never a swivel. OFF is the old fixed gaze (mood-driven only: wince/smile). Stage figure only, and only while facing the crowd (a spin's back-of-head has no face to aim)."},
 ]
 const SHEET_REPEAT_DELAY := 0.32   # debug: hold a stat key this long before it auto-repeats
 const SHEET_REPEAT_RATE := 0.04    # debug: then step the stat this often while held
@@ -1656,6 +1679,10 @@ var post_lesson_show := false   # true for exactly one real act: the Backyard sh
 # or the score, unlike a tut_active lesson: this is a REAL act, just narrated once.
 var show_guide_step := -1        # -1 idle; >=0 is an index into show_guide_lines, holding the world
 var show_guide_lines: Array[String] = []
+var show_guide_tick := 0     # cine_tick when the current guide line opened, so an animation
+							  # tied to a line starts with it (see guide_stem_demo)
+var show_guide_seen := false     # the narration has run once: a retry of the same act is plain
+								  # (see arm_show_guide)
 var first_show_reaction := ""    # set by resolve_act() for the tagged act; shown on its results card
 var tut_active := false   # a hands-on lesson is running inside ST_PLAY
 var tut_id := ""          # "balls" (the 1->2->3 progression) or "prop_<n>"
@@ -2417,6 +2444,7 @@ func _physics_process(delta: float) -> void:
 		# a guided card with no auto-dismiss). Same shape as tut_maintain's own advance.
 		if _demo and cine_tick % 90 == 89:
 			show_guide_step += 1
+			show_guide_tick = cine_tick
 			if show_guide_step >= show_guide_lines.size():
 				show_guide_step = -1
 		return
@@ -2755,6 +2783,7 @@ func _input(event: InputEvent) -> void:
 	if show_guide_step >= 0:
 		if kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
 			show_guide_step += 1
+			show_guide_tick = cine_tick   # the next line's own animations start with it
 			play_sfx("ui2", -11.0)
 			if show_guide_step >= show_guide_lines.size():
 				show_guide_step = -1
@@ -2875,6 +2904,19 @@ func _input(event: InputEvent) -> void:
 	# trivial to fish for. You either FINISH cleanly (Enter) or drop out, and you
 	# only try again from the results card afterwards. Training stays freely resettable.
 	var performing := mode == MODE_PERFORM
+	# ...and JUGGLING is the narrower question the loadout keys ask (2026-07-31, Louis:
+	# "i can't change the number of objects or the kind of objects in my hands when i
+	# start a performance, while that should only be the case once i've begun juggling").
+	# `performing` is true from the moment the establishing card is dismissed, which is
+	# BEFORE the first throw - so gating the count/prop/pattern keys on it froze the
+	# loadout at the one moment the player is still allowed to change their mind, walking
+	# out holding whatever the last act happened to leave selected. `started` is the flag
+	# that means "a prop has actually left a hand" (do_throw sets it, start_run clears it,
+	# and a drop never unsets it), which is exactly Louis's "once I've begun juggling".
+	# The SHOP is deliberately NOT on this looser gate: it stays shut for the whole act
+	# (2026-07-31's own note, "the shop should not be reachable at all once playing") -
+	# swapping the load you are holding is a decision, opening a store mid-bow is not.
+	var juggling := performing and started
 	if kc == K_CYCLE:
 		cycle_trick()   # which trick the TRICK key is loaded with (remappable, so not in the match)
 		return
@@ -2917,19 +2959,22 @@ func _input(event: InputEvent) -> void:
 		# gate and return well above this match). start_run clamps to [3,
 		# max_balls()] on its own, so stepping past either end is always a safe
 		# no-op, not an error.
-		# THE LOADOUT IS LOCKED DURING A PERFORMANCE TOO (2026-07-31, Louis, same note as
+		# THE LOADOUT IS LOCKED ONCE THE JUGGLING STARTS (2026-07-31, Louis, same note as
 		# the shop above: "or to change objects or amounts during performance"). Count,
 		# prop and pattern used to have their own LIVE variants for exactly a running
 		# performance (set_count_live/cycle_prop_live/cycle_pattern_live) - that mid-act
-		# path is gone now; all three only ever act in practice, matching KEY_R just above.
+		# path is gone now; all three re-deal through start_run, which is safe while
+		# nothing has been thrown yet (the score, the goals and the segment are all still
+		# at zero) and is exactly why the gate is `juggling` and not `performing` - see
+		# its own comment above.
 		KEY_1:
-			if not performing: start_run(num_balls - 1)
+			if not juggling: start_run(num_balls - 1)
 		KEY_2:
-			if not performing: start_run(num_balls + 1)
+			if not juggling: start_run(num_balls + 1)
 		KEY_O:
-			if not performing: cycle_prop(1)
+			if not juggling: cycle_prop(1)
 		KEY_P:
-			if not performing: cycle_pattern()   # step the juggling pattern (re-deals the hands)
+			if not juggling: cycle_pattern()   # step the juggling pattern (re-deals the hands)
 		KEY_F1:
 			if debug_mode: debug_jump_venue(0)   # debug: F1..F7 jump reputation to venues 1..7
 		KEY_F2:
@@ -3206,7 +3251,37 @@ func establish_key() -> void:
 		arm_show_guide()
 
 
+func guide_stem_demo() -> float:
+	# THE STEM DEMONSTRATES ITSELF while the guide's second line is up: it fills to the top
+	# and empties again at the same rate, over and over, which is the one thing a still
+	# picture of a meter cannot say - that this is a thing that FILLS, repeatedly, as you
+	# play. Returns -1.0 whenever the real number should be drawn instead.
+	#
+	# GUIDE_STEM_CYCLE is in ticks and cine_tick runs at 120/s (the standing gotcha), so 140
+	# is a fill and a drain inside about 1.2 seconds - Louis's "very fast", and symmetric
+	# because he asked for it to "run out again AT THE SAME SPEED". A triangle wave, not a
+	# sine: a sine lingers at both ends and reads as breathing rather than as filling.
+	# The cycle is anchored to the moment the LINE arrived, not to the free-running clock:
+	# a demonstration that starts halfway up, or starts by draining, demonstrates nothing.
+	# It begins at empty, every time, as the sentence about it appears.
+	if show_guide_step != 1:
+		return -1.0
+	var t := fmod(float(cine_tick - show_guide_tick), GUIDE_STEM_CYCLE) / (GUIDE_STEM_CYCLE * 0.5)
+	return t if t <= 1.0 else 2.0 - t
+
+
 func arm_show_guide() -> void:
+	# ONCE PER CAREER, NEVER ON A RETRY (2026-07-31, Louis: "for players repeating the
+	# tutorial - with R, or after failing - they shouldn't have to go through the tutorial
+	# again, just give them a plain performance"). `post_lesson_show` stays set until the
+	# tagged act actually resolves and hands over to the menu tour, so a failed first act
+	# re-entered through the results card came back through establish_key() and re-armed the
+	# whole four-line talk. This latch is the difference between "the act that is tagged" and
+	# "the first time that act is walked out to": the closing reaction and the menu tour
+	# still key off post_lesson_show and still happen, only the narration is one-shot.
+	if show_guide_seen:
+		return
+	show_guide_seen = true
 	show_guide_lines = [
 		"Let's test out your skills with an actual audience. The goal is to receive as many flowers as you can.",
 		"That stem, growing at your side - that shows your progress toward it. Each notch on it is a smaller goal on the way, and every one you pass sprouts its own flower.",
@@ -3214,6 +3289,7 @@ func arm_show_guide() -> void:
 		"When you're ready to stop: catch everything and hold it, or press %s. Good luck out there." % String(k_finish()[0]),
 	]
 	show_guide_step = 0
+	show_guide_tick = cine_tick
 
 
 # --- act maths: the three goals, the deck's live effects, the drop limit -----
@@ -4609,25 +4685,54 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1))
 	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true))
 	# THE FIRST EXCHANGE, ONE ACTION AT A TIME (2026-07-31, Louis: "right after throwing
-	# both it should pause frame by frame to tell me to catch them one by one", in this
-	# exact order - "catch first ball, throw it right back, catch second ball, throw it
-	# right back", each throw-back timed to the OTHER ball reaching its own peak). Built as
-	# a loop rather than many near-identical lines: the ball thrown first (from dom) always
-	# lands first, so the catching hand alternates off/dom/off/dom from here on, and a loop
-	# is what keeps that alternation from drifting out of step across several round trips.
-	# DOUBLED TO FOUR REPS (2026-07-31, Louis: "repeat the help a bit longer, at least
-	# double as long" - this was 2). A trailing catch closes the last throw before the
-	# handoff below, so free play never opens on a ball still in the air - Louis's other
-	# note, "make sure that no balls are in the air when you give the player control".
-	var catchers: Array[int] = [off, dom]
+	# both it should pause frame by frame to tell me to catch them one by one", then:
+	# "it should ALWAYS be the first thrown ball that needs to be caught and thrown - that
+	# mistake is prominent in the 2 ball juggling tutorial").
+	#
+	# THE HAND ORDER, AND WHY IT IS NOT THE OBVIOUS ONE. These two balls DO cross - do_throw
+	# carries an explicit `if tut_active and tut_id == "balls" and num_balls == 2: cross =
+	# true`, because Cascade's parity rule would otherwise keep an even count same-handed and
+	# this step exists to rehearse the odd-count cross. So with T the airtime and the second
+	# ball thrown at the first one's peak (T/2), the props arrive:
+	#
+	#   off(T), dom(1.5T), dom(2T), off(2.5T), off(3T), dom(3.5T), ...
+	#
+	# The catch to CLOSE THE OPENING - off at T - is not scripted here at all: it belongs to
+	# the beat above ("throw the second before it lands"), where the catch guard stops the
+	# world for it while that throw is still being asked for. Every arrival after it falls to
+	# a beat below, and taking every OTHER one from that list leaves dom(1.5T), off(2.5T),
+	# dom(3.5T) - a plain [dom, off] alternation STARTING ON THE STRONG HAND.
+	#
+	# The old list started on the other hand, which put every beat one arrival behind: it
+	# named a ball that was 84 ticks out while a different one was 64 ticks from the other
+	# hand, so the ball being talked about was never the ball coming down. That is Louis's
+	# "it should always be the first thrown ball that needs to be caught and thrown", and it
+	# is why this is written from a trace (`--demo --tutorial balls`, printing every airborne
+	# prop at every beat) rather than from reasoning about the pattern: under this order every
+	# single catch beat opens with exactly ONE prop in the air and a uniform 34-tick lead,
+	# and under the old one half of them opened with two and chose the wrong one.
+	#
+	# Each catch is followed by throwing that same ball straight back - Louis's own script,
+	# "catch and throw on the RIGHT KJ KJ and on the LEFT DF DF". The throw-back carries NO
+	# `peak` flag: with two props the other one is already on its way down by the time you
+	# have caught this one, so waiting for a peak that has been and gone would stall the
+	# beat (it is the three-ball opening, where the second throw really does go under a
+	# rising first, that needs the peak hold).
+	var seq: Array[int] = [dom, off]
 	for _rep in 4:
-		for i in 2:
-			var ch: int = catchers[i]
+		for i in seq.size():
+			var ch: int = seq[i]
 			var kt := TD if ch == dom else TO
 			var kc2 := CD if ch == dom else CO
 			out.append(tut_do("Catch it.", "catch", ch, kc2, 2, 1))
-			out.append(tut_do("Throw it right back.", "throw", ch, kt, 2, 1, true))
-	out.append(tut_do("Catch it.", "catch", off, CO, 2, 1))
+			out.append(tut_do("Throw it right back.", "throw", ch, kt, 2, 1))
+	# ...and the two closing catches, which take the next two arrivals in the same order the
+	# loop just ran (it alternates, and it ended on the other hand's throw). Both props are
+	# in the air after the last throw-back, and free play may never open on a prop still
+	# flying - Louis: "there was also a rule about not giving control to the player while
+	# any balls are in the air".
+	out.append(tut_do("Catch it.", "catch", seq[0], CD if seq[0] == dom else CO, 2, 1))
+	out.append(tut_do("And the last one.", "catch", seq[1], CD if seq[1] == dom else CO, 2, 1))
 	out.append(tut_free("Keep that going: catch, throw it right back, on each side in turn.",
 		2, 6, 6, "Try it out. Enter when you've got it.", 1))
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
@@ -4638,6 +4743,12 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_do("Catch.", "catch", dom, CD, 3, 2))
 	out.append(tut_do("And again. Throw.", "throw", off, TO, 3, 2))
 	out.append(tut_do("Catch.", "catch", off, CO, 3, 2))
+	# ...and one more catch, so the air is EMPTY before free play opens (Louis's standing
+	# rule, restated 2026-07-31: "no balls in the air when you give the player control").
+	# The section used to end on a catch, which is not the same thing - the throw two beats
+	# earlier was still flying. This takes it, leaving two in the strong hand and one in the
+	# other: the cascade's own opening position, so practice starts where the drill did.
+	out.append(tut_do("And take the last one down.", "catch", dom, CD, 3, 2))
 	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, 10, 10,
 		"Prove you are ready: ten throws and ten catches.", 2))
 	# THE OTHER WAY, IN ONE LINE (2026-07-29, Louis: folded in from the old standalone
@@ -4897,6 +5008,22 @@ func tut_setup_step() -> void:
 	# hand that a live ball is already dropping into made the current one uncatchable -
 	# a forced drop right at "two balls now". Same count (a trick/pattern drill) flows on.
 	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() != want_n
+	# ...AND NOBODY IS HANDED THE CONTROLS MID-FLIGHT (2026-07-31, Louis: "there was also a
+	# rule about not giving control to the player while any balls are in the air"). A `free`
+	# beat is the one place the helping stops - no guard, no stopped world, a drop is real -
+	# so opening one with a prop already falling hands the player somebody else's throw to
+	# rescue. Counting beats until the air happens to be empty is not a rule, it is a
+	# coincidence that has to be re-derived every time the choreography changes (it was
+	# wrong for the three-ball section, which ended on two catches and still had one up), so
+	# a free beat simply DEALS ITSELF CLEAN whenever anything is still flying. That also
+	# fixes the hands: a fresh deal honours the step's own `stack`, where flowing on left the
+	# two-ball drill starting with both props in the weak hand.
+	# The same beat also re-deals when the HANDS are not where the drill starts from: the
+	# two-ball section can end with both props in the weak hand, which is a legal position
+	# and not the one "keep that going, on each side in turn" is describing.
+	if String(step["goal"]) == "free" and (balls_airborne() > 0
+			or (int(step.get("stack", -1)) >= 0 and stack(tut_step_hand(step)).size() != int(step["stack"]))):
+		fresh = true
 	prop_type = want_prop
 	num_balls = want_n
 	# a pattern lesson forces its own pattern FOR THE LESSON ONLY: pattern_sel (the
@@ -5314,11 +5441,78 @@ func tut_do_ready() -> bool:
 	# real, ungraded, un-helped catch - a whiff, or a mistimed one that dropped the ball. The
 	# guard is the same TUT_CATCH_GUARD the stretch-wide hold below uses, so the two cannot
 	# disagree about when a prop is "coming in".
+	# THE SOONEST PROP, NOT THE FIRST ONE IN THE ARRAY (2026-07-31, Louis: "it should always
+	# be the first thrown ball that needs to be caught"). This used to `return` on whichever
+	# prop the `balls` list happened to reach first, so with two bound for the same hand it
+	# could time the freeze off the LATER arrival and let the earlier one sail past the
+	# stopped-world guard it exists to provide. tut_landing_ball answers the question once,
+	# for this and for the aura that marks the same prop on screen.
 	var h := LEFT if g == "catch_l" else RIGHT
+	var lb := tut_landing_ball(h)
+	if lb == null:
+		return false
+	return tick >= lb.land_tick - TUT_CATCH_GUARD
+
+
+func tut_landing_ball(h: int) -> Ball:
+	# THE PROP THIS HAND MUST DEAL WITH NEXT: of everything in flight bound for hand h, the
+	# one arriving SOONEST - which, at the one height a lesson throws at, is always the one
+	# thrown first. Returns null when nothing is on its way. (The odd-count middle ball
+	# belongs to whichever hand takes it, the same exception tut_incoming/tut_guard_hand make.)
+	var best: Ball = null
 	for b in balls:
-		if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball):
-			return tick >= b.land_tick - TUT_CATCH_GUARD
-	return false
+		if b.state != STATE_FLIGHT:
+			continue
+		if b.to_hand != h and b != col_mid_ball:
+			continue
+		if best == null or b.land_tick < best.land_tick:
+			best = b
+	return best
+
+
+func tut_focus_ball() -> Ball:
+	# THE ONE PROP THE LESSON IS ASKING ABOUT RIGHT NOW (2026-07-31, Louis: "you should
+	# emphasize - yellow aura circle around the ball - ONLY the ball that currently requires
+	# an action, not the one from the previous action"). Everything a lesson beat asks for is
+	# about exactly one prop: a catch is about the prop coming down at that hand, a throw is
+	# about the prop that press would send up (do_throw pops the FRONT of the stack, so that
+	# is the one, not whichever was added last). Answered here once so the aura, the key
+	# prompt and the freeze can never disagree about which prop is the subject.
+	if not tut_active:
+		return null
+	# THE CATCH GUARD OUTRANKS THE SCRIPT, because it outranks it in the sim too. A helped
+	# stretch stops the world whenever ANY prop comes within TUT_CATCH_GUARD of landing,
+	# wherever the script has got to (tut_catch_hold) - so the lesson regularly freezes for a
+	# prop the current beat never named, and during the two-ball opening it always does: the
+	# first ball's own arrival lands inside the beat that is still asking for the second
+	# throw. Whatever the world stopped FOR is, by definition, "the ball that currently
+	# requires an action", so it takes the aura ahead of the beat's own subject.
+	var gh := tut_guard_hand()
+	if gh >= 0 and tut_catch_hold():
+		return tut_landing_ball(gh)
+	if tut_holding():
+		# an older lesson's multi-key beat: its lowest outstanding rank is the live ask
+		var rank := tut_hold_rank()
+		for e in tut_hold:
+			if bool(e.get("ok", false)) or int(e["rank"]) != rank:
+				continue
+			var eh := int(e["hand"])
+			if eh < 0:
+				continue
+			if String(e["act"]) == "catch":
+				return tut_landing_ball(eh)
+			if String(e["act"]) == "throw":
+				return stack(eh)[0] if not stack(eh).is_empty() else null
+		return null
+	if tut_advance_at >= 0:
+		return null   # this beat is answered; nothing is owed until the next one opens
+	var g := String(tut_step_data().get("goal", ""))
+	if g == "catch_l" or g == "catch_r":
+		return tut_landing_ball(LEFT if g == "catch_l" else RIGHT)
+	if g == "throw_l" or g == "throw_r":
+		var th := LEFT if g == "throw_l" else RIGHT
+		return stack(th)[0] if not stack(th).is_empty() else null
+	return null
 
 
 func tut_at_peak() -> bool:
@@ -5332,6 +5526,25 @@ func tut_at_peak() -> bool:
 		if absi(tick - apex) <= TUT_PEAK_WINDOW:
 			return true
 	return false
+
+
+func tut_quiet_fx() -> bool:
+	# NO CATCH FLOURISH ON A CATCH THE LESSON IS ABOUT TO STOP THE WORLD ON (2026-07-31,
+	# Louis: "remove the catching special effects while the game pauses, because it looks
+	# bad - either pause once the effect is gone, or remove the effect for catches that
+	# will be paused"). Of his two options this is the second, and it is the only one that
+	# is actually available: a guided beat freezes because a prop is CLOSE TO LANDING, so
+	# "wait for the effect to finish first" would mean waiting past the very arrival the
+	# freeze exists to protect - the pause cannot be deferred without giving up its whole
+	# job. Every popup and particle a catch fires is therefore skipped for the stretch of
+	# the lesson where the world is being held for the player.
+	#
+	# It costs nothing in feedback, either: a helped catch is graded PERFECT by
+	# construction (see on_catch's `sure`), so "PERFECT" over a hand the game stopped
+	# itself to demand a press from was never telling the player anything they did. The
+	# sounds still play, and `free` practice - which is not helped, and where a catch is
+	# genuinely earned - keeps the full flourish.
+	return tut_active and tut_helped()
 
 
 func tut_helped() -> bool:
@@ -5879,7 +6092,10 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		# down first, so everything the lesson draws to explain itself sits on top of it
 		# at full brightness rather than being dimmed along with the scenery.
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.30))
-	draw_tut_prompts(font, s, step)   # a timing ring + bare handed key over the hands, no boxes
+	# the aura goes on FIRST, under the key letters, so the prop is lit and the key that
+	# acts on it sits on top of that light rather than competing with it
+	draw_tut_focus(tut_focus_ball())
+	draw_tut_prompts(font, s, step)   # a bare handed key over the hands, no boxes
 	# **A SCRIPTED STEP SPEAKS INSTEAD** (2026-07-29). Every beat of the rewritten basics
 	# carries `say`, and for those the banner below - the kind tag, the title, the pace pips,
 	# the goal dots - is simply not drawn: Louis asked for the window and the key row and
@@ -6206,6 +6422,44 @@ func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: flo
 	draw_text_shout(font, at - Vector2(80.0, 0.0), key, HORIZONTAL_ALIGNMENT_CENTER, 160.0, fs, Color(col.r, col.g, col.b, a))
 
 
+func tut_ball_pos(b: Ball) -> Vector2:
+	# where a prop is actually DRAWN this frame, in flight or in a hand - the held case
+	# mirrors draw_hand's own stacking offset (pos + (0, -3 - 6i)) rather than guessing,
+	# so an aura placed here sits on the prop and not near it.
+	if b == null:
+		return Vector2.ZERO
+	if b.state == STATE_FLIGHT:
+		return flight_pos(b)
+	for h: int in [LEFT, RIGHT]:
+		var st := stack(h)
+		var i := st.find(b)
+		if i >= 0:
+			return hpos[h] + Vector2(0.0, -3.0 - float(i) * 6.0)
+	return Vector2.ZERO
+
+
+func draw_tut_focus(b: Ball) -> void:
+	# ONE PROP WEARS THE AURA, AND ONLY WHILE IT IS THE ASK (2026-07-31, Louis: "emphasize
+	# only the ball that currently requires an action, not the one from the previous
+	# action"). tut_focus_ball is the single answer to "which prop"; this only draws it.
+	#
+	# SOFT, NOT A DRAWN CIRCLE. An earlier pass put a hard `draw_arc` round the prop and
+	# Louis's verdict was that it looked "jagged or just positioned wrong or both" - so the
+	# body of the mark is draw_glow (one textured quad, a real radial falloff, no polygon
+	# to alias) and the ring on top is thin, antialiased and deliberately faint: it gives
+	# the glow an edge to read against a bright stage without ever being the thing you see.
+	if b == null:
+		return
+	var p := tut_ball_pos(b)
+	if p == Vector2.ZERO:
+		return
+	var r := BALL_RADIUS_PX * prop_scale(b.kind) + 9.0
+	var pulse := 0.5 + 0.5 * sin(atick() * 0.07)   # cine_tick runs at 120/s: halve the rate
+	var gold := Color(1.0, 0.86, 0.32)
+	draw_glow(p, r * 2.1 + 5.0 * pulse, Color(gold.r, gold.g, gold.b, 0.22 + 0.12 * pulse))
+	draw_arc(p, r + 2.5 * pulse, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, 0.30 + 0.22 * pulse), 1.6, true)
+
+
 func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# THE lesson affordance (Louis): which key, over which hand, at the moment to press it
 	# - but as a bare letter and a timing ring, never a boxed bubble. A met goal no
@@ -6245,10 +6499,26 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# calmer key over the other hand is a second ask, and the whole point of the pause
 	# is that there is exactly one thing to do
 	var beat := tut_holding()
+	# ...AND A SCRIPTED `do` BEAT IS THE SAME PROMISE (2026-07-31, Louis: emphasise "only
+	# the ball that currently requires an action, not the one from the previous action").
+	# A `do` beat names exactly one key on one hand, but this function drew a throw key over
+	# EVERY holding hand and a catch key over every receiving one - so the hand that had
+	# just caught kept a bright key on it while the lesson had already moved the ask
+	# somewhere else. That stale key, sitting on the prop of the PREVIOUS beat, is what read
+	# as the wrong ball being emphasised. `tut_do_goal` is empty for every other kind of
+	# step, so free play and the older lessons keep all their prompts.
+	var do_goal := String(step.get("goal", "")) if (tut_do_step() and tut_advance_at < 0) else ""
+	# ...with the one exception the guard forces (see tut_focus_ball's own note): if the world
+	# is stopped because a prop is landing at a hand the beat did NOT name, that hand still
+	# needs its key, or the player is staring at a frozen game with the only prompt on the
+	# wrong side and no way to learn what to press.
+	var guard_h := tut_guard_hand() if tut_catch_hold() else -1
 	for h: int in [LEFT, RIGHT]:
 		if soonest[h] > lead:
 			continue
 		if beat and not tut_hold_names("catch", h):
+			continue
+		if do_goal != "" and do_goal != ("catch_l" if h == LEFT else "catch_r") and guard_h != h:
 			continue
 		var hp: Vector2 = hpos[h]
 		# NO MORE RING (2026-07-31, Louis: "the circle that surrounds the ball ... it's
@@ -6267,6 +6537,8 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 			continue
 		if beat and not tut_hold_names("throw", hh):
 			continue
+		if do_goal != "" and do_goal != ("throw_l" if hh == LEFT else "throw_r"):
+			continue   # see do_goal above: one beat, one key, one prop
 		# a GUIDED step is a call-and-response with one ball on the table, so the hand
 		# holding it IS the ask: its key burns as brightly as any named goal would. The
 		# step's goal there is the catch at the far end, and reading only that left the
@@ -7527,7 +7799,7 @@ func start_run(n: int) -> void:
 	results_open = false
 	results_record = false
 	first_show_reaction = ""   # never carries a stale line into an unrelated act's card
-	stem_mid_bonus_given = false
+	stem_way_given = 0
 	stem_gold_bonus_given = false
 	results_tick = -999
 	results_stamped = false
@@ -7699,7 +7971,11 @@ func on_catch(h: int) -> void:
 		applause = maxf(0.0, applause + APPL_WHIFF)
 		catch_flash[h] = tick
 		hclose[h] = 0.0
-		add_popup(hpos[h], "whiff", Color(0.7, 0.66, 0.6, 1.0))
+		if not tut_quiet_fx():
+			# a press out of turn during a HELPED stretch is swallowed quietly (the lesson's
+			# own standing rule) - and the popup would be one more thing hanging over a
+			# freeze that is about to happen anyway. See tut_quiet_fx.
+			add_popup(hpos[h], "whiff", Color(0.7, 0.66, 0.6, 1.0))
 		play_sfx("whiff", -12.0)
 		return
 	if sure:
@@ -7794,6 +8070,9 @@ func on_catch(h: int) -> void:
 			streak = 0
 			perfect_chain = 0
 			return
+	# see tut_quiet_fx: a helped lesson catch fires no popup and no particle, because the
+	# lesson is about to stop the world on top of whatever it spawned
+	var fx := not tut_quiet_fx()
 	if best_d <= wperf:
 		streak += 1
 		best_streak = maxi(best_streak, streak)
@@ -7810,15 +8089,19 @@ func on_catch(h: int) -> void:
 			perfect_chain += 1
 			if best_d == 0:
 				amazing_until = _frames + AMAZING_FRAMES
-				add_popup(hpos[h] + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
+				if fx:
+					add_popup(hpos[h] + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
 			if perfect_chain >= CHAIN_NEED:
 				perfect_chain = 0
 				chain_until = _frames + CHAIN_FRAMES
-				add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  thirty seconds of thick time", Color(0.75, 0.92, 1.0))
+				if fx:
+					add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  thirty seconds of thick time", Color(0.75, 0.92, 1.0))
 				play_sfx("record", -8.0)
-		add_popup(hpos[h], "PERFECT", Color(1.0, 0.86, 0.42))
+		if fx:
+			add_popup(hpos[h], "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
-		spawn_parts(hpos[h], Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
+		if fx:
+			spawn_parts(hpos[h], Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
 		# NO RING IN THE TUTORIAL (2026-07-31, Louis: "the circle during tutorial pauses is
 		# still wrong ... just get rid of that circle around the ball in the tutorial").
 		# This "ring" kind is a normal-play catch flourish (an 18-tick expanding shockwave,
@@ -7839,12 +8122,15 @@ func on_catch(h: int) -> void:
 			# the hit-stop to a single tick (the ring/confetti counts already thin inside
 			# spawn_parts), so the milestone still registers without the jolt.
 			var streak_tier := 2 if streak % 100 == 0 else (1 if streak % 50 == 0 else 0)
-			freeze = 1 if reduce_motion else 4 + streak_tier * 2
+			# the hit-stop goes too while a lesson is helping: a beat that is ALREADY about
+			# to freeze the world does not need four extra ticks of stutter in front of it
+			freeze = 0 if tut_quiet_fx() else (1 if reduce_motion else 4 + streak_tier * 2)
 			if not tut_active:   # see the PERFECT ring note above - same freeze-hang risk
 				spawn_parts(hpos[h], Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
 			var vs := get_viewport_rect().size
-			add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
-			if streak_tier >= 1:
+			if fx:
+				add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
+			if streak_tier >= 1 and fx:
 				spawn_parts(Vector2(vs.x * 0.5, vs.y * 0.16), Color(1.0, 0.85, 0.45), 12 + streak_tier * 10, 2.4, "confetti")
 			if mode == MODE_PERFORM:
 				play_sfx("cheer", -11.0)
@@ -7866,9 +8152,11 @@ func on_catch(h: int) -> void:
 			seg_add_catch(1)
 		warm_room(APPL_GOOD)
 		add_xp(2)
-		add_popup(hpos[h], "GOOD", Color(0.78, 0.92, 0.6))
+		if fx:
+			add_popup(hpos[h], "GOOD", Color(0.78, 0.92, 0.6))
 		play_sfx("good", -8.0)
-		spawn_parts(hpos[h], Color(0.85, 0.92, 0.6), 4, 2.4, "spark")
+		if fx:
+			spawn_parts(hpos[h], Color(0.85, 0.92, 0.6), 4, 2.4, "spark")
 		if streak % 5 == 0:
 			play_sfx("streak", -8.0)
 	else:
@@ -7880,7 +8168,8 @@ func on_catch(h: int) -> void:
 			seg_add_catch(2)   # a Late still counts. It is worth one.
 		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
-		add_popup(hpos[h], "late", Color(0.95, 0.62, 0.4))
+		if fx:
+			add_popup(hpos[h], "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
 	# the record chase: passing your own best AT this venue mid-act is a moment. The
 	# act is one continuous run now, so its live score IS the number the record
@@ -10663,7 +10952,14 @@ func update_sim() -> void:
 func update_hands() -> void:
 	for h in [LEFT, RIGHT]:
 		var cur: Vector2 = hpos[h]
-		hpos[h] = cur.lerp(hand_target(h), HAND_SMOOTH)
+		var target := hand_target(h)
+		if exp_on("hand_spring"):
+			var accel := (target - cur) * HAND_SPRING_K - hvel[h] * HAND_SPRING_D
+			hvel[h] += accel
+			hpos[h] = cur + hvel[h]
+		else:
+			hpos[h] = cur.lerp(target, HAND_SMOOTH)
+			hvel[h] = Vector2.ZERO   # so a mid-run F9 toggle back to spring never inherits a stale kick
 		var want := 1.0 if not stack(h).is_empty() else 0.0
 		hclose[h] = lerpf(hclose[h], want, 0.3)
 	if _handlog and tick >= 24:
@@ -11676,7 +11972,18 @@ func draw_juggler(s: Vector2) -> void:
 	# otherwise it would squash to a thin oval at the profile.
 	if spin_on:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_head(head, head_r, hair, skin, facing_back)
+	# gaze_track (F9 experiment): aim the eyes at whichever prop is due to land soonest -
+	# the very ball hand_target already has its (empty) hand travelling out to meet. Just
+	# a scan of `balls`, no different in spirit from hand_target's own `inc` search.
+	var gaze := Vector2.ZERO
+	if exp_on("gaze_track") and not facing_back:
+		var watch: Ball = null
+		for b in balls:
+			if b.state == STATE_FLIGHT and (watch == null or b.land_tick < watch.land_tick):
+				watch = b
+		if watch != null:
+			gaze = flight_pos(watch) - head
+	draw_head(head, head_r, hair, skin, facing_back, gaze)
 	if wearing("glasses") and not facing_back:
 		draw_worn_glasses(head, head_r, accent)
 	# WARDROBE: the TOP HAT goes on after the head and OUTSIDE the body's width-scale,
@@ -12135,7 +12442,7 @@ func draw_stage_boot(at: Vector2, H: float, side: float, leather: Color, spat: C
 # appear at r >= 10 and teeth only at r >= 14, where there is room for them to be teeth
 # rather than a white band filling the mouth. Nothing here moves the head, the stance or
 # any proportion - the figure is settled and a face pass must never reshape it.
-func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: bool) -> void:
+func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: bool, gaze: Vector2 = Vector2.ZERO) -> void:
 	# THE ONE HEAD, at whatever radius the caller has. The stage figure and the Skills
 	# preview's little performer each used to draw their own - same intent, different
 	# code, and the preview's had already drifted to a bare arc for a mouth and no
@@ -12153,7 +12460,7 @@ func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: b
 	draw_circle(head, r, skin)                                        # face over the hair
 	draw_circle(head + Vector2(-r * 0.26, -r * 0.08), r * 0.52, Color(1.0, 0.86, 0.6, 0.10))   # cheek highlight
 	draw_hair_front(head, r, hair)   # the hairline goes UNDER the features...
-	draw_face_v2(head, r, hair)      # ...and the brows come with the face
+	draw_face_v2(head, r, hair, gaze) # ...and the brows come with the face
 
 
 func draw_hair_back(head: Vector2, r: float, hair: Color) -> void:
@@ -12224,7 +12531,7 @@ func mouth_shape(c: Vector2, hw: float, lift: float, top_bow: float, bot_bow: fl
 	return pts
 
 
-func draw_face_v2(head: Vector2, r: float, hair_tone: Color) -> void:
+func draw_face_v2(head: Vector2, r: float, hair_tone: Color, gaze: Vector2 = Vector2.ZERO) -> void:
 	var mood := face_mood()
 	# EYES. THREE MARKS AND NO MORE, because that is all a 21px head has room for: one
 	# dark almond, one catchlight, one brow above it. The first attempt also drew an
@@ -12240,11 +12547,20 @@ func draw_face_v2(head: Vector2, r: float, hair_tone: Color) -> void:
 		eh = r * 0.05
 	elif mood == 1:
 		eh = r * 0.10
+	# gaze_track (F9 experiment): BOTH marks slide together, a hair's width, toward
+	# whatever the caller says is worth watching (draw_juggler points this at the
+	# soonest-landing airborne prop - the same one hand_target already has the empty
+	# hand reaching for). `gaze` only ever carries a DIRECTION here, never a distance -
+	# the caller's own magnitude is thrown away and replaced with this fixed, tiny
+	# budget, because "three marks and no more" (above) means there is no sclera for a
+	# pupil to swim around in: the whole eye must glance as one shape, and a glance a
+	# real head could not physically make is worse than no glance at all.
+	var look := gaze.normalized() * r * 0.055 if gaze.length_squared() > 0.0001 else Vector2.ZERO
 	# TYPED, not bare: an untyped array literal makes every element a Variant, and
 	# arithmetic on one infers nothing - which is the "cannot infer the type" parse error
 	# --check-only does not report and only a real run surfaces.
 	for sgn: float in [-1.0, 1.0]:
-		var c := head + Vector2(sgn * ex, ey)
+		var c := head + Vector2(sgn * ex, ey) + look
 		fill_ellipse(c, ew, eh, Color(0.16, 0.10, 0.08))
 		if eh > r * 0.07:
 			# the catchlight goes up and LEFT, with the cheek highlight and the hair
@@ -14187,7 +14503,8 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 	soft_card(r, Color(0.075, 0.045, 0.06, 0.88), Color(accent.r, accent.g, accent.b, 0.5), 1.0, 9.0, 12.0)
 
 
-func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color) -> void:
+func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color,
+		live: bool = true) -> void:
 	# THE GOAL, quietly, because the flowers on the boards are doing the loud work.
 	# A growing STEM with a bud at its tip and a notch at each goal line: the same
 	# concave curve and the same information as the money hat, in a fifth of the space
@@ -14222,44 +14539,65 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	draw_rect(Rect2(x - 3.0, box.position.y, 6.0, box.size.y), Color(0.42, 0.36, 0.34, 0.5), false, 1.0)
 	if h > 1.0:
 		draw_rect(Rect2(x - 3.0, base - h, 6.0, h), stem)
-		# a leaf every so often up the stem, so growth reads as growth
-		var leaves := int(h / 30.0)
-		for i in leaves:
-			var ly := base - 24.0 - float(i) * 30.0
-			var dir := 1.0 if i % 2 == 0 else -1.0
+	# TWO FLOWERS AND TWO LEAVES ON EACH SIDE, ALTERNATING (2026-07-31, Louis, exactly
+	# that). Both are laid out from ONE ladder so the alternation cannot drift: going up
+	# the stalk it reads leaf, flower, leaf, flower, leaf, flower, leaf, flower, with every
+	# item on the opposite side to the one below it. Flower k takes side (k even -> right),
+	# so the four flowers land 2 right and 2 left; leaf k takes the opposite, so the four
+	# leaves do the same. The old leaf rule ("one every 30px of fill") could not do this -
+	# it put as many leaves as the bar was tall, all evenly spaced, with no relationship to
+	# the flowers at all.
+	#
+	# WHERE THE FOUR FLOWERS SIT. Two of them ARE the real subgoals (`marks`, i.e. goals 1
+	# and 2). The other two are visual waypoints filling the two gaps below them - half way
+	# to the first goal, and half way between the first and the second - so the climb has
+	# something to show for itself in the stretches that are otherwise bare stalk. A
+	# waypoint pays a small one-time warm_room() when it is first reached; it is not a
+	# fourth NUM_GOALS entry and does not touch scoring.
+	#
+	# NOTHING SITS ABOVE THE LAST REAL GOAL, deliberately. The third and final goal is the
+	# BLOOM at the tip (Louis: "the final subgoal, the third one, should be the big flower on
+	# the top"), and that bloom opens to 7.0 * STEM_BLOOM_SC * FLOWER_REACH = ~28px of petal
+	# - more than a fifth of the whole 148px track. A fourth flower up there is inside it.
+	# Tried it that way first and the two shapes overlapped exactly as the arithmetic says.
+	var fmarks: Array[float] = []
+	var is_goal: Array[bool] = []
+	if marks.size() > 0:
+		var prev_m := 0.0
+		for m in marks:
+			fmarks.append((prev_m + float(m)) * 0.5)   # the waypoint in the gap below it
+			is_goal.append(false)
+			fmarks.append(float(m))
+			is_goal.append(true)
+			prev_m = float(m)
+	for fi in fmarks.size():
+		var m: float = fmarks[fi]
+		var fdir := 1.0 if fi % 2 == 0 else -1.0
+		# THE LEAF BELOW THIS FLOWER, on the other side: halfway down to the flower under it
+		# (or to the root, for the first one), so the two never crowd each other.
+		var prev: float = fmarks[fi - 1] if fi > 0 else 0.0
+		var lm := (prev + m) * 0.5
+		if frac >= lm:
+			var ly := base - box.size.y * clampf(lm, 0.0, 1.0)
 			var lv := PackedVector2Array()
 			for k in 9:
 				var t := TAU * float(k) / 8.0
-				lv.append(Vector2(x + dir * 10.0, ly) + Vector2(cos(t) * 10.0, sin(t) * 4.4).rotated(dir * -0.35))
+				lv.append(Vector2(x - fdir * 10.0, ly) + Vector2(cos(t) * 10.0, sin(t) * 4.4).rotated(-fdir * -0.35))
 			draw_colored_polygon(lv, Color(stem.r, stem.g, stem.b, 0.9))
-	# ALL SUBGOALS, THE TWO REAL ONES AND THE ONE VISUAL WAYPOINT, THROUGH ONE LOOP - a
-	# waypoint bud (`gives_bonus` false-by-default handled below) sits at the midpoint
-	# between the last real mark and the top, so "two on the stem, one more near the top"
-	# is one shape drawn twice rather than two different pieces of code.
-	var all_marks: Array[float] = []
-	for m in marks:
-		all_marks.append(float(m))
-	var waypoint_i := -1
-	if all_marks.size() > 0:
-		waypoint_i = all_marks.size()
-		all_marks.append((all_marks[all_marks.size() - 1] + 1.0) * 0.5)
-	for mi in all_marks.size():
-		var m: float = all_marks[mi]
-		var my := base - box.size.y * clampf(m, 0.0, 1.0)
-		var passed := frac >= m
-		if not passed:
+		if frac < m:
 			continue
 		# A SUBGOAL SPROUTS FROM THE STEM, NOT BESIDE IT: the flower head sits out at its
 		# usual distance, but its own stem (draw_flower's `stem` arg) is aimed straight
 		# back at the main stalk, so the two read as one plant rather than a flower that
-		# happens to be floating near a line. Even index to one side, odd to the other,
-		# same convention the leaves above already use.
-		var fdir := 1.0 if mi % 2 == 0 else -1.0
-		var fp := Vector2(x + fdir * 15.0, my - 5.0)
+		# happens to be floating near a line - and that stem is what Louis asked for when
+		# he said the flower should "have a small stem, like a thin leaf". draw_flower puts
+		# a little leaf halfway along it for free.
+		var my := base - box.size.y * clampf(m, 0.0, 1.0)
+		var fp := Vector2(x + fdir * STEM_FLOWER_OUT, my - 5.0)
 		var back := Vector2(x, my) - fp
-		draw_flower(fp, 2, 0.85, back.angle() - PI * 0.5, 0.95, back.length() / 0.85)
-		if mi == waypoint_i and not stem_mid_bonus_given:
-			stem_mid_bonus_given = true
+		draw_flower(fp, 2, STEM_FLOWER_SC, back.angle() - PI * 0.5, 0.95, back.length() / STEM_FLOWER_SC)
+		if live and not is_goal[fi] and (stem_way_given & (1 << fi)) == 0:
+			stem_way_given |= 1 << fi
 			warm_room(0.03)
 	# THE BUD OPENS as the goal comes in, and the bloom is deliberately much BIGGER than
 	# the bud was (2026-07-27, Louis: "a bigger flower when done, making it more clear
@@ -14282,8 +14620,15 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		for i in 6:                                    # petals shed round a finished act
 			var sa := atick() * 0.02 + TAU * float(i) / 6.0
 			draw_flower(bud + Vector2(cos(sa), sin(sa)) * (STEM_SHED_R + STEM_SHED_GROW * over), 0, STEM_SHED_SC, sa, 0.5)
+		# PURPLE IS THE THIRD SUBGOAL, YELLOW IS THE REAL ONE (2026-07-31, Louis: "the final
+		# subgoal - the third one - should be the big flower on top being purple, and the
+		# actual goal should be the big flower on top changing from purple to yellow"). So
+		# the top bloom carries the last two steps of the whole climb on its own, in colour
+		# and nothing else: posy (FLOWER_TIERS[1], purple) the moment the third and final
+		# NUM_GOALS entry falls, and gold rose (FLOWER_TIERS[2], the yellow one) once the
+		# score has gone STEM_OVER_GOLD_AT past it. Each pays its own one-time warm_room().
 		var gold := over >= STEM_OVER_GOLD_AT
-		if gold and not stem_gold_bonus_given:
+		if gold and live and not stem_gold_bonus_given:
 			stem_gold_bonus_given = true
 			warm_room(0.05)
 		draw_flower(bud, 2 if gold else 1, STEM_BLOOM_SC + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
@@ -14802,8 +15147,19 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# toward the goal as a slim stem, and TONIGHT'S TAKINGS, which the hat never
 		# showed at all.
 		# ...stopping clear of the cash-in line along the card's bottom edge
-		draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
-			Color(venue_data(run_venue)["glow"]))
+		# ...and while the first show's guide is explaining this exact thing, the stem SHOWS
+		# what it does instead of being pointed at (2026-07-31, Louis: "emphasize the flower
+		# in a better way - instead of a dumb circle around it, make it fill up very fast and
+		# run out again at the same speed; that shows how the meter is supposed to fill up
+		# repeatedly"). `live` is false for the demo so the waypoint and gold bonuses cannot
+		# fire off an animation.
+		var gdemo := guide_stem_demo()
+		if gdemo >= 0.0:
+			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), gdemo, 0.0, marks,
+				Color(venue_data(run_venue)["glow"]), false)
+		else:
+			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
+				Color(venue_data(run_venue)["glow"]))
 		# THE TAKINGS COLUMN STARTS CLEAR OF THE BLOOM (2026-07-27, Louis: the flower
 		# overlapped the word TONIGHT). The stem's bud sits on the centre line of the
 		# box above (its x + half its 34px width), and past the final goal it opens
@@ -18388,6 +18744,13 @@ func pv_draw_prop(pr: Dictionary, inner: Rect2) -> void:
 		# the same warm ring the sim puts on a trick throw
 		draw_arc(p, r + 3.5, 0.0, TAU, 20, Color(1.0, 0.86, 0.5, 0.45 * fade), 1.6, true)
 	draw_circle(p, r + 5.0, Color(col.r, col.g, col.b, 0.15 * fade))
+	# A RIM, so the ball reads against ITSELF - not just against the backdrop (2026-07-31,
+	# found while checking Columns: its middle lane rides the dead centreline, which is
+	# exactly where the vest's own buttons sit, and a mid-tone ball that size in that spot
+	# was reading as a fourth button, not a third object). A stroke this size costs nothing
+	# on the two outer lanes, which never had the problem, and fixes the one that did
+	# without special-casing Columns at all.
+	draw_arc(p, r + 1.0, 0.0, TAU, 16, Color(0.05, 0.03, 0.03, 0.55 * fade), 2.0, true)
 	draw_circle(p, r, Color(col.r, col.g, col.b, fade))
 	var hi := col.lightened(0.4)
 	draw_circle(p + Vector2(-2.0, -2.0), 2.2, Color(hi.r, hi.g, hi.b, 0.9 * fade))
@@ -21061,7 +21424,7 @@ func draw_purist_legend(font: Font, s: Vector2) -> void:
 		var ry := s.y * 0.40 + float(i) * 30.0
 		var la := clampf(float(cine_tick - 60 - i * 12) / 30.0, 0.0, 1.0)
 		draw_fit_string(font, Vector2(lx, ry), String(venue_data(i)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 240.0, 15, Color(0.85, 0.8, 0.9, la))
-		draw_string(font, Vector2(lx + 240.0, ry), commafy(int(best_scores_purist[i])), HORIZONTAL_ALIGNMENT_RIGHT, 100.0, 15, Color(0.86, 0.78, 1.0, la))
+		draw_string(font, Vector2(lx + 240.0, ry), score_text(best_scores_purist[i]), HORIZONTAL_ALIGNMENT_RIGHT, 100.0, 15, Color(0.86, 0.78, 1.0, la))
 	if cine_tick > 90:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
 		draw_string(font, Vector2(0, s.y * 0.88), "any key  -  the career plays on, records still to chase",
@@ -21102,14 +21465,17 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 		ty += 24.0
 	var pa := 0.7 + 0.3 * sin(atick() * 0.14)
 	draw_string(font, Vector2(bx + bw - 100.0, by + bh - 10.0), "%s  go on" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 12, Color(1.0, 0.9, 0.7, pa))
-	# THE SECOND LINE POINTS AT THE GOAL STEM, so "that shows your progress" has something
-	# to look at rather than a description in the abstract. LX/tcard_y mirror draw_hud's own
-	# layout constants for the goal card - if that layout ever moves, this glow should move
-	# with it.
+	# THE SECOND LINE MAKES THE STEM DEMONSTRATE ITSELF (2026-07-31, Louis: "instead of a
+	# dumb circle around it, make it fill up very fast and run out again at the same speed").
+	# The ring that used to be drawn here - a 90px arc thrown round the goal card - is gone:
+	# a circle can only say "look over there", and what the player needs to understand is
+	# what the thing DOES. draw_hud drives the real stem off guide_stem_demo() while this
+	# line is up, so the explanation and the object explained are the same picture. All that
+	# is left here is a soft wash of light behind it, to carry the eye across.
 	if show_guide_step == 1:
 		var stem_c := Vector2(18.0 + 152.0 + 17.0, 78.0 + 12.0 + 74.0)
-		var ring_a := 0.5 + 0.5 * sin(atick() * 0.1)
-		draw_arc(stem_c, 90.0, 0.0, TAU, 32, Color(1.0, 0.88, 0.5, 0.35 + 0.25 * ring_a), 2.5, true)
+		var wash := 0.5 + 0.5 * sin(atick() * 0.05)
+		draw_glow(stem_c, 96.0 + 10.0 * wash, Color(1.0, 0.88, 0.5, 0.10 + 0.06 * wash))
 
 
 func draw_tutdone(font: Font, s: Vector2) -> void:
@@ -21237,10 +21603,16 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		# "???" here can't spoil it the way printing its actual name would
 		var nm := String(venue_data(i)["name"]) if reached else "???"
 		draw_string(font, Vector2(lx, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66) if reached else Color(0.5, 0.46, 0.42))
+		# SCORES GO THROUGH score_text, NEVER commafy (the standing rule at commafy's own
+		# comment). This board was the last reader still breaking it - and the one Louis
+		# reported three sessions running: `commafy`'s argument is an int, a record is a
+		# float that routinely passes 1e30 under the segment formula, so the conversion
+		# saturated at INT64 max and every board printed the same 9,223,372,0... clipped
+		# mid-number by the 90px column.
 		var b := best_scores[i]
 		var p := best_scores_purist[i]
-		draw_string(font, Vector2(lx + 230.0, ry), commafy(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
-		draw_string(font, Vector2(lx + 330.0, ry), commafy(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 230.0, ry), score_text(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 330.0, ry), score_text(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
 
 	# right: the lifetime numbers
 	var rx := s.x * 0.5 + 30.0
