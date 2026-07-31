@@ -2369,7 +2369,11 @@ func _physics_process(delta: float) -> void:
 		update_hands()
 		return
 	if sheet_open or shop_open or skills_open or tailor_open or paused or debug_panel_open:
-		if sheet_open and debug_mode:
+		if sheet_open:
+			# HOLDING ENTER KEEPS INVESTING (2026-07-31, Louis: increase a stat only by
+			# arrow-selecting it and confirming with Enter, "make sure you can hold it to
+			# increase numbers fast") - real play now shares this with the debug-only
+			# stat/money keys below, which already had the acceleration curve built.
 			# debug build only: holding a stat key keeps stepping it, faster the longer
 			# it is held. Runs in BOTH sheet pictures now - the talent tree reads the
 			# same stats through the same _adjust, so there was never a reason to
@@ -4021,10 +4025,11 @@ func sleep_day() -> void:
 #region SHEET / SHOP / SKILLS INPUT
 func sheet_input(kc: int) -> void:
 	# the character sheet's keys, shared by the play overlay and the day hub.
-	# Arrows (dpad, stick) walk the four cards and Enter invests in the lit one,
-	# so a pad spends points as freely as the number keys do; a number key also
-	# pulls the cursor onto its card, so the highlight always shows what just paid.
-	var ids := ["acc", "str", "end", "spd"]
+	# ARROWS SELECT, ENTER CONFIRMS - THE ONLY WAY IN NOW (2026-07-31, Louis: "remove the
+	# buttons: 1, 2, 3, 4 from the stats: increase only by selecting with arrows and
+	# pressing enter"). The 1-4 jump-and-spend shortcut is gone; holding Enter itself now
+	# repeats (see sheet_repeat), which is the speed those keys used to provide.
+	var ids := sheet_ids()
 	match kc:
 		KEY_TAB, KEY_ESCAPE:
 			sheet_open = false
@@ -4036,18 +4041,6 @@ func sheet_input(kc: int) -> void:
 			play_sfx("ui", -15.0)
 		KEY_ENTER, KEY_KP_ENTER:
 			_sheet_invest(ids[sheet_sel])
-		KEY_1:
-			sheet_sel = 0
-			_sheet_invest("acc")
-		KEY_2:
-			sheet_sel = 1
-			_sheet_invest("str")
-		KEY_3:
-			sheet_sel = 2
-			_sheet_invest("end")
-		KEY_4:
-			sheet_sel = 3
-			_sheet_invest("spd")
 		KEY_Q:
 			if debug_mode: _adjust("acc", -1)
 		KEY_W:
@@ -9858,7 +9851,7 @@ func prop_hit_scale(_kind: int) -> float:
 	return HIT_FLOOR
 
 
-func invest(which: String) -> void:
+func invest(which: String, defer_save: bool = false) -> void:
 	if points <= 0:
 		return
 	var prev_max := max_balls()   # Strength may cross a ball-count gate; catch it below
@@ -9885,7 +9878,15 @@ func invest(which: String) -> void:
 	points -= 1
 	check_ball_unlock(prev_max)   # a new ball count queues its own lesson at the hub
 	announce_unlocks()            # a stat spend can cross a skill's Strength/Accuracy ask
-	save_progress()
+	if not defer_save:
+		save_progress()
+
+
+func sheet_ids() -> Array[String]:
+	# the four stat cards, in the order the sheet lays them out and arrows walk them -
+	# one array, read by sheet_input, sheet_repeat and the talent-tree sheet alike, so
+	# the order can never drift between a reader and another.
+	return ["acc", "str", "end", "spd"]
 
 
 func _sheet_invest(which: String) -> void:
@@ -9895,15 +9896,35 @@ func _sheet_invest(which: String) -> void:
 		invest(which)
 
 
+func _sheet_invest_repeat(which: String) -> void:
+	# the same free/spend choice _sheet_invest makes, for a HELD Enter (sheet_repeat) -
+	# but the save is deferred to key-release rather than fired on every point of a
+	# burst, the same reason the money repeat above defers its own save.
+	if debug_mode:
+		_adjust(which, 1)
+	else:
+		invest(which, true)
+
+
 func sheet_repeat(dt: float) -> void:
-	# debug build only: while the character sheet is open, HOLDING a stat-adjust key keeps
-	# stepping the stat instead of one press per point. The first press was already applied
-	# by _input, so a freshly held key waits SHEET_REPEAT_DELAY before it starts repeating.
-	# Normal (non-debug) play never calls this, so there it stays one point per press.
+	# HOLDING ENTER KEEPS INVESTING IN THE SELECTED STAT (2026-07-31, Louis: stats go up
+	# only by arrow-selecting one and confirming with Enter, "make sure you can hold it to
+	# increase numbers fast") - real play's own repeat, on the exact accel curve the
+	# debug-only keys below already used. `_sheet_invest_repeat` makes the same free/spend
+	# choice `_sheet_invest` does but defers the save (see its own comment) the same way
+	# the money repeat below does, so a fast burst is not also a burst of disk writes.
+	# Every OTHER key here (1-4, Q/W/E/R, M/N) stays debug build only: while the character
+	# sheet is open, HOLDING one of those keeps stepping the stat instead of one press per
+	# point. The first press was already applied by _input, so a freshly held key waits
+	# SHEET_REPEAT_DELAY before it starts repeating.
 	var key := 0
 	var which := ""
 	var delta := 0
-	if Input.is_physical_key_pressed(KEY_1):
+	if Input.is_physical_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_KP_ENTER):
+		key = KEY_ENTER; which = sheet_ids()[sheet_sel]; delta = 1
+	elif not debug_mode:
+		pass   # every remaining key below is debug-only
+	elif Input.is_physical_key_pressed(KEY_1):
 		key = KEY_1; which = "acc"; delta = 1
 	elif Input.is_physical_key_pressed(KEY_2):
 		key = KEY_2; which = "str"; delta = 1
@@ -9962,6 +9983,10 @@ func sheet_repeat(dt: float) -> void:
 		if which == "money":
 			_repeat_dirty = true
 			money = maxi(0, money + delta * burst)
+		elif key == KEY_ENTER:
+			_repeat_dirty = true   # invest() defers its own save - see _sheet_invest_repeat
+			for _i in burst:
+				_sheet_invest_repeat(which)
 		else:
 			for _i in burst:
 				_adjust(which, delta)

@@ -838,20 +838,23 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.13 Stats sheet - drop the number-key shortcuts
 
-- [ ] **Remove the 1/2/3/4 buttons.** Increase a stat only by arrow-selecting it and pressing
+- [x] **Remove the 1/2/3/4 buttons.** Increase a stat only by arrow-selecting it and pressing
   Enter to confirm.
-- [ ] **Holding the key should fast-repeat the increase.**
-- Current state: `sheet_input(kc)`, Game.gd:4023-4071. `KEY_1..KEY_4` (4040-4051) jump-select
-  AND immediately spend in one press - delete this block. Arrow+Enter already exists and
-  needs no new plumbing: `KEY_LEFT`/`KEY_RIGHT` (4032-4037) already cycle `sheet_sel` and
-  `KEY_ENTER`/`KEY_KP_ENTER` (4038-4039) already calls `_sheet_invest(ids[sheet_sel])`. Hold-
-  to-repeat does NOT exist for real play today: `sheet_repeat(dt)` (~9994-10060) and its
-  `SHEET_REPEAT_DELAY`/`RATE` constants (Game.gd:1557-1558) are debug-only, gated on
-  `debug_mode` at its only call site (Game.gd:2386-2391) and polling `Input.
-  is_physical_key_pressed` for KEY_1-4/R/Q/W/E/M/N, none of which apply to a real player.
-  Needs a parallel always-on repeat block keyed off Enter (and/or the arrows, if holding an
-  arrow should also fast-cycle selection - Louis only asked for the increase to repeat, so
-  scope this to Enter unless it reads wrong without arrow-repeat too).
+- [x] **Holding the key should fast-repeat the increase.**
+- Deleted the `KEY_1..KEY_4` block from `sheet_input` (it jump-selected AND spent in one
+  press). Arrow+Enter needed no new plumbing - it already existed.
+- Hold-to-repeat genuinely didn't exist for real play: `sheet_repeat(dt)` and its
+  `SHEET_REPEAT_DELAY`/`RATE`/`RAMP`/`MAX` constants were wired debug-only, gated on
+  `debug_mode` at the one call site and polling raw stat/money keys a real player never
+  touches. Broadened the call site to run for ANY open sheet, added an Enter branch ahead of
+  the (now explicitly `debug_mode`-gated) old ones, sharing the same acceleration curve. The
+  one real wrinkle: `invest()` calls `save_progress()` on every point, and the existing money
+  repeat already had a comment warning that doing that on every point of a fast burst is
+  "what makes a held key stutter" - so `invest()` picked up a `defer_save` argument, a new
+  `_sheet_invest_repeat()` uses it, and the save fires once on key-release, the same pattern
+  the money repeat already used (`_repeat_dirty`). Also pulled the four stat ids
+  (`["acc","str","end","spd"]`) into one `sheet_ids()`, since it was about to be read from a
+  second place (`sheet_repeat`) and a literal in two places is how these things drift.
 
 ---
 
