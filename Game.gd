@@ -2356,6 +2356,13 @@ func _physics_process(delta: float) -> void:
 		if _demo and game_state == ST_ESTABLISH and cine_tick > 40:
 			establish_key()          # dev: the autoplayer dismisses each set's card, so
 									 #      --demo --booking runs a whole booking end to end
+		# THE SHEET IS OPENED FROM THE DAY HUB TOO (2026-07-31, Louis: "holding enter
+		# doesn't work to quickly spend xp points") - and the day hub's own game_state is
+		# ST_DAY, not ST_PLAY, so the identical `sheet_repeat` call guarding the ST_PLAY
+		# branch below never ran for it: this whole function returns above that call
+		# whenever the sheet is opened from anywhere but a live/practice session.
+		if sheet_open:
+			sheet_repeat(delta)
 		return
 	# THE UNLOCK CARD HOLDS THE ACT. It waits for a key now, so without this the crowd
 	# would drain and props would fall behind a card the player is reading. cine_tick is
@@ -4532,19 +4539,23 @@ func tut_lesson(id: String) -> Array:
 	# THE FIRST EXCHANGE, ONE ACTION AT A TIME (2026-07-31, Louis: "right after throwing
 	# both it should pause frame by frame to tell me to catch them one by one", in this
 	# exact order - "catch first ball, throw it right back, catch second ball, throw it
-	# right back", each throw-back timed to the OTHER ball reaching its own peak, "repeat
-	# this 2 times (each ball has gone back and forth twice)" before free play). Built as a
-	# loop rather than eight near-identical lines: the ball thrown first (from dom) always
+	# right back", each throw-back timed to the OTHER ball reaching its own peak). Built as
+	# a loop rather than many near-identical lines: the ball thrown first (from dom) always
 	# lands first, so the catching hand alternates off/dom/off/dom from here on, and a loop
-	# is what keeps that alternation from drifting out of step across two full round trips.
+	# is what keeps that alternation from drifting out of step across several round trips.
+	# DOUBLED TO FOUR REPS (2026-07-31, Louis: "repeat the help a bit longer, at least
+	# double as long" - this was 2). A trailing catch closes the last throw before the
+	# handoff below, so free play never opens on a ball still in the air - Louis's other
+	# note, "make sure that no balls are in the air when you give the player control".
 	var catchers: Array[int] = [off, dom]
-	for _rep in 2:
+	for _rep in 4:
 		for i in 2:
 			var ch: int = catchers[i]
 			var kt := TD if ch == dom else TO
 			var kc2 := CD if ch == dom else CO
 			out.append(tut_do("Catch it.", "catch", ch, kc2, 2, 1))
 			out.append(tut_do("Throw it right back.", "throw", ch, kt, 2, 1, true))
+	out.append(tut_do("Catch it.", "catch", off, CO, 2, 1))
 	out.append(tut_free("Keep that going: catch, throw it right back, on each side in turn.",
 		2, 6, 6, "Try it out. Enter when you've got it.", 1))
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
@@ -4847,8 +4858,7 @@ func tut_setup_step() -> void:
 		running = false
 		stamina_max = 100.0 + 9.0 * float(endurance)
 		stamina = stamina_max
-		hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
-		hand_catch_rest = [catch_slot(LEFT), catch_slot(RIGHT)]
+		hpos = [inner_pos(LEFT), inner_pos(RIGHT)]   # rest inward, everywhere (2026-07-31, Louis)
 		hclose = [0.0, 0.0]
 		catch_flash = [-999, -999]
 		throw_kick = [-999, -999]
@@ -6105,21 +6115,6 @@ func draw_tut_legend(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(x + 168.0, y), String(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.82, 0.76, 0.68, 0.9))
 
 
-func draw_timing_ring(at: Vector2, d: int) -> void:
-	# LESSON ONLY: turn the invisible catch window into a visible target. A ring around
-	# the receiving hand tightens as the ball approaches (d = ticks until it lands) and
-	# flashes gold across the Perfect window, so a beginner can SEE why a catch is early
-	# or on time. Never drawn in a real set - it would defeat the timing skill.
-	var pw := perfect_window()
-	var r := lerpf(14.0, 48.0, clampf(float(d) / float(PROMPT_LEAD), 0.0, 1.0))
-	var perfect := absi(d) <= pw
-	var col := Color(1.0, 0.85, 0.35, 0.95) if perfect else Color(0.7, 0.8, 0.95, 0.55)
-	var width := 3.5 if perfect else 2.0
-	draw_arc(at, r, 0.0, TAU, 40, col, width, true)
-	if perfect:
-		draw_arc(at, r + 4.0, 0.0, TAU, 40, Color(1.0, 0.9, 0.5, 0.4), 2.0, true)
-
-
 func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: float) -> void:
 	# a single BARE key letter floating beside a hand - outlined, no box - so the handed
 	# press (which hand, which key) is guided at the point of action without a text
@@ -6184,7 +6179,9 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		if beat and not tut_hold_names("catch", h):
 			continue
 		var hp: Vector2 = hpos[h]
-		draw_timing_ring(hp, soonest[h])
+		# NO MORE RING (2026-07-31, Louis: "the circle that surrounds the ball ... it's
+		# jagged or just positioned wrong or both ... just get rid of that circle around
+		# the ball in the tutorial"). The bare key letter below is the whole prompt now.
 		var urg := 1.0 - float(soonest[h]) / float(lead)
 		# OUTWARD, NOT OVERHEAD (2026-07-29, Louis: the key should sit to the side of
 		# the hand, clear of the juggler's own body, rather than floating above it).
@@ -7174,12 +7171,12 @@ func next_throw_over_top(h: int) -> bool:
 	return h == dominant_hand and pattern in [SHOWER, HALFSHOWER]
 
 
-# the STRUCTURAL throw/catch point for hand h under the current pattern/trick -
-# always safe to read live, since it reflects what the player has already
-# committed to (the pattern, an active toggle), never a guess about a ball in
-# flight. throw_slot is read every tick while h is holding (see hand_target);
-# catch_slot only seeds the initial hand_catch_rest, since after that the actual
-# CATCH point is locked in per-ball at throw time (do_throw), not re-derived here.
+# the STRUCTURAL throw point for hand h under the current pattern/trick - always
+# safe to read live, since it reflects what the player has already committed to
+# (the pattern, an active toggle), never a guess about a ball in flight. Read
+# every tick while h is holding (see hand_target); a CATCH point is never
+# guessed at all - it is locked in per-ball at throw time (do_throw) - and an
+# empty, nothing-incoming hand simply rests inward (hand_target), no slot needed.
 func throw_slot(h: int) -> int:
 	if pattern == COLUMNS:
 		# Columns rests at ONE point (Louis, ROADMAP 12b): the same slot it catches at,
@@ -7191,22 +7188,6 @@ func throw_slot(h: int) -> int:
 		# closest to the actual lanes, so it also shrinks the hand/ball gap.
 		return HAND_INNER
 	return HAND_OUTER if next_throw_over_top(h) else HAND_INNER
-
-
-func catch_slot(h: int) -> int:
-	# ONLY EVER CALLED TO SEED hand_catch_rest AT A FRESH DEAL (see its own two call
-	# sites) - a real throw immediately overwrites it with the ball's true landing slot
-	# (do_throw), so this is purely the guess for "nothing has been thrown yet". Louis,
-	# 2026-07-31: hands should rest INWARD until something is actually incoming, not
-	# reach out on the strength of a guess - outward is the reach for a real catch, and
-	# at a fresh deal there is no real catch to reach for. The over-the-top branch below
-	# is a genuine exception: that slot is set because a throw the pattern has already
-	# locked in (the OTHER hand's) is truly on its way there.
-	if pattern == COLUMNS:
-		return HAND_INNER
-	if next_throw_over_top(other(h)):
-		return over_top_land_slot(h)
-	return HAND_INNER
 
 
 # where an over-the-top throw COMES DOWN on hand t, and the one rule that keeps the high
@@ -7288,7 +7269,11 @@ func hand_target(h: int) -> Vector2:
 		if pattern == COLUMNS and stack(h)[0].lane_x >= 0.0:
 			p.x = stack(h)[0].lane_x
 	else:
-		p = inc.to_pos if inc != null else slot_pos(h, hand_catch_rest[h])
+		# EMPTY AND NOTHING INCOMING RESTS INWARD, EVERYWHERE (2026-07-31, Louis: this
+		# should not be a tutorial-only rule - "should be everywhere"). Outward is the
+		# reach for a REAL incoming catch (`inc.to_pos`, right above); with nothing
+		# actually on its way, there is nothing to reach for.
+		p = inc.to_pos if inc != null else slot_pos(h, HAND_INNER)
 	# THE HAND GOES TO THE COLUMN, ALL THE WAY (2026-07-28). There used to be a floor
 	# here (COL_HAND_MIN, 40px) keeping a Columns hand out of the torso, because the lane
 	# layout could put a column inside the body - at four objects the inner lanes sat 22px
@@ -7521,8 +7506,7 @@ func start_run(n: int) -> void:
 	chain_until = -999999
 	_slow_cur = 0.0
 	_tick_acc = 1.0
-	hpos = [outer_pos(LEFT), outer_pos(RIGHT)]
-	hand_catch_rest = [catch_slot(LEFT), catch_slot(RIGHT)]
+	hpos = [inner_pos(LEFT), inner_pos(RIGHT)]   # rest inward, everywhere (2026-07-31, Louis)
 	hclose = [0.0, 0.0]
 	catch_flash = [-999, -999]
 	throw_kick = [-999, -999]
@@ -7602,7 +7586,14 @@ func on_catch(h: int) -> void:
 	# Checked BEFORE the ball is chosen, so a refused press costs nothing at all - it is not a
 	# whiff, because reaching with a full hand is not a mistimed catch, it is an impossible one.
 	# `sure` is exempt: a guided lesson beat has frozen the world to demand this press.
-	if not sure and not set_catch_full and not stack(h).is_empty():
+	# THE LAST BALL IN THE AIR IS ALWAYS CATCHABLE (2026-07-31, Louis: "catch to stop:
+	# doesn't work, because i can't catch when i'm holding an object"). The stop gesture
+	# ("catch everything and hold it") only works if a hand that already caught its own
+	# ball can still take the very last one still up - by definition there is nothing left
+	# to juggle around it once this lands, so the traffic-management reason for the rule
+	# (above) has nothing left to protect. `balls_airborne() <= 1` means THIS ball, since
+	# it is still STATE_FLIGHT at this point in the function.
+	if not sure and not set_catch_full and not stack(h).is_empty() and balls_airborne() > 1:
 		return
 	var best: Ball = null
 	var best_d := 1000000
@@ -7753,7 +7744,16 @@ func on_catch(h: int) -> void:
 		add_popup(hpos[h], "PERFECT", Color(1.0, 0.86, 0.42))
 		play_sfx("perfect", -5.0)
 		spawn_parts(hpos[h], Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
-		spawn_parts(hpos[h], Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
+		# NO RING IN THE TUTORIAL (2026-07-31, Louis: "the circle during tutorial pauses is
+		# still wrong ... just get rid of that circle around the ball in the tutorial").
+		# This "ring" kind is a normal-play catch flourish (an 18-tick expanding shockwave,
+		# `draw_parts`) with nowhere near enough life to survive a real freeze - but a
+		# guided beat's own pause holds `tick` itself, which is what this effect ages on
+		# (`step_parts`/`draw_parts`), so it visibly hangs at whatever radius it had
+		# reached the instant the pause began, for as long as the pause lasts. Simplest
+		# correct fix for a lesson screen: it never spawns there in the first place.
+		if not tut_active:
+			spawn_parts(hpos[h], Color(1.0, 0.9, 0.6), 1, 0.0, "ring")
 		if streak % 10 == 0:
 			# a milestone: a beat of hit-stop, a shock ring, a toast, the crowd lifts -
 			# scaled by tier (Still open: "Escalating streak feedback") so streak 200
@@ -7765,7 +7765,8 @@ func on_catch(h: int) -> void:
 			# spawn_parts), so the milestone still registers without the jolt.
 			var streak_tier := 2 if streak % 100 == 0 else (1 if streak % 50 == 0 else 0)
 			freeze = 1 if reduce_motion else 4 + streak_tier * 2
-			spawn_parts(hpos[h], Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
+			if not tut_active:   # see the PERFECT ring note above - same freeze-hang risk
+				spawn_parts(hpos[h], Color(1.0, 0.82, 0.4), 2 + streak_tier, 0.0, "ring")
 			var vs := get_viewport_rect().size
 			add_popup(Vector2(vs.x * 0.5, vs.y * 0.33), "x%d STREAK" % streak, Color(1.0, 0.82, 0.4))
 			if streak_tier >= 1:
@@ -8117,11 +8118,9 @@ func do_throw(h: int, hold: int) -> void:
 	# lock the receiving hand's waiting point in RIGHT NOW, for exactly this ball
 	# (Louis): Columns/lane/mid-ball throws land INNER, an over-the-top throw lands
 	# wherever the receiving hand does NOT throw from (over_top_land_slot), and a
-	# plain throw lands OUTER. This is the one and only place hand_catch_rest
-	# changes, so the empty hand never has to guess where a future throw goes -
-	# it already knows, the instant this one leaves the hand. Resolving the slot ONCE
-	# here, and reusing it for b.to_pos below, is what keeps the hand and the ball
-	# agreeing on a single landing point even if the pattern changes mid-flight.
+	# plain throw lands OUTER. Resolved ONCE here and reused for b.to_pos below, so
+	# the ball's own landing point can never disagree with itself even if the
+	# pattern changes mid-flight.
 	var land_slot := HAND_OUTER
 	if over_top:
 		land_slot = over_top_land_slot(b.to_hand)
@@ -8140,7 +8139,6 @@ func do_throw(h: int, hold: int) -> void:
 		# lands INNER now and the hand carries it out to throw, which is the scoop a
 		# shower's throwing hand actually makes.
 		land_slot = HAND_INNER
-	hand_catch_rest[b.to_hand] = land_slot
 	# always launch from wherever the ball is actually sitting: a lane or normal
 	# ball rests pulled in at inner_pos while held, the middle ball rests at
 	# stage center (see draw_hand) - EXCEPT on the very throw that first marks it
@@ -8199,10 +8197,9 @@ func do_throw(h: int, hold: int) -> void:
 		# (measurably worse, per the --latecatch audit). A crossing road's own
 		# concurrency is carried entirely by prop_hit_scale.
 		# ...and it lands on `land_slot`, which IS outer_pos for every pattern except the
-		# Shower's feed (see the land_slot block above). This used to read outer_pos
-		# outright, so the ball and the hand waiting for it could disagree: land_slot is
-		# what sets hand_catch_rest, so hard-coding the landing here meant a change to one
-		# silently did not move the other.
+		# Shower's feed (see the land_slot block above) - resolved once and read here and
+		# by hand_target's own `inc.to_pos` lookup, so the ball and the hand waiting for
+		# it can never disagree about where it is actually going.
 		b.from_pos = inner_pos(h)
 		b.to_pos = slot_pos(b.to_hand, land_slot)
 	if this_trick == TR_BTB:
@@ -14800,20 +14797,18 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var heat := clampf(log_10(maxf(per, 1.0)) / 40.0, 0.0, 1.0)
 		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
 		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if seg_x > 0.0 else 0
-		# "N/catch", ONE READABLE UNIT (2026-07-31, Louis: "make it a bit more clear what it
-		# means: eg 16/catch"). The old layout spread this over three lines - the number, a
-		# small "A CATCH" label above it, "N in this run" below - none of which said what
-		# the number itself WAS. The suffix sits on the number's own baseline, same trick as
-		# any unit-after-a-figure ("$5.99/mo"): smaller, same line, so it reads as one thing
-		# rather than a label floating nearby. `per` already falls the moment a drop closes
-		# the segment (close_run -> seg_open("drop") resets seg_x/seg_n) and `seg_n` already
-		# tracks the live object count (seg_sync_load, called on every count/prop/pattern
-		# change) - this was a display gap, not a math one.
+		# "Mult = N" (2026-07-31, Louis: replace the "/catch" reading with this - "Mult = 8,
+		# (or whatever the value is)"). Same one-line trick as the suffix it replaces
+		# ("$5.99/mo"): a smaller label on the number's own baseline, just leading now
+		# instead of trailing. `per` already falls the moment a drop closes the segment
+		# (close_run -> seg_open("drop") resets seg_x/seg_n) and `seg_n` already tracks the
+		# live object count (seg_sync_load, called on every count/prop/pattern change).
 		var per_fs := 26 + mpulse
 		var per_txt := score_text(per)
-		draw_string(font, Vector2(RX + 14, 52), per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, per_fs, scol2)
-		var per_w := font.get_string_size(per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, per_fs).x
-		draw_string(font, Vector2(RX + 14.0 + per_w + 4.0, 52), "/catch", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
+		var lbl := "Mult = "
+		var lbl_w := font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		draw_string(font, Vector2(RX + 14, 52), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + 14.0 + lbl_w + 2.0, 52), per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, per_fs, scol2)
 		draw_string(font, Vector2(RX + RW - 150, 40), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
@@ -16548,16 +16543,19 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	elif points > 0:
 		var pa := 0.72 + 0.28 * sin(float(Time.get_ticks_msec()) * 0.006)
 		soft_card(Rect2(tx, by0, innerw, 32.0), Color(0.22, 0.17, 0.06, 0.45 + 0.2 * pa), Color(1.0, 0.86, 0.45, 0.75), 1.5, 9.0, 6.0)
-		draw_string(font, Vector2(tx, by0 + 22.0), "%d POINT%s TO SPEND  -  press a column's number, or Left / Right then Enter" % [points, "" if points == 1 else "S"], HORIZONTAL_ALIGNMENT_CENTER, innerw, 15, Color(1.0, 0.92, 0.7))
+		# NO "PRESS A COLUMN'S NUMBER" ANY MORE (2026-07-31, Louis: the 1-4 shortcuts are
+		# gone from input, "but the windows that shows to use them aren't gone yet" - this
+		# banner was one of them, still promising a press that does nothing).
+		draw_string(font, Vector2(tx, by0 + 22.0), "%d POINT%s TO SPEND  -  Left / Right, then Enter" % [points, "" if points == 1 else "S"], HORIZONTAL_ALIGNMENT_CENTER, innerw, 15, Color(1.0, 0.92, 0.7))
 	else:
 		draw_string(font, Vector2(tx, by0 + 22.0), "Skill sets your score; stats ease the climb. The next point comes with the next level.", HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
 
 	# ---- four growth columns ----
 	var branches := [
-		{"id": "acc", "name": "ACCURACY",  "val": accuracy,  "cap": ACC_CAP,   "col": Color(0.55, 0.78, 1.0),  "key": "1", "role": "off-Perfect catches"},
-		{"id": "str", "name": "STRENGTH",  "val": strength,  "cap": STR_CAP,   "col": Color(0.97, 0.55, 0.42), "key": "2", "role": "prop weight & loft"},
-		{"id": "end", "name": "ENDURANCE", "val": endurance, "cap": END_CAP,   "col": Color(0.55, 0.85, 0.62), "key": "3", "role": "stamina pool"},
-		{"id": "spd", "name": "SPEED",     "val": speed,     "cap": SPEED_CAP, "col": Color(0.82, 0.70, 0.97), "key": "4", "role": "slow-motion"},
+		{"id": "acc", "name": "ACCURACY",  "val": accuracy,  "cap": ACC_CAP,   "col": Color(0.55, 0.78, 1.0),  "role": "off-Perfect catches"},
+		{"id": "str", "name": "STRENGTH",  "val": strength,  "cap": STR_CAP,   "col": Color(0.97, 0.55, 0.42), "role": "prop weight & loft"},
+		{"id": "end", "name": "ENDURANCE", "val": endurance, "cap": END_CAP,   "col": Color(0.55, 0.85, 0.62), "role": "stamina pool"},
+		{"id": "spd", "name": "SPEED",     "val": speed,     "cap": SPEED_CAP, "col": Color(0.82, 0.70, 0.97), "role": "slow-motion"},
 	]
 	var gap := 16.0
 	var colw := (innerw - gap * 3.0) / 4.0
@@ -16670,7 +16668,13 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		var can := points > 0 and val < cap
 		var pl := Rect2(cx + colw * 0.5 - 48.0, coly + colh - 40.0, 96.0, 30.0)
 		soft_card(pl, Color(0.15, 0.22, 0.12, 0.92) if can else Color(0.11, 0.08, 0.09, 0.7), Color(0.55, 0.85, 0.5, 0.6) if can else Color(0.5, 0.45, 0.42, 0.3), 1.0, 7.0, 5.0)
-		draw_keycap(font, pl.position.x + 9.0, pl.position.y + 6.0, String(b["key"]))
+		# THE PLATE NAMES ENTER, NOT A NUMBER, AND ONLY ON THE ACTIVE COLUMN (2026-07-31,
+		# Louis: the 1-4 shortcuts are gone, "increase only by selecting with arrows and
+		# pressing enter"). A keycap on every column used to promise each could be invested
+		# in directly by its own number; only the SELECTED column can take a press now, so
+		# only it gets a keycap - the same affordance a focused control shows anywhere else.
+		if active and can:
+			draw_keycap(font, pl.position.x + 9.0, pl.position.y + 6.0, String(k_finish()[0]))
 		draw_string(font, Vector2(pl.position.x, pl.position.y + 20.0), ("+1" if can else ("MAX" if val >= cap else "-")), HORIZONTAL_ALIGNMENT_RIGHT, pl.size.x - 12.0, 15, Color(0.8, 0.96, 0.74) if can else Color(0.62, 0.57, 0.52, 0.85))
 
 	# ---- the active branch's effect, spelled out, and the footer keys ----
