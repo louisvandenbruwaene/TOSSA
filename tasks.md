@@ -801,15 +801,33 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.9 Gloves - still look bad
 
-- [ ] **Redesign the glove shape**, on stage and in the tailor.
-- Current state: on-stage `draw_hand(h)`, Game.gd:12798-~12870 - a plain ellipse mitt with a
-  bolted-on 5-point thumb polygon and 3 stitch lines (12841-12854). Tailor icon,
-  `draw_gear_icon()` case `"gloves"`, Game.gd:16938-16964 - the comment there already admits
-  it was redrawn once before because "they looked strange": a 13-point hand-fitted arc
-  (`for i in 13: a := PI + PI*i/12`) plus a separate thumb blob, same shape family as the
-  stage version. Both read as a crude two-piece mitt-plus-thumb rather than a glove. This
-  wants an actual shape redesign, not a tweak - budget it real attention rather than a
-  five-minute pass, same as the club got in section 16.
+- [x] **Redesign the glove shape**, on stage and in the tailor.
+- The real defect, found by comparing both existing implementations: every previous pass
+  (there were two, on stage and in the tailor icon, independently) drew the thumb as its
+  OWN polygon glued onto the palm ellipse - two shapes that can never quite agree at the
+  seam, which is what reads as a blob with a fin rather than a hand. Built `mitt_shape()`
+  (beside `fill_ellipse`, which it's a sibling of): ONE outline, a plain ellipse bulged
+  toward a thumb angle with a bell-curve falloff, drawn with the same 20-segment polygon
+  loop the rest of the file's round shapes use - so the palm and the thumb are one
+  continuous edge with nowhere to disagree.
+- Applied it in THREE places that all used to draw the hand differently:
+  1. **On stage** (`draw_hand`) - replaced the ellipse-plus-glued-triangle with
+     `mitt_shape()`, and thinned the three fanning "pointing" stitch lines to one seam
+     along the thumb ridge (the bump itself now does the work of saying "glove").
+  2. **The tailor's rack icon** (`draw_gear_icon`, case `"gloves"`) - deleted its own
+     separately hand-fitted 13-point arch + glued thumb entirely and calls the exact same
+     `mitt_shape()` the stage hand does, which is also literally the standing rule stated
+     in that code's own comment two passes ago ("a shop icon that does not match the thing
+     you buy is a small lie") and not actually followed until now.
+  3. **The tailor's mirror preview** (`draw_mini_juggler`) - found on the way, not
+     originally scoped: its hands were a flat `draw_circle`, gloved or bare, indistinguishable
+     except by colour. Now uses `mitt_shape()` too when gloved, with a taller bump amplitude
+     (1.1 vs the stage hand's 0.62) since the same proportional bump anti-aliased away to
+     nothing at this preview's small radius.
+- Verified by screenshot at all three: `--prop 6 --booking --demo` for the stage hand
+  (zoomed crop shows a clean asymmetric teardrop, no seam), `--tailor 4` for the rack icon
+  and the mirror preview (both show a clear thumb bump, not a circle). Full `validate.sh`
+  (not `--quick`) passes.
 
 ### 22.10 Catching to end a performance without a forced drop
 
