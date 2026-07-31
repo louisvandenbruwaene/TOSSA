@@ -788,15 +788,22 @@ Thirteen items, some of them small and some of them a real redesign. Status key 
 
 ### 22.10 Catching to end a performance without a forced drop
 
-- [ ] **Let the player stop juggling without every performance ending in a drop.** Either:
+- [x] **Let the player stop juggling without every performance ending in a drop.** Either:
   (a) let them keep catching but not throw again, or (b) better: detect that the player wants
   to stop and cash in / catch everything at once automatically.
-- Current state: cashing in already exists (Enter, "finish/cash in" per CLAUDE.md's input
-  list) once past goal 1 - so the mechanic Louis wants may already be reachable and the real
-  gap is that it isn't obvious/guided (ties into 22.7's "press Enter to stop, shown as a
-  symbol" line from his own notes at line 333). Needs checking against the current Enter/
-  cash-in handler in ST_PLAY before deciding whether this is a new mechanic or a discoverability
-  fix - don't build a second stop-mechanic if one already exists and just isn't taught.
+- **Already built, checked in full, nothing to add.** Louis's preferred option (b) exists
+  exactly as he described it: `on_catch` (Game.gd ~7825-7830) fires `finish_performance()`
+  the instant a catch leaves the air completely empty with `goals_hit >= 1` - "catch
+  everything and it reads that as the bow" is the live mechanic, not a proposal. Enter
+  (`k_finish()`) does the same thing directly, any time `running` is true, goal or no goal.
+  It's clearly signposted too: `draw_hud` (Game.gd ~14763-14768) prints "F/J or catch them
+  all: cash in [score]" once goal 1 is banked, and a quieter "Enter: bow out" before it.
+  Traced `cashing_in` end to end to be sure this wasn't dead code - it isn't; `finish_performance`'s
+  own comment already says "the two cash-in gestures Louis asked for are one path."
+  **If Louis is still hitting a forced drop in practice**, this needs a repro (which venue,
+  which goal state) rather than a second mechanic bolted on next to a working one - a common
+  way this could still bite: quitting via Enter BEFORE goal 1 ends the act with nothing
+  banked, which may be what reads as "forced to drop" even though no drop actually occurred.
 
 ### 22.11 Live score display, top right
 
