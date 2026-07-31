@@ -1,0 +1,43 @@
+{
+  "_README": [
+    "PIXELTOSSA art manifest. This file is the ONLY thing that decides whether a visual",
+    "element is a sprite or a procedural drawing. Game.gd never names a PNG.",
+    "",
+    "TO REPLACE AN ELEMENT:",
+    "  1. author the art on a 320x180-density canvas (see _AUTHORING below)",
+    "  2. save it into the matching Assets/ folder",
+    "  3. add a line here, keyed by the seam key",
+    "  4. run the game - that element is now a sprite; delete the line to go back",
+    "",
+    "A key with no line here draws procedurally, exactly as `main` does. A line whose",
+    "file is missing logs one warning and falls back, so you can reserve a key before",
+    "the art exists. Keys beginning with _ are documentation and are skipped.",
+    "",
+    "TO SEE THE LIVE KEY LIST, run the game with:  --artreport",
+    "It prints every key the running session actually reached, marked [sprite] or [proc].",
+    "That list is generated from the code, so it can never go stale the way this comment",
+    "can. The _KEYS block below is a convenience copy, correct as of the branch point."
+  ],
+
+  "_AUTHORING": {
+    "canvas": "320x180 is the art's pixel density; the game's coordinate space stays 1280x720",
+    "scale": "1 art pixel is drawn as a 4x4 screen block (ART_PIXEL = 4), no resampling",
+    "rule": "author at 1/4 the screen size you want, e.g. a 24px-wide ball on screen = 6px of art",
+    "import": "PNG, lossless, no mipmaps, nearest filter - project.godot's importer_defaults does this",
+    "tint": "props/hands/gear are drawn with the game's colour as a TINT, so author them WHITE",
+    "pivot": "[0.5,0.5] is the centre; [0.5,1.0] pins the bottom edge to the draw position",
+    "scale_field": "optional multiplier if the art is authored bigger or smaller than its slot"
+  },
+
+  "_KEYS": {
+    "prop/*": "ball egg ring club knife torch chainsaw  (Assets/Props/, tinted, rotated)",
+    "char/*": "head head_back hat_top glasses helmet boot hand_open hand_closed glove_open glove_closed",
+    "bg/*": "backyard street_corner small_theatre the_circus championship world_arena midnight_show",
+    "ui/*": "keycap card_skill card_trick gear_glasses gear_pie gear_gloves ...",
+    "fx/*": "flower_t0 flower_t1 flower_t2 tomato"
+  },
+
+  "_EXAMPLE": {
+    "prop/ball": { "path": "res://Assets/Props/ball.png", "pivot": [0.5, 0.5], "scale": 1.0 }
+  }
+}

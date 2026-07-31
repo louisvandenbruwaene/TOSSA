@@ -1940,6 +1940,18 @@ const DEMO_BEAT := 28
 
 #region STARTUP
 func setup_font() -> void:
+	# SEAM: a pixel face, if one has been dropped in. This is the ONE art element chosen
+	# once rather than per draw call, so it gets a path check instead of a manifest key.
+	#
+	# The three properties below are the whole difference between a pixel font and a
+	# blurry one, and Godot's defaults are wrong for every one of them: antialiasing
+	# feathers the glyph edges into grey, subpixel positioning lets a glyph start at a
+	# fractional x (so identical letters render differently down a line), and hinting
+	# nudges stems off the grid. A bitmap face with these left on looks like a smaller
+	# version of the current font, not like pixel art - which is the usual reason a first
+	# pixel-art pass "still looks wrong" and nobody can say why.
+	if setup_pixel_font():
+		return
 	# one clean humane face at semibold, set up as a FontVariation so the single
 	# variable-weight file serves every size. If the file is ever missing the
 	# engine fallback quietly takes over and nothing breaks.
@@ -1956,6 +1968,32 @@ func setup_font() -> void:
 		tv.base_font = base
 		tv.variation_opentype = {"wght": 800}
 		title_font_v = tv
+
+
+func setup_pixel_font() -> bool:
+	# Assets/Fonts/pixel.ttf (or .fnt / .otf) takes over both faces if it is there. Returns
+	# false - silently, because "no pixel font yet" is the normal state of this branch - so
+	# setup_font falls through to Nunito. Note both faces get the SAME file: a pixel font
+	# has no weight axis to vary, so title_font()'s hierarchy has to come from size, which
+	# is how bitmap type has always done it.
+	for ext: String in ["ttf", "otf", "fnt", "font"]:
+		var path := "res://Assets/Fonts/pixel." + ext
+		if not ResourceLoader.exists(path):
+			continue
+		var f: Variant = load(path)
+		if not (f is Font):
+			continue
+		if f is FontFile:
+			var ff := f as FontFile
+			ff.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+			ff.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+			ff.hinting = TextServer.HINTING_NONE
+			ff.multichannel_signed_distance_field = false
+		ui_font = f
+		title_font_v = f
+		print("art: pixel font active (%s)" % path)
+		return true
+	return false
 
 
 func game_font() -> Font:
@@ -1982,7 +2020,17 @@ func _ready() -> void:
 	sync_props()          # every per-prop array as long as PROPS, before anything reads one
 	migrate_old_saves()   # the game was called IACTO until 2026-07-28: carry those
 						  # careers across before anything reads a save (see below)
+	# --artmanifest must be read BEFORE art_boot, which is the one dev flag that cannot wait
+	# for the block below - the bank is built once, at startup. Guarded on is_debug_build
+	# for the same reason every other flag is: none of them may parse in a shipped build.
+	if OS.is_debug_build():
+		var mi := ua.find("--artmanifest")
+		if mi != -1 and mi + 1 < ua.size():
+			art_manifest_path = ua[mi + 1]
 	load_settings()
+	art_boot()            # the pixel-art seam's texture bank, BEFORE setup_font: a bitmap
+						  # face registered under "font/ui" wins over Nunito, and the font
+						  # is the one piece of art that is chosen once instead of per draw
 	setup_font()
 	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
 	Input.joy_connection_changed.connect(_on_joy_connection)
@@ -2005,6 +2053,13 @@ func _ready() -> void:
 		return
 	if ua.has("--demo"):
 		_demo = true
+	# --- pixel-art remaster flags (PIXELTOSSA); see the PIXEL-ART RENDER SEAM region ---
+	if ua.has("--procart"):    # force every art key to miss: the A/B against a sprite
+		art_on = false
+	if ua.has("--artreport"):  # print which seam keys this run reached, and which had art
+		_art_report = true
+	if ua.has("--pixel"):      # capture --shot at 320x180 art density instead of 1280x720
+		_art_pixel = true
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -3055,6 +3110,10 @@ func _pad_to_key(btn: int) -> int:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		if _art_report:
+			_art_report = false   # PREDELETE can follow CLOSE_REQUEST; print the list once
+			art_report()
 	# a performance must never die to a missed alt-tab: losing window focus mid-set
 	# auto-pauses instead of letting the sim keep draining stamina unattended.
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
@@ -11052,6 +11111,240 @@ func flight_vel(b: Ball) -> Vector2:
 
 #endregion
 
+#region PIXEL-ART RENDER SEAM
+# ---------------------------------------------------------------------------------------
+# THE SEAM (PIXELTOSSA branch). Everything the player SEES is drawn by code today. This
+# region is the single place where a hand-authored sprite can take over from a procedural
+# drawing, one element at a time, without a gameplay function ever knowing it happened.
+#
+# THE CONTRACT, and it is the whole point of the branch:
+#
+#   func draw_whatever(...):
+#       if art_blit("group/key", pos, sc, ang, tint): return   # <- sprite, if one exists
+#       <the existing procedural code, untouched>              # <- otherwise, as before
+#
+# `art_blit` returns FALSE whenever no texture is registered for that key, so with an empty
+# bank - which is the state this branch ships in - every one of these lines is a dictionary
+# miss and the game draws exactly what `main` draws, pixel for pixel. Registering art is
+# editing DATA (drop a PNG in Assets/, add a line to Resources/art_manifest.json), never
+# editing code. That is objective 4 of the remaster brief, discharged.
+#
+# WHY draw_colored_polygon AND NOT draw_texture_rect. A textured polygon composes with
+# whatever transform is already active (draw_prop_body runs its squash-and-stretch through
+# `draw_set_transform` before calling into the prop art), and it takes a rotation for free.
+# draw_texture_rect would need its own draw_set_transform to rotate, which would CLOBBER an
+# outer one and silently drop the squash. It is also one engine call per sprite, against the
+# dozens each procedural prop currently spends - see docs/coding_guidelines.md on draw cost
+# being ~5us PER CALL, not per vertex. Sprites should make this file faster, not slower.
+#
+# ART_PIXEL AND THE COORDINATE SPACE. The stage's coordinate space stays 1280x720 and is not
+# negotiable: `inner_pos`/`outer_pos`, every hitbox, `--collcheck`'s clearances and the whole
+# throw model are expressed in it, so changing it would change gameplay. 1280x720 is exactly
+# 4x 320x180, which is the entire reason 320x180 is the right authoring resolution here: a
+# sprite drawn on a 320x180 canvas is blitted at 4x with no resampling, every source pixel
+# landing on an exact 4x4 block, and on the day the real viewport drops to 320x180 every
+# asset is already the correct size. Run `--pixel` to see that endpoint today.
+# ---------------------------------------------------------------------------------------
+
+const ART_PIXEL := 4.0                 # screen units per authored art pixel (1280/320)
+const ART_W := 320                     # the authoring canvas, and the eventual viewport
+const ART_H := 180
+const ART_MANIFEST := "res://Resources/art_manifest.json"
+var art_manifest_path := ART_MANIFEST   # --artmanifest <path> points this elsewhere, which
+										# is how the placeholder set is tried on without
+										# editing (or risking) the real manifest
+# not a `const`: GDScript will not accept a PackedVector2Array as a constant expression.
+# Built once at load and never mutated, which is the only property the call sites need.
+var art_uv := PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
+
+var art_bank: Dictionary = {}      # key -> {"tex": Texture2D, "pivot": Vector2, "scale": float}
+var art_on := true                 # --procart clears this: every key misses, procedural wins
+var art_asked: Dictionary = {}     # every key any draw call has ever requested
+var art_hits: Dictionary = {}      # ...and the subset that resolved to a real texture
+var _art_pixel := false          # --pixel: downsample the --shot capture to art density
+var _art_report := false           # --artreport: dump both lists on quit
+
+
+func art_boot() -> void:
+	# Read the manifest once at startup. A missing/!empty manifest is the NORMAL state on this
+	# branch and must stay completely silent - it means "no art authored yet", not an error.
+	if not FileAccess.file_exists(art_manifest_path):
+		return
+	var raw := FileAccess.get_file_as_string(art_manifest_path)
+	var parsed: Variant = JSON.parse_string(raw)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		push_warning("art: %s is not a JSON object - running fully procedural" % art_manifest_path)
+		return
+	for key: String in (parsed as Dictionary).keys():
+		if key.begins_with("_"):
+			continue                          # "_comment" and friends are documentation
+		var e: Variant = (parsed as Dictionary)[key]
+		if typeof(e) != TYPE_DICTIONARY:
+			continue
+		var path := str((e as Dictionary).get("path", ""))
+		if path == "" or not ResourceLoader.exists(path):
+			# a manifest line whose file is not there yet is a PLAN, not a failure - it is
+			# exactly how you reserve a key before drawing the art. Loud enough to find,
+			# quiet enough to leave in place for weeks.
+			push_warning("art: '%s' -> %s not found, falling back to procedural" % [key, path])
+			continue
+		var tex: Variant = load(path)
+		if not (tex is Texture2D):
+			continue
+		var piv: Variant = (e as Dictionary).get("pivot", [0.5, 0.5])
+		var pv := Vector2(0.5, 0.5)
+		if typeof(piv) == TYPE_ARRAY and (piv as Array).size() == 2:
+			pv = Vector2(float((piv as Array)[0]), float((piv as Array)[1]))
+		art_bank[key] = {
+			"tex": tex,
+			"pivot": pv,
+			"scale": float((e as Dictionary).get("scale", 1.0)),
+		}
+	if art_bank.size() > 0:
+		print("art: %d sprite(s) registered from %s" % [art_bank.size(), art_manifest_path])
+
+
+func art_snap(v: Vector2) -> Vector2:
+	# to the ART_PIXEL grid, so a blitted sprite's source pixels stay square and stop
+	# crawling as the thing under them moves at sub-pixel speed. Deliberately NOT the
+	# project-wide `snap_2d_vertices_to_pixel`: that one would also snap every procedural
+	# polygon in the file and destroy the explicit alpha feathers this project's triangle
+	# edges depend on (see docs/coding_guidelines.md). Snap the sprites, not the paint.
+	return (v / ART_PIXEL).round() * ART_PIXEL
+
+
+func art_blit(key: String, pos: Vector2, sc: float = 1.0, ang: float = 0.0,
+		tint: Color = Color.WHITE) -> bool:
+	# The one substitution point. TRUE = a sprite was drawn and the caller must return
+	# immediately; FALSE = draw yourself, exactly as before.
+	art_asked[key] = true
+	if not art_on or not art_bank.has(key):
+		return false
+	var e: Dictionary = art_bank[key]
+	var tex: Texture2D = e["tex"]
+	var size := Vector2(tex.get_size()) * ART_PIXEL * float(e["scale"]) * sc
+	if size.x <= 0.0 or size.y <= 0.0:
+		return false
+	art_hits[key] = true
+	var half := size * 0.5
+	# the pivot as an offset from the sprite's CENTRE, since the quad is built around its
+	# centre - a (0.5, 0.5) pivot is therefore the zero case and costs nothing
+	var piv: Vector2 = e["pivot"]
+	var off := Vector2((0.5 - piv.x) * size.x, (0.5 - piv.y) * size.y)
+	var c := pos + (off.rotated(ang) if not is_zero_approx(ang) else off)
+	if is_zero_approx(ang):
+		c = art_snap(c - half) + half     # snap the top-left, keep the quad centred on c
+	_art_quad(tex, c, half, ang, tint)
+	return true
+
+
+func art_blit_size(key: String, center: Vector2, size: Vector2, ang: float = 0.0,
+		tint: Color = Color.WHITE) -> bool:
+	# For elements whose on-screen size is decided by the GAME rather than by the art: the
+	# head is drawn at whatever radius its caller has, a boot at a fraction of figure height,
+	# a keycap at the width of its label. Those sizes are layout and must not change when a
+	# sprite arrives, so the texture is fitted to them instead of setting them. Same
+	# true/false contract as art_blit.
+	art_asked[key] = true
+	if not art_on or not art_bank.has(key):
+		return false
+	# a NEGATIVE width is meaningful and must survive: it mirrors the quad, which is how one
+	# boot/hand/arm asset serves both sides exactly as the procedural version mirrors through
+	# a transform. Only a zero-area box is rejected.
+	if is_zero_approx(size.x) or is_zero_approx(size.y):
+		return false
+	art_hits[key] = true
+	var e: Dictionary = art_bank[key]
+	var sz := size * float(e["scale"])
+	var piv: Vector2 = e["pivot"]
+	var off := Vector2((0.5 - piv.x) * sz.x, (0.5 - piv.y) * sz.y)
+	var c := center + (off.rotated(ang) if not is_zero_approx(ang) else off)
+	if is_zero_approx(ang):
+		c = art_snap(c - sz * 0.5) + sz * 0.5
+	_art_quad(e["tex"], c, sz * 0.5, ang, tint)
+	return true
+
+
+func _art_quad(tex: Texture2D, c: Vector2, half: Vector2, ang: float, tint: Color) -> void:
+	# one textured quad, built by hand so it COMPOSES with any draw_set_transform already in
+	# effect (draw_prop_body's squash-and-stretch is exactly that case) and so a rotation
+	# costs nothing extra. Winding is consistent and the quad is convex, so it can never hit
+	# the silent-nothing-drawn failure draw_colored_polygon has on self-intersecting shapes.
+	var pts := PackedVector2Array()
+	for q: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+		var d := Vector2(q.x * half.x, q.y * half.y)
+		pts.append(c + (d.rotated(ang) if not is_zero_approx(ang) else d))
+	draw_colored_polygon(pts, tint, art_uv, tex)
+
+
+func art_blit_rect(key: String, box: Rect2, tint: Color = Color.WHITE) -> bool:
+	# For elements sized by their BOX rather than by the art: backdrops, panels, card frames.
+	# The texture is stretched to the box, so a 9-slice-ish asset should be authored at the
+	# proportions it will be used at. Same true/false contract as art_blit.
+	art_asked[key] = true
+	if not art_on or not art_bank.has(key):
+		return false
+	if box.size.x <= 0.0 or box.size.y <= 0.0:
+		return false
+	art_hits[key] = true
+	var tex: Texture2D = (art_bank[key] as Dictionary)["tex"]
+	var p := art_snap(box.position)
+	var sz := art_snap(box.position + box.size) - p
+	draw_colored_polygon(PackedVector2Array([
+		p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]), tint, art_uv, tex)
+	return true
+
+
+func art_key_prop(kind: int) -> String:
+	# One prop -> one art key, derived from the PROPS table rather than from a second
+	# hand-written list, so a prop added to that table can never be missing a key here.
+	var n := "ball"
+	if kind >= 0 and kind < PROPS.size():
+		n = str((PROPS[kind] as Dictionary)["name"]).to_lower()
+	return "prop/" + n
+
+
+func art_report() -> void:
+	# --artreport: what the running game ASKED the bank for, and what it got. This is the
+	# remaster's to-do list, generated from the code rather than maintained by hand - drive
+	# the game through a screen and every replaceable element on it prints here.
+	var keys := art_asked.keys()
+	keys.sort()
+	print("\n--- art seam report: %d key(s) reached, %d served by a sprite ---"
+		% [keys.size(), art_hits.size()])
+	for k: String in keys:
+		print("  [%s] %s" % ["sprite" if art_hits.has(k) else "  proc", k])
+	print("--- add any of these to %s to replace it ---\n" % art_manifest_path)
+
+
+func art_pixel_preview(img: Image) -> Image:
+	# --pixel: answer "what does this screen look like as a 320x180 pixel-art game?" by
+	# resampling the captured frame down by ART_PIXEL with NEAREST, then back up so the
+	# result is viewable at normal size with every art pixel a hard 4x4 block.
+	#
+	# THIS IS DELIBERATELY A CAPTURE-SIDE TOOL AND NOT A LIVE VIEWPORT, and the reason is
+	# worth recording because it is the first thing anyone will try. Godot's
+	# CONTENT_SCALE_MODE_VIEWPORT makes `content_scale_size` BOTH the framebuffer and the
+	# coordinate space the game draws in, and `content_scale_factor` does not separate the
+	# two (set to 0.25 it silently reads back 1.0). So a live 320x180 viewport hands
+	# `get_viewport_rect().size` = (320, 180) to a file whose every font size, panel inset
+	# and hint-row offset is written in 1280x720 units - measured, not assumed: the HUD
+	# collapses into overlapping boxes with text four times too big.
+	#
+	# Down-sampling the finished frame gives the same answer about legibility - which is
+	# the whole question at this stage - without pretending the layout has been ported.
+	# Porting the layout to 320x180 is real work for the END of the remaster, once no
+	# procedural drawing is left to be measured in the old space.
+	var w := int(img.get_width() / ART_PIXEL)
+	var h := int(img.get_height() / ART_PIXEL)
+	img.resize(w, h, Image.INTERPOLATE_NEAREST)
+	print("art: --pixel preview downsampled to %dx%d" % [w, h])
+	img.resize(int(w * ART_PIXEL), int(h * ART_PIXEL), Image.INTERPOLATE_NEAREST)
+	return img
+
+
+#endregion
+
 #region STAGE BACKDROP DRAWING
 func _draw() -> void:
 	var t0 := Time.get_ticks_usec() if _fps else 0
@@ -11205,14 +11498,23 @@ func draw_backdrop(s: Vector2) -> void:
 	# flat black void (the biggest single "cheap look" fix on the play screen)
 	var sky_top := Color(floor_c.r * 0.7, floor_c.g * 0.7, floor_c.b * 0.9)
 	var sky_bot := Color(glow.r * 0.10 + 0.02, glow.g * 0.09 + 0.02, glow.b * 0.10 + 0.03)
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
 
 	var fy := s.y * 0.80
 
-	# the venue's own set dressing sits behind the light, then a dark veil pushes it
-	# back into the depth, so the escalating ladder is FELT without ever competing
-	# with the props (ART pillars 1 and 4)
-	draw_venue_dressing(s, vi, fy, glow)
+	# SEAM: ONE PAINTING PER HOUSE, and it replaces exactly two layers - the sky gradient
+	# and the set dressing. Everything after it (the veil, the spotlight cone, the
+	# footlights, the floor) is LIGHT, not scenery, and stays procedural on purpose: the
+	# cone narrows and warms as a streak builds, which is the stage rewarding focus, and
+	# `stage_darkness`/Blackout drive the rest. A painted backdrop that had the lighting
+	# baked into it would freeze all of that, and the light is the half of this picture
+	# that is actually reacting to the player.
+	var bg_key := "bg/" + str(v["name"]).to_lower().replace(" ", "_")
+	if not art_blit_rect(bg_key, Rect2(Vector2.ZERO, s)):
+		draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
+		# the venue's own set dressing sits behind the light, then a dark veil pushes it
+		# back into the depth, so the escalating ladder is FELT without ever competing
+		# with the props (ART pillars 1 and 4)
+		draw_venue_dressing(s, vi, fy, glow)
 	# THE VEIL IS PER-VENUE (2026-07-27, Louis: some stages are "some blurry line in the
 	# dark ... most stages do fine: like the circus. but some don't; like the midnight
 	# event"). This flat 42% wash exists to push the set behind the props, and on a bright
@@ -12267,6 +12569,11 @@ func draw_top_hat(head: Vector2, r: float, silk: Color, band: Color, accent: Col
 	# centre, so the brim rides at -0.78r: low enough to cover the hairline the way a worn
 	# hat does, high enough to leave the brows (-0.30r) and the whole face clear. The one
 	# thing this must never do is push the head down to make room.
+	# SEAM: the hat is one object at one ratio, so it is one sprite. Sized off head radius
+	# exactly as the drawing below is, so a sprite cannot make the crown taller or the brim
+	# wider than the settled figure allows.
+	if art_blit_size("char/hat_top", head + Vector2(0.0, -r * 1.53), Vector2(r * 3.0, r * 2.3)):
+		return
 	var brim_y := head.y - r * 0.78
 	var crown_top := brim_y - r * 1.50
 	var lit := silk.lightened(0.16)
@@ -12303,6 +12610,8 @@ func draw_worn_glasses(head: Vector2, r: float, accent: Color) -> void:
 	# instead of the card's fixed pixels, so it reads at either figure's size. Frame is
 	# a neutral tortoiseshell - a real accessory's own material, not a venue tint - and
 	# the lens catches a sliver of the venue's accent the way the hat's band pin does.
+	if art_blit_size("char/glasses", head + Vector2(0.0, -r * 0.06), Vector2(r * 2.1, r * 0.8)):
+		return   # SEAM
 	var frame := Color(0.16, 0.12, 0.09)
 	var lr := r * 0.30
 	var w := maxf(1.1, r * 0.075)
@@ -12322,6 +12631,8 @@ func draw_worn_helmet(head: Vector2, r: float, cap_c: Color, accent: Color) -> v
 	# either side, a straw running to the mouth), scaled off head radius the way the
 	# top hat is. Mutually exclusive with the Top Hat at the call site - a player owns
 	# both crowns but a head only wears one - so this never fights it for the same space.
+	if art_blit_size("char/helmet", head + Vector2(0.0, -r * 0.55), Vector2(r * 3.2, r * 1.8)):
+		return   # SEAM
 	var cap := head + Vector2(0.0, -r * 0.60)
 	var can_w := r * 0.34
 	var can_h := r * 1.10
@@ -12361,6 +12672,12 @@ func draw_stage_boot(at: Vector2, H: float, side: float, leather: Color, spat: C
 	# Also new: a proper turned-down CUFF at the top, a stacked heel with visible layers, and a
 	# sole that runs past the upper as a welt. Everything is still in units of H inside a
 	# mirrored transform, so one description serves both feet at any figure size.
+	# SEAM: `side` is -1 or +1 and the drawing below mirrors through the transform, so the
+	# sprite mirrors through a negative width - one boot asset serves both feet, which is
+	# also how the procedural version stays one description.
+	if art_blit_size("char/boot", at + Vector2(0.0, -H * 0.33),
+			Vector2(side * H * 0.48, H * 0.62)):
+		return
 	var hide := Color(minf(leather.r * 1.75 + 0.05, 1.0), minf(leather.g * 1.65 + 0.03, 1.0),
 		minf(leather.b * 1.50 + 0.02, 1.0))
 	var lit := Color(minf(hide.r * 1.34, 1.0), minf(hide.g * 1.30, 1.0), minf(hide.b * 1.26, 1.0))
@@ -12448,6 +12765,14 @@ func draw_head(head: Vector2, r: float, hair: Color, skin: Color, facing_back: b
 	# code, and the preview's had already drifted to a bare arc for a mouth and no
 	# fringe at all. A face is exactly the kind of thing two copies of go quietly out of
 	# step, so there is one now and the preview simply passes a smaller r.
+	#
+	# SEAM: two keys, because a head seen from behind is a different picture and not a
+	# mirrored one. `r` is the caller's, so a sprite is fitted to the radius the figure
+	# already has - the stance and proportions are settled and art must not renegotiate
+	# them. The 2.6r box leaves room for the hair silhouette, which swells past the skull.
+	if art_blit_size("char/head_back" if facing_back else "char/head", head,
+			Vector2(r, r) * 2.6, 0.0, Color.WHITE):
+		return
 	draw_hair_back(head, r, hair)
 	if facing_back:
 		# ALL HAIR, no nape (2026-07-27, Louis: "during spin, the back of the players
@@ -13167,37 +13492,55 @@ func draw_hand(h: int) -> void:
 	var openf := 1.0 - close
 	var stretch := lerpf(0.0, 6.0, openf)
 	var mitt_c := pos + Vector2(inward * openf * 1.5, -stretch * 0.5)
-	if gloved:
-		# SILK GLOVES, third pass (2026-07-31, Louis: "the gloves still look horrible on the
-		# player and in the tailor"). The second pass added a thumb, which was the right
-		# instinct - a glove has a shape a bare hand does not - but drew it as its own
-		# 5-point polygon glued to the palm ellipse, so the two pieces never quite agreed at
-		# the seam and it read as a blob with a fin on it. mitt_shape draws the thumb as a
-		# bulge in the SAME outline the palm is, one continuous edge, no seam to disagree at.
-		draw_colored_polygon(mitt_shape(mitt_c, 11.5, 11.5 + stretch, inward * -1.15, 0.62), sk)
-	else:
-		fill_ellipse(mitt_c, 11.5, 11.5 + stretch, sk)
-	draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
-	if gloved:
-		var hem := sk.darkened(0.18)
-		var seam := sk.darkened(0.30)
-		# ONE stitch line along the thumb ridge - the bulge itself now says "glove", so this
-		# is the seam a real one would show there, not three lines pretending to be several
-		draw_line(pos + Vector2(inward * 5.4, -1.6), pos + Vector2(inward * 11.6, -9.0),
-			Color(seam.r, seam.g, seam.b, 0.5), 1.1)
-		# the wrist opening: a band with a scalloped lower edge and a button at the side,
-		# which is what a dress glove closes with
-		var wy := pos.y + 7.2
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(pos.x - 10.4, wy - 3.4), Vector2(pos.x + 10.4, wy - 3.4),
-			Vector2(pos.x + 9.0, wy + 4.4), Vector2(pos.x + 3.4, wy + 2.2),
-			Vector2(pos.x, wy + 5.6), Vector2(pos.x - 3.4, wy + 2.2),
-			Vector2(pos.x - 9.0, wy + 4.4)]), hem)
-		draw_line(Vector2(pos.x - 10.0, wy - 2.6), Vector2(pos.x + 10.0, wy - 2.6), Color(1, 1, 1, 0.30), 1.3)
-		draw_circle(Vector2(pos.x + inward * 7.4, wy + 0.6), 1.5, Color(seam.r, seam.g, seam.b, 0.85))
-		# the silk's own sheen: one small filled highlight, up and left like every other
-		# light on this stage
-		fill_ellipse(pos + Vector2(-3.6, -4.6 - stretch * 0.4), 4.2, 2.8, Color(1, 1, 1, 0.30))
+	# SEAM, and the first place the remaster will want an AnimatedSprite2D rather than a
+	# still. The hand OPENS AND CLOSES continuously (`close` is a float, not a flag) and
+	# that motion is how the no-crossing choreography reads, so a single frame would lose
+	# real information. Two keys and a threshold is the honest still-image approximation;
+	# when the art is ready, swap this pair for a strip indexed by `close` and nothing
+	# outside this function changes. `inward` mirrors one asset onto both hands.
+	# The catch glow above stays procedural on purpose: it is gameplay FEEDBACK, not
+	# artwork, and it has to keep reading identically while the art is in flux.
+	# The GLOVED key is separate because a glove is a different object, not a tint - the
+	# procedural version below already treats it that way (its own outline, its own hem and
+	# stitching), so the art must be allowed to as well.
+	var mitt_key := ("char/glove_" if gloved else "char/hand_") + ("open" if openf > 0.5 else "closed")
+	var mitt_art := art_blit_size(mitt_key, mitt_c,
+		Vector2(inward * 23.0, 23.0 + stretch * 2.0), 0.0, sk)
+	# NOTE the deliberate absence of an early `return` here: this function still has to draw
+	# the props RESTING IN THE PALM further down, and "a prop in a hand is drawn in that
+	# hand, with no exceptions" is a standing rule of this file. Only the MITT is replaced.
+	if not mitt_art:
+		if gloved:
+			# SILK GLOVES, third pass (2026-07-31, Louis: "the gloves still look horrible on the
+			# player and in the tailor"). The second pass added a thumb, which was the right
+			# instinct - a glove has a shape a bare hand does not - but drew it as its own
+			# 5-point polygon glued to the palm ellipse, so the two pieces never quite agreed at
+			# the seam and it read as a blob with a fin on it. mitt_shape draws the thumb as a
+			# bulge in the SAME outline the palm is, one continuous edge, no seam to disagree at.
+			draw_colored_polygon(mitt_shape(mitt_c, 11.5, 11.5 + stretch, inward * -1.15, 0.62), sk)
+		else:
+			fill_ellipse(mitt_c, 11.5, 11.5 + stretch, sk)
+		draw_circle(pos + Vector2(0, -2), 8.0, Color(1.0, 0.82, 0.55, 0.12))
+		if gloved:
+			var hem := sk.darkened(0.18)
+			var seam := sk.darkened(0.30)
+			# ONE stitch line along the thumb ridge - the bulge itself now says "glove", so this
+			# is the seam a real one would show there, not three lines pretending to be several
+			draw_line(pos + Vector2(inward * 5.4, -1.6), pos + Vector2(inward * 11.6, -9.0),
+				Color(seam.r, seam.g, seam.b, 0.5), 1.1)
+			# the wrist opening: a band with a scalloped lower edge and a button at the side,
+			# which is what a dress glove closes with
+			var wy := pos.y + 7.2
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(pos.x - 10.4, wy - 3.4), Vector2(pos.x + 10.4, wy - 3.4),
+				Vector2(pos.x + 9.0, wy + 4.4), Vector2(pos.x + 3.4, wy + 2.2),
+				Vector2(pos.x, wy + 5.6), Vector2(pos.x - 3.4, wy + 2.2),
+				Vector2(pos.x - 9.0, wy + 4.4)]), hem)
+			draw_line(Vector2(pos.x - 10.0, wy - 2.6), Vector2(pos.x + 10.0, wy - 2.6), Color(1, 1, 1, 0.30), 1.3)
+			draw_circle(Vector2(pos.x + inward * 7.4, wy + 0.6), 1.5, Color(seam.r, seam.g, seam.b, 0.85))
+			# the silk's own sheen: one small filled highlight, up and left like every other
+			# light on this stage
+			fill_ellipse(pos + Vector2(-3.6, -4.6 - stretch * 0.4), 4.2, 2.8, Color(1, 1, 1, 0.30))
 
 	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
 	# drawn at stage centre while held. That was a fix for an older hand placement: the
@@ -14985,8 +15328,13 @@ func k_count() -> Array[String]:
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
 	# a small keyboard-key box; returns its width so hints can chain
 	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0)
-	draw_rect(Rect2(x, y, w, 19.0), Color(0.15, 0.10, 0.10, 0.92))
-	draw_rect(Rect2(x, y, w, 19.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
+	# SEAM: the CAP only. The width above and the label below are LAYOUT and must not move
+	# when art arrives - every hint row in the game chains off this return value, and a key
+	# hint whose text stopped fitting its box would be a legibility regression, not a
+	# restyle. So the sprite is stretched to the box the text asked for, never the reverse.
+	if not art_blit_rect("ui/keycap", Rect2(x, y, w, 19.0)):
+		draw_rect(Rect2(x, y, w, 19.0), Color(0.15, 0.10, 0.10, 0.92))
+		draw_rect(Rect2(x, y, w, 19.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
 	draw_string(font, Vector2(x, y + 14.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, 12, Color(1.0, 0.9, 0.7))
 	return w
 
@@ -15806,6 +16154,13 @@ func draw_card_frame(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> v
 	# THE CARD ITSELF, shared by every face and both backs so the deck looks like a deck.
 	# Rounded body in the kind's own paper, a bright keyline, and an inset second line -
 	# which is the mark that makes a rectangle read as a printed card rather than a panel.
+	#
+	# SEAM: two keys, skill vs trick, matching the one thing the frame encodes. `a` rides
+	# in as the tint's alpha so the deal/flip animations keep fading the frame exactly as
+	# they do now. NOT sized off the art: cards are laid out by the screens that own them,
+	# and `lift` (the hover raise) scales the rect, so the sprite follows the rect.
+	if art_blit_rect("ui/card_trick" if is_trick else "ui/card_skill", r, Color(1, 1, 1, a)):
+		return
 	var kc := card_kind_col(is_trick)
 	soft_card(r, Color(card_field(is_trick).r, card_field(is_trick).g, card_field(is_trick).b, 0.99 * a),
 		Color(kc.r, kc.g, kc.b, 0.85 * a), 2.5 * lift, 14.0 * lift, 22.0)
@@ -17304,6 +17659,11 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 	# KEYED BY ID, not by row number (2026-07-28). It used to match on 0..3, which is the
 	# same fragility the shop's buy keys had: the moment the gear list grew past four and
 	# split across two rooms, an index meant a different object in each room.
+	#
+	# SEAM: keyed by the same `id`, for the same reason - "ui/gear_pie" cannot drift onto
+	# the wrong row the way "the third icon" can.
+	if art_blit_size("ui/gear_" + id, c, Vector2(40.0, 40.0), 0.0, cc):
+		return
 	match id:
 		"glasses":   # GLASSES: two glazed lenses in a real frame, with temples going back
 			for sgn in [-1.0, 1.0]:
@@ -20369,6 +20729,14 @@ func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, 
 	# deliberately extravagant - dozens of shapes per object where the stage draws a
 	# handful. One dispatcher so the shop card and the F9 stage toggle can never show
 	# different pictures of the same object.
+	#
+	# ...and BECAUSE it is one dispatcher, it is also the single seam for all seven props:
+	# stage, shop card, tutorial kit panel and skills preview all arrive here, so one PNG
+	# per prop replaces that prop EVERYWHERE at once. `col` is handed over as the tint, so
+	# per-ball colour variation keeps working on a sprite exactly as it works on the
+	# procedural disc - author the round props WHITE and let the game colour them.
+	if art_blit(art_key_prop(kind), pos, sc, ang, col):
+		return
 	match kind:
 		PROP_EGGS:     cap_egg(pos, col, sc)
 		PROP_RINGS:    cap_ring(pos, col, 12.0 * sc)
@@ -22757,6 +23125,13 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 			var t := TAU * float(k) / 8.0
 			lv.append(mid + side * 3.4 * sc + Vector2(cos(t) * 3.6 * sc, sin(t) * 1.6 * sc).rotated(dir.angle()))
 		draw_colored_polygon(lv, Color(0.34, 0.60, 0.30, a))
+	# SEAM, deliberately placed AFTER the stem: the stem is a DIRECTION (it points back
+	# along the way the flower is lying), not a picture, so it stays procedural and a
+	# bloom sprite drops on top of it. One key per TIER, because the tier is carried by
+	# petal count and colour and is meant to be read at a glance without a number - a
+	# single sprite tinted three ways would throw away the one thing this drawing is for.
+	if art_blit("fx/flower_t%d" % tier, p, sc, rot, Color(1, 1, 1, a)):
+		return
 	if tier == FLOWER_BOUQUET:
 		# A BOUQUET IS SEVERAL FLOWERS, never one big one. Three blooms round a single
 		# binding point with the florist's paper behind them: that is the read that says
@@ -22798,6 +23173,8 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 
 
 func draw_tomato(p: Vector2, sc: float, rot: float, a: float) -> void:
+	if art_blit("fx/tomato", p, sc, rot, Color(1, 1, 1, a)):
+		return   # SEAM
 	var r := 6.0 * sc
 	fill_ellipse(p, r * 1.05, r * 0.92, Color(0.86, 0.18, 0.16, a))
 	draw_circle(p + Vector2(-r * 0.32, -r * 0.34), r * 0.24, Color(1.0, 0.62, 0.54, 0.7 * a))
@@ -23860,6 +24237,8 @@ func _capture_and_quit() -> void:
 		if tex != null:
 			var img := tex.get_image()
 			if img != null:
+				if _art_pixel:
+					img = art_pixel_preview(img)
 				img.save_png(_shot_path)
 	get_tree().quit()
 
