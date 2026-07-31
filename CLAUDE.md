@@ -132,3 +132,17 @@ quality-led, tonal stingers only, no ambient crowd bed.
 - The shutdown "ObjectDB leaked"/"resources still in use" noise is benign (live music streams at
   quit) - only worry if the count grows with run length.
 - The juggler figure's stance/proportions are settled: never reshape as a side effect of a fix.
+- **`--shot` lies when the window is not focused.** `get_viewport().get_texture().get_image()`
+  hands back the last *presented* frame, which on an unfocused window can be seconds stale - so
+  a capture looks like the game is stuck on an old screen when it is not. Launch, then
+  `osascript -e 'tell application "System Events" to set frontmost of (first process whose name
+  contains "Godot") to true'` a few seconds in. `--shotat` counts PHYSICS frames (120/s), and a
+  tutorial freeze burns them without advancing `tick`, so it is not a clock.
+- **Parse-check what is COMMITTED, not the working tree.** `178cbd9` shipped a Game.gd that
+  referenced three constants declared only in an uncommitted line; `godot --check-only` on the
+  working tree passed and a clone of the tip would not load at all. `git clone --depth 1
+  file:///path && godot --headless --check-only --script Game.gd` is the check that catches it.
+- **Cascade only crosses at an ODD count** (`do_throw`'s `cross`), and the basics lesson
+  overrides that for its two-ball step. Any tutorial choreography written by hand has to know
+  which of the two it is standing in, or the scripted hand order goes wrong from the second
+  exchange - and it goes wrong invisibly, because the catch guard quietly covers for it.
