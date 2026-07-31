@@ -1,0 +1,25 @@
+# gdlint config (gdtoolkit) - tuned for Game.gd's deliberate one-file architecture.
+#
+# Disabled rules and why, so nobody re-enables them by copying a template later:
+#   class-definitions-order - Game.gd groups consts/vars/funcs BY GAME SYSTEM
+#     (throw model, catch model, shop, tailor, ...), not by declaration type.
+#     That grouping is documented and deliberate (see CLAUDE.md); this rule
+#     would ask for a reorganization the project explicitly does not want.
+#   max-public-methods / max-returns / max-file-lines - all three fire because
+#     the game is one intentionally-consolidated script (see AUDIT_2026-07-26.md
+#     P3: "workable today, needs guardrails before another large feature pass" -
+#     the guardrail is code review discipline, not a line-count lint gate).
+#   max-line-length - the file uses long trailing/aligned comments as inline
+#     documentation on purpose (verified: lines run past 400 characters in
+#     several places). No threshold silences the deliberate cases without also
+#     hiding genuinely runaway lines, so the rule adds noise, not signal, here.
+disable:
+  - class-definitions-order
+  - max-public-methods
+  - max-returns
+  - max-file-lines
+  - max-line-length
+
+# draw_performer_polish legitimately takes 11 params (wardrobe pieces + venue
+# palette); that's a known, reviewed case, not sprawl. Default is 10.
+function-arguments-number: 12
