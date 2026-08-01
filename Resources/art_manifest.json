@@ -47,6 +47,6 @@
 
   "prop/ball":  { "path": "res://Assets/Props/ball.png",  "pivot": [0.5, 0.5],   "scale": 1.0 },
   "prop/ring":  { "path": "res://Assets/Props/ring.png",  "pivot": [0.5, 0.5],   "scale": 1.0 },
-  "prop/club":  { "path": "res://Assets/Props/club.png",  "pivot": [0.5, 0.558], "scale": 1.0 },
+  "prop/club":  { "path": "res://Assets/Props/club.png",  "pivot": [0.5, 0.558], "scale": 0.3333 },
   "prop/knife": { "path": "res://Assets/Props/knife.png", "pivot": [0.5, 0.663], "scale": 1.0 }
 }

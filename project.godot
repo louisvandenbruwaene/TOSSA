@@ -23,6 +23,15 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[importer_defaults]
+
+texture={
+"compress/mode": 0,
+"detect_3d/compress_to": 0,
+"mipmaps/generate": false,
+"process/fix_alpha_border": false
+}
+
 [input_devices]
 
 buffering/agile_event_flushing=true
@@ -31,39 +40,11 @@ buffering/agile_event_flushing=true
 
 common/physics_ticks_per_second=120
 
-; PIXELTOSSA: every newly imported texture is pixel art by default, so nobody has to
-; remember to tick four boxes per PNG in the import dock.
-;   compress/mode 0      lossless - a compressed 8x8 block smears hand-placed pixels
-;   mipmaps/generate     off - mips are for minified 3D, and one would blur the art
-;   fix_alpha_border     off - it rewrites the colour of transparent pixels; harmless
-;                        under nearest filtering, but it means the file on disk is not
-;                        what the game shows, and that is a bad thing to debug later
-[importer_defaults]
-
-texture={
-"compress/mode": 0,
-"mipmaps/generate": false,
-"process/fix_alpha_border": false,
-"detect_3d/compress_to": 0
-}
-
 [rendering]
 
+textures/canvas_textures/default_texture_filter=0
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.06, 0.03, 0.05, 1)
-; NEAREST-NEIGHBOUR EVERYWHERE (0 = Nearest). The one setting that makes a sprite look
-; like pixel art instead of a small blurry picture. Costs nothing today - the branch
-; point ships zero textures - and is correct for every one that arrives.
-textures/canvas_textures/default_texture_filter=0
-; Node transforms snap to whole pixels. Cheap and right; there is one Node2D in this
-; project, so today it is a statement of intent more than an effect.
 2d/snap/snap_2d_transforms_to_pixel=true
-; snap_2d_vertices_to_pixel is DELIBERATELY LEFT OFF and should stay off until the last
-; procedural drawing is gone. It snaps EVERY 2D vertex, including the sub-pixel alpha
-; feathers this project's triangle-array edges depend on for their anti-aliasing (see
-; docs/coding_guidelines.md) - turning it on now would visibly chew the edges of art
-; that is still doing the job. Sprites get their snapping in `art_snap` instead, which
-; snaps the sprites without touching the paint. Flip this on at the end of the remaster.
-2d/snap/snap_2d_vertices_to_pixel=false
