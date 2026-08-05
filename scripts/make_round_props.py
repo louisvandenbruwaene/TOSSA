@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Draw the three round props' CARD art: ball, ring and egg.
+
+WHY THESE THREE ARE GENERATED HERE RATHER THAN BY PIXELLAB. prop_big/* is normally
+PixelLab's job and it is genuinely good at it - the club, knife, torch and chainsaw
+come back on-palette, crisply banded and with a confident silhouette. It cannot draw
+a BALL. Measured 2026-08-05, what came back was a raytraced sphere with a smooth
+continuous ramp instead of shading bands, standing on a plinth fused to its own
+outline; the egg the same; and the ring arrived as a torus in three-quarter
+perspective whose tube did not close, so it read as an open coil rather than a ring.
+Beside four crisp painted props they looked like a different game, which is exactly
+what Louis called out.
+
+Deriving them from the game's own drawing (pixelise_prop.py --big) fixes the geometry
+and loses the volume - a flat white disc with a grey rim, because the stage sprite has
+eleven pixels to say "sphere" with and does not need to.
+
+But a ball, a ring and an egg are ANALYTIC SURFACES, so there is a third option that
+neither generation nor derivation offers: compute the shading exactly. That is what
+this does. Every value below is a lighting decision, not a resampling artefact.
+
+WHAT MAKES IT READ AS PIXEL ART RATHER THAN A SMALL RENDER:
+
+1. COVERAGE IS SUPERSAMPLED AND THEN HARD-THRESHOLDED, so the silhouette is a true
+   circle at pixel resolution with no semi-transparent fringe. Blur at the edge is the
+   single thing that makes generated pixel art look fake.
+2. SHADING IS COMPUTED AT FINAL RESOLUTION AND QUANTISED TO BANDS, so a band boundary
+   lands on an exact pixel edge. Supersampling the shading too would reintroduce the
+   smooth ramp this exists to avoid.
+3. A RIM LIGHT along the shadow edge. This is the one that does the most work: without
+   it a shaded sphere reads as a flat disc with a dark side, and with it the form turns.
+
+THEY ARE AUTHORED GREYSCALE AND MUST STAY THAT WAY. draw_prop_icon multiplies these by
+the prop's own colour, and a multiply can only ever DARKEN, so the brightest pixel has
+to be pure white or every ball in the game is permanently dulled. The floor matters
+just as much: GREY_FLOOR keeps the darkest band off black, because against a dark card
+a near-black pixel is indistinguishable from a transparent one and the silhouette grows
+holes. That is also why there is NO dark outline here, even though the painted props
+have one - an outline would multiply toward black and eat the edge.
+
+USAGE
+  .venv/bin/python scripts/make_round_props.py               # report only
+  .venv/bin/python scripts/make_round_props.py --write       # apply (artguard-guarded)
+  .venv/bin/python scripts/make_round_props.py --write --force
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+import artguard
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "Assets" / "Props"
+
+SS = 8                # supersampling factor, for coverage only
+BANDS = 6             # discrete shading steps - matches the painted props' density
+GREY_FLOOR = 0.45     # darkest value a tinted prop may use (see pixelise_prop.py)
+LIGHT = np.array([-0.50, -0.62, 0.60])   # key light: upper-left, toward the viewer
+LIGHT = LIGHT / np.linalg.norm(LIGHT)
+
+# Sizes chosen so every card reads as equally filled and NOTHING overflows. The card's
+# picture area is about 119x92 art px, and draw_prop_icon adds a bob and a contact
+# shadow under it, so ~76 art px is the safe ceiling - the painted props run 79-90 tall
+# and needed the draw-side offset fix to fit at all. Round props were far smaller than
+# the painted ones (a 36px ball beside an 88px club) which left their cards looking
+# empty, so they grow here as well as improve.
+SIZES = {"ball": (52, 52), "ring": (62, 62), "egg": (46, 60)}
+
+
+def quantise(v: np.ndarray) -> np.ndarray:
+	"""Lambert term -> one of BANDS discrete values in [GREY_FLOOR, 1]."""
+	b = np.clip(np.floor(v * BANDS), 0, BANDS - 1)
+	return GREY_FLOOR + (1.0 - GREY_FLOOR) * (b / (BANDS - 1))
+
+
+def grids(w: int, h: int):
+	"""Final-resolution pixel centres, normalised to [-1,1] on the larger axis."""
+	ys, xs = np.mgrid[0:h, 0:w]
+	x = (xs + 0.5) / w * 2.0 - 1.0
+	y = (ys + 0.5) / h * 2.0 - 1.0
+	return x, y
+
+
+def ss_grids(w: int, h: int):
+	ys, xs = np.mgrid[0:h * SS, 0:w * SS]
+	x = (xs + 0.5) / (w * SS) * 2.0 - 1.0
+	y = (ys + 0.5) / (h * SS) * 2.0 - 1.0
+	return x, y
+
+
+def coverage(mask_ss: np.ndarray, w: int, h: int) -> np.ndarray:
+	"""Supersampled mask -> hard pixel mask (majority coverage)."""
+	m = mask_ss.reshape(h, SS, w, SS).mean(axis=(1, 3))
+	return m >= 0.5
+
+
+def shade(nx, ny, nz, inside):
+	"""Wrapped lambert + specular + rim, quantised. Returns value in [0,1]."""
+	ndl = nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]
+	# WRAP LIGHTING, not clipped lambert. Straight max(0, N.L) puts the terminator
+	# halfway across the form and dumps everything beyond it into the darkest band, so
+	# a sphere came out as a bright crescent on a big flat grey field - and since these
+	# sprites are MULTIPLIED by the prop's colour, that flat field is what the shop card
+	# actually shows. Wrapping remaps [-1,1] to [0,1] so the bands spread evenly across
+	# the whole surface, which is both how a round object looks under a soft stage light
+	# and how pixel artists band a sphere by hand.
+	lam = ndl * 0.5 + 0.5
+	val = quantise(lam)
+	# RIM LIGHT: the bounce along the edge AWAY from the key light. This is the single
+	# thing that stops a shaded sphere reading as a flat disc with a dark side - it
+	# separates the form from the background and turns it. Keyed on how edge-on the
+	# surface is (nz small) and how far from the light it faces, so it hugs the
+	# lower-right silhouette and never touches the lit side.
+	edge = np.clip(1.0 - nz, 0.0, 1.0)
+	away = np.clip(-(nx * LIGHT[0] + ny * LIGHT[1]), 0.0, 1.0)
+	rim = (edge ** 1.5 * away) > 0.30
+	val = np.where(rim, np.maximum(val, 0.80), val)
+	# SPECULAR: a small hard cluster where the surface faces the light most directly.
+	# Pure white, because a multiply can only darken and this is the tint's anchor.
+	val = np.where(ndl > 0.955, 1.0, val)
+	return np.where(inside, val, 0.0)
+
+
+def sphere(w, h):
+	xs, ys = ss_grids(w, h)
+	inside = coverage(xs ** 2 + ys ** 2 <= 1.0, w, h)
+	x, y = grids(w, h)
+	r2 = np.clip(x ** 2 + y ** 2, 0.0, 1.0)
+	z = np.sqrt(np.maximum(0.0, 1.0 - r2))
+	return shade(x, y, z, inside), inside
+
+
+def egg(w, h):
+	# A classic egg profile: an ellipse whose width tapers toward the TOP, so the blunt
+	# end is down. Shading uses the ellipsoid normal, which is close enough at this size
+	# and far steadier than differentiating the taper.
+	def prof(x, y):
+		t = np.clip(1.0 - 0.22 * (-y), 0.02, 2.0)   # y = -1 at top, +1 at bottom
+		return (x / t) ** 2 + y ** 2
+
+	xs, ys = ss_grids(w, h)
+	inside = coverage(prof(xs, ys) <= 1.0, w, h)
+	x, y = grids(w, h)
+	r2 = np.clip(prof(x, y), 0.0, 1.0)
+	z = np.sqrt(np.maximum(0.0, 1.0 - r2))
+	return shade(x, y, z, inside), inside
+
+
+def ring(w, h):
+	# FACE-ON, matching the ring the stage actually draws, and a closed tube - the
+	# generated one's open seam is what made it read as a coil. The surface normal is
+	# the torus normal: at distance d from the centre, the tube's cross-section angle
+	# is phi = asin((d - R_mid) / R_tube), and the normal leans radially by sin(phi)
+	# while facing the viewer by cos(phi).
+	r_mid, r_tube = 0.72, 0.26
+	xs, ys = ss_grids(w, h)
+	d_ss = np.sqrt(xs ** 2 + ys ** 2)
+	inside = coverage(np.abs(d_ss - r_mid) <= r_tube, w, h)
+	x, y = grids(w, h)
+	d = np.sqrt(x ** 2 + y ** 2)
+	d = np.where(d < 1e-6, 1e-6, d)
+	phi = np.arcsin(np.clip((d - r_mid) / r_tube, -1.0, 1.0))
+	nz = np.cos(phi)
+	nr = np.sin(phi)
+	return shade(x / d * nr, y / d * nr, nz, inside), inside
+
+
+SHAPES = {"ball": sphere, "ring": ring, "egg": egg}
+
+
+def build(name: str, write: bool, force: bool) -> str:
+	w, h = SIZES[name]
+	val, inside = SHAPES[name](w, h)
+	g = np.clip(np.round(val * 255.0), 0, 255).astype(np.uint8)
+	rgba = np.dstack([g, g, g, np.where(inside, 255, 0).astype(np.uint8)])
+	# tight-crop: prop_big/* has no pivot, so art_blit centres on the canvas
+	ys, xs = np.where(inside)
+	rgba = rgba[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+	levels = len(np.unique(g[inside]))
+	if not write:
+		return f"{name:5} {rgba.shape[1]:3}x{rgba.shape[0]:<3} {levels} grey levels  (report only)"
+	p = OUT / f"big_{name}.png"
+	status = artguard.save_guarded(p, lambda q: Image.fromarray(rgba, "RGBA").save(q), force)
+	return f"{name:5} {rgba.shape[1]:3}x{rgba.shape[0]:<3} {levels} grey levels  [{status}]"
+
+
+def main() -> int:
+	write = "--write" in sys.argv
+	force = "--force" in sys.argv
+	names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(SIZES)
+	for n in names:
+		print(build(n, write, force))
+	if not write:
+		print("\n(pass --write to apply)")
+	return 0
+
+
+if __name__ == "__main__":
+	sys.exit(main())

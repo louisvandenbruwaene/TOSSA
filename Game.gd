@@ -2199,7 +2199,13 @@ func _ready() -> void:
 		_late_catch_n = int(ua[lci + 1])
 	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
 		_handlog = true
-	var skip_menu := _demo or _shot or _collcheck or _handlog or debug_mode or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
+	# debug_mode is NOT in this list (2026-08-05, Louis: the debug build should open the
+	# title screen, not a practice tool). It used to be, so /Applications/PIXELTOSSA
+	# Debug.app dropped straight into Practice and the menu, slots, settings and credits
+	# were unreachable in the one build made for looking at things. Every OTHER entry here
+	# is an unattended dev capture that genuinely has nowhere to click, and --demo/--shot
+	# still skip the menu when combined with --debug, which is what venue previews use.
+	var skip_menu := _demo or _shot or _collcheck or _handlog or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
 	if ua.has("--menu"):   # dev: hold the title screen, which is what --shot otherwise skips past.
 		skip_menu = false  # It briefly took a 1..4 variant while the four backdrops were being
 						   # compared; there is one picture again, so there is nothing to pick.
@@ -6919,6 +6925,16 @@ func apply_fullscreen() -> void:
 #region SAVE SLOTS
 func start_slot(i: int) -> void:
 	save_slot = i
+	# THE DEBUG BUILD HAS ONE SAVE, NOT THREE, and it must never be reset. save_file()
+	# returns SAVE_PATH_DEBUG whenever debug_mode is on, so the per-slot file this screen
+	# shows is not what actually gets loaded - and measuring `fresh` against slot_path(i)
+	# would send a stocked sandbox through reset_new_game() and into the basics tutorial,
+	# wiping every maxed stat the moment Louis clicked a slot. load_progress() stocks the
+	# debug save if it has not been (see debug_stock), so this always resumes a full one.
+	if debug_mode:
+		load_progress()
+		enter_day()
+		return
 	var fresh := not FileAccess.file_exists(slot_path(i))
 	if fresh:
 		reset_new_game()
@@ -10794,6 +10810,56 @@ func load_progress() -> void:
 	stamina = clampf(float(cf.get_value("day", "stamina", stamina_max)), 0.0, stamina_max)
 	if venue_pick < 0:
 		venue_pick = venue_index()   # older saves default to their grandest stage
+	# THE DEBUG BUILD STOCKS ITSELF (see debug_stock). Outside the load block on purpose:
+	# a debug save that does not exist yet never enters it, and that is exactly the case
+	# this exists for. get_value on an unloaded ConfigFile returns the default, so a
+	# missing file reads as "not stocked" and gets stocked.
+	if debug_mode and not bool(cf.get_value("prog", "debug_stocked", false)):
+		debug_stock()
+
+
+func debug_stock() -> void:
+	# A DEBUG BUILD SHOULD OPEN INTO A SANDBOX, NOT A GRIND. The debug shortcuts (1/2/3/4
+	# up, Q/W/E/R down, M/N purse, ,/. reputation, F1-F7 venue jumps) are byte-identical to
+	# TOSSA's - that was never the gap. The gap was the SAVE: TOSSA's tossa_debug.cfg had
+	# been played into a loaded sandbox over months (every stat at 200, eight figures in the
+	# purse, every prop and garment owned), while this fork started a brand new
+	# pixeltossa_debug.cfg at three balls and sixty flowers. Same perks, nothing to use them
+	# on, so the debug build opened on a pauper and everything interesting was a grind away.
+	#
+	# Copying the file across would have fixed it once and diverged again, and would not
+	# survive deleting the save. Stocking on first load fixes it for good, including for a
+	# third fork. It runs ONCE - `debug_stocked` is written into the save - so anything
+	# deliberately spent or sold from here stays spent.
+	#
+	# It cannot touch a real career: save_file() returns SAVE_PATH_DEBUG whenever
+	# debug_mode is on, and debug_mode is only ever set by --debug.
+	accuracy = ACC_CAP
+	strength = STR_CAP
+	endurance = END_CAP
+	speed = SPEED_CAP
+	stamina_max = 100.0 + 9.0 * float(endurance)
+	stamina = stamina_max
+	money = 100_000_000            # past anything the shop can ask for, and it is a sandbox
+	reputation = 12000             # clears every gate including the Midnight Show's 6000
+	energy_drinks = 20
+	pie_count = 10
+	has_backroom = true
+	# every prop, at a count the late game can actually use, and the glowing version too
+	for i in prop_count.size():
+		prop_count[i] = MAX_BALLS_HARD
+		glow_count[i] = MAX_BALLS_HARD
+	# EVERY CUT OF EVERY GARMENT, not just this stage's. A wardrobe is 8 pieces x 7 houses
+	# and the whole point of the debug build is to look at any of them without earning it.
+	# Nothing is WORN: wear_normalize enforces one piece per category, and picking the
+	# outfit is a thing to test rather than a thing to assume.
+	owned_wear.clear()
+	for p in WEAR_PIECES:
+		for v in TOP_VENUE + 2:      # 0..TOP_VENUE plus the Midnight Show's own cut
+			owned_wear.append(wear_key(p, v))
+	# points to spend, so the character sheet has something to do on the first screen
+	points = 20
+	save_progress()
 
 
 func save_progress() -> void:
@@ -10829,6 +10895,9 @@ func save_progress() -> void:
 	cf.set_value("prog", "xp", xp)
 	cf.set_value("prog", "points", points)
 	cf.set_value("prog", "won", won)
+	# written for every save, read only by the debug build (see debug_stock): it is what
+	# stops the sandbox being restocked over whatever the last debug session left behind.
+	cf.set_value("prog", "debug_stocked", debug_mode)
 	cf.set_value("prog", "demo_wall_seen", demo_wall_seen)
 	cf.set_value("prog", "purist_legend_seen", purist_legend_seen)
 	cf.set_value("prog", "best_scores", best_scores)
@@ -15277,8 +15346,20 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 	# call bypasses it: only the ROUND props take the colour, so those are authored
 	# greyscale; club, knife, torch and chainsaw carry their own paint.
 	var big_tinted := not (kind in [PROP_CLUBS, PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW])
-	if art_blit("prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower(), at, 1.0,
-			ang, col if big_tinted else Color.WHITE):
+	# CENTRED ON `pos`, NOT ON `at` - the sprite must not inherit the procedural drawing's
+	# geometry corrections. PROP_ICON_OFF exists because draw_prop_rich hangs each shape
+	# from a point that is not its visual middle (a club's grip, a torch's shaft), and it
+	# is scaled by `sc`, which for a torch on a full-size card is 2.96 - so the sprite was
+	# being shoved ~24px down on top of the card's own 6% push, and the club and the torch
+	# hung out through the bottom of their cards. A prop_big sprite is already tight-cropped
+	# and centred on its own content, so the only correction it wants is the bob.
+	#
+	# This is the seam quietly undoing a fit rule, which is the failure mode to watch for
+	# whenever a sprite replaces a drawing: draw_shop_card computes `mag` from the space
+	# actually left, expressly so a prop cannot "grow out through its own card", and that
+	# `mag` only ever reached the procedural path.
+	if art_blit("prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower(),
+			pos + Vector2(0.0, bob), 1.0, ang, col if big_tinted else Color.WHITE):
 		return
 	draw_prop_rich(kind, at, col, ang, sc)
 
