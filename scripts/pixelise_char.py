@@ -69,6 +69,31 @@ PARTS = {
 
 BOX_RE = re.compile(r"^BOX (\S+) ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)")
 
+# --- PER-REGION BODY PARTS ------------------------------------------------------------
+#
+# costume_palette() repaints the outfit per venue across five colours, so the body cannot
+# be one sprite and cannot be one tint. Each region becomes its own GREYSCALE mask, blitted
+# over the same box with that region's live colour.
+#
+# WHICH PIXELS BELONG TO WHICH REGION IS ANSWERED BY THE GAME, NOT BY ME. `--charid` makes
+# costume_palette return saturated primaries no costume contains, so a second render is a
+# region ID map and classification is a nearest-colour test between maximally separated
+# points rather than an attempt to split two similar browns.
+#
+# key -> (filename, ID colour in the --charid render)
+REGIONS = {
+    "char/torso_suit":   ("torso_suit.png",   (255, 0, 0)),
+    "char/torso_collar": ("torso_collar.png", (255, 255, 0)),
+    "char/torso_vest":   ("torso_vest.png",   (0, 0, 255)),
+    # The buttons are NOT costume-derived - Color(0.34, 0.20, 0.11) is a literal - so they
+    # keep their own colour and are matched by it. Baking them into the vest mask instead
+    # would have let the waistcoat's tint repaint the buttons at every venue.
+    "char/torso_button": ("torso_button.png", (87, 51, 28)),
+    # Trousers are `suit_dk`, so they carry that region's ID rather than a trouser one.
+    "char/legs_trouser": ("legs_trouser.png", (0, 255, 0)),
+}
+ID_MAX_DIST = 90.0   # a pixel further than this from every ID colour is an overlay, not a region
+
 
 def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
     c = rgb / 255.0
@@ -186,13 +211,83 @@ def main() -> None:
         Image.fromarray(out, "RGBA").save(OUT / fname)
         rows.append((key, f"{int(w)}x{int(h)}", f"{tw}x{th}", "grey" if tinted else "colour"))
 
+    # --- per-region body parts -------------------------------------------------------
+    idp = d / "juggler_id.png"
+    if idp.exists():
+        idm = np.asarray(Image.open(idp).convert("RGB")).astype(np.float64)
+        ids = np.array([v[1] for v in REGIONS.values()], dtype=np.float64)
+        dist = np.linalg.norm(idm[:, :, None, :] - ids[None, None, :, :], axis=3)
+        which = np.argmin(dist, axis=2)
+        near = dist.min(axis=2) <= ID_MAX_DIST
+
+        # THE BUTTONS NEED A GUARD THE SATURATED IDS DO NOT. Every other region is painted
+        # a primary no costume contains, so nearest-colour classification is unambiguous.
+        # The buttons keep their real colour, Color(0.34, 0.20, 0.11), and the jacket's
+        # antialiased outer edge fades from red toward the dark field straight THROUGH
+        # that brown - so the raw match picks up a thin outline down the coat. Buttons are
+        # drawn on the waistcoat, so intersecting with a dilated vest mask removes the
+        # edge without touching a single real button pixel.
+        vest_i = list(REGIONS).index("char/torso_vest")
+        vest_m = (which == vest_i) & near
+        grown = vest_m.copy()
+        for _ in range(3):
+            g = grown
+            grown = (g | np.roll(g, 1, 0) | np.roll(g, -1, 0)
+                     | np.roll(g, 1, 1) | np.roll(g, -1, 1))
+
+        for ri, (key, (fname, _idc)) in enumerate(REGIONS.items()):
+            if key not in boxes:
+                rows.append((key, "not reached", "", ""))
+                continue
+            x, y, w, h = boxes[key]
+            x0, y0 = int(round(x)), int(round(y))
+            x1, y1 = int(round(x + w)), int(round(y + h))
+            m = (which == ri) & near
+            if key == "char/torso_button":
+                m = m & grown
+            mask = m[y0:y1, x0:x1]
+            if mask.sum() == 0:
+                rows.append((key, "no pixels", "", ""))
+                continue
+            crop = src[y0:y1, x0:x1].astype(np.float64)
+
+            # THE VALUE IS A RATIO, NOT A NORMALISATION. The sprite is multiplied by the
+            # live costume colour at draw time, so what it has to store is "how much of
+            # the base colour is here" - 1.0 on flat cloth, less where the drawing already
+            # shaded it. Dividing by the region's MODAL colour (the flat base, by far the
+            # most common pixel) reproduces the original exactly wherever it is flat, and
+            # darkens correctly where the procedural version had a shadow or a fold.
+            # Normalising min-to-max instead would invent contrast that was never there
+            # and would make a flat region come out as noise.
+            lum = 0.2126 * crop[..., 0] + 0.7152 * crop[..., 1] + 0.0722 * crop[..., 2]
+            vals = np.round(lum[mask]).astype(int)
+            base = float(np.bincount(np.clip(vals, 0, 255)).argmax())
+            v = np.clip(lum / max(base, 1e-6), 0.0, 1.0) * 255.0
+
+            tw, th = max(1, round(w / ART_PIXEL)), max(1, round(h / ART_PIXEL))
+            a = mask.astype(np.float64)
+            pm = np.stack([v * a, v * a, v * a, a * 255.0], axis=2).astype(np.uint8)
+            small = np.asarray(Image.fromarray(pm, "RGBA")
+                               .resize((tw, th), Image.BOX)).astype(np.float64)
+            aa = small[..., 3] / 255.0
+            keep = aa >= ALPHA_CUT
+            with np.errstate(invalid="ignore", divide="ignore"):
+                g = np.where(aa > 0, small[..., 0] / np.maximum(aa, 1e-6), 0)
+            g = np.clip(g, 0, 255)
+            out = np.stack([g, g, g, np.where(keep, 255, 0)], axis=2).astype(np.uint8)
+            Image.fromarray(out, "RGBA").save(OUT / fname)
+            rows.append((key, f"{int(w)}x{int(h)}", f"{tw}x{th}", "region"))
+    else:
+        print("(no juggler_id.png - skipping per-region body parts; run with --charid)")
+
     print(f"{'key':<20} {'render':>10} {'sprite':>8}  mode")
     for k, a, b, c in rows:
         print(f"{k:<20} {a:>10} {b:>8}  {c}")
     print("\nmanifest lines:")
     for k, a, b, c in rows:
         if b:
-            print(f'  "{k}": {{ "path": "res://Assets/Characters/{PARTS[k][0]}" }},')
+            fn = PARTS[k][0] if k in PARTS else REGIONS[k][0]
+            print(f'  "{k}": {{ "path": "res://Assets/Characters/{fn}" }},')
 
 
 if __name__ == "__main__":
