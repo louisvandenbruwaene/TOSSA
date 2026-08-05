@@ -84,6 +84,28 @@ declare -a TARGETS=(
 )
 
 wrong=0
+blank=0
+
+# THE THIRD WAY A CAPTURE LIES. The state assertion catches the wrong SCREEN and the
+# duplicate check catches the same frame twice, but neither sees a frame that is simply
+# EMPTY - the viewport read back before anything had been presented into it. Observed
+# 2026-08-05: day_hub_rest came back 1280x720 of pure black, a perfectly valid PNG, in a
+# run where its state assertion passed because the game really was in ST_DAY. Three
+# straight retries of the same command were clean, so it is transient like the others.
+#
+# One unique colour is the test, and it cannot false-positive on a real screen: every
+# screen in this game draws text, panels or a backdrop. Needs the venv; without it the
+# check is skipped rather than guessed at.
+frame_is_blank() {
+  [[ -x .venv/bin/python ]] || return 1
+  .venv/bin/python -c "
+import sys
+import numpy as np
+from PIL import Image
+a = np.asarray(Image.open(sys.argv[1]).convert('RGB'))
+sys.exit(0 if len(np.unique(a.reshape(-1, 3), axis=0)) <= 1 else 1)
+" "$1" 2>/dev/null
+}
 
 for entry in "${TARGETS[@]}"; do
   name="${entry%%:*}"
@@ -108,6 +130,11 @@ for entry in "${TARGETS[@]}"; do
     # wall-clock on a screen that was going to fail anyway.
     run_windowed 45 "$log" $flags --shot "$out" --shotat "$tick" || true
     got="$(grep -m1 '^shot state: ' "$log" | awk '{print $4}')"
+    if [[ -s "$out" ]] && frame_is_blank "$out"; then
+      log_warn "$name -> captured a BLANK frame - retrying"
+      rm -f "$out"
+      continue
+    fi
     [[ -z "$expect" || "$got" == "$expect" ]] && break
     log_warn "$name -> captured '$got', expected '$expect' - retrying"
     rm -f "$out"
@@ -116,6 +143,10 @@ for entry in "${TARGETS[@]}"; do
   if [[ ! -s "$out" ]]; then
     log_warn "$name -> FAILED (see log below; screen may need more game state than a cold boot gives it)"
     tail -10 "$log" | sed 's/^/    /'
+    fail=$((fail + 1))
+  elif frame_is_blank "$out"; then
+    log_err "$name -> BLANK FRAME twice (viewport read before anything was presented)"
+    blank=$((blank + 1))
     fail=$((fail + 1))
   elif [[ -n "$expect" && "$got" != "$expect" ]]; then
     log_err "$name -> WRONG SCREEN: captured '$got', expected '$expect' (twice)"
@@ -131,6 +162,7 @@ done
 echo
 log_info "Captured $ok/$((ok + fail)) screens."
 [[ $wrong -gt 0 ]] && log_err "$wrong screen(s) photographed the wrong state twice - see above."
+[[ $blank -gt 0 ]] && log_err "$blank screen(s) came back blank twice - see above."
 
 # --- STALE-FRAME GUARD (the belt to the state assertion's braces) -------------
 # The state check above catches a capture that landed in the wrong SCREEN. This
