@@ -17,13 +17,15 @@ THE PIXEL PREFIX IS NOT IN THE BAKE. It is type, it is already crisp in the pixe
 a quantised size, and reducing it by two would destroy it. --markref suppresses it, and
 the word draws live over the sprite.
 
-ONE SIZE ONLY. The sprite is authored against MENU_MARK and the seam uses it only at that
-exact letter height; anything else would need a fractional scale. The credits (52) and a
-narrow window's clamped title fall through to the drawing, which is correct.
+ONE TEXTURE PER SIZE. A bake is only correct at the letter height it was made at, since
+any other needs a fractional scale and scaling pixel art DOWN cannot be undone. The seam
+looks up ui/wordmark_<size>, so baking a new size is just running this again; a size with
+no bake falls through to the drawing. The BOX is size-independent - the four numbers this
+prints are in units of the letter height - so one set of offsets covers every size.
 
 USAGE
-  godot --audio-driver Dummy --path . -- --markref --shot artifacts/mark_ref/mark.png --shotat 200
-  .venv/bin/python scripts/pixelise_mark.py [--force]
+  godot --audio-driver Dummy --path . -- --markref 168 --shot artifacts/mark_ref/mark_168.png --shotat 200
+  .venv/bin/python scripts/pixelise_mark.py 168 [--force]
 """
 
 from __future__ import annotations
@@ -39,15 +41,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import artguard  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-REF = ROOT / "artifacts" / "mark_ref" / "mark.png"
-OUT = ROOT / "Assets" / "UI" / "wordmark.png"
+REF_DIR = ROOT / "artifacts" / "mark_ref"
+OUT_DIR = ROOT / "Assets" / "UI"
 PALETTE = ROOT / "Resources" / "palette" / "palette.json"
 
 CLEAR = np.array([15, 8, 13])
 BG_TOL = 10
 ALPHA_CUT = 0.42
 ART_PIXEL = 2
-MENU_MARK = 168.0
 MARK_PREFIX, MARK_RISE, MARK_DROP = 0.46, 1.06, 0.17
 VIEW = (1280.0, 720.0)
 
@@ -67,8 +68,11 @@ def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
+    size = float(next((a for a in sys.argv[1:] if not a.startswith("--")), 168))
+    REF = REF_DIR / f"mark_{int(size)}.png"
+    OUT = OUT_DIR / f"wordmark_{int(size)}.png"
     if not REF.exists():
-        raise SystemExit(f"no {REF} - run the game with --markref first (see the docstring)")
+        raise SystemExit(f"no {REF} - run the game with --markref {int(size)} first")
     a = np.asarray(Image.open(REF).convert("RGB")).astype(np.float64)
     m = np.abs(a - CLEAR).sum(axis=2) > BG_TOL
     ys, xs = np.where(m)
@@ -103,16 +107,16 @@ def main() -> None:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     st = artguard.save_guarded(OUT, lambda q: Image.fromarray(out, "RGBA").save(q),
                                "--force" in sys.argv)
-    artguard.report({"Assets/UI/wordmark.png": st})
+    artguard.report({str(OUT.relative_to(ROOT)): st})
 
     # The placement the seam needs, measured rather than assumed: where the drawn mark sits
     # relative to (screen centre, the props' baseline), in units of the letter height.
-    cy = VIEW[1] * 0.5 + MENU_MARK * ((MARK_PREFIX + MARK_RISE - MARK_DROP) * 0.5 - 0.5)
-    base = cy + MENU_MARK * 0.5
+    cy = VIEW[1] * 0.5 + size * ((MARK_PREFIX + MARK_RISE - MARK_DROP) * 0.5 - 0.5)
+    base = cy + size * 0.5
     print(f"{st}: {tw}x{th}")
     print("  capsule_mark's box, in units of `size`:")
-    print(f"    x  {(x0 - VIEW[0] * 0.5) / MENU_MARK:.5f}   y  {(y0 - base) / MENU_MARK:.5f}")
-    print(f"    w  {(x1 - x0) / MENU_MARK:.5f}   h  {(y1 - y0) / MENU_MARK:.5f}")
+    print(f"    x  {(x0 - VIEW[0] * 0.5) / size:.5f}   y  {(y0 - base) / size:.5f}")
+    print(f"    w  {(x1 - x0) / size:.5f}   h  {(y1 - y0) / size:.5f}")
 
 
 if __name__ == "__main__":

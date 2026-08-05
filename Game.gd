@@ -2152,8 +2152,12 @@ func _ready() -> void:
 	var chi := ua.find("--charhide")   # dev: leave ONE garment off under --chargear,
 	if chi != -1 and chi + 1 < ua.size():   # so a piece it would occlude can be seen
 		_charhide = ua[chi + 1]
-	if ua.has("--markref"):       # dev: the prop wordmark alone, at its title-screen size
+	var mri := ua.find("--markref")   # dev: the prop wordmark alone, at a given letter height
+	if mri != -1:
 		_markref = true
+		_markref_size = float(MENU_MARK)
+		if mri + 1 < ua.size() and not str(ua[mri + 1]).begins_with("--"):
+			_markref_size = float(ua[mri + 1])
 		art_on = false            # photograph the DRAWING, not a bake already replacing it
 	if ua.has("--bgref"):         # dev: the backdrop alone, unlit - see the bg seam
 		_bgref = true
@@ -11311,7 +11315,8 @@ var _chargear := false             # --chargear: wear every garment (reference r
 var _charback := false             # --charback: draw the figure facing away (the Spin view)
 var _charopen := false             # --charopen: hold the hand open (reference render only)
 var _charhide := ""                # --charhide <id>: one garment to leave off under --chargear
-var _markref := false              # --markref: the prop wordmark alone, for baking it to a sprite
+var _markref := false              # --markref [size]: the prop wordmark alone, for baking
+var _markref_size := 0.0           # ...at this letter height (default MENU_MARK)
 
 
 func art_boot() -> void:
@@ -11673,7 +11678,7 @@ func _draw() -> void:
 		# it is already crisp in the pixel font, and reducing it by two would destroy it.
 		# The bake is the props; the word draws live on top of it.
 		var mref := get_viewport_rect().size
-		capsule_mark(mref, mark_cy_centred(mref.y, float(MENU_MARK), 0.5), float(MENU_MARK))
+		capsule_mark(mref, mark_cy_centred(mref.y, _markref_size, 0.5), _markref_size)
 		return
 	if _bgref:
 		# draw_backdrop returns early under this flag, having drawn only the sky gradient
@@ -21859,11 +21864,18 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	# size would need a fractional scale, which is the one thing that reliably turns pixel
 	# art back into mush, so every other caller - the credits at 52, a narrow window's
 	# clamped title - correctly falls through to the drawing.
-	if not _markref and is_equal_approx(size, float(MENU_MARK)):
+	# KEYED BY SIZE, because a baked sprite is only correct at the size it was baked at -
+	# any other needs a fractional scale, and scaling pixel art DOWN is the one operation
+	# that cannot be undone. The mark is drawn at four sizes (the title, a store capsule,
+	# and two in the credits), so the bank holds one texture per size and a size with no
+	# bake simply falls through to the drawing. The BOX is size-independent: those four
+	# numbers are in units of the letter height, measured from the render by
+	# scripts/pixelise_mark.py, so one set covers every size.
+	if not _markref:
 		var base_y := cy + size * 0.5
 		var box := Rect2(s.x * 0.5 - size * 2.38095, base_y - size * 1.11548,
 			size * 4.71429, size * 1.26190)
-		if art_blit_rect("ui/wordmark", box, Color(1, 1, 1, _cap_a)):
+		if art_blit_rect("ui/wordmark_%d" % int(roundf(size)), box, Color(1, 1, 1, _cap_a)):
 			_cap_a = 1.0
 			return
 	var gap := size * CAP_GAP
@@ -23181,7 +23193,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				# minus the rise. It used to be a hand-picked 78, which happened to equal
 				# 52 * the MARK_RISE of the day and stopped being true the moment the A
 				# was rebuilt.
-				draw_wordmark(ry - 52.0 * MARK_RISE, 52, Color(gold.r, gold.g, gold.b, a), s)
+				draw_wordmark(ry - 52.0 * (MARK_PREFIX + MARK_RISE), 52, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(24), Color(0.9, 0.8, 0.68, a))
 			"orn":
@@ -23205,7 +23217,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.42
-		draw_wordmark(fy - 58.0 * MARK_RISE, 58, Color(1.0, 0.9, 0.55, fa), s)
+		draw_wordmark(fy - 58.0 * (MARK_PREFIX + MARK_RISE), 58, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.72, 0.6, 0.65 * fa))
 

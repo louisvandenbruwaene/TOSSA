@@ -44,5 +44,8 @@
   "Assets/UI/card_skill.png": "130c165060525d7f605f4d7f1db4fe3b0d1c66678015979e89fe26d59b36cfef",
   "Assets/UI/card_trick.png": "6893084b5c1bd952b61d8c0b5d135367185af220b05816baf76cafdf1c8f2389",
   "Assets/UI/keycap.png": "13fd48f1d0c7de107d1a0ee71ca7437af065b0b1769f95a14e5953f59cc64980",
-  "Assets/UI/wordmark.png": "eb96686f3e4f25baf0ea05eb9eaef5cb9ec7072e61cf48523ef678be819d62e5"
+  "Assets/UI/wordmark.png": "eb96686f3e4f25baf0ea05eb9eaef5cb9ec7072e61cf48523ef678be819d62e5",
+  "Assets/UI/wordmark_168.png": "eb96686f3e4f25baf0ea05eb9eaef5cb9ec7072e61cf48523ef678be819d62e5",
+  "Assets/UI/wordmark_52.png": "50de644e9ad15c9b1a3a66cc6d555cf179a8f6062f28b4626a830bfd08e64788",
+  "Assets/UI/wordmark_58.png": "99157f5fbfbe89c476848d1a83ff06f8cf7bf65ebeea5f96e9725304fba07eef"
 }
