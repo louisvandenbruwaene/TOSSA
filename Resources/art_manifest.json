@@ -110,5 +110,7 @@
   "char/boot": { "path": "res://Assets/Characters/boot.png" },
   "char/torso_back_suit": { "path": "res://Assets/Characters/torso_back_suit.png" },
   "char/torso_back_collar": { "path": "res://Assets/Characters/torso_back_collar.png" },
-  "ui/wordmark": { "path": "res://Assets/UI/wordmark.png" }
+  "ui/wordmark_168": { "path": "res://Assets/UI/wordmark_168.png" },
+  "ui/wordmark_58":  { "path": "res://Assets/UI/wordmark_58.png" },
+  "ui/wordmark_52":  { "path": "res://Assets/UI/wordmark_52.png" }
 }
