@@ -13401,6 +13401,70 @@ func draw_capsule(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> v
 	draw_circle(b, rb, col)
 
 
+func draw_capsule_pix(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> void:
+	# THE SAME CAPSULE, RASTERISED ONTO THE ART GRID. One draw_rect per art row.
+	#
+	# WHY THIS EXISTS AND WHY IT IS NOT A SPRITE. The arms were the last part of the
+	# figure off the grid, and it showed: with the torso, head and hands sprited, the
+	# body stepped in clean 2px blocks while the arms kept smooth 1px diagonals, which is
+	# the exact tell that says "vector art pretending to be pixel art".
+	#
+	# A sprite cannot fix it. draw_arm's bones are `maxf(46.0, reach * 0.56)`, so the
+	# segments STRETCH with reach every frame, and a fixed sprite stretched to a variable
+	# length is distortion rather than animation. Pre-rendering a rotation bank does not
+	# help either, because the bank would have to be two-dimensional - angle by length.
+	#
+	# So the shape stays procedural and only its RASTERISATION changes. Filling by art row
+	# gives genuine 2px quantisation at any angle and any length, with no assets, and it
+	# tracks the IK exactly because it IS the IK.
+	#
+	# The span per row is the union of the two end discs and the connecting quad - which
+	# is what draw_capsule actually draws, and deliberately not the convex hull of the two
+	# discs. The quad uses a perpendicular offset rather than the true tangent, so the hull
+	# would be very slightly fatter at the taper and the two versions would not A/B.
+	#
+	# Cost is one rect per art row (about 35 for an upper arm) against the two calls the
+	# polygon version spends. Measured against the file's ~5us-per-call guidance that is
+	# well under a millisecond for the whole figure, and it is only used on the arms.
+	var ra := wa * 0.5
+	var rb := wb * 0.5
+	var d := b - a
+	var L := d.length()
+	var n := (Vector2(-d.y, d.x) / L) if L > 0.001 else Vector2.ZERO
+	# the quad's four corners, in order, so consecutive pairs are its edges
+	var q := [a + n * ra, b + n * rb, b - n * rb, a - n * ra]
+
+	var top := minf(a.y - ra, b.y - rb)
+	var bot := maxf(a.y + ra, b.y + rb)
+	var y := floorf(top / ART_PIXEL) * ART_PIXEL
+	while y < bot:
+		var cy := y + ART_PIXEL * 0.5      # sample the row's CENTRE, not its top edge
+		var lo := INF
+		var hi := -INF
+		for i in 2:
+			var c: Vector2 = a if i == 0 else b
+			var r: float = ra if i == 0 else rb
+			var dy := cy - c.y
+			if absf(dy) < r:
+				var hw := sqrt(r * r - dy * dy)
+				lo = minf(lo, c.x - hw)
+				hi = maxf(hi, c.x + hw)
+		if L > 0.001:
+			for i in 4:
+				var p: Vector2 = q[i]
+				var s: Vector2 = q[(i + 1) % 4]
+				if (p.y <= cy and s.y > cy) or (s.y <= cy and p.y > cy):
+					var t := (cy - p.y) / (s.y - p.y)
+					var x := p.x + (s.x - p.x) * t
+					lo = minf(lo, x)
+					hi = maxf(hi, x)
+		if hi > lo:
+			var x0 := floorf(lo / ART_PIXEL) * ART_PIXEL
+			var x1 := ceilf(hi / ART_PIXEL) * ART_PIXEL
+			draw_rect(Rect2(x0, y, x1 - x0, ART_PIXEL), col)
+		y += ART_PIXEL
+
+
 func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color,
 		cuff: Color = Color(0, 0, 0, 0)) -> void:
 	var bend := 1.0 if h == LEFT else -1.0            # elbows bow outward
@@ -13417,9 +13481,12 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 	# picture: a performer in evening dress has no bare forearm, and the two skin-coloured
 	# capsules were reading as rolled-up shirtsleeves on a man wearing a tailcoat. The whole
 	# arm is cloth now, and the only skin below the collar is the hand itself.
-	draw_capsule(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm, tapering to the elbow
-	draw_capsule(elbow, wrist, 13.0, 10.0, sleeve)     # forearm, same cloth, to the wrist
-	draw_circle(elbow, 7.0, sleeve)                    # elbow joint
+	# draw_capsule_pix, not draw_capsule: same shape, rasterised onto the art grid so the
+	# arms step in the same 2px blocks the sprited torso does. See draw_capsule_pix for
+	# why this is a rasteriser change and not a sprite.
+	draw_capsule_pix(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm, tapering to the elbow
+	draw_capsule_pix(elbow, wrist, 13.0, 10.0, sleeve)     # forearm, same cloth, to the wrist
+	draw_capsule_pix(elbow, elbow, 14.0, 14.0, sleeve)     # elbow joint (a capsule of zero length)
 	if cuff.a > 0.0:
 		# WARDROBE pass only (performer_polish): the jacket sleeve runs on down the
 		# forearm and finishes in a shirt cuff, leaving bare wrist and hand for the
@@ -13427,8 +13494,8 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 		# real arm at every frame instead of guessing a body-relative spot.
 		var cs := elbow.lerp(wrist, 0.58)
 		var ce := elbow.lerp(wrist, 0.76)
-		draw_capsule(elbow, cs, 13.5, 11.5, sleeve)
-		draw_capsule(cs, ce, 12.0, 11.5, cuff)
+		draw_capsule_pix(elbow, cs, 13.5, 11.5, sleeve)
+		draw_capsule_pix(cs, ce, 12.0, 11.5, cuff)
 
 
 # two-bone IK: places the elbow so it sits exactly l1 from shoulder a and l2 from
