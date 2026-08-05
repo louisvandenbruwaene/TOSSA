@@ -91,5 +91,7 @@
   "char/torso_collar":  { "path": "res://Assets/Characters/torso_collar.png" },
   "char/torso_vest":    { "path": "res://Assets/Characters/torso_vest.png" },
   "char/torso_button":  { "path": "res://Assets/Characters/torso_button.png" },
-  "char/legs_trouser":  { "path": "res://Assets/Characters/legs_trouser.png" }
+  "char/legs_trouser":  { "path": "res://Assets/Characters/legs_trouser.png" },
+  "bg/backyard":      { "path": "res://Assets/Backgrounds/backyard.png" },
+  "bg/street_corner": { "path": "res://Assets/Backgrounds/street_corner.png" }
 }

@@ -2140,6 +2140,9 @@ func _ready() -> void:
 		_art_suppress = true
 	if ua.has("--charid"):        # dev: render the costume as a region ID map (see costume_palette)
 		_charid = true
+	if ua.has("--bgref"):         # dev: the backdrop alone, unlit - see the bg seam
+		_bgref = true
+		art_on = false            # photograph the DRESSING, never a backdrop already replacing it
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -11288,6 +11291,7 @@ var _art_boxes_on := false         # --artboxes: record where each sized element
 var _art_boxes: Dictionary = {}    # key -> Rect2, the last box the game asked for
 var _art_suppress := false         # --charsuppress: claim char/* keys but draw nothing
 var _charid := false               # --charid: paint costume regions as flat ID colours
+var _bgref := false                # --bgref: draw only sky + dressing, the layers bg/* replaces
 
 
 func art_boot() -> void:
@@ -11637,6 +11641,12 @@ func _draw() -> void:
 	if _charref:
 		_draw_char_ref()
 		return
+	if _bgref:
+		# draw_backdrop returns early under this flag, having drawn only the sky gradient
+		# and the dressing - so this is the whole frame. The veil, cone and footlights
+		# never run, which is the point: they are light, not scenery.
+		draw_backdrop(get_viewport_rect().size)
+		return
 	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
 	_draw_state_fade()
@@ -11799,6 +11809,20 @@ func draw_backdrop(s: Vector2) -> void:
 	# baked into it would freeze all of that, and the light is the half of this picture
 	# that is actually reacting to the player.
 	var bg_key := "bg/" + str(v["name"]).to_lower().replace(" ", "_")
+	if _bgref:
+		# --bgref: draw ONLY the two layers the seam replaces - the sky gradient and the
+		# set dressing - and nothing after them. This is the backdrop equivalent of
+		# --propref/--charref, and it exists because two of the seven venues cannot be
+		# generated: the Backyard and the Street Corner are outdoor and asymmetric, so the
+		# mirror trick that built the other five duplicates their scenery, and separately
+		# generated halves do not meet at the horizon. Reducing the game's own dressing to
+		# the art grid is guaranteed to match TOSSA exactly, which is the brief, and it is
+		# the same technique the props and the body already use.
+		# The lighting deliberately does NOT run: a backdrop with the spotlight baked into
+		# it would freeze the cone that narrows and warms as a streak builds.
+		draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
+		draw_venue_dressing(s, vi, fy, glow)
+		return
 	if not art_blit_rect(bg_key, Rect2(Vector2.ZERO, s)):
 		draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
 		# the venue's own set dressing sits behind the light, then a dark veil pushes it
