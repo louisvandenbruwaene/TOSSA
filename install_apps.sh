@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Build the two /Applications launchers - TOSSA and TOSSA Debug - that Louis actually
-# clicks to play. Run this after moving or renaming the project folder.
+# Build the two /Applications launchers - PIXELTOSSA and PIXELTOSSA Debug - that Louis
+# actually clicks to play. Run this after moving or renaming the project folder.
 #
 # WHY THIS SCRIPT EXISTS. The launchers are not exported games; each is a tiny .app
 # wrapper whose whole payload is one line:
@@ -12,20 +12,34 @@
 # reads as "the app won't launch" with no error anywhere. Nothing in the project could
 # have caught it, which is exactly why the fix belongs in the project as a script.
 #
+# IT HAPPENED A SECOND TIME, AND THIS FORK CAUSED IT (found 2026-08-05). The PIXELTOSSA
+# worktree once lived at ~/Projects/PIXELTOSSA and this script was run from there while
+# it was still named TOSSA - so /Applications/TOSSA.app was rebuilt pointing at the FORK,
+# and then the whole Projects tree moved under ~/Documents and that path died too. Both
+# of Louis's TOSSA icons were dead and pointing at the wrong game. Hence the names below:
+# this script must only ever be able to write PIXELTOSSA launchers. If you fork this
+# project again, change APP_BASE and BUNDLE_ID in the same commit as GAME_TITLE, or you
+# will silently steal the parent game's icons all over again.
+#
 # THE DEBUG APP IS A SEPARATE APP ON PURPOSE: it passes --debug, which grants free stat
-# editing and the F-key venue jumps, and it keeps its own save file (tossa_debug.cfg). Two
-# icons in the Dock is the cheapest way to never edit a real career by accident.
+# editing and the F-key venue jumps, and it keeps its own save file
+# (pixeltossa_debug.cfg). Two icons in the Dock is the cheapest way to never edit a real
+# career by accident.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GODOT=${GODOT:-/opt/homebrew/bin/godot}
-ICON="$HERE/export/icons/TOSSA.icns"
+
+APP_BASE="PIXELTOSSA"
+BUNDLE_ID="eu.vandenbruwaene.pixeltossa"
+ICON="$HERE/export/icons/PIXELTOSSA.icns"
+[ -f "$ICON" ] || ICON="$HERE/export/icons/TOSSA.icns"   # until the pixel icon is drawn
 
 build () {
 	local NAME="$1" EXE="$2" ID="$3" ARGS="$4"
 	local APP="/Applications/$NAME.app"
 	rm -rf "$APP"
 	mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-	cp "$ICON" "$APP/Contents/Resources/TOSSA.icns"
+	cp "$ICON" "$APP/Contents/Resources/$APP_BASE.icns"
 	cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,7 +52,7 @@ build () {
     <key>CFBundleShortVersionString</key><string>0.3.0</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleExecutable</key><string>$EXE</string>
-    <key>CFBundleIconFile</key><string>TOSSA</string>
+    <key>CFBundleIconFile</key><string>$APP_BASE</string>
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -53,11 +67,11 @@ LAUNCH
 	echo "installed $APP  ->  $HERE"
 }
 
-build "TOSSA"       "TOSSA"       "eu.vandenbruwaene.tossa"       ""
-build "TOSSA Debug" "TOSSA-Debug" "eu.vandenbruwaene.tossa.debug" " -- --debug"
+build "$APP_BASE"       "$APP_BASE"       "$BUNDLE_ID"       ""
+build "$APP_BASE Debug" "$APP_BASE-Debug" "$BUNDLE_ID.debug" " -- --debug"
 
 # macOS caches icons hard; without this the Dock can show the old one for days
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-	-f /Applications/TOSSA.app "/Applications/TOSSA Debug.app" 2>/dev/null || true
+	-f "/Applications/$APP_BASE.app" "/Applications/$APP_BASE Debug.app" 2>/dev/null || true
 killall Dock 2>/dev/null || true
 echo "done - both apps point at $HERE"

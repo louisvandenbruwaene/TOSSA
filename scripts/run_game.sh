@@ -8,4 +8,4 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/lib.sh
 require_godot
 log_info "Launching TOSSA (windowed, real audio)$( [[ $# -gt 0 ]] && echo " -- $*" )"
-exec "$GODOT_BIN" --path "$TOSSA_ROOT" -- "$@"
+exec "$GODOT_BIN" --path "$PIXELTOSSA_ROOT" -- "$@"
