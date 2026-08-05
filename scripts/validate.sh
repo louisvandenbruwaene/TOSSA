@@ -172,16 +172,26 @@ fi
 #
 # ADVISORY, and it must stay that way: text is deliberately rendered at SCREEN
 # density (1280x720) rather than art density, because 640x360 turns a HUD label
-# to mush and this game is text-heavy - that was decision 1 of the fork. Text
+# to mush and this game is text-heavy - that was decision 2 of the fork. Text
 # therefore counts as "off-grid" by design and puts a floor under every screen
-# that has words on it. The number is for spotting a JUMP between runs, not for
-# hitting zero.
+# that has words on it.
+#
+# AND IT IS NOISY HERE, which is the part worth knowing before reading anything
+# into it. Step 7's shot is a LIVE ACT at tick 700, so the frame differs every
+# run - props mid-flight, flowers in the air, a different spotlight width.
+# Measured 2026-08-05, two consecutive identical commands: 28.1% and 22.3%. A
+# six-point move on this line means nothing at all.
+#
+# For a number that can actually be compared, use `make screenshot`, which runs
+# the same check over all 32 screens, most of which are static.
 if [[ $QUICK -eq 0 && -s "${shot:-}" ]]; then   # ${shot:-}: unset under --quick, and set -u is on
   log_head "9. Art-grid drift (PIXELTOSSA, advisory)"
   if [[ -x .venv/bin/python ]]; then
     .venv/bin/python scripts/check_pixel_grid.py "$shot" | sed 's/^/    /'
-    log_info "Baseline 2026-08-05: in-act stage ~17%, menus 12-25%, title 35% (its"
-    log_info "curtains/boards are still procedural), gameover 0.6% (fully converted)."
+    log_info "A live-act frame runs 22-28% and varies that much between identical"
+    log_info "runs, so only a very large move here means anything. Per-screen"
+    log_info "baselines live in scripts/check_pixel_grid.py; 'make screenshot'"
+    log_info "sweeps all 32 and is the number worth comparing."
   else
     log_warn "Skipped - .venv/bin/python not found (run 'make setup')."
   fi

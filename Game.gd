@@ -3406,6 +3406,16 @@ func begin_daily_challenge() -> void:
 
 
 func establish_key() -> void:
+	# A MINIMUM TIME ON SCREEN, matching the ST_TUTDONE card's own `cine_tick > 40` guard.
+	# Without it ANY key event dismissed this card the instant it appeared - at tick 0,
+	# before its own fade-in has even finished (`fin` completes at 26, the marquee's tagA
+	# at 30), so a player holding a key, or still leaning on the one that booked the act,
+	# never sees the goals they are about to be scored against. Found via the dev capture
+	# harness, where `--establish N` intermittently photographed the practice screen
+	# instead of the card: a stray key reaching the window won the race. 40 ticks is a
+	# third of a second (cine_tick runs at 120/s, the standing gotcha).
+	if cine_tick < 40:
+		return
 	game_state = ST_PLAY
 	start_run(establish_after)   # the card dismissed: walk out and begin the act
 	# THE FIRST SHOW'S GUIDE ARMS HERE, once, on the exact act post_lesson_show tags -
@@ -23070,6 +23080,29 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_vignette(s, 0.6)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
 
+	# THE MARQUEE SCRIM. The exterior is a full-bleed illustration and the marquee is bare
+	# text with an 8-way outline, so its legibility depends entirely on whatever the venue
+	# happens to draw underneath it - which the card cannot know. Measured 2026-08-05 across
+	# all seven exteriors: the Circus puts its centre pole and gold pennant straight through
+	# the blurb line, and the pennant is the SAME GOLD as the text's own fill, so "and" lost
+	# everything except its dark outline and read as a smudge; the Street Corner runs the
+	# blurb across a grid of lit windows. Those are one bug, not two, so the fix is a band
+	# behind the whole marquee rather than a nudge to one venue's tent.
+	#
+	# Feathered at both ends and flat across the middle, so it reads as depth in the picture
+	# instead of a rectangle laid on top of it. The flat section has to cover the BLURB at
+	# 0.12*h + 96, not just the name: the name already carries draw_title_glow and was never
+	# the line that failed.
+	var scrim := Color(0.02, 0.01, 0.02)
+	var sc_a := 0.5
+	var sc_top := s.y * 0.05
+	var sc_in := s.y * 0.125
+	var sc_out := s.y * 0.275
+	var sc_end := s.y * 0.31
+	draw_gradient_v(Rect2(0, sc_top, s.x, sc_in - sc_top), Color(scrim.r, scrim.g, scrim.b, 0.0), Color(scrim.r, scrim.g, scrim.b, sc_a), 12)
+	draw_rect(Rect2(0, sc_in, s.x, sc_out - sc_in), Color(scrim.r, scrim.g, scrim.b, sc_a))
+	draw_gradient_v(Rect2(0, sc_out, s.x, sc_end - sc_out), Color(scrim.r, scrim.g, scrim.b, sc_a), Color(scrim.r, scrim.g, scrim.b, 0.0), 12)
+
 	var tagA := clampf(float(cine_tick - 10) / 20.0, 0.0, 1.0)
 	# ONLY the marquee stays over the portrait: STAGE n of 6, the name in lights, the
 	# crowd blurb - text with the 8-way outline, no boxes. Everything informational
@@ -24281,7 +24314,15 @@ func ext_circus(s: Vector2) -> void:
 	draw_moon(Vector2(s.x * 0.16, s.y * 0.18), 22.0)
 	draw_stars(s, 28, 0.42)
 	draw_rect(Rect2(0, gy, s.x, s.y - gy), Color(0.10, 0.08, 0.07))
-	draw_bigtop(Vector2(s.x * 0.5, gy), s.x * 0.52, s.y * 0.46)
+	# 0.40, not 0.46: the big top is the ONE exterior that reached into the marquee. Its
+	# mast stands 40px proud of the apex and the pennant hangs off that, which put the flag
+	# at y=176 with the venue blurb's baseline at 182 - and the pennant is the same gold as
+	# the blurb's own fill, so the word behind it lost everything but its outline and read
+	# as a smudge. draw_establish's slow push-in makes it worse over time, not better: it
+	# zooms about the CENTRE, so everything above the middle of the frame climbs as the
+	# card plays. At 0.40 the flag tops out at 219, which still clears the text at the full
+	# 1.07 zoom (209). Wider than it is tall is also what a real big top looks like.
+	draw_bigtop(Vector2(s.x * 0.5, gy), s.x * 0.52, s.y * 0.40)
 	draw_lantern_string(Vector2(s.x * 0.08, s.y * 0.30), Vector2(s.x * 0.92, s.y * 0.34))
 	draw_dust(s, 16, Color(1.0, 0.8, 0.5))
 
@@ -24851,13 +24892,68 @@ func _capture_and_quit() -> void:
 	# give us (the viewport has no texture there). Asking for one anyway is what used
 	# to force the whole pattern sweep through slow, wall-clock-bound windowed runs.
 	if _shot_path != "":
-		var tex := get_viewport().get_texture()
+		var tex := get_viewport().get_texture()  # see shot_state_name() below for the print
 		if tex != null:
 			var img := tex.get_image()
 			if img != null:
 				if _art_pixel:
 					img = art_pixel_preview(img)
 				img.save_png(_shot_path)
+		# SAY WHAT WAS PHOTOGRAPHED, OVERLAY AND ALL. A capture can silently be the wrong screen -
+		# get_viewport().get_texture() hands back the last PRESENTED frame, and an
+		# unfocused window presents late - and the PNG that comes out is a perfectly
+		# valid picture of something else, so no check on the file can catch it.
+		# Measured 2026-08-05: `--establish 2` and `--establish 3` each captured the
+		# practice screen once and the right card on retry, from the identical command.
+		# Printing the state turns that into something a script can assert on
+		# (scripts/screenshot.sh does), and it costs one line per dev capture.
+		print("shot state: %d %s" % [game_state, shot_state_name()])
 	get_tree().quit()
+
+
+func shot_state_name() -> String:
+	# The label a capture script asserts against (see the --shot print above). It has to
+	# name the OVERLAY, not just game_state, because the screens dev flags reach most
+	# often are overlays: --shop, --sheet, --skills, --pause, --results and --tailor all
+	# sit on top of ST_PLAY or ST_DAY, so game_state alone would report "play" for six
+	# different pictures and assert nothing. Overlays are tested before the base state
+	# and in paint order, topmost first, so the name matches what is actually on screen.
+	if _propref != "" or _charref:
+		return "ref"          # an isolated art reference, not a screen
+	if debug_panel_open:
+		return "f9"
+	if paused:
+		return "pause"
+	if results_open:
+		return "results"
+	if ucard_kind >= 0:
+		return "ucard"
+	if shop_open:
+		return "shop"
+	if tailor_open:
+		return "tailor"
+	if sheet_open:
+		return "sheet"
+	if skills_open:
+		return "skills"
+	if tut_id != "":
+		return "tutorial"
+	match game_state:
+		ST_MENU: return "menu"
+		ST_SLOTS: return "slots"
+		ST_SETTINGS: return "settings"
+		ST_PLAY: return "play"
+		ST_ESTABLISH: return "establish"
+		ST_CREDITS: return "credits"
+		ST_DAY: return "day"
+		ST_STATS: return "stats"
+		ST_REMAP: return "remap"
+		ST_GAMEOVER: return "gameover"
+		ST_TUTDONE: return "tutdone"
+		ST_CAPSULE: return "capsule"
+		ST_DEMO_WALL: return "demowall"
+		ST_PURIST_LEGEND: return "legend"
+		ST_MENUTOUR: return "menutour"
+	return "state%d" % game_state
 
 #endregion
