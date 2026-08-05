@@ -20098,7 +20098,16 @@ func crescent_points(c: Vector2, r: float, off: Vector2, ir: float) -> PackedVec
 		bsweep += TAU
 	if c.distance_to(b + Vector2(cos(b0 + bsweep * 0.5), sin(b0 + bsweep * 0.5)) * ir) > r:
 		bsweep -= TAU
-	for i in 21:
+	# THE HORNS ARE SHARED, SO THEY ARE ONLY EMITTED ONCE (fixed 2026-08-05). Both arcs
+	# START and END on a horn: the outer one runs p1 -> p2 and the biting one runs p2 -> p1.
+	# Walking both from end to end therefore listed p2 twice in a row and closed the ring on
+	# a second copy of p1, giving two zero-length edges. Godot's ear-clipping triangulator
+	# rejects that outright - "Invalid polygon data, triangulation failed" - and
+	# draw_colored_polygon then draws NOTHING, silently. The REST icon on the day hub has
+	# been an empty space this whole time, and the error was firing every single frame
+	# (8,629 times in one short headless run) where nobody was reading the log.
+	# Skipping the first and last point of the inner arc closes the ring exactly once.
+	for i in range(1, 20):
 		var a := b0 + bsweep * (float(i) / 20.0)
 		pts.append(b + Vector2(cos(a), sin(a)) * ir)
 	return pts
