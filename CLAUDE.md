@@ -1,8 +1,79 @@
-# TOSSA
+# PIXELTOSSA
 
 A skill-based juggling game with a light performer-career sim around it. Godot 4.7, 2D, GDScript,
-one self-contained file (`Game.gd`, ~23k lines), code-only art, mostly code-rendered audio. Aimed
-at a polished $10 Steam release.
+one self-contained file (`Game.gd`, ~24k lines), mostly code-rendered audio. Aimed at a polished
+$10 Steam release.
+
+**This repo is the PIXEL-ART FORK of TOSSA, cut loose 2026-08-05 as its own game** with its own
+name, saves, launchers and exports. TOSSA's art is drawn entirely in code; PIXELTOSSA replaces the
+pictures with sprites on a locked palette and keeps the gameplay identical. Everything below that
+is not in the PIXEL ART section is inherited from TOSSA and still true.
+
+## PIXEL ART (read this before touching anything visual)
+
+**Four decisions are locked. Do not relitigate them.**
+
+1. **Density: 640x360, `ART_PIXEL = 2`.** One art pixel is drawn as a 2x2 screen block, no
+   resampling, over the unchanged 1280x720 coordinate space. NOT 320x180: measured `--pixel`
+   captures show the juggler reads beautifully there but every HUD label turns to mush (a 13px
+   label becomes 3px), and this game is text-heavy.
+2. **Text stays at SCREEN density**, which follows from 1. Words are rendered at 1280x720, not on
+   the art grid. This is why a screen full of UI never measures as "fully converted" (see
+   `scripts/check_pixel_grid.py`) and that is correct, not a defect.
+3. **Style matches TOSSA.** The palette is extracted from `Game.gd` and locked to 48 colours in
+   `Resources/palette/` (including a .gpl Aseprite loads). Selective or no outlines, restrained
+   shading, no thick black 16-bit outlines.
+4. **Grid-snap the geometry, sprite the pictures.** Panels, bars and the spotlight cone stay
+   procedural. The spotlight must keep narrowing and warming as a streak builds, so it can never
+   be baked into a backdrop.
+
+**THE SEAM IS THE WHOLE ARCHITECTURE.** `Game.gd` never names a PNG. `art_blit` /
+`art_blit_size` / `art_blit_rect` / `art_blit_regions` take a key like `prop/club`, and
+`Resources/art_manifest.json` ALONE decides sprite versus procedural. Delete a line from the
+manifest and that element goes back to being drawn. `--procart` forces everything procedural for
+an A/B, `--artreport` lists every key the running session actually reached.
+
+**DERIVE, DO NOT GENERATE, ANYTHING SMALL OR ANYTHING WITH A CHARACTER IN IT.**
+
+- **PixelLab's floor is 1024 pixels of AREA.** At this density that rules it out for every stage
+  prop (a ball is 11x11, the chainsaw 21x48 = 1008) and for hands and small icons. It is the right
+  tool for backdrops and for large UI.
+- **Props are derived**: `--propref <name>` renders one prop isolated at x6 through the real
+  drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
+  alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a
+  model's idea of a juggling club.
+- **The character is TRACED, never generated.** A generated juggler comes back with realistic
+  proportions and the arms down, which is a different character. `scripts/gen_char_refs.sh` drives
+  the five flags this needs.
+- **Two sizes per prop.** `prop/*` is the stage sprite (tiny, derived); `prop_big/*` is the shop
+  card (PixelLab, blitted at zoom 1 so the ART decides the size). A stage club is 6x32 art px and
+  no art skill puts more pixels there, but a card magnifies it, so the card needs its own asset.
+
+**Hard-won gotchas, each one paid for:**
+
+- **The pixel font is only crisp at MULTIPLES OF 4.** Measured by rendering a 9..34 sweep in
+  Godot, because PIL disagreed with the engine and would have given the wrong answer. TOSSA's
+  most-used sizes were 13 and 15, two of the worst, which is why the talent tree read "ZZ POINTS
+  TO SPEND". `ps()` quantises at every text call site and `validate.sh` check 8 fails the build if
+  a new one skips it.
+- **Godot serves a CACHED import, not your PNG.** Editing a sprite on disk changes nothing in the
+  game until `make reimport`, so an art fix looks like it did nothing. Two byte-identical captures
+  before and after a change is the tell.
+- **`scripts/artguard.py` protects hand edits.** A SHA ledger in `Assets/.generated.json`; any
+  generator skips a file whose hash differs from what it last wrote, or that it has no record of
+  at all. `--force` overwrites, `--relock` re-baselines.
+- **Prop pivots are NOT centres** (a club tumbles about 55.8% down its sprite), and prop scales are
+  fractional, so prop sprites must be pinned to exact integer screen-pixels per art pixel.
+- **Tinted props are authored GREYSCALE** (`ball`, `egg`, `ring` only) because the game multiplies
+  them by a colour and a multiply can only darken. They need `GREY_FLOOR = 0.45` or their rim
+  pixels multiply down to near-black and read as holes in the silhouette.
+- **Generators put round props on a PLINTH** even when told not to, and it is fused to the
+  silhouette so a width-threshold filter misses it. `scripts/trim_plinth.py` detects it properly
+  (convexity break plus a luminance drop) and explains why the obvious rule fails.
+- **`costume_palette()` changes five colours per venue**, so the torso, arms and legs stay
+  procedural on purpose: one sprite freezes the outfit and one tint cannot carry five colours.
+  The body is per-region sprites multiplied by the live costume colour.
+- **zsh: an unquoted `$var` holding two flags passes as ONE argument.** Use `${=f}`.
 
 **Full narrative history (every dated session, every rejected attempt, every measured number)
 lives in `CLAUDE_HISTORY.md`, archived 2026-07-31.** This file is trimmed to current-state facts

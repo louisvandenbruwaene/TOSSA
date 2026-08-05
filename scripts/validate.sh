@@ -164,6 +164,29 @@ else
   printf '%s\n' "$out" | tail -n +2
 fi
 
+# --- 9. Art-grid drift (PIXELTOSSA, advisory) --------------------------------
+# At ART_PIXEL = 2 a converted element is four identical pixels per aligned 2x2
+# block. Anything smooth - an antialiased curve, a gradient, a rounded panel
+# corner - breaks that, so the share of non-flat blocks measures how much of a
+# frame is still vector drawing. See scripts/check_pixel_grid.py.
+#
+# ADVISORY, and it must stay that way: text is deliberately rendered at SCREEN
+# density (1280x720) rather than art density, because 640x360 turns a HUD label
+# to mush and this game is text-heavy - that was decision 1 of the fork. Text
+# therefore counts as "off-grid" by design and puts a floor under every screen
+# that has words on it. The number is for spotting a JUMP between runs, not for
+# hitting zero.
+if [[ $QUICK -eq 0 && -s "${shot:-}" ]]; then   # ${shot:-}: unset under --quick, and set -u is on
+  log_head "9. Art-grid drift (PIXELTOSSA, advisory)"
+  if [[ -x .venv/bin/python ]]; then
+    .venv/bin/python scripts/check_pixel_grid.py "$shot" | sed 's/^/    /'
+    log_info "Baseline 2026-08-05: in-act stage ~17%, menus 12-25%, title 35% (its"
+    log_info "curtains/boards are still procedural), gameover 0.6% (fully converted)."
+  else
+    log_warn "Skipped - .venv/bin/python not found (run 'make setup')."
+  fi
+fi
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   log_ok "VALIDATE: all checks passed."
