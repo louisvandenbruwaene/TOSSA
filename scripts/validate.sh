@@ -147,6 +147,23 @@ else
   log_warn "7. Screenshot smoke test skipped (--quick)."
 fi
 
+# --- 8. Font sizes are quantised (PIXELTOSSA) --------------------------------
+# THE PIXEL FONT IS ONLY CRISP AT MULTIPLES OF 4 (see ps() in Game.gd for the sweep
+# this was measured from). A text call whose size argument skips ps() renders with
+# uneven stems - "220" comes out as "ZZ0" - and it is the kind of defect that reads
+# as a bad font rather than as a bug, so nobody goes looking for it. This catches a
+# new call site the moment it is added, which is the only reliable time to catch it.
+log_head "8. Font-size quantisation (PIXELTOSSA)"
+# Python, not grep: these calls wrap across lines and the size argument routinely
+# sits on the continuation line, so a line-based check reports 45 false positives
+# and gets ignored. See scripts/check_font_sizes.py.
+if out=$(python3 scripts/check_font_sizes.py Game.gd 2>&1); then
+  log_ok "Every text call's font size goes through ps()."
+else
+  fail "$(printf '%s' "$out" | head -1)"
+  printf '%s\n' "$out" | tail -n +2
+fi
+
 echo
 if [[ $FAIL -eq 0 ]]; then
   log_ok "VALIDATE: all checks passed."

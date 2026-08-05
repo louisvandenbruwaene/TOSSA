@@ -24,3 +24,11 @@ artifacts/
 #     "file://$PWD/docs/mechanics.html"
 # (Brave is the only Chromium on this machine - no pandoc, wkhtmltopdf or weasyprint.)
 TOSSA_mechanics_reference.pdf
+
+# Python venv for the art/palette tooling (scripts/extract_palette.py).
+# Recreate with: python3 -m venv .venv && .venv/bin/pip install Pillow numpy scikit-learn
+.venv/
+
+# Python venv for the art/palette tooling (scripts/extract_palette.py).
+# Recreate with: python3 -m venv .venv && .venv/bin/pip install Pillow numpy scikit-learn
+.venv/

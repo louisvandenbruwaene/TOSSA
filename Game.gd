@@ -2030,6 +2030,47 @@ func title_font() -> Font:
 	return title_font_v if title_font_v != null else game_font()
 
 
+const PS_STEP := 4    # the pixel font is only crisp at multiples of this
+const PS_MIN := 12    # ...and illegible below this
+
+
+func ps(size: int) -> int:
+	# QUANTISE A FONT SIZE TO THE PIXEL FONT'S GRID. Every draw and every measurement in
+	# this file goes through here, and if you add a text call it must too.
+	#
+	# WHY, MEASURED IN THE ENGINE AND NOT ASSUMED (2026-08-05). A pixel font is an outline
+	# font whose outlines sit on a grid. Ask for a size that is not a whole multiple of
+	# that grid and the rasteriser has to put some stems on one pixel and some on two, with
+	# antialiasing off to smooth it over - so the glyphs do not blur, they DEFORM. A sweep
+	# of Pixel Operator at every size from 9 to 34, rendered by Godot itself rather than by
+	# a proxy rasteriser, shows the damage precisely:
+	#
+	#     12  clean          16  clean          20  clean      24/28/32  clean
+	#     13  "220" -> "ZZ0", the D in SPEND loses its bowl
+	#     14  passable, uneven E and D, 8 reads as 0
+	#     15  "220" -> "ZZ0" again, "0123456789" -> "01Z3456789"
+	#     17  uneven        19/21/23/25...  uneven
+	#
+	# TOSSA's three most-used sizes are 13 (x31), 15 (x31) and 12 (x29), so two of the
+	# three worst sizes in the table were carrying most of the game's text. This is what
+	# made the first pixel-font screenshot look subtly wrong in a way that reads as "bad
+	# font" rather than "wrong size".
+	#
+	# ROUNDING IS TO NEAREST, TIES DOWNWARD. Down on a tie because text that shrinks
+	# degrades gracefully here and text that grows can overflow: 18 -> 16 rather than 20.
+	# The clamp at PS_MIN matters for fit_size, which is allowed to ask for 9.
+	#
+	# IT IS SAFE TO APPLY TWICE. ps(ps(n)) == ps(n), which is what lets fit_size keep
+	# stepping by 1 while measuring through this function - it simply measures the same
+	# crisp size a few times before crossing a rung, and the size it returns is quantised
+	# again at the draw site. Measurement and drawing therefore can never disagree, which
+	# is the bug that would otherwise show up as text overflowing a box it was measured to
+	# fit inside.
+	if size <= PS_MIN:
+		return PS_MIN
+	return maxi(PS_MIN, int(floor((float(size) + float(PS_STEP) * 0.5 - 1.0) / float(PS_STEP))) * PS_STEP)
+
+
 func _ready() -> void:
 	# Dev-only flags. Normal play passes NONE of these: the game then simply waits
 	# for the player's first THROW and never auto-plays or auto-quits.
@@ -6025,8 +6066,8 @@ func draw_tut_tally(font: Font, s: Vector2, step: Dictionary) -> void:
 		var r: Array = rows[i]
 		var y := by + 28.0 + float(i) * 26.0
 		var doneR := int(r[1]) >= int(r[2])
-		draw_string(font, Vector2(bx + 20.0, y), String(r[0]), HORIZONTAL_ALIGNMENT_LEFT, 120.0, 14, Color(0.82, 0.78, 0.70))
-		draw_string(font, Vector2(bx + bw - 100.0, y), "%d / %d" % [int(r[1]), int(r[2])], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 16,
+		draw_string(font, Vector2(bx + 20.0, y), String(r[0]), HORIZONTAL_ALIGNMENT_LEFT, 120.0, ps(14), Color(0.82, 0.78, 0.70))
+		draw_string(font, Vector2(bx + bw - 100.0, y), "%d / %d" % [int(r[1]), int(r[2])], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(16),
 			Color(0.72, 0.95, 0.70) if doneR else Color(1.0, 0.90, 0.62))
 
 
@@ -6042,7 +6083,7 @@ func draw_speech_line(font: Font, pos: Vector2, line: String, take: int, size: i
 	var lb := line.find("[")
 	var rb := line.find("]", lb + 1) if lb >= 0 else -1
 	if lb < 0 or rb < 0:
-		draw_string(font, pos, line.substr(0, clampi(take, 0, line.length())), HORIZONTAL_ALIGNMENT_LEFT, -1, size, base_col)
+		draw_string(font, pos, line.substr(0, clampi(take, 0, line.length())), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
 		return
 	var pre := line.substr(0, lb)
 	var key := line.substr(lb, rb - lb + 1)
@@ -6052,15 +6093,15 @@ func draw_speech_line(font: Font, pos: Vector2, line: String, take: int, size: i
 	var x := pos.x
 	var r0 := clampi(take, 0, pre.length())
 	if r0 > 0:
-		draw_string(font, Vector2(x, pos.y), pre.substr(0, r0), HORIZONTAL_ALIGNMENT_LEFT, -1, size, base_col)
-	x += font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		draw_string(font, Vector2(x, pos.y), pre.substr(0, r0), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
+	x += font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
 	var r1 := clampi(take - pre.length(), 0, key.length())
 	if r1 > 0:
-		draw_string(font, Vector2(x, pos.y), key.substr(0, r1), HORIZONTAL_ALIGNMENT_LEFT, -1, key_size, key_col)
-	x += font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, key_size).x
+		draw_string(font, Vector2(x, pos.y), key.substr(0, r1), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(key_size), key_col)
+	x += font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(key_size)).x
 	var r2 := clampi(take - pre.length() - key.length(), 0, post.length())
 	if r2 > 0:
-		draw_string(font, Vector2(x, pos.y), post.substr(0, r2), HORIZONTAL_ALIGNMENT_LEFT, -1, size, base_col)
+		draw_string(font, Vector2(x, pos.y), post.substr(0, r2), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
 
 
 func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
@@ -6116,7 +6157,7 @@ func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
 	if subl.size() > 0 and shown >= _tut_line_len(lines):
 		ty += 6.0
 		for l2 in subl:
-			draw_string(font, Vector2(bx + 96.0, ty), String(l2), HORIZONTAL_ALIGNMENT_LEFT, inner, 13, Color(0.80, 0.86, 0.95))
+			draw_string(font, Vector2(bx + 96.0, ty), String(l2), HORIZONTAL_ALIGNMENT_LEFT, inner, ps(13), Color(0.80, 0.86, 0.95))
 			ty += 18.0
 	# ...and the prompt, only once the beat is actually clearable, so an Enter icon never
 	# appears on a step whose key has not been pressed yet
@@ -6146,7 +6187,7 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 	var bx := s.x * TUT_SIDE_X
 	var by := s.y * TUT_SIDE_Y
 	soft_card(Rect2(bx, by, bw, 150.0), Color(0.10, 0.07, 0.09, 0.96), Color(1.0, 0.86, 0.55, 0.5), 1.6, 12.0, 16.0)
-	draw_string(font, Vector2(bx, by + 28.0), "which hand is your strong one?", HORIZONTAL_ALIGNMENT_CENTER, bw, 14, Color(0.92, 0.88, 0.78))
+	draw_string(font, Vector2(bx, by + 28.0), "which hand is your strong one?", HORIZONTAL_ALIGNMENT_CENTER, bw, ps(14), Color(0.92, 0.88, 0.78))
 	# SIDE BY SIDE (2026-07-29, Louis: "left and right on the left and on the right side
 	# of each other instead of on top of each other") - the layout is now the answer, not
 	# just the label: the LEFT card sits on the left, the RIGHT card on the right, so the
@@ -6162,7 +6203,7 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 		var cx := bx + 24.0 + float(i) * (cw + gap)
 		soft_card(Rect2(cx, cy, cw, 38.0), Color(1.0, 0.86, 0.45, 0.12) if sel else Color(0.14, 0.10, 0.11, 0.9),
 			Color(1.0, 0.88, 0.5, 0.9) if sel else Color(0.6, 0.55, 0.5, 0.4), 1.6 if sel else 1.0, 9.0, 10.0)
-		draw_string(font, Vector2(cx, cy + 25.0), "LEFT" if h == LEFT else "RIGHT", HORIZONTAL_ALIGNMENT_CENTER, cw, 16,
+		draw_string(font, Vector2(cx, cy + 25.0), "LEFT" if h == LEFT else "RIGHT", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(16),
 			Color(1.0, 0.92, 0.62) if sel else Color(0.72, 0.68, 0.62))
 	draw_hints_row(font, bx + bw * 0.5, by + 162.0,
 		[[["Left", "Right"], "choose"], [["Enter"], "yes"]])
@@ -6217,7 +6258,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 	var bh := 74.0
 	soft_card(Rect2(bx, by, bw, bh), Color(0.07, 0.05, 0.07, 0.90), Color(kind_col.r, kind_col.g, kind_col.b, 0.42), 1.5, 12.0, 16.0)
 	draw_rect(Rect2(bx + 1.0, by + 12.0, 3.0, bh - 24.0), Color(kind_col.r, kind_col.g, kind_col.b, 0.85))
-	draw_string(font, Vector2(bx + 18.0, by + 22.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, 10, Color(kind_col.r, kind_col.g, kind_col.b, 0.95))
+	draw_string(font, Vector2(bx + 18.0, by + 22.0), tut_kind_tag(), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, ps(10), Color(kind_col.r, kind_col.g, kind_col.b, 0.95))
 	draw_fit_string(title_font(), Vector2(bx + 18.0, by + 46.0), String(step["text"]), HORIZONTAL_ALIGNMENT_LEFT, bw - 36.0, 19, Color(1.0, 0.92, 0.68))
 	var done := tut_advance_at >= 0
 	# THE PACE PIPS CAME OUT WITH THE LADDER (2026-07-30). Three notches for the three passes, the
@@ -6238,7 +6279,7 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		# a "read" step is met the instant it opens, so congratulating the player for
 		# arriving on it would be congratulating them for nothing
 		var ga := 0.75 + 0.25 * sin(atick() * 0.1)
-		draw_string(font, Vector2(bx, by + bh - 12.0), "GOOD JOB", HORIZONTAL_ALIGNMENT_RIGHT, bw - 18.0, 12, Color(0.72, 0.95, 0.7, ga))
+		draw_string(font, Vector2(bx, by + bh - 12.0), "GOOD JOB", HORIZONTAL_ALIGNMENT_RIGHT, bw - 18.0, ps(12), Color(0.72, 0.95, 0.7, ga))
 	if bool(step.get("intro", false)):
 		draw_tut_intro_card(font, s, step, kind_col)
 	draw_tut_keyrow(font, s)
@@ -6280,16 +6321,16 @@ func draw_tut_intro_card(font: Font, s: Vector2, step: Dictionary, accent: Color
 	var kx := cx + 30.0
 	var ky := cy + 40.0
 	if cap != "":
-		var kw := maxf(72.0, font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x + 34.0)
+		var kw := maxf(72.0, font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(30)).x + 34.0)
 		var pulse := 0.5 + 0.5 * sin(atick() * 0.09)
 		draw_rect(Rect2(kx, ky, kw, 52.0), Color(accent.r, accent.g, accent.b, 0.86 + 0.14 * pulse))
-		draw_string(font, Vector2(kx, ky + 36.0), cap, HORIZONTAL_ALIGNMENT_CENTER, kw, 30, Color(0.10, 0.06, 0.04))
+		draw_string(font, Vector2(kx, ky + 36.0), cap, HORIZONTAL_ALIGNMENT_CENTER, kw, ps(30), Color(0.10, 0.06, 0.04))
 		# two calls, not one string with a newline in it: draw_string has no concept of a
 		# line break and runs the halves together ("the key thisles...")
-		draw_string(font, Vector2(kx, ky + 72.0), "the key this", HORIZONTAL_ALIGNMENT_CENTER, kw, 11, Color(0.76, 0.72, 0.66))
-		draw_string(font, Vector2(kx, ky + 86.0), "lesson is about", HORIZONTAL_ALIGNMENT_CENTER, kw, 11, Color(0.76, 0.72, 0.66))
+		draw_string(font, Vector2(kx, ky + 72.0), "the key this", HORIZONTAL_ALIGNMENT_CENTER, kw, ps(11), Color(0.76, 0.72, 0.66))
+		draw_string(font, Vector2(kx, ky + 86.0), "lesson is about", HORIZONTAL_ALIGNMENT_CENTER, kw, ps(11), Color(0.76, 0.72, 0.66))
 		kx += kw + 28.0
-	draw_string(title_font(), Vector2(kx, cy + 44.0), String(step["text"]), HORIZONTAL_ALIGNMENT_LEFT, cw - (kx - cx) - 30.0, 24, Color(1.0, 0.92, 0.66))
+	draw_string(title_font(), Vector2(kx, cy + 44.0), String(step["text"]), HORIZONTAL_ALIGNMENT_LEFT, cw - (kx - cx) - 30.0, ps(24), Color(1.0, 0.92, 0.66))
 	# the body wraps INSIDE its box and stops at the bottom of it (the standing rule):
 	# blank lines in the source become paragraph breaks, so this reads as prose
 	var ty := cy + 68.0
@@ -6343,8 +6384,8 @@ func draw_tut_special_cue(font: Font, s: Vector2, cue: Dictionary) -> void:
 	var pulse := 0.5 + 0.5 * sin(atick() * 0.13)
 	var fs := 19
 	var cap := String(cue["key"])
-	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 18.0
+	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x
+	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x + 18.0
 	var total := cw + 14.0 + lw
 	var bh := float(fs) + 16.0
 	var bx := s.x * 0.5 - total * 0.5
@@ -6352,8 +6393,8 @@ func draw_tut_special_cue(font: Font, s: Vector2, cue: Dictionary) -> void:
 	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(0.16, 0.10, 0.04, 0.88))
 	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(1.0, 0.72, 0.4, 0.45 + 0.45 * pulse), false, 2.0)
 	draw_rect(Rect2(bx, by + 6.0, cw, bh - 12.0), Color(1.0, 0.72, 0.4, 0.82 + 0.18 * pulse))
-	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, fs, Color(0.12, 0.07, 0.03))
-	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.93, 0.72))
+	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, ps(fs), Color(0.12, 0.07, 0.03))
+	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs), Color(1.0, 0.93, 0.72))
 
 
 func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
@@ -6377,14 +6418,14 @@ func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
 	var pulse := 0.5 + 0.5 * sin(atick() * 0.13)
 	# measure: keycap, its label, and a "then" separator before every entry but the first
 	var sep := "  then  "
-	var sepw := font.get_string_size(sep, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	var sepw := font.get_string_size(sep, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14)).x
 	var caps := PackedFloat32Array()
 	var labs := PackedFloat32Array()
 	var total := 0.0
 	for i in tut_hold.size():
 		var e: Dictionary = tut_hold[i]
-		var cw := maxf(46.0, font.get_string_size(String(e["key"]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 26.0)
-		var lw := font.get_string_size(String(e["what"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var cw := maxf(46.0, font.get_string_size(String(e["key"]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x + 26.0)
+		var lw := font.get_string_size(String(e["what"]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x
 		caps.append(cw)
 		labs.append(lw)
 		total += maxf(cw, lw) + (sepw if i > 0 else 0.0)
@@ -6392,7 +6433,7 @@ func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
 	# rule: no text ever leaves its container - the header was being clipped mid-word
 	# by a card measured off the keycaps alone)
 	var head := "PAUSED  -  the world is waiting for you"
-	var bw := maxf(total + 56.0, font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 44.0)
+	var bw := maxf(total + 56.0, font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 44.0)
 	var bh := 104.0
 	var bx := s.x * 0.5 - bw * 0.5
 	var by := s.y - 162.0
@@ -6402,7 +6443,7 @@ func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
 	for i in tut_hold.size():
 		var e: Dictionary = tut_hold[i]
 		if i > 0:
-			draw_string(font, Vector2(x - sepw, by + 64.0), sep, HORIZONTAL_ALIGNMENT_CENTER, sepw, 14, Color(0.78, 0.74, 0.70, 0.85))
+			draw_string(font, Vector2(x - sepw, by + 64.0), sep, HORIZONTAL_ALIGNMENT_CENTER, sepw, ps(14), Color(0.78, 0.74, 0.70, 0.85))
 		var slot := maxf(caps[i], labs[i])
 		var cw2: float = caps[i]
 		var cx := x + slot * 0.5 - cw2 * 0.5
@@ -6410,7 +6451,7 @@ func draw_tut_hold_cue(font: Font, s: Vector2) -> void:
 		var col := Color(0.55, 0.90, 0.55) if ok else Color(1.0, 0.86, 0.42)
 		var a := 0.45 if ok else (0.82 + 0.18 * pulse)
 		draw_rect(Rect2(cx, by + 38.0, cw2, 34.0), Color(col.r, col.g, col.b, a))
-		draw_string(font, Vector2(cx, by + 64.0), String(e["key"]), HORIZONTAL_ALIGNMENT_CENTER, cw2, fs, Color(0.10, 0.06, 0.03))
+		draw_string(font, Vector2(cx, by + 64.0), String(e["key"]), HORIZONTAL_ALIGNMENT_CENTER, cw2, ps(fs), Color(0.10, 0.06, 0.03))
 		draw_fit_string(font, Vector2(x, by + 92.0), String(e["what"]), HORIZONTAL_ALIGNMENT_CENTER, slot, 13,
 			Color(0.62, 0.86, 0.62, 0.8) if ok else Color(1.0, 0.93, 0.75, 0.95))
 		x += slot + sepw
@@ -6428,8 +6469,8 @@ func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool
 	var pulse := 0.5 + 0.5 * sin(atick() * (0.07 + 0.06 * urg))
 	var fs := int(round(lerpf(17.0, 22.0, urg)))
 	var cap := String(k_finish()[0])   # Enter, or A on a pad
-	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 18.0
+	var lw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x
+	var cw := font.get_string_size(cap, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x + 18.0
 	var total := cw + 14.0 + lw
 	var bh := float(fs) + 16.0
 	var bx := s.x * 0.5 - total * 0.5
@@ -6437,14 +6478,14 @@ func draw_tut_enter_callout(font: Font, s: Vector2, step: Dictionary, last: bool
 	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(0.16, 0.10, 0.04, 0.88))
 	draw_rect(Rect2(bx - 18.0, by, total + 36.0, bh), Color(1.0, 0.86, 0.42, 0.45 + 0.45 * pulse), false, 2.0)
 	draw_rect(Rect2(bx, by + 6.0, cw, bh - 12.0), Color(1.0, 0.86, 0.42, 0.82 + 0.18 * pulse))
-	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, fs, Color(0.12, 0.07, 0.03))
-	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1.0, 0.93, 0.72))
+	draw_string(font, Vector2(bx, by + bh - 11.0), cap, HORIZONTAL_ALIGNMENT_CENTER, cw, ps(fs), Color(0.12, 0.07, 0.03))
+	draw_string(font, Vector2(bx + cw + 14.0, by + bh - 11.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs), Color(1.0, 0.93, 0.72))
 	# ...and the other half of the deal, quieter, because the step never stops being
 	# playable and nobody should feel hurried out of the thing they just got working
 	# ...but only where there is something to keep practising: an opening card is a page
 	# to read, and inviting the player to stay on it longer is inviting them nowhere
 	if String(step["goal"]) != "read":
-		draw_string(font, Vector2(0, by - 8.0), "or keep practising as long as you like", HORIZONTAL_ALIGNMENT_CENTER, s.x, 12, Color(0.78, 0.72, 0.64, 0.75))
+		draw_string(font, Vector2(0, by - 8.0), "or keep practising as long as you like", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(12), Color(0.78, 0.72, 0.64, 0.75))
 
 
 func draw_tut_legend(font: Font, s: Vector2) -> void:
@@ -6484,8 +6525,8 @@ func draw_tut_legend(font: Font, s: Vector2) -> void:
 		var kx := x
 		for k in row[0]:
 			kx += draw_keycap(font, kx, y - 14.0, String(k)) + 3.0
-		draw_string(font, Vector2(x + 62.0, y), String(row[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.88, 0.58))
-		draw_string(font, Vector2(x + 168.0, y), String(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.82, 0.76, 0.68, 0.9))
+		draw_string(font, Vector2(x + 62.0, y), String(row[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(1.0, 0.88, 0.58))
+		draw_string(font, Vector2(x + 168.0, y), String(row[2]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.82, 0.76, 0.68, 0.9))
 
 
 func draw_tut_key(font: Font, at: Vector2, key: String, col: Color, urgency: float) -> void:
@@ -7151,7 +7192,7 @@ func draw_remap(font: Font, s: Vector2) -> void:
 
 	# --- keyboard column (the six core actions) ---
 	var oy := s.y * 0.222
-	draw_string(font, Vector2(px, oy - 22.0), "KEYBOARD", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
+	draw_string(font, Vector2(px, oy - 22.0), "KEYBOARD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14),
 		Color(0.95, 0.82, 0.5, 0.9) if kb_focus else Color(0.6, 0.56, 0.5, 0.6))
 	for i in REMAP_ACTS.size():
 		var sel := kb_focus and i == remap_sel
@@ -7160,19 +7201,19 @@ func draw_remap(font: Font, s: Vector2) -> void:
 			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0), true)
 		var dim := 1.0 if kb_focus else 0.5
 		var nm := String(REMAP_ACTS[i][1])
-		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
+		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18),
 			Color(1.0, 0.9, 0.6) if sel else Color(0.8 * dim, 0.74 * dim, 0.66 * dim))
 		var kname := OS.get_keycode_string(action_key(String(REMAP_ACTS[i][0])))
 		if sel and remap_wait:
 			var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
-			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 16, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
+			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, ps(16), Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
 		else:
 			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(kname.length())), ry - 13.0, kname)
 
 	# --- gamepad column (TRICK + SWITCH TRICK only - catch/throw stay on the
 	# triggers/bumpers, always, never remapped: see PAD_ACTS) ---
 	var gy := oy + float(REMAP_ACTS.size()) * 40.0 + 30.0
-	draw_string(font, Vector2(px, gy - 22.0), "GAMEPAD", HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
+	draw_string(font, Vector2(px, gy - 22.0), "GAMEPAD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14),
 		Color(0.95, 0.82, 0.5, 0.9) if pad_focus else Color(0.6, 0.56, 0.5, 0.6))
 	for i in PAD_ACTS.size():
 		var sel := pad_focus and i == pad_remap_sel
@@ -7181,25 +7222,25 @@ func draw_remap(font: Font, s: Vector2) -> void:
 			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0), true)
 		var dim := 1.0 if pad_focus else 0.5
 		var nm := String(PAD_ACTS[i][1])
-		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 18,
+		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18),
 			Color(1.0, 0.9, 0.6) if sel else Color(0.8 * dim, 0.74 * dim, 0.66 * dim))
 		var gname := pad_button_glyph(pad_action_button(String(PAD_ACTS[i][0])))
 		if sel and remap_wait:
 			var pa2 := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
-			draw_string(font, Vector2(px + pw - 220.0, ry), "press a button...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, 16, Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa2))
+			draw_string(font, Vector2(px + pw - 220.0, ry), "press a button...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, ps(16), Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa2))
 		else:
 			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(gname.length())), ry - 13.0, gname)
 	draw_string(font, Vector2(px, gy + float(PAD_ACTS.size()) * 40.0 + 4.0),
 		"catch and throw always stay on the triggers and bumpers",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.68, 0.63, 0.56, 0.8))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.68, 0.63, 0.56, 0.8))
 
 	# the other in-play keys, listed here so live play never has to show them
 	var refy := gy + float(PAD_ACTS.size()) * 40.0 + 44.0
 	draw_ornament(s.x * 0.5, refy, 150.0, Color(0.82, 0.62, 0.34, 0.6))
-	draw_string(font, Vector2(0, refy + 22.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(0, refy + 46.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      1  2  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Tab switch device    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(0, refy + 22.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(0, refy + 46.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      1  2  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.76, 0.66))
+	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Tab switch device    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -11446,9 +11487,9 @@ func _draw() -> void:
 		# Deliberately no "fps": see the correction in cap_torch for what reading one off
 		# a background window cost.
 		var pf := game_font()
-		var pw2 := pf.get_string_size(_perf_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var pw2 := pf.get_string_size(_perf_line, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x
 		draw_rect(Rect2(8.0, 8.0, pw2 + 20.0, 26.0), Color(0.02, 0.02, 0.04, 0.8))
-		draw_string(pf, Vector2(18.0, 26.0), _perf_line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+		draw_string(pf, Vector2(18.0, 26.0), _perf_line, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13),
 			Color(0.6, 1.0, 0.7))
 	if _fps:
 		_draw_us += Time.get_ticks_usec() - t0
@@ -15118,7 +15159,7 @@ func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color
 		sh.anti_aliasing = true
 		draw_style_box(sh, Rect2(x, y, fw, h * 0.5))
 	if label != "":
-		draw_string(game_font(), Vector2(x + 8, y + h - 4.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.08, 0.04, 0.03, 0.85))
+		draw_string(game_font(), Vector2(x + 8, y + h - 4.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(10), Color(0.08, 0.04, 0.03, 0.85))
 
 
 func draw_drop_marks(x: float, y: float, lim: int, used: int) -> void:
@@ -15221,7 +15262,7 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# the readout goes BELOW the hub: the needle sweeps the upper half only, so this is
 	# the one spot on the instrument it can never cross (it did, over the number)
 	if label != "":
-		draw_string(font, Vector2(c.x - r, c.y + 18.0), label, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, 14,
+		draw_string(font, Vector2(c.x - r, c.y + 18.0), label, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, ps(14),
 			Color(tipc.r, tipc.g, tipc.b, 0.95))
 	# in the red, the band itself pulses: the one number in the game that kills a set
 	if frac <= float(GAUGE_ZONES[0]["to"]):
@@ -15237,12 +15278,12 @@ func fit_text(font: Font, text: String, w: float, size: int) -> String:
 	# something readable instead of something broken (Louis, 2026-07-26: no text should
 	# ever leave its container). Returns the text untouched when it already fits, which
 	# is the normal case, so this costs nothing on the vast majority of draws.
-	if w <= 0.0 or font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= w:
+	if w <= 0.0 or font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x <= w:
 		return text
 	var cut := text
 	while cut.length() > 1:
 		cut = cut.substr(0, cut.length() - 1)
-		if font.get_string_size(cut + "...", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= w:
+		if font.get_string_size(cut + "...", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x <= w:
 			return cut.strip_edges() + "..."
 	return "..."
 
@@ -15252,7 +15293,7 @@ func fit_size(font: Font, text: String, w: float, want: int, low: int = 10) -> i
 	# where shrinking reads better than trimming: a title built by joining two names
 	# ("TORCHES  REVERSE CASCADE"), where an ellipsis would eat one of them.
 	var sz := want
-	while sz > low and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x > w:
+	while sz > low and font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(sz)).x > w:
 		sz -= 1
 	return sz
 
@@ -15261,25 +15302,30 @@ func draw_fit_string(font: Font, pos: Vector2, text: String, align: int, w: floa
 	# draw_string, but the text is shortened to fit `w` first instead of being clipped.
 	# Use this for anything whose length is DATA (a venue name, a trick name, a prop
 	# name, a save-slot title) rather than a fixed string the layout was built around.
-	draw_string(font, pos, fit_text(font, text, w, size), align, w, size, col)
+	draw_string(font, pos, fit_text(font, text, w, size), align, w, ps(size), col)
 
 
-func draw_wrap_fit(font: Font, text: String, box: Rect2, size: int, col: Color, align := HORIZONTAL_ALIGNMENT_LEFT) -> float:
+func draw_wrap_fit(font: Font, text: String, box: Rect2, size_in: int, col: Color, align := HORIZONTAL_ALIGNMENT_LEFT) -> float:
 	# THE block-text overflow guard, the paragraph half of what fit_text does for one
 	# line: wrap into a BOX and draw only the lines that fit its HEIGHT, marking the
 	# last one when there was more. Use it wherever a description sits above something
 	# else on a card - the shop's gear text used to run straight down through its own
 	# price plate as soon as it wrapped to a second line. Returns the height used.
+	#
+	# The size is quantised ONCE here so the line height, the wrap width and the drawn
+	# glyphs all agree. Wrapping at one size and drawing at another is exactly how a
+	# paragraph overflows a box it was measured to fit - see ps().
+	var size := ps(size_in)
 	var lines := _wrap_lines(font, text, box.size.x, size)
 	var lh := float(size) + 4.0
 	var room := maxi(1, int(floor((box.size.y + 3.0) / lh)))
 	var shown := mini(lines.size(), room)
-	var y := box.position.y + font.get_ascent(size)
+	var y := box.position.y + font.get_ascent(ps(size))
 	for i in shown:
 		var ln := lines[i]
 		if i == room - 1 and lines.size() > room:
 			ln = fit_text(font, ln + " ...", box.size.x, size)
-		draw_string(font, Vector2(box.position.x, y), ln, align, box.size.x, size, col)
+		draw_string(font, Vector2(box.position.x, y), ln, align, box.size.x, ps(size), col)
 		y += lh
 	return float(shown) * lh
 
@@ -15293,7 +15339,7 @@ func _wrap_lines(font: Font, text: String, w: float, size: int) -> PackedStringA
 	var line := ""
 	for word in text.split(" "):
 		var test := word if line == "" else line + " " + word
-		if line != "" and font.get_string_size(test, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > w:
+		if line != "" and font.get_string_size(test, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x > w:
 			out.append(line)
 			line = word
 		else:
@@ -15306,7 +15352,7 @@ func _wrap_lines(font: Font, text: String, w: float, size: int) -> PackedStringA
 func _wrap_text(font: Font, text: String, x: float, y: float, w: float, size: int, col: Color) -> void:
 	var ly := y
 	for line in _wrap_lines(font, text, w, size):
-		draw_string(font, Vector2(x, ly), line, HORIZONTAL_ALIGNMENT_LEFT, -1, size, col)
+		draw_string(font, Vector2(x, ly), line, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), col)
 		ly += float(size) + 4.0
 
 
@@ -15410,7 +15456,7 @@ func k_count() -> Array[String]:
 
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
 	# a small keyboard-key box; returns its width so hints can chain
-	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0)
+	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 11.0)
 	# SEAM: the CAP only. The width above and the label below are LAYOUT and must not move
 	# when art arrives - every hint row in the game chains off this return value, and a key
 	# hint whose text stopped fitting its box would be a legibility regression, not a
@@ -15418,7 +15464,7 @@ func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
 	if not art_blit_rect("ui/keycap", Rect2(x, y, w, 19.0)):
 		draw_rect(Rect2(x, y, w, 19.0), Color(0.15, 0.10, 0.10, 0.92))
 		draw_rect(Rect2(x, y, w, 19.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
-	draw_string(font, Vector2(x, y + 14.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, 12, Color(1.0, 0.9, 0.7))
+	draw_string(font, Vector2(x, y + 14.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, ps(12), Color(1.0, 0.9, 0.7))
 	return w
 
 
@@ -15427,16 +15473,16 @@ func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
 	var total := 0.0
 	for it in items:
 		for k in it[0]:
-			total += maxf(21.0, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 11.0) + 3.0
-		total += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 22.0
+			total += maxf(21.0, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 11.0) + 3.0
+		total += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 22.0
 	total -= 22.0
 	var x := cx - total * 0.5
 	for it in items:
 		for k in it[0]:
 			x += draw_keycap(font, x, y, String(k)) + 3.0
 		x += 3.0
-		draw_string(font, Vector2(x, y + 14.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.74, 0.62, 0.9))
-		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x + 16.0
+		draw_string(font, Vector2(x, y + 14.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.82, 0.74, 0.62, 0.9))
+		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 16.0
 
 
 func score_text(v: float) -> String:
@@ -15524,7 +15570,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var cy := s.y * 0.22
 			draw_text_shout(font, Vector2(0, cy), String(cft[0]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.45, 0.35))
 			draw_multiline_string(font, Vector2(s.x * 0.25, cy + 28.0), String(cft[1]),
-				HORIZONTAL_ALIGNMENT_CENTER, s.x * 0.5, 14, 2, Color(0.96, 0.82, 0.74, 0.92))
+				HORIZONTAL_ALIGNMENT_CENTER, s.x * 0.5, ps(14), 2, Color(0.96, 0.82, 0.74, 0.92))
 
 	# ============================ LEFT RAIL: the contest ============================
 	var LX := 18.0
@@ -15536,7 +15582,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var setline := "THE ACT"
 		if purist:
 			setline += "   PURIST"
-		draw_string(font, Vector2(LX + 14, 60), setline, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
+		draw_string(font, Vector2(LX + 14, 60), setline, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), warm)
 		for i in NUM_GOALS:
 			var dotc := Vector2(LX + LW - 20.0 - float(NUM_GOALS - 1 - i) * 18.0, 34.0)
 			if i < goals_hit:
@@ -15552,15 +15598,15 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var tcard_y := 78.0
 		var tcard_h := 196.0
 		hud_card(Rect2(LX, tcard_y, LW, tcard_h), Color(1.0, 0.82, 0.4, 0.4))
-		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55))
-		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1.0, 0.94, 0.76))
+		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55))
+		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(26), Color(1.0, 0.94, 0.76))
 		# the record chase, top-right of the card
 		if run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
 			if record_broken:
 				var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
-				draw_string(font, Vector2(LX + 14, tcard_y + 78), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(1.0, 0.86, 0.42, ra))
+				draw_string(font, Vector2(LX + 14, tcard_y + 78), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), Color(1.0, 0.86, 0.42, ra))
 			else:
-				draw_string(font, Vector2(LX + 14, tcard_y + 78), "best  %s" % score_text(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, dim)
+				draw_string(font, Vector2(LX + 14, tcard_y + 78), "best  %s" % score_text(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), dim)
 		# THE HAT runs the WHOLE act - zero to the final goal - with a mark on the crown
 		# at each goal line, so where you are and what is left both read at a glance. It
 		# rises on the same concave curve (goal_bar_pos) the horizontal meter used, so
@@ -15601,14 +15647,14 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var col_x := LX + 152.0 + 17.0 + STEM_BLOOM_REACH + 7.0
 		var col_w := LW - 8.0 - (col_x - LX)     # to the card's own right margin
 		var fc := Color(0.98, 0.60, 0.72)
-		draw_string(font, Vector2(col_x, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, 11, Color(0.85, 0.72, 0.66))
+		draw_string(font, Vector2(col_x, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, ps(11), Color(0.85, 0.72, 0.66))
 		draw_flower(Vector2(col_x + 9.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
 		# the night's take SHRINKS to fit, never trims: fit_text would render a good
 		# night's 12,400 as "12,4...", and a truncated number is not a number
 		var take := commafy(run_flowers)
 		var take_x := col_x + 23.0
 		draw_string(title_font(), Vector2(take_x, tcard_y + 66.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
-			fit_size(title_font(), take, LX + LW - 8.0 - take_x, 24, 14), fc)
+			ps(fit_size(title_font(), take, LX + LW - 8.0 - take_x, 24, 14)), fc)
 		# and how the room is FEELING, in the one word the pile is saying
 		# ...in the SAME bands the crowd dial is coloured in, so the word and the
 		# needle can never disagree about whether flowers are coming
@@ -15633,14 +15679,14 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# than the column the bloom leaves - so it steps down a size or two rather
 		# than losing the word that carries the meaning
 		draw_string(font, Vector2(col_x, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
-			fit_size(font, mood, col_w, 12, 10), mc)
+			ps(fit_size(font, mood, col_w, 12, 10)), mc)
 		# the ask, and the gamble, in the card's left column beside the hat
 		var goal_head := "FIRST GOAL"
 		if goals_hit >= NUM_GOALS:
 			goal_head = "ALL CLEARED"
 		elif goals_hit > 0:
 			goal_head = "NEXT GOAL"
-		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, 11, Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), Color(0.85, 0.72, 0.55))
 		if goals_hit < NUM_GOALS:
 			# THE NUMBER, and then - only while it matters - THE CLOCK. A goal banks on both
 			# gates (see GOAL_MIN_S), and a bar sitting full with nothing happening is the one
@@ -15653,16 +15699,16 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), "%.1fs" % clock_left,
 					HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(0.72, 0.95, 0.68, cp))
 				draw_string(font, Vector2(LX + 14, tcard_y + 150), "number beaten  -  hold the set",
-					HORIZONTAL_ALIGNMENT_LEFT, 150.0, 10, Color(0.72, 0.95, 0.68, 0.85))
+					HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(0.72, 0.95, 0.68, 0.85))
 			else:
 				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), score_text(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
 				if clock_left > 0.0:
 					# ...and before the number is beaten, the clock is still worth showing,
 					# quietly, so nobody is surprised by it later
 					draw_string(font, Vector2(LX + 14, tcard_y + 150), "opens in %.0fs" % clock_left,
-						HORIZONTAL_ALIGNMENT_LEFT, 150.0, 10, Color(0.78, 0.72, 0.62, 0.75))
+						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(0.78, 0.72, 0.62, 0.75))
 		else:
-			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, 12, Color(1.0, 0.88, 0.5))
+			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, ps(12), Color(1.0, 0.88, 0.5))
 		if goals_hit > 0:
 			# from the first goal on, spell out the gamble: a collapse strips the score
 			# back to the last goal's value (goal_for(goals_hit-1)), so everything earned
@@ -15677,7 +15723,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_fit_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), score_text(score)],
 				HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 11, Color(0.75, 0.95, 0.7, pl))
 		else:
-			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, 10, Color(0.72, 0.66, 0.58, 0.7))
+			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, ps(10), Color(0.72, 0.66, 0.58, 0.7))
 
 		# --- the CROWD (patience clock) and the DROP limit ---
 		var ccard_y := 286.0
@@ -15690,11 +15736,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# readout under the hub off its own bottom border.
 		var ccard_h := 116.0
 		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35))
-		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.72, 0.62))
+		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.9, 0.72, 0.62))
 		# the DIAL on the left, the drops you have left on the right
 		draw_gauge(Vector2(LX + 80.0, ccard_y + 82.0), 44.0, applause, peak_applause,
 			"%d%%" % int(round(applause * 100.0)), font)
-		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.6, 0.55))
+		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.9, 0.6, 0.55))
 		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
 
 		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
@@ -15725,12 +15771,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var nb := next_ball_strength()
 		hud_card(Rect2(LX, 16, LW, 94.0 if nb > 0 else 74.0))
 		var tl := "PRACTICE" + ("   -   DEBUG" if debug_mode else "")
-		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.72, 0.82, 0.9))
-		draw_string(font, Vector2(LX + 14, 60), "no crowd, no pay", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, warm)
+		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), Color(0.72, 0.82, 0.9))
+		draw_string(font, Vector2(LX + 14, 60), "no crowd, no pay", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), warm)
 		# the count keys, said once here; the bottom-left card counts the load itself
-		draw_string(font, Vector2(LX + 14, 78), "%s  %s  step the count" % [String(k_count()[0]), String(k_count()[1])], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
+		draw_string(font, Vector2(LX + 14, 78), "%s  %s  step the count" % [String(k_count()[0]), String(k_count()[1])], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.72, 0.66, 0.56, 0.85))
 		if nb > 0:
-			draw_string(font, Vector2(LX + 14, 94), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.72, 0.66, 0.56, 0.85))
+			draw_string(font, Vector2(LX + 14, 94), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.72, 0.66, 0.56, 0.85))
 
 	# ============================ RIGHT RAIL: you ============================
 	# hidden during the results panel so it never lingers, dimmed, beside the card
@@ -15760,10 +15806,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var per_fs := 26 + mpulse
 		var per_txt := score_text(per)
 		var lbl := "Mult = "
-		var lbl_w := font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		draw_string(font, Vector2(RX + 14, 52), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(RX + 14.0 + lbl_w + 2.0, 52), per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, per_fs, scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, 12, dim)
+		var lbl_w := font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x
+		draw_string(font, Vector2(RX + 14, 52), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.85, 0.72, 0.55))
+		draw_string(font, Vector2(RX + 14.0 + lbl_w + 2.0, 52), per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(per_fs), scol2)
+		draw_string(font, Vector2(RX + RW - 150, 40), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, ps(12), dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
 		# stat points are actionable (Tab), so they get one pulsing line. Gold,
@@ -15781,15 +15827,15 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# elsewhere: the last drop mark and the capped streak label both do the same).
 		var stam_low := sfrac < STAM_LOW
 		var stam_a := 0.55 + 0.45 * sin(float(tick) * 0.3) if stam_low else 0.85
-		draw_string(font, Vector2(sx, 96), "STAMINA  -  LOW" if stam_low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.55, 0.42, stam_a) if stam_low else Color(0.85, 0.9, 0.85, 0.85))
-		draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 11, Color(0.85, 0.9, 0.85, 0.85))
+		draw_string(font, Vector2(sx, 96), "STAMINA  -  LOW" if stam_low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(1.0, 0.55, 0.42, stam_a) if stam_low else Color(0.85, 0.9, 0.85, 0.85))
+		draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(11), Color(0.85, 0.9, 0.85, 0.85))
 		var stcol := Color(0.55, 0.80, 0.6)
 		if stam_low:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 		draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
 		if pts_row:
 			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.95, 0.7, pa))
+			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
@@ -15842,8 +15888,8 @@ func _result_row(font: Font, lx: float, rx: float, y: float, label: String, valu
 	if a <= 0.0:
 		return
 	var slide := (1.0 - a) * 10.0
-	draw_string(font, Vector2(lx + slide, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.78, 0.72, 0.66, a))
-	draw_string(font, Vector2(rx - 300.0 + slide, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 18, Color(vc.r, vc.g, vc.b, a))
+	draw_string(font, Vector2(lx + slide, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18), Color(0.78, 0.72, 0.66, a))
+	draw_string(font, Vector2(rx - 300.0 + slide, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, ps(18), Color(vc.r, vc.g, vc.b, a))
 
 
 func results_age() -> int:
@@ -15886,7 +15932,7 @@ func draw_ovation(font: Font, s: Vector2) -> void:
 		var bx := s.x * 0.5
 		var by := y + 68.0
 		var txt := "+%s" % commafy(ovation_bonus)
-		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+		var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(26)).x
 		draw_text_shout(font, Vector2(bx - tw * 0.5 - 12.0, by), txt, HORIZONTAL_ALIGNMENT_LEFT, tw + 4.0,
 			26, Color(1.0, 0.72, 0.80, a))
 		draw_coin_mark(Vector2(bx + tw * 0.5 + 2.0, by - 8.0), 9.0, Color(1, 1, 1, a), true)
@@ -15913,14 +15959,14 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var complete := goals_hit >= NUM_GOALS
 	var htag := "THE ACT  -  ALL THREE GOALS" if complete else ("THE ACT  -  %d of %d goals" % [goals_hit, NUM_GOALS])
 	var htc := Color(1.0, 0.86, 0.45) if complete else Color(0.9, 0.72, 0.55)
-	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, htc)
-	draw_string(title_font(), Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.5))
+	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), htc)
+	draw_string(title_font(), Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(30), Color(1.0, 0.86, 0.5))
 	# WHY the night ended, right under its name, whenever it did not end in a win: the
 	# card used to show only what was scored and left the player to guess the cause.
 	# The grade badge sits far right, so this line has the left of the card to itself.
 	var ft := fail_text()
 	if not complete and String(ft[0]) != "":
-		draw_string(font, Vector2(lx, py + 96.0), String(ft[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.55, 0.42))
+		draw_string(font, Vector2(lx, py + 96.0), String(ft[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(1.0, 0.55, 0.42))
 	if age >= 64:
 		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
 		var sc := 1.0 + 1.1 * (1.0 - k) * (1.0 - k)   # stamps down from large to rest
@@ -15930,7 +15976,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 		draw_set_transform(bc, -0.06 * (1.0 - k), Vector2(sc, sc))
 		draw_circle(Vector2.ZERO, 42.0, Color(gc.r, gc.g, gc.b, 0.14 * k + 0.06))
 		draw_arc(Vector2.ZERO, 42.0, 0.0, TAU, 40, gc, 3.0, true)
-		draw_string(font, Vector2(-42.0, 21.0), g, HORIZONTAL_ALIGNMENT_CENTER, 84.0, 58, gc)
+		draw_string(font, Vector2(-42.0, 21.0), g, HORIZONTAL_ALIGNMENT_CENTER, 84.0, ps(58), gc)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_line(Vector2(lx, py + 104.0), Vector2(rx, py + 104.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
@@ -15949,7 +15995,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 		var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
 		if results_record:
 			recc.a = 0.7 + 0.3 * sin(float(tick) * 0.1)
-		draw_string(font, Vector2(rx - 300.0, y + 15.0), rec, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, 13, recc)
+		draw_string(font, Vector2(rx - 300.0, y + 15.0), rec, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, ps(13), recc)
 	y += rowh + 8.0
 	var pct := int(round(100.0 * run_clean()))
 	_result_row(font, lx, rx, y, "Caught  /  Dropped", "%d  /  %d    (%d%%)" % [caught, dropped, pct], Color(0.86, 0.9, 0.82), ra.call(1)); y += rowh
@@ -16006,7 +16052,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 			foot = "%s  go again      %s  shop      %s  back to the day" % [kgo, kshop, kmenu]
 			if points > 0:
 				foot = "%s  go again      %s  +%d point%s      %s  shop      %s  back to the day" % [kgo, ksheet, points, "" if points == 1 else "s", kshop, kmenu]
-		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 15, Color(0.86, 0.78, 0.64, fa))
+		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, ps(15), Color(0.86, 0.78, 0.64, fa))
 
 
 func draw_pause_screen(font: Font, s: Vector2) -> void:
@@ -16028,7 +16074,7 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.99), Color(0.9, 0.6, 0.35, 0.5), 2.0, 18.0, 26.0)
-	draw_string(title_font(), Vector2(px, py + 46.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, 28, Color(1.0, 0.86, 0.5))
+	draw_string(title_font(), Vector2(px, py + 46.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(28), Color(1.0, 0.86, 0.5))
 	draw_ornament(px + pw * 0.5, py + 62.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
 
 	var opts := [
@@ -16064,7 +16110,7 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 		draw_fit_string(font, Vector2(cx + 62.0, cy + 26.0), String(o["name"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 18, Color(1.0, 0.95, 0.85) if sel else Color(0.86, 0.81, 0.74))
 		draw_fit_string(font, Vector2(cx + 62.0, cy + 44.0), String(o["note"]), HORIZONTAL_ALIGNMENT_LEFT, cw - 78.0, 11, Color(0.76, 0.71, 0.64, 0.85))
 	var pfoot2 := "up / down  -  A selects  -  B resumes" if pad_active() else "up / down  -  Enter  -  Esc resumes"
-	draw_string(font, Vector2(px, py + ph - 22.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(px, py + ph - 22.0), pfoot2, HORIZONTAL_ALIGNMENT_CENTER, pw, ps(12), Color(0.72, 0.66, 0.6))
 
 
 func exp_on(id: String) -> bool:
@@ -16095,8 +16141,8 @@ func draw_debug_panel() -> void:
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.07, 0.09, 0.13, 0.98), Color(0.5, 0.8, 1.0, 0.6), 2.0, 16.0, 22.0)
-	draw_string(font, Vector2(px, py + 34.0), "EXPERIMENTS", HORIZONTAL_ALIGNMENT_CENTER, pw, 22, Color(0.7, 0.9, 1.0))
-	draw_string(font, Vector2(px, py + 54.0), "debug build only  -  never reaches a release export", HORIZONTAL_ALIGNMENT_CENTER, pw, 11, Color(0.55, 0.65, 0.7))
+	draw_string(font, Vector2(px, py + 34.0), "EXPERIMENTS", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(22), Color(0.7, 0.9, 1.0))
+	draw_string(font, Vector2(px, py + 54.0), "debug build only  -  never reaches a release export", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(11), Color(0.55, 0.65, 0.7))
 	var oy := py + 76.0
 	for i in EXPERIMENT_DEFS.size():
 		var edef: Dictionary = EXPERIMENT_DEFS[i]
@@ -16110,9 +16156,9 @@ func draw_debug_panel() -> void:
 		var namecol := Color(1.0, 0.95, 0.8) if sel else Color(0.8, 0.78, 0.72)
 		draw_fit_string(font, Vector2(px + 20.0, ry + 16.0), String(edef["name"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 140.0, 15, namecol)
 		var statecol := Color(0.55, 0.95, 0.55) if on else Color(0.7, 0.6, 0.55)
-		draw_string(font, Vector2(px + pw - 100.0, ry + 16.0), "ON" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 80.0, 15, statecol)
+		draw_string(font, Vector2(px + pw - 100.0, ry + 16.0), "ON" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(15), statecol)
 		draw_wrap_fit(font, String(edef["desc"]), Rect2(px + 20.0, ry + 26.0, pw - 40.0, row_h - 34.0), 10, Color(0.62, 0.6, 0.58))
-	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, 12, Color(0.6, 0.68, 0.72))
+	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(12), Color(0.6, 0.68, 0.72))
 
 
 #region SKILL CARDS - the Balatro-style deck
@@ -17122,7 +17168,7 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 			var nm := String(d["name"]).to_upper()
 			var nsz := fit_size(title_font(), nm, namew, int(maxf(10.0, 27.0 * grow)), 11)
 			draw_string(title_font(), Vector2(r.position.x + 15.0 * grow, art.position.y + art.size.y + 34.0 * grow),
-				nm, HORIZONTAL_ALIGNMENT_CENTER, namew, nsz, Color(1.0, 0.96, 0.86, a))
+				nm, HORIZONTAL_ALIGNMENT_CENTER, namew, ps(nsz), Color(1.0, 0.96, 0.86, a))
 			draw_ornament(cx, art.position.y + art.size.y + 46.0 * grow, vw * 0.52,
 				Color(kindcol.r, kindcol.g, kindcol.b, 0.7 * a))
 			# what it actually does, wrapped into the room that is left above the footer
@@ -17142,7 +17188,7 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 				HORIZONTAL_ALIGNMENT_CENTER if v2 else HORIZONTAL_ALIGNMENT_LEFT)
 			draw_string(font, Vector2(r.position.x, r.position.y + ch - 30.0 * grow),
 				"SKILLS shows you how" if is_trick else "P switches patterns in training",
-				HORIZONTAL_ALIGNMENT_CENTER, vw, int(maxf(8.0, 11.0 * grow)), Color(0.72, 0.68, 0.62, 0.9 * a))
+				HORIZONTAL_ALIGNMENT_CENTER, vw, ps(int(maxf(8.0, 11.0 * grow))), Color(0.72, 0.68, 0.62, 0.9 * a))
 	# THE KIND PILL rides on top of both sides, because it is the one thing that is true
 	# either way round: a trick card is a trick card face up or face down. It is what the
 	# face-down card says INSTEAD of a name, so it drops the word NEW and simply names the
@@ -17156,7 +17202,7 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 			else ("NEW TRICK" if is_trick else "NEW PATTERN")
 		draw_string(font, Vector2(pill.position.x, pill.position.y + 16.0 * grow),
 			pilltxt, HORIZONTAL_ALIGNMENT_CENTER, pillw,
-			fit_size(font, pilltxt, pillw - 6.0, int(maxf(8.0, 12.0 * grow)), 7),
+			ps(fit_size(font, pilltxt, pillw - 6.0, int(maxf(8.0, 12.0 * grow)), 7)),
 			Color(kindcol.r, kindcol.g, kindcol.b, a))
 	# THE FACE-DOWN CARD HAS TO SAY WHAT IT IS WORTH TURNING OVER FOR, or a player who
 	# does not yet know the mechanic reads a blank card and a "press any key" and learns
@@ -17165,7 +17211,7 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 	if ucard_flip < 0.0:
 		draw_string(font, Vector2(0.0, cy + ch * 0.5 + 26.0 * grow),
 			"a skill you do not have yet  -  turn it over", HORIZONTAL_ALIGNMENT_CENTER, s.x,
-			int(maxf(9.0, 13.0 * grow)), Color(0.82, 0.76, 0.68, 0.9 * a))
+			ps(int(maxf(9.0, 13.0 * grow))), Color(0.82, 0.76, 0.68, 0.9 * a))
 	# ...and the prompt, which only appears once the card will actually listen. Pulsed,
 	# because a card that waits forever has to say so or it reads as a freeze. It names
 	# the two different things the two presses do.
@@ -17176,7 +17222,7 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(r.position.x, r.position.y + ch - 13.0 * grow),
 			"press any key to turn it over" if ucard_flip < 0.0 else "press any key",
 			HORIZONTAL_ALIGNMENT_CENTER, vw,
-			int(maxf(7.0, (10.0 if ucard_flip < 0.0 else 12.0) * grow)),
+			ps(int(maxf(7.0, (10.0 if ucard_flip < 0.0 else 12.0) * grow))),
 			Color(kindcol.r, kindcol.g, kindcol.b, pa * a))
 
 
@@ -17200,7 +17246,7 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(bx, by, bw, 40.0), Color(0.10, 0.06, 0.08, 0.86 * a))
 	draw_rect(Rect2(bx, by, bw, 40.0), Color(1.0, 0.82, 0.45, (0.34 + 0.28 * glow) * a), false, 1.5)
 	draw_fit_string(font, Vector2(bx, by + 18.0), "NEW SKILL   %s" % String(t["name"]).to_upper(), HORIZONTAL_ALIGNMENT_CENTER, bw - 20.0, 16, Color(1.0, 0.88, 0.52, a))
-	draw_string(font, Vector2(bx, by + 33.0), "how to use it lives in  SKILLS", HORIZONTAL_ALIGNMENT_CENTER, bw, 11, Color(0.82, 0.76, 0.66, 0.85 * a))
+	draw_string(font, Vector2(bx, by + 33.0), "how to use it lives in  SKILLS", HORIZONTAL_ALIGNMENT_CENTER, bw, ps(11), Color(0.82, 0.76, 0.66, 0.85 * a))
 
 
 func draw_trick_hud(font: Font, s: Vector2) -> void:
@@ -17244,9 +17290,9 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	# opposite carries no prefix either), and the title shrinks to FIT the card -
 	# "BEHIND THE BACK - ON (High Toss next)" used to run off the right edge
 	var fs := 16
-	while fs > 11 and font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > pw - 24.0:
+	while fs > 11 and font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x > pw - 24.0:
 		fs -= 1
-	draw_string(font, Vector2(px + 12.0, s.y - 52.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, fs, lc)
+	draw_string(font, Vector2(px + 12.0, s.y - 52.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, ps(fs), lc)
 	var items: Array = []
 	var use := ""
 	match kind:
@@ -17281,17 +17327,17 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	# running out past both edges on the longest pairing (TORCHES + REVERSE CASCADE)
 	var tsz := fit_size(font, oname + "    " + pname, pw - 24.0, 16, 11)
 	var otext := oname + "    "
-	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz).x
-	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz).x
+	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz)).x
+	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz)).x
 	var jx := cx - jw * 0.5
-	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz, ocol)
-	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, tsz, Color(0.86, 0.76, 0.62))
+	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), ocol)
+	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), Color(0.86, 0.76, 0.62))
 	var colw := pw / 3.0
 	var cy := s.y - 26.0
 	var hand_c := Color(0.92, 0.84, 0.7)
-	draw_string(font, Vector2(px, cy), "left hand  %d" % _stack_l.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, hand_c)
-	draw_string(font, Vector2(px + colw, cy), "in the air  %d" % balls_airborne(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, Color(0.7, 0.85, 1.0))
-	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, 13, hand_c)
+	draw_string(font, Vector2(px, cy), "left hand  %d" % _stack_l.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(13), hand_c)
+	draw_string(font, Vector2(px + colw, cy), "in the air  %d" % balls_airborne(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(13), Color(0.7, 0.85, 1.0))
+	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(13), hand_c)
 
 
 #endregion
@@ -17484,13 +17530,13 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	var innerw := pw - 80.0
 
 	# ---- header: title, purse, level + xp, and the points banner ----
-	draw_string(title_font(), Vector2(tx, py + 50.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(tx + 156.0, py + 48.0), "TALENT TREE", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.6, 0.82, 1.0))
+	draw_string(title_font(), Vector2(tx, py + 50.0), "JUGGLER", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(30), Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(tx + 156.0, py + 48.0), "TALENT TREE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.6, 0.82, 1.0))
 	draw_purse(font, px + pw - 40.0, py + 50.0)
-	draw_string(font, Vector2(px, py + 70.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, 12, Color(0.82, 0.72, 0.85))
+	draw_string(font, Vector2(px, py + 70.0), "Rep %s   %s" % [commafy(reputation), rep_tier()], HORIZONTAL_ALIGNMENT_RIGHT, pw - 40.0, ps(12), Color(0.82, 0.72, 0.85))
 	var need := xp_to_next(level)
 	var xf := clampf(float(xp) / float(maxi(1, need)), 0.0, 1.0)
-	draw_string(font, Vector2(tx, py + 93.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
+	draw_string(font, Vector2(tx, py + 93.0), "LEVEL %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18), Color(1.0, 0.9, 0.6))
 	var xbx := tx + 118.0
 	var xbw := innerw - 118.0
 	draw_meter(xbx, py + 81.0, xbw, 15.0, xf, Color(0.92, 0.72, 0.36))
@@ -17512,9 +17558,9 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		# NO "PRESS A COLUMN'S NUMBER" ANY MORE (2026-07-31, Louis: the 1-4 shortcuts are
 		# gone from input, "but the windows that shows to use them aren't gone yet" - this
 		# banner was one of them, still promising a press that does nothing).
-		draw_string(font, Vector2(tx, by0 + 22.0), "%d POINT%s TO SPEND  -  Left / Right, then Enter" % [points, "" if points == 1 else "S"], HORIZONTAL_ALIGNMENT_CENTER, innerw, 15, Color(1.0, 0.92, 0.7))
+		draw_string(font, Vector2(tx, by0 + 22.0), "%d POINT%s TO SPEND  -  Left / Right, then Enter" % [points, "" if points == 1 else "S"], HORIZONTAL_ALIGNMENT_CENTER, innerw, ps(15), Color(1.0, 0.92, 0.7))
 	else:
-		draw_string(font, Vector2(tx, by0 + 22.0), "Skill sets your score; stats ease the climb. The next point comes with the next level.", HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(0.75, 0.7, 0.62))
+		draw_string(font, Vector2(tx, by0 + 22.0), "Skill sets your score; stats ease the climb. The next point comes with the next level.", HORIZONTAL_ALIGNMENT_CENTER, innerw, ps(13), Color(0.75, 0.7, 0.62))
 
 	# ---- four growth columns ----
 	var branches := [
@@ -17539,9 +17585,9 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		var cardfill := Color(bcol.r * 0.14, bcol.g * 0.14, bcol.b * 0.16, 0.92) if active else Color(0.11, 0.09, 0.12, 0.85)
 		soft_card(Rect2(cx, coly, colw, colh), cardfill, Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.28), 2.0 if active else 1.0, 13.0, 14.0)
 		# name, role, current value
-		draw_string(title_font(), Vector2(cx, coly + 32.0), String(b["name"]), HORIZONTAL_ALIGNMENT_CENTER, colw, 17, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.82))
-		draw_string(font, Vector2(cx, coly + 50.0), String(b["role"]), HORIZONTAL_ALIGNMENT_CENTER, colw, 11, Color(0.72, 0.68, 0.62))
-		draw_string(title_font(), Vector2(cx, coly + 98.0), str(val), HORIZONTAL_ALIGNMENT_CENTER, colw, 42, Color(1.0, 0.95, 0.82))
+		draw_string(title_font(), Vector2(cx, coly + 32.0), String(b["name"]), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(17), bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.82))
+		draw_string(font, Vector2(cx, coly + 50.0), String(b["role"]), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(11), Color(0.72, 0.68, 0.62))
+		draw_string(title_font(), Vector2(cx, coly + 98.0), str(val), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(42), Color(1.0, 0.95, 0.82))
 		# the vertical GROWTH track: fills from the bottom up to val/cap, milestone pips
 		# at the real thresholds, the next one pulsing while a point is unspent
 		var trk_w := 15.0
@@ -17627,9 +17673,9 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 			nl2 = "at %d  (+%d)" % [int(nodes[next_i]["val"]), int(nodes[next_i]["val"]) - val]
 		else:
 			nl1 = "at the cap"
-		draw_string(font, Vector2(cx + 6.0, trk_bot + 16.0), nl1, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, 11, Color(0.86, 0.82, 0.74))
+		draw_string(font, Vector2(cx + 6.0, trk_bot + 16.0), nl1, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, ps(11), Color(0.86, 0.82, 0.74))
 		if nl2 != "":
-			draw_string(font, Vector2(cx + 6.0, trk_bot + 31.0), nl2, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, 11, Color(0.66, 0.62, 0.58))
+			draw_string(font, Vector2(cx + 6.0, trk_bot + 31.0), nl2, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, ps(11), Color(0.66, 0.62, 0.58))
 		# the invest plate at the foot of the column
 		var can := points > 0 and val < cap
 		var pl := Rect2(cx + colw * 0.5 - 48.0, coly + colh - 40.0, 96.0, 30.0)
@@ -17641,7 +17687,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		# only it gets a keycap - the same affordance a focused control shows anywhere else.
 		if active and can:
 			draw_keycap(font, pl.position.x + 9.0, pl.position.y + 6.0, String(k_finish()[0]))
-		draw_string(font, Vector2(pl.position.x, pl.position.y + 20.0), ("+1" if can else ("MAX" if val >= cap else "-")), HORIZONTAL_ALIGNMENT_RIGHT, pl.size.x - 12.0, 15, Color(0.8, 0.96, 0.74) if can else Color(0.62, 0.57, 0.52, 0.85))
+		draw_string(font, Vector2(pl.position.x, pl.position.y + 20.0), ("+1" if can else ("MAX" if val >= cap else "-")), HORIZONTAL_ALIGNMENT_RIGHT, pl.size.x - 12.0, ps(15), Color(0.8, 0.96, 0.74) if can else Color(0.62, 0.57, 0.52, 0.85))
 
 	# ---- the active branch's effect, spelled out, and the footer keys ----
 	var eff := ""
@@ -17651,7 +17697,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		"end": eff = "ENDURANCE: raises your maximum stamina, the fuel every throw and catch spends."
 		"spd": eff = "SPEED: bends the whole act toward slow motion, so every catch window stretches (capped at 25%)."
 	var dy := py + ph - 62.0
-	draw_string(font, Vector2(tx, dy), eff, HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.82, 0.79, 0.72))
+	draw_string(font, Vector2(tx, dy), eff, HORIZONTAL_ALIGNMENT_CENTER, innerw, ps(12), Color(0.82, 0.79, 0.72))
 	if debug_mode:
 		# the legend has to NAME the hold, or the fast path is a secret. And it says
 		# coin_word(), never a literal "gold": the purse beside it reads "flowers", and
@@ -17679,13 +17725,13 @@ func draw_purse(font: Font, right_x: float, y: float) -> void:
 	# flower. The icon says it better than an abbreviation can, and it stays correct
 	# when the economy switches.
 	var txt := commafy(money)
-	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x
 	# amount THEN mark, same order as the price plates below it - a shop that asked
 	# "20 flowers" while the purse answered "flowers 50,582" read as two currencies.
 	# The mark grows a touch with the flash too, so money changing hands is felt on the
 	# object and not only on the number beside it.
 	var mr := 10.0 + 1.5 * fl
-	draw_string(font, Vector2(right_x - tw - mr * 2.0 - 8.0, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
+	draw_string(font, Vector2(right_x - tw - mr * 2.0 - 8.0, y), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs), gc)
 	draw_coin_mark(Vector2(right_x - mr, y - 8.0), mr, Color(1.0, 0.84, 0.4), true)
 
 
@@ -17727,8 +17773,8 @@ func draw_price_plate(font: Font, r: Rect2, keylabel: String, price: String, aff
 	var mr := 7.0
 	var psz := fit_size(font, price, room - mr * 2.0 - 5.0, 16, 9)
 	var mx := r.position.x + r.size.x - 12.0 - mr
-	var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz).x
-	draw_string(font, Vector2(mx - mr - 5.0 - pw, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz, cc)
+	var pw := font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(psz)).x
+	draw_string(font, Vector2(mx - mr - 5.0 - pw, baseline), price, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(psz), cc)
 	draw_coin_mark(Vector2(mx, baseline - 5.5), mr, cc, true)
 
 
@@ -17962,7 +18008,7 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 			if not has_backroom and through:
 				# the 16+ plate nailed to the jamb, which is the joke and also the gate
 				draw_rect(Rect2(c.x + 6.0, c.y + 4.0, 17.0, 13.0), Color(0.90, 0.86, 0.78))
-				draw_string(game_font(), Vector2(c.x + 7.0, c.y + 15.0), "16", HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
+				draw_string(game_font(), Vector2(c.x + 7.0, c.y + 15.0), "16", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11),
 					Color(0.55, 0.10, 0.10))
 		"drinks":
 			# ENERGY DRINKS, and the point of this icon is that it is NOT the helmet
@@ -18040,7 +18086,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98), Color(0.9, 0.6, 0.35, 0.5), 2.0, 16.0, 22.0)
-	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "THE TAILOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
+	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "THE TAILOR", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(30), Color(1.0, 0.86, 0.55))
 	# THE ONE SENTENCE THIS SCREEN MUST GET RIGHT. It is a loadout now (Louis reversed the
 	# cosmetic-only call), which means taking a piece off costs you its bonus - and the trap I
 	# was avoiding when I made it cosmetic is real, so the screen states the rule and the live
@@ -18048,7 +18094,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	# they have, on this screen, before the act.
 	draw_string(font, Vector2(px + 40.0, py + 82.0),
 		"what you wear is what you get. A piece cut for tonight's house pays; the same piece cut for another is only clothes.",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.82, 0.75, 0.64))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 	# the live read: how much of tonight's set is actually on him. Counted by CATEGORY, not by
 	# raw piece (2026-07-30) - the head is one slot now, not two, so "the full set" means one
@@ -18061,7 +18107,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 			setn += 1
 	draw_string(font, Vector2(px + pw - 460.0, py + 82.0),
 		"tonight at %s:  %d of %d pieces  ·  score x%.2f" % [suit_name(cur_venue()), setn, wear_cats.size(), setb],
-		HORIZONTAL_ALIGNMENT_RIGHT, 420.0, 13,
+		HORIZONTAL_ALIGNMENT_RIGHT, 420.0, ps(13),
 		Color(0.75, 0.95, 0.70) if setn > 0 else Color(0.86, 0.62, 0.52))
 	draw_line(Vector2(px + 40.0, py + 100.0), Vector2(px + pw - 40.0, py + 100.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
@@ -18136,12 +18182,12 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var tonight := cur_venue()
 	var cellw := 26.0
 	var rowh2 := 40.0
-	draw_string(font, Vector2(cx2, hy), "THE RACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(cx2, hy), "THE RACK", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.95, 0.8, 0.55, 0.9))
 	# the house headings, with TONIGHT'S marked - the only column that pays
 	for st in venue_index() + 1:
 		var hx := cx2 + 160.0 + float(st) * cellw
 		var hc := Color(1.0, 0.86, 0.5) if st == tonight else Color(0.62, 0.56, 0.50)
-		draw_string(font, Vector2(hx - 6.0, hy), str(st + 1), HORIZONTAL_ALIGNMENT_CENTER, cellw, 12, hc)
+		draw_string(font, Vector2(hx - 6.0, hy), str(st + 1), HORIZONTAL_ALIGNMENT_CENTER, cellw, ps(12), hc)
 		if st == tonight:
 			draw_rect(Rect2(hx - 13.0, hy + 6.0, cellw - 4.0, 2.0), Color(1.0, 0.86, 0.5, 0.7))
 	# EVERY ROW IS DIVIDED INTO ITS CATEGORY (2026-07-30, Louis: "make sure it's all divided
@@ -18260,21 +18306,21 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		var owned3 := owns_wear(pc, stg)
 		var fy2 := y_cursor + 8.0   # the loop's own final cursor, so an extra group header pushes this down too
 		draw_string(font, Vector2(cx2, fy2), "%s  -  %s cut" % [String(pdf["name"]), suit_name(stg)],
-			HORIZONTAL_ALIGNMENT_LEFT, detw, 14, Color(1.0, 0.88, 0.55))
-		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, detw, 12,
+			HORIZONTAL_ALIGNMENT_LEFT, detw, ps(14), Color(1.0, 0.88, 0.55))
+		draw_string(font, Vector2(cx2, fy2 + 20.0), String(pdf["note"]), HORIZONTAL_ALIGNMENT_LEFT, detw, ps(12),
 			Color(0.78, 0.90, 0.72))
 		if not owned3:
 			var pcost := wear_cost(pc, stg)
 			var afford2 := money >= pcost
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "buy for %s" % commafy(pcost),
-				HORIZONTAL_ALIGNMENT_LEFT, detw, 13,
+				HORIZONTAL_ALIGNMENT_LEFT, detw, ps(13),
 				Color(0.78, 0.96, 0.72) if afford2 else Color(0.90, 0.55, 0.48))
 		elif worn_stage(pc) == stg:
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "worn  -  press again to take it off",
-				HORIZONTAL_ALIGNMENT_LEFT, detw, 13, Color(0.80, 0.75, 0.68))
+				HORIZONTAL_ALIGNMENT_LEFT, detw, ps(13), Color(0.80, 0.75, 0.68))
 		else:
 			draw_string(font, Vector2(cx2, fy2 + 40.0), "owned  -  press to wear it",
-				HORIZONTAL_ALIGNMENT_LEFT, detw, 13, Color(0.80, 0.75, 0.68))
+				HORIZONTAL_ALIGNMENT_LEFT, detw, ps(13), Color(0.80, 0.75, 0.68))
 		# SHARING A SLOT, SPELLED OUT (2026-07-30, Louis: "make the player choose"): only ever
 		# shown for a category with a rival in it, so the one pair that competes (hat, helmet)
 		# says so right where the player is about to press Enter on one of them.
@@ -18284,7 +18330,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 				if pr != pc and wear_category(pr) == wear_category(pc):
 					rivals.append(String(wear_piece_def(pr)["name"]))
 			draw_string(font, Vector2(cx2, fy2 + 60.0), "shares a slot with the %s  -  wearing one takes off the other" % ", ".join(rivals),
-				HORIZONTAL_ALIGNMENT_LEFT, detw, 12, Color(0.78, 0.72, 0.62))
+				HORIZONTAL_ALIGNMENT_LEFT, detw, ps(12), Color(0.78, 0.72, 0.62))
 
 	draw_hints_row(font, px + pw * 0.5, py + ph - 40.0,
 		[[["Up", "Down"], "garment"], [["Left", "Right"], "house"], [["Enter"], "wear it"],
@@ -18304,13 +18350,13 @@ func draw_shop(font: Font, s: Vector2) -> void:
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
-	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, 34, Color(1.0, 0.86, 0.55))
+	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(34), Color(1.0, 0.86, 0.55))
 	# WHICH ROOM, said in the header rather than left to be inferred from the goods
 	# ...and it no longer has to teach a hotkey. The C hint lived here because C was the
 	# only way through the curtain; the door is a card on the gear row now and explains
 	# itself where every other purchase does.
 	var sub := "to juggle N of a prop, own N of them"
-	draw_string(font, Vector2(tx + 118.0, py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+	draw_string(font, Vector2(tx + 118.0, py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13),
 		Color(0.95, 0.72, 0.55) if shop_room == SHOP_ROOM_BACK else Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 
@@ -18355,7 +18401,7 @@ func draw_shop_grid(font: Font, tx: float, py: float, innerw: float, strip_y: fl
 	var ch := minf((band_h - gap * float(rows - 1)) / float(rows), 300.0)
 	var cw := minf((innerw - gap * float(cols - 1)) / float(cols), 300.0)
 	draw_string(font, Vector2(tx, py + 96.0), "PROPS",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(0.95, 0.8, 0.55, 0.9))
 	var hover_card := Rect2()
 	var hover_prop := -1
 	for ci in np:
@@ -18408,12 +18454,12 @@ func draw_stat_rows(font: Font, x: float, w: float, y0: float, step: float, rows
 		var lab := String(row[0])
 		var val := String(row[1])
 		var vs := fit_size(font, val, w * 0.55, size, 9)
-		var vw: float = font.get_string_size(val, HORIZONTAL_ALIGNMENT_LEFT, -1, vs).x
+		var vw: float = font.get_string_size(val, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(vs)).x
 		var ry := y0 + float(ri) * step
 		var ind: float = 14.0 if lab.begins_with("max ") else 0.0
 		draw_fit_string(font, Vector2(x + ind, ry), lab, HORIZONTAL_ALIGNMENT_LEFT,
 			maxf(20.0, w - ind - vw - 8.0), size, Color(0.68, 0.62, 0.56))
-		draw_string(font, Vector2(x, ry), val, HORIZONTAL_ALIGNMENT_RIGHT, w, vs, row[2])
+		draw_string(font, Vector2(x, ry), val, HORIZONTAL_ALIGNMENT_RIGHT, w, ps(vs), row[2])
 
 
 func draw_enter_arrow(x: float, y0: float, y1: float, run: float, col: Color) -> void:
@@ -18459,7 +18505,7 @@ func draw_shop_hover(font: Font, i: int, card: Rect2, s: Vector2) -> void:
 	soft_card(box, Color(0.10, 0.065, 0.085, 0.98), Color(1.0, 0.86, 0.5, 0.75), 1.6, 11.0, 16.0)
 	var nm := String(PROPS[i]["name"])
 	draw_string(font, Vector2(x, y + 26.0), nm, HORIZONTAL_ALIGNMENT_CENTER, w,
-		fit_size(font, nm, w - 20.0, 18, 12), Color(1.0, 0.88, 0.6))
+		ps(fit_size(font, nm, w - 20.0, 18, 12)), Color(1.0, 0.88, 0.6))
 	draw_line(Vector2(x + 14.0, y + 36.0), Vector2(x + w - 14.0, y + 36.0), Color(1.0, 0.86, 0.5, 0.22), 1.0)
 	var lx := x + 16.0
 	var rw := w - 32.0
@@ -18494,7 +18540,7 @@ func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
 	# number, so it goes through fit_size and never through fit_text.
 	var price := commafy(cost)
 	var psz := fit_size(font, price, r.size.x * 0.46, 21, 11)
-	var pwid: float = font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz).x
+	var pwid: float = font.get_string_size(price, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(psz)).x
 	var mr := 7.0
 	var chw := minf(pwid + mr * 2.0 + 30.0, r.size.x - 24.0)
 	var chh := 30.0
@@ -18503,7 +18549,7 @@ func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
 		Color(0.55, 0.85, 0.5, 0.55) if afford else Color(0.7, 0.35, 0.3, 0.45), 1.2, 8.0, 6.0)
 	var pcol_t := Color(1.0, 0.92, 0.62) if afford else Color(0.86, 0.52, 0.46)
 	draw_string(font, Vector2(chip.position.x + 13.0, chip.position.y + chh * 0.5 + float(psz) * 0.36),
-		price, HORIZONTAL_ALIGNMENT_LEFT, -1, psz, pcol_t)
+		price, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(psz), pcol_t)
 	draw_coin_mark(Vector2(chip.end.x - 13.0 - mr, chip.position.y + chh * 0.5), mr, Color(1, 1, 1, 1), true)
 	# ...and the goods, filling everything under it. `mag` comes off the space actually left
 	# rather than a fixed number, so the same card body works at the grid's 250px and at the
@@ -18521,7 +18567,7 @@ func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
 	# count now. This row is the reason a prop CATEGORY system is the right next move:
 	# past about eight cards there is no width left, whatever the arithmetic says.
 	draw_string(font, Vector2(tx, py + 96.0), "PROPS",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(0.95, 0.8, 0.55, 0.9))
 	var room_props := shop_props()
 	var np := room_props.size()
 	var gap := 14.0 if np <= 6 else 10.0
@@ -18570,7 +18616,7 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 	var gy := y0 + ch + 30.0
 	if gn > 0:   # ...and no header over an empty row: the gear cards all became clothing or,
 		# in the Glow Tape's case, per-prop stock, so the row is usually empty now
-		draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.95, 0.8, 0.55, 0.9))
+		draw_string(font, Vector2(tx, gy), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(0.95, 0.8, 0.55, 0.9))
 	# A GEAR CARD HAS A MAXIMUM WIDTH. With the clothes gone the row holds ONE item, and
 	# `innerw / 1` stretched that card across the whole panel - a single object floating in
 	# 1,040px of empty card, which reads as a bug rather than as a shop with one thing left
@@ -18610,10 +18656,10 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 			draw_fit_string(font, Vector2(cx0, gy0 + 88.0), String(e["name"]), HORIZONTAL_ALIGNMENT_CENTER, gw,
 				fit_size(font, String(e["name"]), gw - 10.0, 15, 10), Color(1.0, 0.88, 0.6))
 		if owned:
-			draw_string(font, Vector2(cx0, gy0 + gh - 20.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, 15, Color(0.6, 0.9, 0.6))
+			draw_string(font, Vector2(cx0, gy0 + gh - 20.0), "OWNED", HORIZONTAL_ALIGNMENT_CENTER, gw, ps(15), Color(0.6, 0.9, 0.6))
 		else:
 			if gcount > 0:
-				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % gcount, HORIZONTAL_ALIGNMENT_RIGHT, gw - 12.0, 12, Color(0.75, 0.9, 0.72))
+				draw_string(font, Vector2(cx0, gy0 + 22.0), "own %d" % gcount, HORIZONTAL_ALIGNMENT_RIGHT, gw - 12.0, ps(12), Color(0.75, 0.9, 0.72))
 			draw_price_plate(font, Rect2(cx0 + 10.0, plate_top, gw - 20.0, 38.0),
 				"", commafy(gcost), money >= gcost,
 				"walk through" if gcost == 0 else "")
@@ -18630,7 +18676,7 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 	soft_card(strip, Color(0.10, 0.05, 0.05, 0.85) if warn else Color(0.08, 0.05, 0.06, 0.82),
 		Color(1.0, 0.5, 0.4, 0.5) if warn else Color(0.9, 0.6, 0.35, 0.3), 1.0, 9.0, 8.0)
 	if noted:
-		draw_string(font, Vector2(strip.position.x, strip_y + 25.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, strip.size.x, 13,
+		draw_string(font, Vector2(strip.position.x, strip_y + 25.0), shop_msg, HORIZONTAL_ALIGNMENT_CENTER, strip.size.x, ps(13),
 			Color(1.0, 0.66, 0.5) if warn else Color(0.72, 0.95, 0.68))
 	else:
 		var detail := ""
@@ -18650,8 +18696,8 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 				detail_head = String(gl[gi]["name"])
 				detail = String(gl[gi]["desc"])
 		if detail != "":
-			draw_string(font, Vector2(strip.position.x + 16.0, strip_y + 25.0), detail_head, HORIZONTAL_ALIGNMENT_LEFT, 156.0, 15, Color(1.0, 0.86, 0.55))
-			draw_string(font, Vector2(strip.position.x + 180.0, strip_y + 25.0), detail, HORIZONTAL_ALIGNMENT_LEFT, strip.size.x - 196.0, 13, Color(0.85, 0.8, 0.7))
+			draw_string(font, Vector2(strip.position.x + 16.0, strip_y + 25.0), detail_head, HORIZONTAL_ALIGNMENT_LEFT, 156.0, ps(15), Color(1.0, 0.86, 0.55))
+			draw_string(font, Vector2(strip.position.x + 180.0, strip_y + 25.0), detail, HORIZONTAL_ALIGNMENT_LEFT, strip.size.x - 196.0, ps(13), Color(0.85, 0.8, 0.7))
 
 	# ---------------- footer: the keys ----------------
 	if pad_active():
@@ -18695,7 +18741,7 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 			draw_circle(Vector2(x + 24.0 + float(di) * 13.0, y - 5.0), 2.6, Color(0.55, 0.50, 0.46, 0.9))
 		# right edge pulled 12px inside the row, or it sits exactly ON the selection
 		# highlight's border - which the narrower columns made visible
-		draw_string(font, Vector2(x + w - 88.0, y), "locked", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, 12, Color(0.66, 0.58, 0.52))
+		draw_string(font, Vector2(x + w - 88.0, y), "locked", HORIZONTAL_ALIGNMENT_RIGHT, 64.0, ps(12), Color(0.66, 0.58, 0.52))
 		return
 	# NO "ready" BADGE ANY MORE, and dropping it is what let the columns narrow enough for the
 	# card to have a home. It was there to distinguish an owned skill from a locked one back
@@ -19217,9 +19263,9 @@ func draw_skills(font: Font, s: Vector2) -> void:
 
 	var kc_use := k_trick()[0]
 	var kc_sel := k_cycle()[0]
-	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1.0, 0.86, 0.55))
-	draw_string(font, Vector2(px + 40.0, py + 84.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.82, 0.75, 0.64))
-	draw_string(font, Vector2(px + pw - 210.0, py + 50.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(1.0, 0.9, 0.6))
+	draw_string(title_font(), Vector2(px + 40.0, py + 50.0), "SKILLS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(30), Color(1.0, 0.86, 0.55))
+	draw_string(font, Vector2(px + 40.0, py + 84.0), "%s cycles which skill is loaded   -   %s uses it   -   patterns switch with P while you practise" % [kc_sel, kc_use], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.82, 0.75, 0.64))
+	draw_string(font, Vector2(px + pw - 210.0, py + 50.0), "Level %d" % level, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18), Color(1.0, 0.9, 0.6))
 	# a plain hairline (the same quiet divider draw_results uses between its own
 	# sections) so TRICKS / PATTERNS reads as a new section, not a third line of
 	# the same paragraph the title started
@@ -19240,8 +19286,8 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var y0 := header_y + 42.0
 	# the headers sit well ABOVE the first row so the selection highlight (which
 	# reaches ~23px above a row's baseline) never touches the TRICKS / PATTERNS label
-	draw_string(font, Vector2(col_l, header_y), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(col_r, header_y), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_l, header_y), "TRICKS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.95, 0.8, 0.55, 0.9))
+	draw_string(font, Vector2(col_r, header_y), "PATTERNS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.95, 0.8, 0.55, 0.9))
 	for i in nt:
 		var td: Dictionary = TRICKS[i]
 		_skills_row(font, col_l, y0 + float(i) * row_h, colw, String(td["name"]), td, trick_unlocked(i), i == skills_sel)
@@ -19295,7 +19341,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	var prev_x := px + 476.0
 	var zone_w := px + pw - 40.0 - prev_x
 	draw_string(font, Vector2(prev_x, header_y),
-		"YOUR CARD" if is_unlocked else "NOT YET YOURS", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+		"YOUR CARD" if is_unlocked else "NOT YET YOURS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.95, 0.8, 0.55, 0.9))
 	var card_w := 232.0
 	var card_h := 330.0
 	var card_r := Rect2(prev_x, py + 152.0, card_w, card_h)
@@ -19312,9 +19358,9 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		var nmw := card_w - 20.0 - (CARD_PIP_KEEP if exp_on("card_v2") else 0.0)
 		draw_string(title_font(), Vector2(card_r.position.x + 10.0 + (card_w - 20.0 - nmw) * 0.5,
 			card_r.position.y + card_h - 20.0), cnm, HORIZONTAL_ALIGNMENT_CENTER, nmw,
-			fit_size(title_font(), cnm, nmw - 6.0, 20, 10), Color(1.0, 0.96, 0.86))
+			ps(fit_size(title_font(), cnm, nmw - 6.0, 20, 10)), Color(1.0, 0.96, 0.86))
 		draw_string(font, Vector2(prev_box.position.x, header_y), "HOW IT MOVES",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.95, 0.8, 0.55, 0.9))
+			HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.95, 0.8, 0.55, 0.9))
 		draw_skill_preview(font, prev_box, is_tr, sidx, ename)
 	else:
 		# THE CARD, FACE DOWN, IN THE SAME SLOT THE FACE USES. The preview is the one place on
@@ -19324,7 +19370,7 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		# on the card changes and everything around it stays exactly where it was.
 		draw_skill_card_back(card_r, skills_sel < nt, 1.0)
 		draw_string(font, Vector2(card_r.position.x, card_r.position.y + card_h + 30.0),
-			"not dealt yet", HORIZONTAL_ALIGNMENT_CENTER, card_w, 13, Color(0.78, 0.72, 0.64))
+			"not dealt yet", HORIZONTAL_ALIGNMENT_CENTER, card_w, ps(13), Color(0.78, 0.72, 0.64))
 
 	# ...AND THE PROSE GOES TOO. Hiding the name while leaving its "how" and "desc" in the
 	# box below would be the same spoiler with the label filed off: "In practice, press P to
@@ -19343,8 +19389,8 @@ func draw_skills(font: Font, s: Vector2) -> void:
 	# never encroaches on the footer no matter how much "how" needed to wrap.
 	# measured with NO line cap (-1): a 2-line cap silently dropped a third line on the
 	# longest entries, which is the same clip the comment above says was fixed once
-	var how_h := font.get_multiline_string_size(how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1).y
-	var desc_h := font.get_multiline_string_size(desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1).y
+	var how_h := font.get_multiline_string_size(how, HORIZONTAL_ALIGNMENT_LEFT, how_w, ps(13), -1).y
+	var desc_h := font.get_multiline_string_size(desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, ps(13), -1).y
 	var box_h := 30.0 + how_h + 8.0 + desc_h + 12.0
 	var box_bottom := py + ph - 44.0
 	var box_top := box_bottom - box_h
@@ -19364,17 +19410,17 @@ func draw_skills(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(px + pw - 490.0, dy + 18.0),
 			"%d %s still to be dealt" % [left_n, "trick" if left_n == 1 else "tricks"] if skills_sel < nt \
 				else "%d %s still to be dealt" % [left_n, "pattern" if left_n == 1 else "patterns"],
-			HORIZONTAL_ALIGNMENT_RIGHT, 444.0, 13, Color(0.85, 0.62, 0.5))
+			HORIZONTAL_ALIGNMENT_RIGHT, 444.0, ps(13), Color(0.85, 0.62, 0.5))
 	# "how" (a pattern's own version can run to two sentences) wraps instead of clipping mid-word,
 	# and "desc" is placed BELOW however tall "how" actually rendered, not at a fixed
 	# offset, so the two never overlap regardless of how much "how" needed to wrap
-	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1, Color(0.9, 0.82, 0.66))
-	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0 + how_h + 8.0), desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, 13, -1, Color(0.78, 0.72, 0.64))
+	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0), how, HORIZONTAL_ALIGNMENT_LEFT, how_w, ps(13), -1, Color(0.9, 0.82, 0.66))
+	draw_multiline_string(font, Vector2(px + 46.0, dy + 42.0 + how_h + 8.0), desc, HORIZONTAL_ALIGNMENT_LEFT, how_w, ps(13), -1, Color(0.78, 0.72, 0.64))
 
 	var foot := "arrows browse      Enter  practise this skill      Esc to leave"
 	if not is_unlocked:
 		foot = "arrows browse      Esc to leave      (this one is still locked)"
-	draw_string(font, Vector2(px, py + ph - 22.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, 13, Color(0.74, 0.68, 0.6))
+	draw_string(font, Vector2(px, py + ph - 22.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, ps(13), Color(0.74, 0.68, 0.6))
 
 
 # -----------------------------------------------------------------------------
@@ -19452,18 +19498,18 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var eic := Vector2(r.position.x + 30.0, r.position.y + 34.0)
 		draw_circle(eic, 14.0, Color(ec.r, ec.g, ec.b, 0.18))
 		day_icon(String(e["icon"]), eic, ec)
-		draw_string(font, Vector2(r.position.x + 54.0, r.position.y + 23.0), String(e["label"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 11, Color(0.74, 0.70, 0.64, 0.9))
+		draw_string(font, Vector2(r.position.x + 54.0, r.position.y + 23.0), String(e["label"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, ps(11), Color(0.74, 0.70, 0.64, 0.9))
 		draw_fit_string(font, Vector2(r.position.x + 54.0, r.position.y + 45.0), String(e["big"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 130.0, 18, ec)
 		draw_fit_string(font, Vector2(r.position.x + 54.0, r.position.y + 62.0), String(e["note"]), HORIZONTAL_ALIGNMENT_LEFT, lw - 68.0, 11, Color(0.74, 0.70, 0.64, 0.9))
 	var sr := Rect2(lx, ly + 160.0, lw, 72.0)
 	soft_card(sr, Color(0.07, 0.045, 0.06, 0.86), Color(scol.r, scol.g, scol.b, 0.30), 1.0, 11.0, 12.0)
 	draw_rect(Rect2(sr.position.x + 1.0, sr.position.y + 12.0, 3.0, sr.size.y - 24.0), Color(scol.r, scol.g, scol.b, 0.8))
-	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 24.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, 120.0, 11, Color(0.80, 0.84, 0.80, 0.9))
-	draw_string(font, Vector2(sr.position.x + lw - 108.0, sr.position.y + 24.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 11, Color(0.80, 0.84, 0.80, 0.9))
+	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 24.0), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, 120.0, ps(11), Color(0.80, 0.84, 0.80, 0.9))
+	draw_string(font, Vector2(sr.position.x + lw - 108.0, sr.position.y + 24.0), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(11), Color(0.80, 0.84, 0.80, 0.9))
 	draw_meter(sr.position.x + 18.0, sr.position.y + 32.0, lw - 36.0, 12.0, sfrac, scol)
 	draw_string(font, Vector2(sr.position.x + 18.0, sr.position.y + 62.0),
 		"worn out  -  throws are getting wild" if sfrac < STAM_LOW else "rested enough to work",
-		HORIZONTAL_ALIGNMENT_LEFT, lw - 36.0, 11, Color(1.0, 0.6, 0.45) if sfrac < STAM_LOW else Color(0.74, 0.70, 0.64, 0.9))
+		HORIZONTAL_ALIGNMENT_LEFT, lw - 36.0, ps(11), Color(1.0, 0.6, 0.45) if sfrac < STAM_LOW else Color(0.74, 0.70, 0.64, 0.9))
 	# UNSPENT POINTS ARE THE ONE THING HERE THE PLAYER SHOULD ACT ON (2026-07-27, Louis:
 	# "there should also be a more clear indicator that you have xp points to spend into
 	# stats"). They were mentioned only in small print - one line in the play HUD and a
@@ -19516,8 +19562,8 @@ func draw_day(font: Font, s: Vector2) -> void:
 		# a breadcrumb, so an open drawer never leaves the player wondering where they are
 		var gc := day_group_col(day_group)
 		draw_string(font, Vector2(ax + 4.0, ay - 13.0), day_group_name(day_group),
-			HORIZONTAL_ALIGNMENT_LEFT, aw * 0.6, 13, Color(gc.r, gc.g, gc.b, 0.95))
-		draw_string(font, Vector2(ax, ay - 13.0), "Esc  back", HORIZONTAL_ALIGNMENT_RIGHT, aw - 4.0, 12, Color(0.72, 0.66, 0.6, 0.8))
+			HORIZONTAL_ALIGNMENT_LEFT, aw * 0.6, ps(13), Color(gc.r, gc.g, gc.b, 0.95))
+		draw_string(font, Vector2(ax, ay - 13.0), "Esc  back", HORIZONTAL_ALIGNMENT_RIGHT, aw - 4.0, ps(12), Color(0.72, 0.66, 0.6, 0.8))
 	var cy := ay
 	for i in rows.size():
 		day_draw_card(font, rows[i], Rect2(ax, cy, aw, heights[i]), i == day_sel, sub_w)
@@ -19526,7 +19572,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# transient feedback (a meal eaten, a spent day) fades after a few seconds
 	if day_msg != "" and cine_tick - day_msg_tick < 300:
 		var ma := clampf(1.0 - float(cine_tick - day_msg_tick - 220) / 80.0, 0.0, 1.0)
-		draw_string(font, Vector2(0, s.y - 92.0), day_msg, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.88, 0.55, ma))
+		draw_string(font, Vector2(0, s.y - 92.0), day_msg, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(1.0, 0.88, 0.55, ma))
 
 	# the footer follows what the cursor is actually on: Left/Right picks the stage on
 	# PERFORM (without this hint the < > around the venue name was the only cue a whole
@@ -19559,9 +19605,9 @@ func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> floa
 	var perf := String(r["id"]) == "perform"
 	if perf:
 		h += 28.0                                   # the stage picker line
-	h += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 10.0
+	h += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 10.0
 	if not bool(r["ok"]) and String(r["why"]) != "":
-		h += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 4.0
+		h += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	if perf:
 		h += 20.0                                   # the record to chase
 		if next_venue_rep() > 0:
@@ -19596,9 +19642,9 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 	var cost := String(r["cost"])
 	var cost_w := 0.0
 	if cost != "":
-		cost_w = minf(120.0, font.get_string_size(cost, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 8.0)
+		cost_w = minf(120.0, font.get_string_size(cost, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 8.0)
 		draw_string(font, Vector2(right - cost_w, box.position.y + 28.0), cost,
-			HORIZONTAL_ALIGNMENT_RIGHT, cost_w, 12, Color(0.88, 0.80, 0.64, 0.9) if ok else Color(0.58, 0.54, 0.5))
+			HORIZONTAL_ALIGNMENT_RIGHT, cost_w, ps(12), Color(0.88, 0.80, 0.64, 0.9) if ok else Color(0.58, 0.54, 0.5))
 	draw_fit_string(font, Vector2(tx, box.position.y + 29.0), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT,
 		right - cost_w - tx - 8.0, 17, title_c)
 	if not sel:
@@ -19609,28 +19655,28 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		# still move (left to right, never wrapping), with the PURIST mark beside it
 		var pv := play_venue()
 		var pick := "%s%s%s" % ["<   " if pv > 0 else "", String(venue_data(pv)["name"]), "   >" if pv < venue_index() else ""]
-		draw_string(font, Vector2(tx, y + 16.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 18, Color(1.0, 0.88, 0.52))
+		draw_string(font, Vector2(tx, y + 16.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(18), Color(1.0, 0.88, 0.52))
 		if purist:
 			draw_string(font, Vector2(box.position.x + box.size.x - 110.0, y + 16.0), "PURIST",
-				HORIZONTAL_ALIGNMENT_RIGHT, 96.0, 11, Color(0.84, 0.72, 0.90))
+				HORIZONTAL_ALIGNMENT_RIGHT, 96.0, ps(11), Color(0.84, 0.72, 0.90))
 		y += 28.0
-	draw_multiline_string(font, Vector2(tx, y + font.get_ascent(12)), String(r["sub"]),
-		HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1, Color(0.86, 0.80, 0.70))
-	y += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 10.0
+	draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), String(r["sub"]),
+		HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1, Color(0.86, 0.80, 0.70))
+	y += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 10.0
 	if not ok and String(r["why"]) != "":
-		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(12)), String(r["why"]),
-			HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1, Color(1.0, 0.66, 0.48))
-		y += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, -1).y + 4.0
+		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), String(r["why"]),
+			HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1, Color(1.0, 0.66, 0.48))
+		y += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	if String(r["id"]) == "perform":
 		var vi := play_venue()
 		var chase := "no record here yet  -  set one"
 		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
 			chase = "record to beat   %s" % score_text(rec_table()[vi])
-		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, Color(0.96, 0.83, 0.52, 0.92))
+		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.96, 0.83, 0.52, 0.92))
 		var nxt := next_venue_rep()
 		if nxt > 0:
 			draw_string(font, Vector2(tx, y + 32.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
-				HORIZONTAL_ALIGNMENT_LEFT, sub_w, 12, Color(0.84, 0.74, 0.90, 0.92))
+				HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.84, 0.74, 0.90, 0.92))
 
 
 func crescent_points(c: Vector2, r: float, off: Vector2, ir: float) -> PackedVector2Array:
@@ -19912,7 +19958,7 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 					var f := float(k) / 8.0
 					pts.append(Vector2(wx + sin(f * 5.0 + t * 9.0 + float(w) * 2.0) * 7.0, c.y + 4.0 - f * (46.0 + 20.0 * t)))
 				draw_polyline(pts, Color(1.0, 0.97, 0.9, 0.35 * ease_in * (1.0 - t * 0.5)), 2.5)
-			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "a hot meal", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(1.0, 0.9, 0.65, ease_in))
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "a hot meal", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(1.0, 0.9, 0.65, ease_in))
 		"inn":
 			# the world dims to sleep, a lit window and drifting z's carry it
 			draw_rect(Rect2(0, 0, s.x, s.y), Color(0.01, 0.01, 0.03, 0.55 + 0.4 * t))
@@ -19924,8 +19970,8 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 			for z in 3:
 				var zt := fposmod(t * 2.2 + float(z) * 0.33, 1.0)
 				var zp := c + Vector2(70.0 + zt * 46.0 + float(z) * 8.0, -30.0 - zt * 70.0)
-				draw_string(font, zp, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, 18 + z * 4, Color(0.9, 0.88, 0.8, (1.0 - zt) * 0.8))
-			draw_string(font, Vector2(0, c.y + 110.0), "the day ends", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.85, 0.7, ease_in))
+				draw_string(font, zp, "z", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18 + z * 4), Color(0.9, 0.88, 0.8, (1.0 - zt) * 0.8))
+			draw_string(font, Vector2(0, c.y + 110.0), "the day ends", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(0.9, 0.85, 0.7, ease_in))
 		"pie":
 			# UNCLE DAN'S PIE: the slice on its plate, and the hum that follows it - the
 			# whole reason to eat one is the slow motion, so the picture says so
@@ -19944,7 +19990,7 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 			for ri in 3:
 				var rt := fposmod(t * 1.1 + float(ri) * 0.33, 1.0)
 				draw_arc(c, 30.0 + rt * 90.0, 0.0, TAU, 26, Color(0.75, 0.92, 1.0, (1.0 - rt) * 0.28 * ease_in), 2.0, true)
-			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "the world slows down", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(0.82, 0.94, 1.0, ease_in))
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "the world slows down", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(0.82, 0.94, 1.0, ease_in))
 		"egg":
 			# A RAW EGG: cracked over the mouth in one go, which is the joke
 			var c := Vector2(s.x * 0.5, s.y * 0.52)
@@ -19958,7 +20004,7 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 				var fall := (tip - 0.25) / 0.75
 				fill_ellipse(c + Vector2(0.0, -10.0 + fall * 46.0), 13.0, 15.0, Color(1.0, 0.78, 0.24))
 				fill_ellipse(c + Vector2(-3.0, -14.0 + fall * 46.0), 4.5, 5.0, Color(1.0, 0.92, 0.62, 0.8))
-			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "down in one", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(1.0, 0.9, 0.65, ease_in))
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "down in one", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(1.0, 0.9, 0.65, ease_in))
 		"tomato":
 			# A THROWN TOMATO, eaten anyway. The bite is the picture, and the little
 			# bruise-coloured splash sells that it has been on the boards.
@@ -19972,7 +20018,7 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 			for si in 4:
 				var st2 := fposmod(t * 1.6 + float(si) * 0.27, 1.0)
 				draw_circle(c + Vector2(-46.0 + float(si) * 30.0, 44.0 + st2 * 16.0), 3.0 * (1.0 - st2), Color(0.82, 0.22, 0.20, (1.0 - st2) * 0.7 * ease_in))
-			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "still perfectly good", HORIZONTAL_ALIGNMENT_CENTER, 340.0, 16, Color(1.0, 0.82, 0.72, ease_in))
+			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "still perfectly good", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(1.0, 0.82, 0.72, ease_in))
 
 
 #endregion
@@ -20566,9 +20612,9 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	draw_ornament(cx, divider_y, 300.0, Color(0.82, 0.62, 0.34, 0.85))
 	menu_rows(font, s, oy)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
-	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	if OS.is_debug_build():   # a build number is dev-only furniture - a shipped title
-		draw_string(font, Vector2(s.x - 140.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 110.0, 12, Color(0.6, 0.55, 0.5, 0.7))   # screen never shows one
+		draw_string(font, Vector2(s.x - 140.0, s.y - 34.0), "v0.9", HORIZONTAL_ALIGNMENT_RIGHT, 110.0, ps(12), Color(0.6, 0.55, 0.5, 0.7))   # screen never shows one
 
 	draw_vignette(s, 0.5)
 	# NO GOLD FRAME ON THE TITLE SCREEN (2026-07-30, Louis: "Why is there a thin light
@@ -21631,7 +21677,7 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 	draw_backdrop(s)
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.66))
-	draw_string(title_font(), Vector2(0, s.y * 0.15), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, 44, Color(1.0, 0.86, 0.5))
+	draw_string(title_font(), Vector2(0, s.y * 0.15), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(44), Color(1.0, 0.86, 0.5))
 	draw_ornament(s.x * 0.5, s.y * 0.15 + 40.0, 200.0, Color(0.82, 0.62, 0.34, 0.85))
 
 	var gap := 26.0
@@ -21668,23 +21714,23 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 				bc.a = 0.95 if exists else 0.4
 				cap_ball(bp, bc, 9.0)
 		var tcol := Color(1.0, 0.9, 0.6) if sel else (accent if exists else Color(0.7, 0.64, 0.58))
-		draw_string(title_font(), Vector2(cx, cy + 132.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, cw, 22, tcol)
+		draw_string(title_font(), Vector2(cx, cy + 132.0), "Slot %d" % (i + 1), HORIZONTAL_ALIGNMENT_CENTER, cw, ps(22), tcol)
 		if exists:
-			draw_string(title_font(), Vector2(cx, cy + 186.0), "Lv %d" % int(info["level"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 34, Color(1.0, 0.95, 0.82))
+			draw_string(title_font(), Vector2(cx, cy + 186.0), "Lv %d" % int(info["level"]), HORIZONTAL_ALIGNMENT_CENTER, cw, ps(34), Color(1.0, 0.95, 0.82))
 			draw_fit_string(font, Vector2(cx, cy + 214.0), String(info["venue"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(0.84, 0.78, 0.68))
 			draw_fit_string(font, Vector2(cx, cy + 238.0), "%s %s" % [commafy(int(info["gold"])), coin_word()], HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(1.0, 0.86, 0.45))
 			if crowned:
-				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(1.0, 0.82, 0.4))
-			draw_string(font, Vector2(cx, cy + ch - 18.0), "[X] delete", HORIZONTAL_ALIGNMENT_CENTER, cw, 12, Color(0.88, 0.55, 0.5) if sel else Color(0.7, 0.5, 0.47, 0.7))
+				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(1.0, 0.82, 0.4))
+			draw_string(font, Vector2(cx, cy + ch - 18.0), "[X] delete", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(0.88, 0.55, 0.5) if sel else Color(0.7, 0.5, 0.47, 0.7))
 		else:
-			draw_string(font, Vector2(cx, cy + 190.0), "empty", HORIZONTAL_ALIGNMENT_CENTER, cw, 18, Color(0.7, 0.64, 0.58))
-			draw_string(font, Vector2(cx, cy + 214.0), "start a new climb", HORIZONTAL_ALIGNMENT_CENTER, cw, 13, Color(0.6, 0.56, 0.5, 0.85))
+			draw_string(font, Vector2(cx, cy + 190.0), "empty", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(18), Color(0.7, 0.64, 0.58))
+			draw_string(font, Vector2(cx, cy + 214.0), "start a new climb", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(13), Color(0.6, 0.56, 0.5, 0.85))
 
 	var by := cy + ch + 30.0
 	var bsel := menu_sel == NUM_SLOTS
-	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
+	draw_string(font, Vector2(0, by + 22.0), ("Back" if not bsel else ">   Back   <"), HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(24), Color(1.0, 0.9, 0.55) if bsel else Color(0.72, 0.66, 0.6))
 	var sfoot := "Left / Right    A to play    X to delete    B to go back" if pad_active() else "Left / Right    Enter to play    X to delete    Esc to go back"
-	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -21744,7 +21790,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 	var head_h := 18.0
 	var y := s.y * 0.172
 	for sec in sections:
-		draw_string(font, Vector2(px + 4.0, y + 13.0), String(sec["head"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.95, 0.8, 0.55, 0.85))
+		draw_string(font, Vector2(px + 4.0, y + 13.0), String(sec["head"]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.95, 0.8, 0.55, 0.85))
 		y += head_h
 		for i in sec["rows"]:
 			var r: Dictionary = rows[i]
@@ -21762,7 +21808,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 			var nm := String(r["name"])
 			var has_note := String(r["note"]) != ""
 			var ny := y + (card_h * 0.5 - 4.0 if has_note else card_h * 0.5 + 6.0)
-			draw_string(font, Vector2(px + 24.0, ny), nm, HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 17, Color(1.0, 0.95, 0.82) if sel else Color(0.86, 0.81, 0.73))
+			draw_string(font, Vector2(px + 24.0, ny), nm, HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, ps(17), Color(1.0, 0.95, 0.82) if sel else Color(0.86, 0.81, 0.73))
 			if has_note:
 				draw_fit_string(font, Vector2(px + 24.0, ny + 15.0), String(r["note"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 200.0, 11, Color(0.72, 0.66, 0.6, 0.9))
 			match String(r["kind"]):
@@ -21770,24 +21816,24 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 					var vol: float = r["val"]
 					draw_meter(px + pw - 178.0, y + card_h * 0.5 - 7.0, 128.0, 14.0, vol, Color(ac.r, ac.g, ac.b, 0.95) if vol > 0.0 else Color(0.5, 0.44, 0.4))
 					draw_string(font, Vector2(px + pw - 44.0, y + card_h * 0.5 + 5.0), "mute" if vol <= 0.0 else "%d%%" % int(round(vol * 100.0)),
-						HORIZONTAL_ALIGNMENT_RIGHT, 34.0, 14, Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.86, 0.92, 0.84))
+						HORIZONTAL_ALIGNMENT_RIGHT, 34.0, ps(14), Color(0.85, 0.6, 0.55) if vol <= 0.0 else Color(0.86, 0.92, 0.84))
 				"bool":
 					draw_pill_toggle(px + pw - 74.0, y + card_h * 0.5 - 13.0, 54.0, 26.0, bool(r["val"]))
 				"pick":
 					# a two-way PICK, not a yes/no: the unchosen side stays visible so the
 					# row reads as "left or right", which is what the setting is
 					var isr := bool(r["val"])
-					draw_string(font, Vector2(px + pw - 118.0, y + card_h * 0.5 + 6.0), "LEFT", HORIZONTAL_ALIGNMENT_LEFT, 60.0, 15,
+					draw_string(font, Vector2(px + pw - 118.0, y + card_h * 0.5 + 6.0), "LEFT", HORIZONTAL_ALIGNMENT_LEFT, 60.0, ps(15),
 						Color(0.55, 0.5, 0.46) if isr else Color(1.0, 0.88, 0.55))
-					draw_string(font, Vector2(px + pw - 62.0, y + card_h * 0.5 + 6.0), "RIGHT", HORIZONTAL_ALIGNMENT_LEFT, 60.0, 15,
+					draw_string(font, Vector2(px + pw - 62.0, y + card_h * 0.5 + 6.0), "RIGHT", HORIZONTAL_ALIGNMENT_LEFT, 60.0, ps(15),
 						Color(1.0, 0.88, 0.55) if isr else Color(0.55, 0.5, 0.46))
 				"nav":
-					draw_string(font, Vector2(px + pw - 42.0, y + card_h * 0.5 + 7.0), ">", HORIZONTAL_ALIGNMENT_RIGHT, 28.0, 20, Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
+					draw_string(font, Vector2(px + pw - 42.0, y + card_h * 0.5 + 7.0), ">", HORIZONTAL_ALIGNMENT_RIGHT, 28.0, ps(20), Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
 			y += card_h + gap
 		y += sec_gap
 
 	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
-	draw_string(font, Vector2(0, s.y - 40.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 40.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -21815,7 +21861,7 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 	draw_title_glow(font, s.y * 0.22, "THE ROAD ENDS HERE", 42, Color(0.9, 0.55, 0.4, fin), s)
 	draw_ornament(s.x * 0.5, s.y * 0.22 + 68.0, 220.0, Color(0.7, 0.45, 0.3, 0.8 * fin))
 	draw_string(font, Vector2(0, s.y * 0.40), "Too tired to work. Too poor for a bed. The city keeps what it takes.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.85, 0.78, 0.66, fin))
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(18), Color(0.85, 0.78, 0.66, fin))
 	var lines := [
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%s performances,  %s catches" % [commafy(int(career["perfs"])), commafy(int(career["catches"]))],
@@ -21824,10 +21870,10 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 	]
 	for i in lines.size():
 		var la := clampf(float(cine_tick - 80 - i * 30) / 40.0, 0.0, 1.0)
-		draw_string(font, Vector2(0, s.y * 0.50 + float(i) * 30.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.7, 0.62, la))
+		draw_string(font, Vector2(0, s.y * 0.50 + float(i) * 30.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.75, 0.7, 0.62, la))
 	if cine_tick > 90:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.80), "any key  -  a new juggler picks up the balls", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.8, 0.72, 0.6, 0.4 + 0.5 * pa))
+		draw_string(font, Vector2(0, s.y * 0.80), "any key  -  a new juggler picks up the balls", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.8, 0.72, 0.6, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.7)
 
 
@@ -21845,7 +21891,7 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, s.y * 0.20 + 68.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
 	draw_string(font, Vector2(0, s.y * 0.34),
 		"You've earned your way past what this demo has to give. The full climb keeps going.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.88, 0.8, 0.68, fin))
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(0.88, 0.8, 0.68, fin))
 	var lines := [
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%s performances,  %s catches,  best streak %s" % [commafy(int(career["perfs"])), commafy(int(career["catches"])), commafy(int(career["best_streak"]))],
@@ -21853,16 +21899,16 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 	]
 	for i in lines.size():
 		var la := clampf(float(cine_tick - 70 - i * 25) / 40.0, 0.0, 1.0)
-		draw_string(font, Vector2(0, s.y * 0.48 + float(i) * 28.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.85, 0.8, 0.7, la))
+		draw_string(font, Vector2(0, s.y * 0.48 + float(i) * 28.0), String(lines[i]), HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.85, 0.8, 0.7, la))
 	if cine_tick > 90:
 		var wa := 0.6 + 0.4 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.68), "WISHLIST %s ON STEAM" % GAME_TITLE, HORIZONTAL_ALIGNMENT_CENTER, s.x, 22, Color(1.0, 0.9, 0.55, wa))
+		draw_string(font, Vector2(0, s.y * 0.68), "WISHLIST %s ON STEAM" % GAME_TITLE, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(22), Color(1.0, 0.9, 0.55, wa))
 		draw_string(font, Vector2(0, s.y * 0.68 + 30.0), "to keep climbing when it ships",
-			HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(0.8, 0.76, 0.68, 0.85))
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(13), Color(0.8, 0.76, 0.68, 0.85))
 	if cine_tick > 120:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
 		draw_string(font, Vector2(0, s.y * 0.84), "any key  -  keep playing what you've already got",
-			HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.75, 0.7, 0.62, 0.4 + 0.5 * pa))
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.75, 0.7, 0.62, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.7)
 
 
@@ -21878,17 +21924,17 @@ func draw_purist_legend(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 68.0, 220.0, Color(0.7, 0.6, 0.9, 0.85 * fin))
 	draw_string(font, Vector2(0, s.y * 0.27),
 		"No gear. No stats. No help. A record stands at every stage on your own hands alone.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.88, 0.84, 0.94, fin))
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(0.88, 0.84, 0.94, fin))
 	var lx := s.x * 0.5 - 160.0
 	for i in best_scores_purist.size():
 		var ry := s.y * 0.40 + float(i) * 30.0
 		var la := clampf(float(cine_tick - 60 - i * 12) / 30.0, 0.0, 1.0)
 		draw_fit_string(font, Vector2(lx, ry), String(venue_data(i)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 240.0, 15, Color(0.85, 0.8, 0.9, la))
-		draw_string(font, Vector2(lx + 240.0, ry), score_text(best_scores_purist[i]), HORIZONTAL_ALIGNMENT_RIGHT, 100.0, 15, Color(0.86, 0.78, 1.0, la))
+		draw_string(font, Vector2(lx + 240.0, ry), score_text(best_scores_purist[i]), HORIZONTAL_ALIGNMENT_RIGHT, 100.0, ps(15), Color(0.86, 0.78, 1.0, la))
 	if cine_tick > 90:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
 		draw_string(font, Vector2(0, s.y * 0.88), "any key  -  the career plays on, records still to chase",
-			HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.75, 0.7, 0.8, 0.4 + 0.5 * pa))
+			HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.75, 0.7, 0.8, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.7)
 
 
@@ -21921,10 +21967,10 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 	draw_head(hc + Vector2(0.0, 3.0), 15.0, Color(0.28, 0.16, 0.11), Color(0.87, 0.64, 0.45), false)
 	var ty := by + 34.0
 	for l in lines:
-		draw_string(font, Vector2(bx + 96.0, ty), String(l), HORIZONTAL_ALIGNMENT_LEFT, inner, 17, Color(1.0, 0.94, 0.80))
+		draw_string(font, Vector2(bx + 96.0, ty), String(l), HORIZONTAL_ALIGNMENT_LEFT, inner, ps(17), Color(1.0, 0.94, 0.80))
 		ty += 24.0
 	var pa := 0.7 + 0.3 * sin(atick() * 0.14)
-	draw_string(font, Vector2(bx + bw - 100.0, by + bh - 10.0), "%s  go on" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 12, Color(1.0, 0.9, 0.7, pa))
+	draw_string(font, Vector2(bx + bw - 100.0, by + bh - 10.0), "%s  go on" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(12), Color(1.0, 0.9, 0.7, pa))
 	# THE SECOND LINE MAKES THE STEM DEMONSTRATE ITSELF (2026-07-31, Louis: "instead of a
 	# dumb circle around it, make it fill up very fast and run out again at the same speed").
 	# The ring that used to be drawn here - a 90px arc thrown round the goal card - is gone:
@@ -21950,7 +21996,7 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 	draw_title_glow(font, s.y * 0.20, "YOU CAN JUGGLE", 42, Color(1.0, 0.88, 0.5, fin), s)
 	draw_ornament(s.x * 0.5, s.y * 0.20 + 66.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
 	draw_string(font, Vector2(0, s.y * 0.34), "Throw, catch, and keep it flying. The rest is a career.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(0.88, 0.8, 0.68, fin))
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(18), Color(0.88, 0.8, 0.68, fin))
 
 	# the starting kit, one warm panel: the purse and the three balls
 	var kw := 460.0
@@ -21962,25 +22008,25 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		# and hud_panel alone is translucent enough to let it bleed through the kit
 		draw_rect(Rect2(kx, ky, kw, 148.0), Color(0.05, 0.03, 0.05, 0.9 * ka))
 		hud_panel(Rect2(kx, ky, kw, 148.0))
-		draw_string(font, Vector2(kx, ky + 30.0), "YOUR STARTING KIT", HORIZONTAL_ALIGNMENT_CENTER, kw, 14, Color(0.95, 0.8, 0.55, ka))
+		draw_string(font, Vector2(kx, ky + 30.0), "YOUR STARTING KIT", HORIZONTAL_ALIGNMENT_CENTER, kw, ps(14), Color(0.95, 0.8, 0.55, ka))
 		# THE MARK IS THE UNIT, and this screen never got the memo (2026-07-30). A disc with a
 		# white blob on it is the exact coin `draw_coin_mark` replaced back in July - so the
 		# purse the player is handed in the last beat of the tutorial was drawn in the currency
 		# art of two economies ago, while the hub they walk into next draws flowers.
 		draw_coin_mark(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 1.0, 1.0, ka))
-		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s %s" % [commafy(money), coin_word()], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.86, 0.45, ka))
+		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s %s" % [commafy(money), coin_word()], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.86, 0.45, ka))
 		for i in 3:
 			var bc := ball_color(i)
 			bc.a = ka
 			# the shared ball, not the flat disc - see the save cards for the same fix
 			cap_ball(Vector2(kx + 104.0 + float(i) * 26.0, ky + 108.0), bc, BALL_RADIUS_PX * 0.9)
-		draw_string(font, Vector2(kx + 140.0 + 42.0, ky + 114.0), "three juggling balls", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.88, 0.8, 0.68, ka))
+		draw_string(font, Vector2(kx + 140.0 + 42.0, ky + 114.0), "three juggling balls", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.88, 0.8, 0.68, ka))
 
 	draw_string(font, Vector2(0, s.y * 0.66), "The Backyard is waiting for its first show.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.8, 0.74, 0.64, ka))
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.8, 0.74, 0.64, ka))
 	if cine_tick > 40:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.78), "Enter  -  take the stage for your first show", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
+		draw_string(font, Vector2(0, s.y * 0.78), "Enter  -  take the stage for your first show", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.6)
 
 
@@ -22012,22 +22058,22 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 		var ph := 40.0 + float(rows.size()) * 56.0
 		draw_rect(Rect2(px, py, pw, ph), Color(0.05, 0.03, 0.05, 0.9 * ka))
 		hud_panel(Rect2(px, py, pw, ph))
-		draw_string(font, Vector2(px, py + 24.0), "THE DAY HUB HOLDS THREE DRAWERS", HORIZONTAL_ALIGNMENT_CENTER, pw, 13,
+		draw_string(font, Vector2(px, py + 24.0), "THE DAY HUB HOLDS THREE DRAWERS", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(13),
 			Color(0.85, 0.72, 0.55, ka))
 		for i in rows.size():
 			var r: Array = rows[i]
 			var ry := py + 52.0 + float(i) * 56.0
 			day_icon(String(r[0]), Vector2(px + 34.0, ry + 8.0), Color(1.0, 0.9, 0.68, ka))
-			draw_string(font, Vector2(px + 62.0, ry), String(r[1]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, 16,
+			draw_string(font, Vector2(px + 62.0, ry), String(r[1]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, ps(16),
 				Color(1.0, 0.92, 0.62, ka))
-			draw_string(font, Vector2(px + 62.0, ry + 20.0), String(r[2]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, 13,
+			draw_string(font, Vector2(px + 62.0, ry + 20.0), String(r[2]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, ps(13),
 				Color(0.85, 0.80, 0.72, ka * 0.9))
 	draw_string(font, Vector2(0, py + float(rows.size()) * 56.0 + 66.0),
 		"Tab opens your stats sheet any time, on stage or in the hub. Esc always steps back one level.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.8, 0.74, 0.64, ka))
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.8, 0.74, 0.64, ka))
 	if cine_tick > 40:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.86), "Enter  -  the day is yours", HORIZONTAL_ALIGNMENT_CENTER, s.x, 16,
+		draw_string(font, Vector2(0, s.y * 0.86), "Enter  -  the day is yours", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16),
 			Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.6)
 
@@ -22052,9 +22098,9 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	var career_rows := 9 if int(career.get("mastery", 0)) > 0 else 8
 	var panel_h := maxf(88.0 + 6.0 * 38.0, 88.0 + float(career_rows - 1) * 30.0)
 	hud_panel(Rect2(lx - 20.0, ly - 34.0, 460.0, panel_h))
-	draw_string(font, Vector2(lx, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
-	draw_string(font, Vector2(lx + 230.0, ly), "best", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.8, 0.74, 0.66))
-	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 13, Color(0.82, 0.72, 0.85))
+	draw_string(font, Vector2(lx, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.88, 0.55))
+	draw_string(font, Vector2(lx + 230.0, ly), "best", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(13), Color(0.8, 0.74, 0.66))
+	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(13), Color(0.82, 0.72, 0.85))
 	for i in 7:
 		var ry := ly + 34.0 + float(i) * 38.0
 		var reached := i <= venue_index()
@@ -22062,7 +22108,7 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		# Show in particular is meant to be a surprise past the real win, and a plain
 		# "???" here can't spoil it the way printing its actual name would
 		var nm := String(venue_data(i)["name"]) if reached else "???"
-		draw_string(font, Vector2(lx, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66) if reached else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.85, 0.78, 0.66) if reached else Color(0.5, 0.46, 0.42))
 		# SCORES GO THROUGH score_text, NEVER commafy (the standing rule at commafy's own
 		# comment). This board was the last reader still breaking it - and the one Louis
 		# reported three sessions running: `commafy`'s argument is an int, a record is a
@@ -22071,13 +22117,13 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		# mid-number by the 90px column.
 		var b := best_scores[i]
 		var p := best_scores_purist[i]
-		draw_string(font, Vector2(lx + 230.0, ry), score_text(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
-		draw_string(font, Vector2(lx + 330.0, ry), score_text(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, 15, Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 230.0, ry), score_text(b) if b > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(15), Color(1.0, 0.86, 0.45) if b > 0 else Color(0.5, 0.46, 0.42))
+		draw_string(font, Vector2(lx + 330.0, ry), score_text(p) if p > 0 else "-", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(15), Color(0.82, 0.72, 0.85) if p > 0 else Color(0.5, 0.46, 0.42))
 
 	# right: the lifetime numbers
 	var rx := s.x * 0.5 + 30.0
 	hud_panel(Rect2(rx - 20.0, ly - 34.0, 460.0, panel_h))
-	draw_string(font, Vector2(rx, ly), "THE CAREER SO FAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(1.0, 0.88, 0.55))
+	draw_string(font, Vector2(rx, ly), "THE CAREER SO FAR", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.88, 0.55))
 	var lines := [
 		["days on the road", str(int(career["days"]))],
 		["performances", str(int(career["perfs"]))],
@@ -22092,10 +22138,10 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		lines.append(["mastery points turned to %s" % coin_word(), commafy(int(career["mastery"]))])
 	for i in lines.size():
 		var ry := ly + 34.0 + float(i) * 30.0
-		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.85, 0.78, 0.66))
-		draw_string(font, Vector2(rx + 280.0, ry), String(lines[i][1]), HORIZONTAL_ALIGNMENT_RIGHT, 140.0, 15, Color(1.0, 0.9, 0.65))
+		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.85, 0.78, 0.66))
+		draw_string(font, Vector2(rx + 280.0, ry), String(lines[i][1]), HORIZONTAL_ALIGNMENT_RIGHT, 140.0, ps(15), Color(1.0, 0.9, 0.65))
 
-	draw_string(font, Vector2(0, s.y - 42.0), "Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.7, 0.66, 0.6))
+	draw_string(font, Vector2(0, s.y - 42.0), "Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
@@ -22570,13 +22616,13 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	var rx := 18.0
 	var ry := s.y - 88.0 - rh
 	hud_panel(Rect2(rx, ry, rw, rh))
-	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
+	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
 		draw_fit_string(font, Vector2(rx + 16.0, ry + 54.0), score_text(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, rw - 32.0, 24, Color(0.96, 0.83, 0.52, tagA))
 	else:
-		draw_string(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.82, 0.6, 0.85 * tagA))
+		draw_string(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(0.9, 0.82, 0.6, 0.85 * tagA))
 	if purist:
-		draw_string(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
+		draw_string(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.82, 0.72, 0.85, 0.9 * tagA))
 
 	# bottom-RIGHT: the act's ask - the three goals to chase, and the whole-act
 	# challenge when one was rolled. Cash in from the first number on; each further
@@ -22588,10 +22634,10 @@ func draw_establish(font: Font, s: Vector2) -> void:
 		var bx := s.x - 18.0 - bw
 		var by2 := s.y - 88.0 - bh
 		hud_panel(Rect2(bx, by2, bw, bh))
-		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
+		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
 		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
 			score_text(goal_for(establish_venue, 0)), score_text(goal_for(establish_venue, 1)), score_text(goal_for(establish_venue, 2))],
-			HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 19, Color(1.0, 0.88, 0.5, tagA))
+			HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, ps(19), Color(1.0, 0.88, 0.5, tagA))
 		if has_enc:
 			var ec := Color(1.0, 0.55, 0.4)
 			var ey := by2 + 82.0
@@ -22605,7 +22651,7 @@ func draw_establish(font: Font, s: Vector2) -> void:
 				ey += 70.0
 
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
-	draw_string(font, Vector2(0, s.y - 34.0), "press any key to begin", HORIZONTAL_ALIGNMENT_CENTER, s.x, 18, Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
+	draw_string(font, Vector2(0, s.y - 34.0), "press any key to begin", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(18), Color(1.0, 0.9, 0.6, 0.5 + 0.5 * pulse))
 
 
 # --- the victory screen: shown once the top stage is conquered ----------------
@@ -22672,20 +22718,20 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				# was rebuilt.
 				draw_wordmark(ry - 52.0 * MARK_RISE, 52, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(24), Color(0.9, 0.8, 0.68, a))
 			"orn":
 				draw_ornament(cx, ry, 150.0, Color(0.82, 0.62, 0.34, 0.8 * a))
 			"role":
-				draw_string(font, Vector2(0, ry - 8.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.82, 0.7, 0.52, 0.85 * a))
-				draw_string(font, Vector2(0, ry + 22.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 27, Color(gold.r, gold.g, gold.b, a))
+				draw_string(font, Vector2(0, ry - 8.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(17), Color(0.82, 0.7, 0.52, 0.85 * a))
+				draw_string(font, Vector2(0, ry + 22.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(27), Color(gold.r, gold.g, gold.b, a))
 			"line":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(21), Color(0.92, 0.86, 0.76, a))
 				if btxt != "":
-					draw_string(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
+					draw_string(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(21), Color(0.92, 0.86, 0.76, a))
 			"win":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.86, 0.42, a))
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(30), Color(1.0, 0.86, 0.42, a))
 			"thanks":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
+				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(30), Color(1.0, 0.9, 0.6, a))
 
 	# once the last line has climbed past centre the roll settles into a held final
 	# title card, which waits, unmoving, for any key. The scrolling text is above it
@@ -22696,7 +22742,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		var fy := s.y * 0.42
 		draw_wordmark(fy - 58.0 * MARK_RISE, 58, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
-		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.82, 0.72, 0.6, 0.65 * fa))
+		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.72, 0.6, 0.65 * fa))
 
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -22770,8 +22816,8 @@ func draw_ornament(cx: float, y: float, half_w: float, col: Color) -> void:
 
 
 func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, s: Vector2) -> void:
-	draw_string(font, Vector2(2, y + 2.0 + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, Color(0, 0, 0, 0.55))
-	draw_string(font, Vector2(0, y + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, size, col)
+	draw_string(font, Vector2(2, y + 2.0 + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(size), Color(0, 0, 0, 0.55))
+	draw_string(font, Vector2(0, y + float(size)), text, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(size), col)
 
 
 # THE WORDMARK IS THE PICTURE, EVERYWHERE (2026-07-28, Louis: "the tossa logo on the
@@ -23648,8 +23694,8 @@ func draw_text_shout(font: Font, pos: Vector2, text: String, align: int, width: 
 	var oc := Color(0.04, 0.02, 0.03, col.a * 0.9)
 	for o in [Vector2(-1.5, 0.0), Vector2(1.5, 0.0), Vector2(0.0, -1.5), Vector2(0.0, 1.5),
 			Vector2(-1.1, -1.1), Vector2(1.1, -1.1), Vector2(-1.1, 1.1), Vector2(1.1, 1.1)]:
-		draw_string(font, pos + o, text, align, width, size, oc)
-	draw_string(font, pos, text, align, width, size, col)
+		draw_string(font, pos + o, text, align, width, ps(size), oc)
+	draw_string(font, pos, text, align, width, ps(size), col)
 
 
 func draw_popups(font: Font) -> void:
@@ -24004,7 +24050,7 @@ func draw_marquee(center: Vector2, w: float) -> void:
 		var col := Color(1.0, 0.85, 0.4) if on else Color(0.4, 0.3, 0.2)
 		draw_circle(Vector2(bx, center.y - h * 0.5 - 4.0), 2.5, col)
 		draw_circle(Vector2(bx, center.y + h * 0.5 + 4.0), 2.5, col)
-	draw_string(game_font(), Vector2(center.x - w * 0.5, center.y + 6.0), "TONIGHT", HORIZONTAL_ALIGNMENT_CENTER, w, 18, Color(1.0, 0.85, 0.45))
+	draw_string(game_font(), Vector2(center.x - w * 0.5, center.y + 6.0), "TONIGHT", HORIZONTAL_ALIGNMENT_CENTER, w, ps(18), Color(1.0, 0.85, 0.45))
 
 
 func draw_bigtop(base: Vector2, w: float, h: float) -> void:
