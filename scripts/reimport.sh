@@ -16,7 +16,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/lib.sh
 require_godot
 
-if git -C "$TOSSA_ROOT" diff --quiet -- Game.gd 2>/dev/null; then
+if git -C "$PIXELTOSSA_ROOT" diff --quiet -- Game.gd 2>/dev/null; then
   GAME_GD_WAS_CLEAN=1
 else
   GAME_GD_WAS_CLEAN=0
@@ -24,11 +24,11 @@ else
 fi
 
 log_info "godot --headless --import ..."
-"$GODOT_BIN" --headless --import --path "$TOSSA_ROOT" 2>&1 | tail -20
+"$GODOT_BIN" --headless --import --path "$PIXELTOSSA_ROOT" 2>&1 | tail -20
 
-if [[ $GAME_GD_WAS_CLEAN -eq 1 ]] && ! git -C "$TOSSA_ROOT" diff --quiet -- Game.gd 2>/dev/null; then
+if [[ $GAME_GD_WAS_CLEAN -eq 1 ]] && ! git -C "$PIXELTOSSA_ROOT" diff --quiet -- Game.gd 2>/dev/null; then
   log_err "godot --import just rewrote Game.gd's whitespace (known issue - see header). Reverting automatically."
-  git -C "$TOSSA_ROOT" checkout -- Game.gd
+  git -C "$PIXELTOSSA_ROOT" checkout -- Game.gd
   log_ok "Game.gd reverted. Your assets were still imported; Game.gd itself is untouched."
 fi
 

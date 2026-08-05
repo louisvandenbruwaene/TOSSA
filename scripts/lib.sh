@@ -2,7 +2,7 @@
 # Shared helpers for TOSSA's scripts/*.sh. Source this, don't run it directly.
 set -euo pipefail
 
-TOSSA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PIXELTOSSA_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GODOT_BIN="${GODOT_BIN:-$(command -v godot || echo /opt/homebrew/bin/godot)}"
 GTIMEOUT_BIN="${GTIMEOUT_BIN:-$(command -v gtimeout || echo /opt/homebrew/bin/gtimeout)}"
 
@@ -49,7 +49,7 @@ run_headless() {
   require_godot; require_timeout
   set +e
   "$GTIMEOUT_BIN" --kill-after=5 "${secs}s" \
-    "$GODOT_BIN" --headless "${AUDIO_FLAGS[@]}" --path "$TOSSA_ROOT" -- "$@" \
+    "$GODOT_BIN" --headless "${AUDIO_FLAGS[@]}" --path "$PIXELTOSSA_ROOT" -- "$@" \
     >"$log" 2>&1
   local code=$?
   set -e
@@ -65,7 +65,7 @@ run_windowed() {
   require_godot; require_timeout
   set +e
   "$GTIMEOUT_BIN" --kill-after=5 "${secs}s" \
-    "$GODOT_BIN" "${AUDIO_FLAGS[@]}" --path "$TOSSA_ROOT" -- "$@" \
+    "$GODOT_BIN" "${AUDIO_FLAGS[@]}" --path "$PIXELTOSSA_ROOT" -- "$@" \
     >"$log" 2>&1
   local code=$?
   set -e

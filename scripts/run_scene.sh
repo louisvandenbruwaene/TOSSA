@@ -17,4 +17,4 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 log_info "godot --audio-driver Dummy -- $*"
-exec "$GODOT_BIN" "${AUDIO_FLAGS[@]}" --path "$TOSSA_ROOT" -- "$@"
+exec "$GODOT_BIN" "${AUDIO_FLAGS[@]}" --path "$PIXELTOSSA_ROOT" -- "$@"

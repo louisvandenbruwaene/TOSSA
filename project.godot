@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="TOSSA"
-config/description="A juggler's climb: strict catches, hold-to-throw heights, and a career from backyard to world arena."
+config/name="PIXELTOSSA"
+config/description="A juggler's climb in pixels: strict catches, hold-to-throw heights, and a career from backyard to world arena."
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"

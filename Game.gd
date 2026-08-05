@@ -229,9 +229,9 @@ const BROKE_GOLD := 20     # the busking floor applies below this purse
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
-const SAVE_PATH_DEBUG := "user://tossa_debug.cfg"  # debug build: separate progress
-const SAVE_PATH_DEMO := "user://tossa_demo.cfg"     # --demo/--shot autoplay: never a real career save
-const SETTINGS_PATH := "user://tossa_settings.cfg" # global options, shared by slots
+const SAVE_PATH_DEBUG := "user://pixeltossa_debug.cfg"  # debug build: separate progress
+const SAVE_PATH_DEMO := "user://pixeltossa_demo.cfg"     # --demo/--shot autoplay: never a real career save
+const SETTINGS_PATH := "user://pixeltossa_settings.cfg" # global options, shared by slots
 const POINTS_PER_LEVEL := 2   # base stat points per level-up; add_xp adds +level/50 on top.
 							  # HALVED WITH THE XP CURVE (2026-07-29): levels come twice as
 							  # fast now, so a level has to be worth about half as much or the
@@ -412,8 +412,34 @@ const CAP_NUDGE := [          #  x      y     scale        letter
 # needs its lift because its torches now stand on the baseline by construction rather than
 # hanging their butts below it, and the T never needed one. The x column is nearly zero now
 # too, because cap_letter_width finally measures what the S and the A really span.
-const GAME_TITLE := "TOSSA"
-const TITLE_MARK := "TOSS"
+const GAME_TITLE := "PIXELTOSSA"
+const TITLE_MARK := "PIXELTOSS"
+const MARK_WORD := "TOSSA"
+# THE FORK'S NAME, AND WHY IT TAKES THREE CONSTANTS INSTEAD OF TWO (2026-08-05).
+#
+# GAME_TITLE is the game's name as TEXT: the window title, the credits, the daily share
+# string, "WISHLIST %s ON STEAM". That one is simply PIXELTOSSA and always was.
+#
+# MARK_WORD is what the PROP WORDMARK SPELLS, and it is deliberately NOT the name. The
+# mark has no lettering in it at all - capsule_mark builds each glyph out of juggling
+# props (T = two knives, O = a ring, S = a line of balls, A = two leaning clubs), so its
+# `match ch` knows exactly four letters and every other character falls to `_: pass`,
+# drawing nothing while still advancing the cursor by cap_letter_width's 0.60 default.
+# CAP_NUDGE compounds it: five hand-tuned entries indexed BY POSITION, so a longer word
+# slides the T's 1.10 scale onto some other letter and leaves the real letters untuned.
+# Spelling PIXELTOSSA in props would therefore have drawn five blank gaps followed by a
+# mis-scaled TOSSA - not a layout problem, a missing-glyph one. P, I, X, E and L would
+# each need designing out of props first, and P and E have no honest prop shape.
+#
+# So the lockup is: "PIXEL" set in the pixel font as a prefix, above the untouched
+# five-prop TOSSA mark. The mark keeps its tuning table, its measured widths and its
+# MARK_RISE/MARK_DROP arithmetic exactly as they were.
+# TODO(title): draw the PIXEL prefix. Deferred until Assets/Fonts/pixel.ttf exists,
+# because the prefix has to be set in that font or the lockup mixes two type styles.
+#
+# TITLE_MARK keeps its documented meaning (the name without its final round letter, the
+# ball standing in for that letter). It has no call sites today; it is kept in step with
+# GAME_TITLE so it is correct if one appears.
 # NAMES STILL ON THE TABLE (Louis, 2026-07-28) - kept here beside the switch so choosing
 # one is a two-line edit and never a hunt. The second column is what TITLE_MARK becomes:
 # the ball prop stands in for the name's LAST letter, so the mark is the name without it,
@@ -6863,8 +6889,20 @@ func reset_new_game() -> void:
 	save_progress()
 
 
-const OLD_NAMES := ["IACTO", "JUGGLE"]   # every name this game has shipped under, newest
-										  # first - see migrate_old_saves
+const OLD_NAMES: Array[String] = []      # every name this game has shipped under, newest
+										  # first - see migrate_old_saves.
+# EMPTY ON PURPOSE, AND IT IS THE SAFETY RAIL OF THE FORK (2026-08-05). PIXELTOSSA has
+# never shipped under another name, so there is nothing to migrate. TOSSA's list read
+# ["IACTO", "JUGGLE"] and inheriting it would have pulled Louis's ancient IACTO career
+# into a brand new game on first launch - harmless but baffling.
+#
+# The far more important half: "TOSSA" MUST NEVER BE ADDED HERE. migrate_old_saves walks
+# to the PARENT of OS.get_user_data_dir() and reads the sibling folder named for each
+# entry, so listing TOSSA would make this game read app_userdata/TOSSA/ - the live career
+# of the game it was forked from. It only ever copies, never moves, so TOSSA's files
+# would survive; but the two saves would then diverge silently under two different names,
+# which is exactly the confusion an independent fork exists to avoid. Separate folder,
+# separate filenames, separate career. Nothing crosses.
 
 func migrate_old_saves() -> void:
 	# THE RENAME MUST NOT COST ANYONE THEIR CAREER (2026-07-28), and it very nearly did,
@@ -6898,9 +6936,9 @@ func migrate_old_saves() -> void:
 		for i in NUM_SLOTS:
 			names.append(stem + "_slot%d.cfg" % i)
 		for fn in names:
-			var to := String(fn).replace(stem + "_", "tossa_")
+			var to := String(fn).replace(stem + "_", "pixeltossa_")
 			if here.file_exists(to):
-				continue                                  # a real TOSSA file wins
+				continue                                  # a real PIXELTOSSA file wins
 			if here.file_exists(fn):                      # (1) same folder, old name
 				here.copy("user://" + fn, "user://" + to)
 			else:                                         # (2) the old project's folder
@@ -6918,12 +6956,12 @@ func sync_props() -> void:
 
 
 func slot_path(i: int) -> String:
-	return "user://tossa_slot%d.cfg" % i
+	return "user://pixeltossa_slot%d.cfg" % i
 
 
 func delete_slot(i: int) -> void:
 	var dir := DirAccess.open("user://")
-	var fn := "tossa_slot%d.cfg" % i
+	var fn := "pixeltossa_slot%d.cfg" % i
 	if dir != null and dir.file_exists(fn):
 		dir.remove(fn)
 
@@ -21251,8 +21289,8 @@ func mark_width(size: float) -> float:
 	# that slot: the letters had simply grown (a wider S), and a width nobody measured went over.
 	var gap := size * CAP_GAP
 	var total := -gap
-	for i in GAME_TITLE.length():
-		total += cap_letter_width(GAME_TITLE[i], size * cap_nudge(i).z) + gap
+	for i in MARK_WORD.length():
+		total += cap_letter_width(MARK_WORD[i], size * cap_nudge(i).z) + gap
 	return total
 
 
@@ -21296,15 +21334,15 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	var gap := size * CAP_GAP
 	var widths: Array[float] = []
 	var total := 0.0
-	for i in GAME_TITLE.length():
+	for i in MARK_WORD.length():
 		var gsz := size * cap_nudge(i).z
-		widths.append(cap_letter_width(GAME_TITLE[i], gsz))
+		widths.append(cap_letter_width(MARK_WORD[i], gsz))
 		total += widths[i] + gap
 	total -= gap
 	var x := s.x * 0.5 - total * 0.5
 	var base0 := cy + size * 0.5                 # the mark's baseline
-	for i in GAME_TITLE.length():
-		var ch := GAME_TITLE[i]
+	for i in MARK_WORD.length():
+		var ch := MARK_WORD[i]
 		var n := cap_nudge(i)
 		var size_l := size * n.z                 # this letter's own height
 		var w: float = widths[i]

@@ -28,21 +28,21 @@ fi
 echo "[pre-commit] Game.gd is staged - running fast checks..."
 
 if command -v gdformat >/dev/null 2>&1; then
-  scripts/format.sh >/tmp/tossa_precommit_format.log 2>&1
-  grep -q "would reformat" /tmp/tossa_precommit_format.log && \
+  scripts/format.sh >/tmp/pixeltossa_precommit_format.log 2>&1
+  grep -q "would reformat" /tmp/pixeltossa_precommit_format.log && \
     echo "[pre-commit] (gdformat has style suggestions - advisory, see scripts/format.sh --write)"
 fi
 
 if command -v gdlint >/dev/null 2>&1; then
-  scripts/lint.sh > /tmp/tossa_precommit_lint.log 2>&1 || true
-  n=$(grep -c ":" /tmp/tossa_precommit_lint.log || true)
+  scripts/lint.sh > /tmp/pixeltossa_precommit_lint.log 2>&1 || true
+  n=$(grep -c ":" /tmp/pixeltossa_precommit_lint.log || true)
   [[ "${n:-0}" -gt 0 ]] && echo "[pre-commit] ($n gdlint finding(s) - advisory, see scripts/lint.sh)"
 fi
 
 echo "[pre-commit] Parse check (blocking)..."
-if ! "${GODOT_BIN:-/opt/homebrew/bin/godot}" --headless --check-only --script Game.gd >/tmp/tossa_precommit_parse.log 2>&1; then
+if ! "${GODOT_BIN:-/opt/homebrew/bin/godot}" --headless --check-only --script Game.gd >/tmp/pixeltossa_precommit_parse.log 2>&1; then
   echo "[pre-commit] FAILED parse check:"
-  cat /tmp/tossa_precommit_parse.log
+  cat /tmp/pixeltossa_precommit_parse.log
   echo "[pre-commit] Commit blocked. Fix the above or commit with --no-verify to override."
   exit 1
 fi
