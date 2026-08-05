@@ -32,3 +32,6 @@ TOSSA_mechanics_reference.pdf
 # Python venv for the art/palette tooling (scripts/extract_palette.py).
 # Recreate with: python3 -m venv .venv && .venv/bin/pip install Pillow numpy scikit-learn
 .venv/
+
+# Python bytecode from the art tooling
+scripts/__pycache__/
