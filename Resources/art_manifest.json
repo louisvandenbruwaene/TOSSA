@@ -83,5 +83,8 @@
   "bg/the_circus":       { "path": "res://Assets/Backgrounds/the_circus.png" },
   "bg/championship":     { "path": "res://Assets/Backgrounds/championship.png" },
   "bg/world_arena":      { "path": "res://Assets/Backgrounds/world_arena.png" },
-  "bg/the_midnight_show":{ "path": "res://Assets/Backgrounds/the_midnight_show.png" }
+  "bg/the_midnight_show":{ "path": "res://Assets/Backgrounds/the_midnight_show.png" },
+  "char/head":        { "path": "res://Assets/Characters/head.png" },
+  "char/hand_open":   { "path": "res://Assets/Characters/hand_open.png" },
+  "char/hand_closed": { "path": "res://Assets/Characters/hand_closed.png" }
 }

@@ -2131,6 +2131,13 @@ func _ready() -> void:
 	if pri != -1 and pri + 1 < ua.size():   # img2img reference - see _draw_prop_ref
 		_propref = ua[pri + 1]
 		art_on = false            # photograph the DRAWING, never a sprite already replacing it
+	if ua.has("--charref"):       # dev: the juggler alone on a flat field - see _draw_char_ref
+		_charref = true
+		art_on = false            # same reason: photograph the drawing, not its replacement
+	if ua.has("--artboxes"):      # dev: print where every sized element was drawn, on quit
+		_art_boxes_on = true
+	if ua.has("--charsuppress"):  # dev: the "without" half of the isolation difference
+		_art_suppress = true
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -3185,6 +3192,9 @@ func _notification(what: int) -> void:
 		if _art_report:
 			_art_report = false   # PREDELETE can follow CLOSE_REQUEST; print the list once
 			art_report()
+		if _art_boxes_on:
+			_art_boxes_on = false   # same one-shot guard as above
+			art_boxes_report()
 	# a performance must never die to a missed alt-tab: losing window focus mid-set
 	# auto-pauses instead of letting the sim keep draining stamina unattended.
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
@@ -11271,6 +11281,10 @@ var art_hits: Dictionary = {}      # ...and the subset that resolved to a real t
 var _art_pixel := false          # --pixel: downsample the --shot capture to art density
 var _art_report := false           # --artreport: dump both lists on quit
 var _propref := ""                 # --propref <name>: draw only that prop (see _draw_prop_ref)
+var _charref := false              # --charref: draw only the juggler, on a flat field
+var _art_boxes_on := false         # --artboxes: record where each sized element is drawn
+var _art_boxes: Dictionary = {}    # key -> Rect2, the last box the game asked for
+var _art_suppress := false         # --charsuppress: claim char/* keys but draw nothing
 
 
 func art_boot() -> void:
@@ -11354,6 +11368,26 @@ func art_blit_size(key: String, center: Vector2, size: Vector2, ang: float = 0.0
 	# sprite arrives, so the texture is fitted to them instead of setting them. Same
 	# true/false contract as art_blit.
 	art_asked[key] = true
+	if _art_suppress and key.begins_with("char/"):
+		# --charsuppress: claim the element and draw NOTHING. This exists so a reference
+		# pass can isolate a part exactly, instead of cropping its bounding box and hoping.
+		# A head is drawn OVER the collar, so its box contains collar pixels in every corner
+		# the head does not cover, and those end up baked into the sprite as a white notch
+		# under the chin. Rendering the figure once with these parts and once without, then
+		# differencing, yields precisely the pixels the part itself produced - no masking
+		# heuristic, no guessing which stray pixels belong to what.
+		if _art_boxes_on:
+			_art_boxes[key] = Rect2(center - size.abs() * 0.5, size.abs())
+		return true
+	if _art_boxes_on:
+		# THE SEAM ALREADY KNOWS THE GEOMETRY, so nothing else has to guess it. Recording
+		# the box here is what makes deriving character art possible without a second,
+		# drifting copy of the figure's proportions: every char/* element states the exact
+		# centre and size the game will draw it at, so a reference render can be cropped to
+		# that rectangle and reduced to (size / ART_PIXEL) with no measuring by eye.
+		# Recorded BEFORE the art_on/bank check, because the whole point is to capture the
+		# geometry while the element is still PROCEDURAL and has no sprite yet.
+		_art_boxes[key] = Rect2(center - size.abs() * 0.5, size.abs())
 	if not art_on or not art_bank.has(key):
 		return false
 	# a NEGATIVE width is meaningful and must survive: it mirrors the quad, which is how one
@@ -11478,6 +11512,41 @@ func _draw_prop_ref() -> void:
 	draw_prop_rich(kind, PROPREF_AT, Color.WHITE, 0.0, prop_scale(kind) * float(PROPREF_MAG), false)
 
 
+func _draw_char_ref() -> void:
+	# --charref: the juggler alone, at the size and stance the stage draws him, on a flat
+	# field. The companion to --propref, and the source for every char/* sprite.
+	#
+	# NO MAGNIFICATION HERE, unlike --propref, and the reason is arithmetic rather than
+	# taste. The stage draws this figure about 348px tall, and the target sprite density is
+	# exactly half that (ART_PIXEL = 2), so a native capture reduces by precisely 2 with
+	# every source pixel landing in a clean 2x2 box. Magnifying first would only add a
+	# resample step between the drawing and the sprite.
+	#
+	# WHY THIS IS THE ONLY HONEST WAY TO GET THIS ART. The stance and proportions are
+	# settled and explicitly off-limits to change as a side effect. A generated figure -
+	# tested, 2026-08-05 - comes back with realistic proportions, a semi-realistic face and
+	# the arms down, which is a different character wearing the same coat. Tracing the
+	# game's own render cannot drift, because it IS the game's own render.
+	#
+	# Pair it with --artboxes: the seam records the exact centre and size of every char/*
+	# element while it is still procedural, so each part can be cropped from this capture
+	# by rectangle rather than by eye.
+	draw_juggler(get_viewport_rect().size)
+
+
+func art_boxes_report() -> void:
+	# --artboxes: key, then the rectangle the game drew it in, then the sprite size that
+	# rectangle implies at the current density. This is the crop list.
+	var keys := _art_boxes.keys()
+	keys.sort()
+	print("\n--- art boxes: %d element(s) ---" % keys.size())
+	for k: String in keys:
+		var r: Rect2 = _art_boxes[k]
+		print("BOX %s %.2f %.2f %.2f %.2f -> %dx%d" % [k, r.position.x, r.position.y,
+			r.size.x, r.size.y,
+			int(round(r.size.x / ART_PIXEL)), int(round(r.size.y / ART_PIXEL))])
+
+
 func art_report() -> void:
 	# --artreport: what the running game ASKED the bank for, and what it got. This is the
 	# remaster's to-do list, generated from the code rather than maintained by hand - drive
@@ -11521,9 +11590,12 @@ func art_pixel_preview(img: Image) -> Image:
 
 #region STAGE BACKDROP DRAWING
 func _draw() -> void:
-	# --propref: draw ONE prop, isolated, and nothing else. See _draw_prop_ref.
+	# --propref / --charref: draw one thing, isolated, and nothing else.
 	if _propref != "":
 		_draw_prop_ref()
+		return
+	if _charref:
+		_draw_char_ref()
 		return
 	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
@@ -13727,7 +13799,10 @@ func draw_hand(h: int) -> void:
 	# middle ball drawn at centre would be the thing floating free of the hand instead.
 	# A prop in a hand is drawn in that hand, with no exceptions - that is the rule that
 	# stops these two ever disagreeing again.
-	var st := stack(h)
+	# --charref draws the figure to be traced into sprites, and a prop resting in the palm
+	# would be cropped into the hand sprite along with the hand. This is the ONLY place the
+	# reference mode touches the figure, and it removes an object rather than changing one.
+	var st: Array = [] if _charref else stack(h)
 	for i in st.size():
 		var bp := pos
 		# THE ONE CASE "drawn in that hand, no exceptions" (above) still needs a beat of
