@@ -34,6 +34,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+import artguard
+
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "Assets" / "Backgrounds"
 PALETTE = ROOT / "Resources" / "palette" / "palette.json"
@@ -66,7 +68,10 @@ def main() -> None:
     snapped = pal[np.argmin(d, axis=1)].reshape(arr.shape).astype(np.uint8)
 
     OUT.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(snapped, "RGB").save(OUT / f"{name}.png")
+    st = artguard.save_guarded(OUT / f"{name}.png",
+                               lambda q: Image.fromarray(snapped, "RGB").save(q),
+                               "--force" in sys.argv)
+    artguard.report({f"Assets/Backgrounds/{name}.png": st})
     print(f"{name}: {src_path.name} -> {ART_W}x{ART_H}, {len(np.unique(snapped.reshape(-1,3),axis=0))} colours")
     print(f'  "bg/{name}": {{ "path": "res://Assets/Backgrounds/{name}.png" }},')
 

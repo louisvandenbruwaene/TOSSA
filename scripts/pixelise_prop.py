@@ -49,6 +49,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+import artguard
+
 ROOT = Path(__file__).resolve().parent.parent
 REFS = ROOT / "artifacts" / "prop_refs"
 OUT = ROOT / "Assets" / "Props"
@@ -64,6 +66,9 @@ PROPREF_AT = np.array([640.0, 420.0])
 
 # Which props the game tints (author greyscale) and which carry their own paint.
 TINTED = {"ball", "egg", "ring"}
+
+FORCE = False
+RESULTS: dict = {}
 
 
 def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
@@ -144,17 +149,22 @@ def pixelise(name: str, pal: np.ndarray) -> dict:
 
     out = np.concatenate([rgb, np.where(keep, 255, 0)[..., None]], axis=2).astype(np.uint8)
     OUT.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(out, "RGBA").save(OUT / f"{name}.png")
+    status = artguard.save_guarded(OUT / f"{name}.png",
+                                   lambda q: Image.fromarray(out, "RGBA").save(q), FORCE)
 
     # The pivot is where the game rotates the shape about, expressed in the sprite's own
     # normalised space. PROPREF_AT is the known draw position, so this falls straight out.
     piv = ((PROPREF_AT[0] - x0) / bw, (PROPREF_AT[1] - y0) / bh)
+    RESULTS[f"Assets/Props/{name}.png"] = status
     return {"name": name, "w": tw, "h": th, "pivot": (round(piv[0], 3), round(piv[1], 3)),
             "bbox": (bw, bh), "tinted": name in TINTED}
 
 
 def main() -> None:
-    names = sys.argv[1:] or ["ball", "egg", "ring", "club", "knife", "torch", "chainsaw"]
+    global FORCE
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    FORCE = "--force" in sys.argv
+    names = args or ["ball", "egg", "ring", "club", "knife", "torch", "chainsaw"]
     pal = load_palette()
     rows = [pixelise(n, pal) for n in names]
 
@@ -163,6 +173,7 @@ def main() -> None:
         print(f"{r['name']:<10} {r['bbox'][0]:>4}x{r['bbox'][1]:<5} "
               f"{r['w']:>3}x{r['h']:<5} {str(r['pivot']):>14}  {'grey' if r['tinted'] else 'painted'}")
 
+    artguard.report(RESULTS)
     print("\nmanifest lines (paste into Resources/art_manifest.json):")
     for r in rows:
         print(f'  "prop/{r["name"]}": {{ "path": "res://Assets/Props/{r["name"]}.png", '
