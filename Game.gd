@@ -2162,6 +2162,9 @@ func _ready() -> void:
 	if ua.has("--bgref"):         # dev: the backdrop alone, unlit - see the bg seam
 		_bgref = true
 		art_on = false            # photograph the DRESSING, never a backdrop already replacing it
+	if ua.has("--menuref"):       # dev: the title proscenium alone, dustless - see draw_menuref
+		_menuref = true
+		art_on = false            # photograph the DRAWING, never the bake already replacing it
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -11390,6 +11393,7 @@ var _art_boxes: Dictionary = {}    # key -> Rect2, the last box the game asked f
 var _art_suppress := ""            # --charsuppress [key]: claim that char key (or "*") and draw nothing
 var _charid := false               # --charid: paint costume regions as flat ID colours
 var _bgref := false                # --bgref: draw only sky + dressing, the layers bg/* replaces
+var _menuref := false              # --menuref: draw only the title proscenium, dustless
 var _chargear := false             # --chargear: wear every garment (reference render only)
 var _charback := false             # --charback: draw the figure facing away (the Spin view)
 var _charopen := false             # --charopen: hold the hand open (reference render only)
@@ -11764,6 +11768,10 @@ func _draw() -> void:
 		# and the dressing - so this is the whole frame. The veil, cone and footlights
 		# never run, which is the point: they are light, not scenery.
 		draw_backdrop(get_viewport_rect().size)
+		return
+	if _menuref:
+		# --menuref: the title screen's proscenium alone, dustless. See draw_menuref.
+		draw_menuref(get_viewport_rect().size)
 		return
 	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
@@ -20945,6 +20953,36 @@ func menu_backdrop(s: Vector2) -> void:
 	# Every piece of this is furniture the stage already owns, which is the point: the title screen
 	# should be a room this game already has, not a fifth art style.
 	var fy := s.y * MENU_FLOOR
+	# SEAM: the proscenium is a BAKED PICTURE (ui/menu_backdrop), because every layer of it
+	# below is static - measured, the only thing in this whole function that moves is the
+	# dust, which is why the dust alone stays procedural and is drawn on top. Nothing here
+	# has to react to play the way a venue's spotlight cone does, so there is no reason for
+	# the title screen to be redrawing a hundred polygons a frame either.
+	#
+	# It is the LAST vector picture on the most-seen screen in the game: measured 35%
+	# off-grid by scripts/check_pixel_grid.py, the worst of all 32 screens, with crisp
+	# pixel props sitting on smooth antialiased velvet. See scripts/pixelise_menu.py for
+	# how the bake is made and why it dithers rather than banding flat.
+	if art_blit_rect("ui/menu_backdrop", Rect2(Vector2.ZERO, s)):
+		# THE BAKE IS SCENERY. THE LIGHT IS STILL LIVE - the same split draw_backdrop makes
+		# for a venue, and for the same reason: a picture with its lighting painted in can
+		# never be lit differently. Here it also earns its keep twice over, because the veil
+		# is what buys the wordmark its contrast, and the sprite is a good deal brighter
+		# than the drawing it replaced.
+		draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
+		draw_spotlight_cone(s, s.x * 0.5, 0.15)
+		draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
+		# THE APRON FALLS AWAY at the very front of the stage, which does two jobs. The
+		# boards in the sprite are warm and bright - much brighter than the near-black
+		# floor they replaced - and the key hint sits on them in plain grey with no
+		# outline, so it had almost no contrast left. It also grounds the room: a lit
+		# stage that runs at full brightness right off the bottom edge of the screen
+		# reads as a wall, not a floor. Starts below the footlights so it dims the boards
+		# and never the lamps.
+		draw_gradient_v(Rect2(0, s.y - 54.0, s.x, 54.0),
+			Color(0.03, 0.012, 0.02, 0.0), Color(0.03, 0.012, 0.02, 0.78), 10)
+		draw_dust(s, 22, Color(1.0, 0.85, 0.55))
+		return
 	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.135, 0.058, 0.078), Color(0.045, 0.022, 0.032), 22)
 	draw_curtain_wall(s, fy, 0.0, Color(0.150, 0.038, 0.055), 26)
 	# THE VEIL, the same move draw_backdrop makes over a venue's set dressing and for the same
@@ -21023,6 +21061,35 @@ func menu_rows(font: Font, s: Vector2, oy: float) -> void:
 		draw_fit_string(font, Vector2(cx0 + 64.0, cy + 43.0), String(d["note"]),
 			HORIZONTAL_ALIGNMENT_LEFT, cw - 84.0, 12,
 			Color(ac.r, ac.g, ac.b, 0.95) if sel else Color(0.62, 0.58, 0.54))
+
+
+func draw_menuref(s: Vector2) -> void:
+	# --menuref: the title backdrop ALONE, at full size, with no wordmark, no menu cards,
+	# no version stamp and NO DUST. It is the source pixelise_menu.py reduces.
+	#
+	# The dust is left out on purpose and is the reason this flag exists rather than just
+	# cropping a --menu capture: it is the one moving layer, so baking a frame of it would
+	# freeze twenty-two motes into the velvet forever, and they would then also be doubled
+	# by the live layer drawn over the sprite.
+	#
+	# art_on is already false whenever a ref flag is set, so this photographs the DRAWING
+	# and never a bake that is already replacing it - otherwise every re-run would reduce
+	# its own previous output and the picture would soften a little each time.
+	var fy := s.y * MENU_FLOOR
+	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.135, 0.058, 0.078), Color(0.045, 0.022, 0.032), 22)
+	draw_curtain_wall(s, fy, 0.0, Color(0.150, 0.038, 0.055), 26)
+	# NO VEIL, NO CONE, NO GLOW HERE, unlike menu_backdrop's own order: those three are
+	# LIGHT, and the seam draws them live over the sprite. Baking them would double them
+	# on every future re-bake and freeze the one part of this picture that is allowed to
+	# change. Scenery only, which is exactly the line --bgref draws for a venue.
+	menu_drapes(s, fy)
+	draw_footlights(s, fy)
+	draw_rect(Rect2(0, fy, s.x, s.y - fy), Color(0.20, 0.105, 0.085))
+	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(1.0, 0.72, 0.34, 0.13), Color(1.0, 0.72, 0.34, 0.0), 8)
+	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(1.0, 0.74, 0.36, 0.5), 3.0)
+	for i in 9:
+		var px2 := s.x * (float(i) + 0.5) / 9.0
+		draw_line(Vector2(px2, fy + 2.0), Vector2(px2 + s.x * 0.04, s.y), Color(0.0, 0.0, 0.0, 0.10), 1.5)
 
 
 func draw_menu(font: Font, s: Vector2) -> void:
