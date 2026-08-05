@@ -53,18 +53,25 @@ ALPHA_CUT = 0.42
 GREY_FLOOR = 0.45
 ART_PIXEL = 2
 
-# key -> (filename, tinted?)
+# key -> (filename, tinted?, base render)
+#
+# THE BASE RENDER MATTERS AS MUCH AS THE MASK, because gear OCCLUDES what it covers.
+# The head must come from the BARE figure: with a top hat on, the hat covers the crown,
+# and a head derived from the geared render is missing its top - permanently, in a file,
+# where it will look like the sprite was drawn wrong. Conversely the hat, glasses, boots
+# and gloves are only REACHED when worn (see wearing()), so they can only come from the
+# geared render. Bare hands and gloves are mutually exclusive for the same reason.
 PARTS = {
-    "char/head":        ("head.png", False),
-    "char/head_back":   ("head_back.png", False),
-    "char/hand_open":   ("hand_open.png", True),
-    "char/hand_closed": ("hand_closed.png", True),
-    "char/glove_open":  ("glove_open.png", True),
-    "char/glove_closed": ("glove_closed.png", True),
-    "char/hat_top":     ("hat_top.png", False),
-    "char/glasses":     ("glasses.png", False),
-    "char/helmet":      ("helmet.png", False),
-    "char/boot":        ("boot.png", False),
+    "char/head":         ("head.png", False, "juggler"),
+    "char/head_back":    ("head_back.png", False, "juggler_back"),
+    "char/hand_open":    ("hand_open.png", True, "juggler_open"),
+    "char/hand_closed":  ("hand_closed.png", True, "juggler"),
+    "char/glove_open":   ("glove_open.png", True, "juggler_gear_open"),
+    "char/glove_closed": ("glove_closed.png", True, "juggler_gear"),
+    "char/hat_top":      ("hat_top.png", False, "juggler_gear"),
+    "char/glasses":      ("glasses.png", False, "juggler_gear"),
+    "char/helmet":       ("helmet.png", False, "juggler_helm"),
+    "char/boot":         ("boot.png", False, "juggler_gear"),
 }
 
 BOX_RE = re.compile(r"^BOX (\S+) ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)")
@@ -91,6 +98,13 @@ REGIONS = {
     "char/torso_button": ("torso_button.png", (87, 51, 28)),
     # Trousers are `suit_dk`, so they carry that region's ID rather than a trouser one.
     "char/legs_trouser": ("legs_trouser.png", (0, 255, 0)),
+}
+# The away-facing coat is a different picture, not a mirrored one, so it carries its own
+# regions and needs its own ID render (--charback --charid). Only two: mid-Spin the front
+# detailing is not drawn at all, just the plain back of the coat and a collar band.
+REGIONS_BACK = {
+    "char/torso_back_suit":   ("torso_back_suit.png",   (255, 0, 0)),
+    "char/torso_back_collar": ("torso_back_collar.png", (255, 255, 0)),
 }
 ID_MAX_DIST = 90.0   # a pixel further than this from every ID colour is an overlay, not a region
 
@@ -125,35 +139,45 @@ def main() -> None:
     if not boxes:
         raise SystemExit("no BOX lines - did the run include --artboxes?")
 
-    src = np.asarray(Image.open(d / "juggler.png").convert("RGB")).astype(np.int64)
+    def load(name):
+        f = d / f"{name}.png"
+        return np.asarray(Image.open(f).convert("RGB")).astype(np.int64) if f.exists() else None
 
-    # THE ISOLATION DIFFERENCE. juggler_off.png is the same figure rendered with
-    # --charsuppress, i.e. with every char/* element claimed by the seam and drawn as
-    # nothing. Pixels that differ between the two images are exactly the pixels those
-    # elements produced, so a part's own art can be lifted out without cropping in
-    # whatever happened to sit behind it. This matters: the head is drawn OVER the shirt
-    # collar, so its bounding box contains collar in every corner the head does not cover,
-    # and a plain crop bakes a white notch under the chin into the sprite.
-    off_path = d / "juggler_off.png"
-    own = None
-    if off_path.exists():
-        off = np.asarray(Image.open(off_path).convert("RGB")).astype(np.int64)
-        if off.shape == src.shape:
-            own = np.abs(src - off).sum(axis=2) > BG_TOL
+    def own_mask(key, base):
+        """Pixels this part alone drew: base minus the same render with only it suppressed.
+
+        Per-key, not all-at-once. Suppressing every char/* together is only valid while no
+        two elements overlap; with the wardrobe on, the top hat and the glasses both sit
+        inside the head's box, and a shared difference hands the head sprite its own hat
+        and spectacles, baked in and impossible to remove.
+        """
+        a = load(base)
+        b = load("off_" + key.replace("/", "_"))
+        if a is None or b is None or a.shape != b.shape:
+            return None, a
+        return (np.abs(a - b).sum(axis=2) > BG_TOL), a
+
+    src = load("juggler")
+    if src is None:
+        raise SystemExit("no juggler.png - run scripts/gen_char_refs.sh first")
 
     pal = np.array([[int(h[i:i + 2], 16) for i in (1, 3, 5)]
                     for h in json.loads(PALETTE.read_text())["hex"]])
     OUT.mkdir(parents=True, exist_ok=True)
 
     rows = []
-    for key, (fname, tinted) in PARTS.items():
+    for key, (fname, tinted, base) in PARTS.items():
         if key not in boxes:
             rows.append((key, "not reached this run", "", ""))
             continue
         x, y, w, h = boxes[key]
         x0, y0 = int(round(x)), int(round(y))
         x1, y1 = int(round(x + w)), int(round(y + h))
-        crop = src[y0:y1, x0:x1].astype(np.float64)
+        own, base_img = own_mask(key, base)
+        if base_img is None:
+            rows.append((key, "no base render", "", ""))
+            continue
+        crop = base_img[y0:y1, x0:x1].astype(np.float64)
         if own is not None:
             mask = own[y0:y1, x0:x1].astype(np.float64)
         else:
@@ -212,10 +236,15 @@ def main() -> None:
         rows.append((key, f"{int(w)}x{int(h)}", f"{tw}x{th}", "grey" if tinted else "colour"))
 
     # --- per-region body parts -------------------------------------------------------
-    idp = d / "juggler_id.png"
-    if idp.exists():
+    for idname, table, basename in (("juggler_id", REGIONS, "juggler"),
+                                    ("juggler_back_id", REGIONS_BACK, "juggler_back")):
+      idp = d / f"{idname}.png"
+      base_src = load(basename)
+      if idp.exists() and base_src is not None:
+        src = base_src
+        REGIONS_CUR = table
         idm = np.asarray(Image.open(idp).convert("RGB")).astype(np.float64)
-        ids = np.array([v[1] for v in REGIONS.values()], dtype=np.float64)
+        ids = np.array([v[1] for v in table.values()], dtype=np.float64)
         dist = np.linalg.norm(idm[:, :, None, :] - ids[None, None, :, :], axis=3)
         which = np.argmin(dist, axis=2)
         near = dist.min(axis=2) <= ID_MAX_DIST
@@ -227,15 +256,16 @@ def main() -> None:
         # that brown - so the raw match picks up a thin outline down the coat. Buttons are
         # drawn on the waistcoat, so intersecting with a dilated vest mask removes the
         # edge without touching a single real button pixel.
-        vest_i = list(REGIONS).index("char/torso_vest")
-        vest_m = (which == vest_i) & near
+        vest_m = np.zeros(which.shape, bool)
+        if "char/torso_vest" in table:
+            vest_m = (which == list(table).index("char/torso_vest")) & near
         grown = vest_m.copy()
         for _ in range(3):
             g = grown
             grown = (g | np.roll(g, 1, 0) | np.roll(g, -1, 0)
                      | np.roll(g, 1, 1) | np.roll(g, -1, 1))
 
-        for ri, (key, (fname, _idc)) in enumerate(REGIONS.items()):
+        for ri, (key, (fname, _idc)) in enumerate(table.items()):
             if key not in boxes:
                 rows.append((key, "not reached", "", ""))
                 continue
@@ -277,8 +307,8 @@ def main() -> None:
             out = np.stack([g, g, g, np.where(keep, 255, 0)], axis=2).astype(np.uint8)
             Image.fromarray(out, "RGBA").save(OUT / fname)
             rows.append((key, f"{int(w)}x{int(h)}", f"{tw}x{th}", "region"))
-    else:
-        print("(no juggler_id.png - skipping per-region body parts; run with --charid)")
+      else:
+        print(f"(no {idname}.png - skipping those regions)")
 
     print(f"{'key':<20} {'render':>10} {'sprite':>8}  mode")
     for k, a, b, c in rows:
@@ -286,7 +316,7 @@ def main() -> None:
     print("\nmanifest lines:")
     for k, a, b, c in rows:
         if b:
-            fn = PARTS[k][0] if k in PARTS else REGIONS[k][0]
+            fn = PARTS[k][0] if k in PARTS else {**REGIONS, **REGIONS_BACK}[k][0]
             print(f'  "{k}": {{ "path": "res://Assets/Characters/{fn}" }},')
 
 
