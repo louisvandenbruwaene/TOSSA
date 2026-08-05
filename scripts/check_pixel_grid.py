@@ -21,9 +21,22 @@ Usage:
 The number to read is "off-grid %": the share of 2x2 blocks that are not flat.
 Zero is not the target for every screen - see THRESHOLDS below.
 
-THRESHOLDS (measured 2026-08-05, see the commit that added this file):
-a fully converted screen lands under ~2%. The stage sits higher than the menus
-because the spotlight cone and the crowd gauge are deliberately smooth.
+TWO THINGS THIS NUMBER IS NOT:
+
+  * It is not a score out of 100. TEXT IS RENDERED AT SCREEN DENSITY ON PURPOSE
+    (decision 2 of the fork - 640x360 turns a HUD label to mush and this game is
+    text-heavy), so every word on screen counts as off-grid and puts a floor
+    under any screen with writing on it. Chrome that is deliberately smooth - the
+    spotlight cone, the crowd gauge - does the same.
+
+  * A LOW score is not proof of conversion. `gameover` measured 0.63% on
+    2026-08-05, the best of all 32 screens, because it is a nearly empty screen
+    with one line of text on it. The metric scores what is drawn, not what is
+    missing. Read it per-screen and against that screen's own history.
+
+BASELINE 2026-08-05 (the commit that added this file): title 35% - the worst,
+its curtains, swags and boards are all still procedural; shop 25%; day hub 21%;
+in-act stage 17%; results 5.8%.
 """
 
 import sys

@@ -13,7 +13,7 @@ ts="$(timestamp)"
 ok=0
 fail=0
 
-# name : tick : dev flags (without --shot/--shotat, added automatically)
+# name : tick : expected state : dev flags (--shot/--shotat added automatically)
 #
 # Note: a cold launch with no dev flags lands in Practice using the REAL
 # save (verified 2026-07-31 - it is not the title screen at tick 30).
@@ -26,77 +26,116 @@ fail=0
 # `--wardrobe`, `--glow` and `--nokit` are handled INSIDE the --demo branch,
 # so they do nothing without it; `--establish` wants `--booking` to show the
 # act's goals panel rather than a bare exterior.
+#
+# THE EXPECTED-STATE FIELD is what makes this list trustworthy. A capture can
+# come back a valid PNG of the WRONG SCREEN, and it does: measured 2026-08-05,
+# `--establish 2` and `--establish 3` each photographed the practice screen
+# once and the right card on a retry of the identical command. Nothing about
+# the file betrays it. So Game.gd prints `shot state: <n> <name>` next to every
+# capture (see shot_state_name()) and each target below says which name it must
+# be. The name is the OVERLAY where there is one - shop, sheet, pause and the
+# rest all sit on ST_PLAY, so "play" would assert nothing. Empty = don't check.
 declare -a TARGETS=(
   # --- the screens a player sees every run --------------------------------
-  "title:60:--menu"
-  "practice_boot:30:"
-  "day_hub_work:40:--day work"
-  "day_hub_rest:40:--day rest"
-  "day_hub_prep:40:--day prep"
-  "shop:60:--shop"
-  "skills:40:--skills"
-  "sheet:40:--sheet"
-  "pause:60:--pause"
-  "in_act_stage:700:--demo --booking --venue 4"
-  "results:60:--results"
-  "credits:60:--credits"
+  "title:60:menu:--menu"
+  "practice_boot:30:play:"
+  "day_hub_work:40:day:--day work"
+  "day_hub_rest:40:day:--day rest"
+  "day_hub_prep:40:day:--day prep"
+  "shop:60:shop:--shop"
+  "skills:40:skills:--skills"
+  "sheet:40:sheet:--sheet"
+  "pause:60:pause:--pause"
+  "in_act_stage:700:play:--demo --booking --venue 4"
+  "results:60:results:--results"
+  "credits:60:credits:--credits"
   # --- menus and meta screens ----------------------------------------------
-  "settings:40:--settings"
-  "slots:40:--slots"
-  "stats:40:--stats"
-  "f9_experiments:40:--f9"
+  "settings:40:settings:--settings"
+  "slots:40:slots:--slots"
+  "stats:40:stats:--stats"
+  "f9_experiments:40:f9:--f9"
   # --- the dressing room, and the figure actually dressed -------------------
-  "tailor:60:--tailor 0"
-  "dressed_stage:700:--demo --booking --venue 4 --wardrobe"
+  "tailor:60:tailor:--tailor 0"
+  "dressed_stage:700:play:--demo --booking --venue 4 --wardrobe"
   # --- stage variants that change the whole picture -------------------------
   # Blackout (venue 5) is the venue the glowing kit exists for, and --nokit is
   # its mirror: the demo save owns glowing props, so without it every dark-stage
   # capture was silently the charged version.
-  "stage_blackout_glow:700:--demo --booking --venue 5 --glow"
-  "stage_blackout_dark:700:--demo --booking --venue 5 --nokit"
-  "stage_booed:700:--demo --booking --venue 2 --boo"
-  "stage_eggbreak:120:--demo --eggbreak"
+  "stage_blackout_glow:700:play:--demo --booking --venue 5 --glow"
+  "stage_blackout_dark:700:play:--demo --booking --venue 5 --nokit"
+  "stage_booed:700:play:--demo --booking --venue 2 --boo"
+  "stage_eggbreak:120:play:--demo --eggbreak"
   # --- cards, banners and one-off end screens -------------------------------
-  "establish:60:--establish 3 --booking"
-  "unlock_banner:60:--results --unlock"
-  "ucard_trick:90:--demo --booking --ucard trick:spin"
-  "ucard_back:60:--demo --booking --ucard back:trick"
-  "tutorial:60:--tutorial balls"
-  "tutdone:60:--tutdone"
-  "menutour:60:--menutour"
-  "purist_legend:60:--legend"
-  "gameover:60:--gameover"
-  "demo_wallcard:60:--wallcard"
+  "establish:60:establish:--establish 3 --booking"
+  # --unlock is handled INSIDE the --trick branch, so `--results --unlock` silently
+  # captured a plain results screen - found by the duplicate-frame guard below, which
+  # is what a byte-identical pair usually means in practice. The banner also needs a
+  # RUN in progress and only lives 360 ticks from trick_unlock_tick (see line ~16216),
+  # so the shot has to land inside that window.
+  "unlock_banner:200:play:--demo --booking --trick spin --unlock"
+  "ucard_trick:90:ucard:--demo --booking --ucard trick:spin"
+  "ucard_back:60:ucard:--demo --booking --ucard back:trick"
+  "tutorial:60:tutorial:--tutorial balls"
+  "tutdone:60:tutdone:--tutdone"
+  "menutour:60:menutour:--menutour"
+  "purist_legend:60:legend:--legend"
+  "gameover:60:gameover:--gameover"
+  "demo_wallcard:60:demowall:--wallcard"
 )
+
+wrong=0
 
 for entry in "${TARGETS[@]}"; do
   name="${entry%%:*}"
   rest="${entry#*:}"
   tick="${rest%%:*}"
-  flags="${rest#*:}"
+  rest="${rest#*:}"
+  expect="${rest%%:*}"
+  flags="${rest#*:}"        # last field, so colons inside it (--ucard trick:spin) survive
   out="artifacts/screenshots/${name}_${ts}.png"
   log="$(mktemp)"
-  # shellcheck disable=SC2086
-  # 45s, not 30: a --shotat 700 stage capture has to actually play ~700 ticks
-  # before it can save, and validate.sh's own equivalent step already uses 45.
-  # A success quits as soon as the shot is written, so the ceiling only costs
-  # wall-clock on a screen that was going to fail anyway.
-  run_windowed 45 "$log" $flags --shot "$out" --shotat "$tick" || true
-  if [[ -s "$out" ]]; then
-    log_ok "$name -> $out"
-    ok=$((ok + 1))
-  else
+
+  got=""
+  # Two attempts, because the wrong-screen capture is INTERMITTENT rather than
+  # deterministic - the same command that photographed the practice screen got
+  # the right card on a straight retry. One retry turns a flaky net into a
+  # reliable one; a second failure is a real problem worth a human looking.
+  for attempt in 1 2; do
+    # shellcheck disable=SC2086
+    # 45s, not 30: a --shotat 700 stage capture has to actually play ~700 ticks
+    # before it can save, and validate.sh's own equivalent step already uses 45.
+    # A success quits as soon as the shot is written, so the ceiling only costs
+    # wall-clock on a screen that was going to fail anyway.
+    run_windowed 45 "$log" $flags --shot "$out" --shotat "$tick" || true
+    got="$(grep -m1 '^shot state: ' "$log" | awk '{print $4}')"
+    [[ -z "$expect" || "$got" == "$expect" ]] && break
+    log_warn "$name -> captured '$got', expected '$expect' - retrying"
+    rm -f "$out"
+  done
+
+  if [[ ! -s "$out" ]]; then
     log_warn "$name -> FAILED (see log below; screen may need more game state than a cold boot gives it)"
     tail -10 "$log" | sed 's/^/    /'
     fail=$((fail + 1))
+  elif [[ -n "$expect" && "$got" != "$expect" ]]; then
+    log_err "$name -> WRONG SCREEN: captured '$got', expected '$expect' (twice)"
+    wrong=$((wrong + 1))
+    fail=$((fail + 1))
+  else
+    log_ok "$name -> $out${expect:+  [$got]}"
+    ok=$((ok + 1))
   fi
   rm -f "$log"
 done
 
 echo
 log_info "Captured $ok/$((ok + fail)) screens."
+[[ $wrong -gt 0 ]] && log_err "$wrong screen(s) photographed the wrong state twice - see above."
 
-# --- STALE-FRAME GUARD -------------------------------------------------------
+# --- STALE-FRAME GUARD (the belt to the state assertion's braces) -------------
+# The state check above catches a capture that landed in the wrong SCREEN. This
+# catches one that landed in the right screen but an old FRAME of it, which the
+# state name cannot distinguish.
 # CLAUDE.md's own gotcha: `--shot` reads get_viewport().get_texture().get_image(),
 # which hands back the last PRESENTED frame, and macOS throttles presentation for
 # an unfocused window - so an unfocused capture can silently write a frame from
@@ -111,14 +150,33 @@ log_info "Captured $ok/$((ok + fail)) screens."
 # list: every screen above is a DIFFERENT picture. Two byte-identical captures can
 # therefore only mean one frame got served twice. Cheap, exact, and it never
 # touches window focus.
-dupes=$(md5 -q artifacts/screenshots/*_"${ts}".png 2>/dev/null | sort | uniq -d | wc -l | tr -d ' ')
-if [[ "${dupes:-0}" -gt 0 ]]; then
-  log_err "$dupes duplicate frame(s) - a capture went stale and served another screen's frame."
-  log_err "Re-run with the window focused, or capture the affected screens one at a time:"
-  md5 artifacts/screenshots/*_"${ts}".png | awk '{print $NF, $1}' | sort -k2 \
-    | awk '{if ($2==p) print "    " l "\n    " $1; p=$2; l=$1}' | sort -u
+dupe_hashes=$(md5 -r artifacts/screenshots/*_"${ts}".png 2>/dev/null | awk '{print $1}' | sort | uniq -d)
+if [[ -n "$dupe_hashes" ]]; then
+  log_err "Identical frame(s) captured for different screens:"
+  while read -r h; do
+    [[ -z "$h" ]] && continue
+    md5 -r artifacts/screenshots/*_"${ts}".png | awk -v h="$h" '$1==h {print "    " $2}'
+    echo
+  done <<<"$dupe_hashes"
+  log_err "Two screens cannot legitimately be the same picture. Either a capture went"
+  log_err "stale, or - more often - a dev flag in the pair above silently does nothing."
   exit 1
 fi
 log_ok "No duplicate frames - every screen captured its own picture."
+
+# --- ART-GRID SWEEP ----------------------------------------------------------
+# The one place this measurement is worth comparing run to run. validate.sh runs
+# the same check but only on a LIVE ACT frame, which varies 22-28% between
+# identical runs (props mid-flight, flowers in the air) and so says nothing.
+# Most screens here are static, so their numbers are stable and a move is real.
+# Read it as "how much of this screen is still vector drawing", remembering that
+# text is off-grid on purpose - see scripts/check_pixel_grid.py's header.
+if [[ -x .venv/bin/python ]]; then
+  echo
+  log_head "Art-grid drift, worst first"
+  .venv/bin/python scripts/check_pixel_grid.py artifacts/screenshots/*_"${ts}".png \
+    | sed 's/^/    /'
+  log_info "--map <png> <out.png> paints the off-grid blocks magenta."
+fi
 
 [[ $ok -gt 0 ]]  # exit 0 if at least one screen succeeded
