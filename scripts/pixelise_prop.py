@@ -67,6 +67,32 @@ PROPREF_AT = np.array([640.0, 420.0])
 # Which props the game tints (author greyscale) and which carry their own paint.
 TINTED = {"ball", "egg", "ring"}
 
+# --- --big: the CARD-size sprite, for the three round props only ------------------
+#
+# WHY ONLY THE ROUND THREE. prop_big/* is normally PixelLab's job and it is good at it -
+# the club, knife, torch and chainsaw come back on-palette and read crisply, and Louis
+# picked the generated club over a derived one on purpose. But a generator cannot draw
+# a BALL: it returns a raytraced sphere on an attached plinth, with a smooth continuous
+# ramp instead of shading bands, and it returned the ring as a torus seen in three-
+# quarter perspective when the game's ring is face-on. Measured 2026-08-05: the four
+# painted props were 0% off-palette, the three round ones 93-94% off-palette, and the
+# plinth flattened the bottom of the ball and the egg. draw_prop_icon already lays its
+# own contact shadow under the card (fill_ellipse), so a baked plinth is a SECOND
+# shadow on top of the real one.
+#
+# The stage sprites for these same three are perfect, because they are derived from the
+# game's own drawing. So this is that pipeline run at card size rather than a better
+# prompt. The vector source is resolution-independent, so a 36px derived ball genuinely
+# has more detail than the 11px one magnified - which was the whole reason prop_big
+# exists.
+#
+# WIDTHS ARE THE CURRENT SPRITES' OWN CONTENT WIDTH (widest opaque row, measured from
+# the files being replaced) so the props keep the exact size they already have on the
+# card and no layout moves. Output is tight-cropped: prop_big entries carry no pivot,
+# so art_blit centres on the CANVAS, and the old canvases were padded asymmetrically by
+# the plinth - which sat the ball slightly high in its niche.
+BIG_W = {"ball": 36, "ring": 35, "egg": 28}
+
 FORCE = False
 RESULTS: dict = {}
 
@@ -97,7 +123,7 @@ def snap(rgb: np.ndarray, pal: np.ndarray) -> np.ndarray:
     return pal[np.argmin(d, axis=1)].reshape(rgb.shape)
 
 
-def pixelise(name: str, pal: np.ndarray) -> dict:
+def pixelise(name: str, pal: np.ndarray, big: bool = False) -> dict:
     src = np.asarray(Image.open(REFS / f"{name}.png").convert("RGB")).astype(np.int64)
 
     mask = np.abs(src - CLEAR).sum(axis=2) > BG_TOL
@@ -107,10 +133,16 @@ def pixelise(name: str, pal: np.ndarray) -> dict:
     x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1
     bw, bh = x1 - x0, y1 - y0
 
-    # Target size: the on-stage extent divided by ART_PIXEL. The render is MAG times
-    # the stage, so that is simply the bounding box over (MAG * ART_PIXEL).
-    tw = max(1, round(bw / (MAG * ART_PIXEL)))
-    th = max(1, round(bh / (MAG * ART_PIXEL)))
+    if big:
+        # Card size: pinned to the width the existing sprite already occupies, with the
+        # height following the render's own aspect so the shape is not distorted.
+        tw = BIG_W[name]
+        th = max(1, round(tw * bh / bw))
+    else:
+        # Target size: the on-stage extent divided by ART_PIXEL. The render is MAG times
+        # the stage, so that is simply the bounding box over (MAG * ART_PIXEL).
+        tw = max(1, round(bw / (MAG * ART_PIXEL)))
+        th = max(1, round(bh / (MAG * ART_PIXEL)))
 
     crop = src[y0:y1, x0:x1].astype(np.float64)
     a = mask[y0:y1, x0:x1].astype(np.float64)
@@ -148,25 +180,45 @@ def pixelise(name: str, pal: np.ndarray) -> dict:
         rgb = np.repeat(np.clip(lum, 0, 255)[..., None], 3, axis=2)
 
     out = np.concatenate([rgb, np.where(keep, 255, 0)[..., None]], axis=2).astype(np.uint8)
+
+    if big:
+        # Tight-crop: see BIG_W's note. Whatever the reduction leaves as fully
+        # transparent border rows/columns would otherwise decentre the prop, because
+        # prop_big/* carries no pivot and art_blit centres on the canvas.
+        oa = out[..., 3] > 0
+        cy, cx = np.where(oa)
+        out = out[cy.min():cy.max() + 1, cx.min():cx.max() + 1]
+
     OUT.mkdir(parents=True, exist_ok=True)
-    status = artguard.save_guarded(OUT / f"{name}.png",
+    stem = f"big_{name}" if big else name
+    status = artguard.save_guarded(OUT / f"{stem}.png",
                                    lambda q: Image.fromarray(out, "RGBA").save(q), FORCE)
 
     # The pivot is where the game rotates the shape about, expressed in the sprite's own
     # normalised space. PROPREF_AT is the known draw position, so this falls straight out.
     piv = ((PROPREF_AT[0] - x0) / bw, (PROPREF_AT[1] - y0) / bh)
-    RESULTS[f"Assets/Props/{name}.png"] = status
-    return {"name": name, "w": tw, "h": th, "pivot": (round(piv[0], 3), round(piv[1], 3)),
-            "bbox": (bw, bh), "tinted": name in TINTED}
+    RESULTS[f"Assets/Props/{stem}.png"] = status
+    return {"name": stem, "w": out.shape[1], "h": out.shape[0],
+            "pivot": (round(piv[0], 3), round(piv[1], 3)),
+            "bbox": (bw, bh), "tinted": name in TINTED, "big": big}
 
 
 def main() -> None:
     global FORCE
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     FORCE = "--force" in sys.argv
-    names = args or ["ball", "egg", "ring", "club", "knife", "torch", "chainsaw"]
+    big = "--big" in sys.argv
+    if big:
+        names = args or sorted(BIG_W)
+        bad = [n for n in names if n not in BIG_W]
+        if bad:
+            raise SystemExit(f"--big only covers the round props {sorted(BIG_W)}; got {bad}. "
+                             "The painted props' card art is PixelLab's and is good - "
+                             "see BIG_W's note before adding one here.")
+    else:
+        names = args or ["ball", "egg", "ring", "club", "knife", "torch", "chainsaw"]
     pal = load_palette()
-    rows = [pixelise(n, pal) for n in names]
+    rows = [pixelise(n, pal, big) for n in names]
 
     print(f"{'prop':<10} {'render':>10} {'sprite':>9}  {'pivot':>14}  tint")
     for r in rows:
@@ -174,6 +226,11 @@ def main() -> None:
               f"{r['w']:>3}x{r['h']:<5} {str(r['pivot']):>14}  {'grey' if r['tinted'] else 'painted'}")
 
     artguard.report(RESULTS)
+    if big:
+        # prop_big/* takes no pivot (art_blit centres on the canvas) and no scale, so the
+        # manifest lines it already has stay correct - only the pixels change.
+        print("\nprop_big/* manifest lines are unchanged - these files are replaced in place.")
+        return
     print("\nmanifest lines (paste into Resources/art_manifest.json):")
     for r in rows:
         print(f'  "prop/{r["name"]}": {{ "path": "res://Assets/Props/{r["name"]}.png", '

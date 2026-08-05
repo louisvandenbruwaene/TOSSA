@@ -1,7 +1,13 @@
-# TOSSA
+# PIXELTOSSA
 
-A skill-based juggling game wrapped in a light performer-career sim. Godot 4.7,
-one self-contained GDScript file (`Game.gd`), code-only art, original music.
+A skill-based juggling game wrapped in a light performer-career sim, drawn as pixel
+art. Godot 4.7, one self-contained GDScript file (`Game.gd`), original music.
+
+The pixel-art fork of TOSSA, cut loose 2026-08-05 as its own game. Art is authored at
+640x360 and drawn as 2x2 screen blocks on a locked 48-colour palette; `Game.gd` never
+names a PNG, and `Resources/art_manifest.json` alone decides which elements are sprites
+and which are still drawn in code. See CLAUDE.md's PIXEL ART section before touching
+anything visual.
 
 Throw and catch are separate, per-hand, timing-strict inputs. Height is how long
 you hold the throw. Juggling means at least one prop in the air at all times -
