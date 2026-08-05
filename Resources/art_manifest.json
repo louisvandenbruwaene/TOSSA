@@ -86,5 +86,10 @@
   "bg/the_midnight_show":{ "path": "res://Assets/Backgrounds/the_midnight_show.png" },
   "char/head":        { "path": "res://Assets/Characters/head.png" },
   "char/hand_open":   { "path": "res://Assets/Characters/hand_open.png" },
-  "char/hand_closed": { "path": "res://Assets/Characters/hand_closed.png" }
+  "char/hand_closed": { "path": "res://Assets/Characters/hand_closed.png" },
+  "char/torso_suit":    { "path": "res://Assets/Characters/torso_suit.png" },
+  "char/torso_collar":  { "path": "res://Assets/Characters/torso_collar.png" },
+  "char/torso_vest":    { "path": "res://Assets/Characters/torso_vest.png" },
+  "char/torso_button":  { "path": "res://Assets/Characters/torso_button.png" },
+  "char/legs_trouser":  { "path": "res://Assets/Characters/legs_trouser.png" }
 }

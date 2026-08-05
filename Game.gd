@@ -2138,6 +2138,8 @@ func _ready() -> void:
 		_art_boxes_on = true
 	if ua.has("--charsuppress"):  # dev: the "without" half of the isolation difference
 		_art_suppress = true
+	if ua.has("--charid"):        # dev: render the costume as a region ID map (see costume_palette)
+		_charid = true
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -11285,6 +11287,7 @@ var _charref := false              # --charref: draw only the juggler, on a flat
 var _art_boxes_on := false         # --artboxes: record where each sized element is drawn
 var _art_boxes: Dictionary = {}    # key -> Rect2, the last box the game asked for
 var _art_suppress := false         # --charsuppress: claim char/* keys but draw nothing
+var _charid := false               # --charid: paint costume regions as flat ID colours
 
 
 func art_boot() -> void:
@@ -11404,6 +11407,43 @@ func art_blit_size(key: String, center: Vector2, size: Vector2, ang: float = 0.0
 	if is_zero_approx(ang):
 		c = art_snap(c - sz * 0.5) + sz * 0.5
 	_art_quad(e["tex"], c, sz * 0.5, ang, tint)
+	return true
+
+
+func art_blit_regions(prefix: String, box: Rect2, regions: Array) -> bool:
+	# PER-REGION BODY ART, and the reason the body could not simply become one sprite.
+	#
+	# costume_palette() repaints the whole outfit per venue - olive at the Backyard, red at
+	# the Circus, purple at the World Arena - and it does it across five separate colours
+	# (suit, suit_dk, vest, collar, accent) plus a trouser rung. One sprite freezes the
+	# outfit; one tint cannot carry five colours. So each colour region is its own
+	# GREYSCALE mask, blitted over the same box with that region's live costume colour as
+	# the tint. The wardrobe keeps working exactly as it did, and the shapes become pixels.
+	#
+	# `regions` is an ordered Array of [suffix, tint] pairs, and the ORDER IS THE PAINT
+	# ORDER - suit, then collar, then vest, then buttons, the same sequence the procedural
+	# torso lays down. Getting it wrong buries the waistcoat under the jacket.
+	#
+	# ALL-OR-NOTHING ON PURPOSE. If any one region has no art the whole call returns false
+	# and the caller draws the entire body procedurally. A half-sprited torso - a pixel
+	# jacket with a vector waistcoat over it - would be worse than either, and worse in a
+	# way that looks like a rendering bug rather than a missing file.
+	var keys: Array[String] = []
+	for r: Array in regions:
+		keys.append(prefix + "_" + str(r[0]))
+	for k: String in keys:
+		art_asked[k] = true
+	if _art_boxes_on:
+		for k: String in keys:
+			_art_boxes[k] = box
+	if not art_on:
+		return false
+	for k: String in keys:
+		if not art_bank.has(k):
+			return false
+	var c := box.position + box.size * 0.5
+	for i in regions.size():
+		art_blit_size(keys[i], c, box.size, 0.0, regions[i][1])
 	return true
 
 
@@ -12460,13 +12500,20 @@ func draw_juggler(s: Vector2) -> void:
 	var trouser := suit_dk
 	if glow_suit_lit():
 		trouser = Color(0.17, 0.60, 0.34)
-	draw_colored_polygon(PackedVector2Array([   # pelvis
-		Vector2(cx - 0.62 * H, hip_y - 0.3 * H), Vector2(cx + 0.62 * H, hip_y - 0.3 * H),
-		Vector2(cx + 0.56 * H, hip_y + 0.12 * H), Vector2(cx - 0.56 * H, hip_y + 0.12 * H)]), trouser)
-	draw_capsule(Vector2(cx - 0.4 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
-	draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
-	draw_capsule(Vector2(cx + 0.4 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
-	draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
+	# SEAM: pelvis + both legs, one region, tinted with the live trouser colour. The box is
+	# derived from the same constants the capsules below use - the widest point is the
+	# pelvis at +/-0.62H, and the lowest is the shin capsule's bottom cap, which reaches
+	# 0.2H past its endpoint at floor_y - 0.16H.
+	var leg_top := hip_y - 0.3 * H
+	var leg_box := Rect2(cx - 0.62 * H, leg_top, 1.24 * H, (floor_y + 0.05 * H) - leg_top)
+	if not art_blit_regions("char/legs", leg_box, [["trouser", trouser]]):
+		draw_colored_polygon(PackedVector2Array([   # pelvis
+			Vector2(cx - 0.62 * H, hip_y - 0.3 * H), Vector2(cx + 0.62 * H, hip_y - 0.3 * H),
+			Vector2(cx + 0.56 * H, hip_y + 0.12 * H), Vector2(cx - 0.56 * H, hip_y + 0.12 * H)]), trouser)
+		draw_capsule(Vector2(cx - 0.4 * H, hip_y), Vector2(cx - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
+		draw_capsule(Vector2(cx - 0.34 * H, knee_y), Vector2(cx - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
+		draw_capsule(Vector2(cx + 0.4 * H, hip_y), Vector2(cx + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, trouser)
+		draw_capsule(Vector2(cx + 0.34 * H, knee_y), Vector2(cx + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, trouser)
 	if wearing("boots"):
 		# WARDROBE: STAGE BOOTS replace the two flat shoe ellipses - see draw_stage_boot
 		draw_stage_boot(Vector2(cx - 0.34 * H, floor_y), H, -1.0, shoe, collar, accent)
@@ -12484,30 +12531,40 @@ func draw_juggler(s: Vector2) -> void:
 
 	# jacket: one tapered silhouette (sloped shoulders, a drawn-in waist, a slight hip
 	# flare). Its neckline sits at the shoulders (not up near the chin) so the neck shows.
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.30 * H, shoulder_y - 0.04 * H),
-		Vector2(cx + 0.30 * H, shoulder_y - 0.04 * H), Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H),
-		Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
-		Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), suit)
-	# (the round shoulder caps are gone: they read as epaulettes poking above the
-	# jacket line. The polygon's own sloped corner is the shoulder now.)
-	draw_circle(Vector2(cx - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
+	# SEAM: the whole torso, per costume region. The box spans the jacket silhouette's own
+	# extremes - +/-0.92H at the shoulder line, from shoulder_y - 0.04H down to
+	# hip_y + 0.15H - so it is derived from the polygon below rather than measured off a
+	# screenshot. FRONT AND BACK ARE SEPARATE KEY SETS for the same reason head/head_back
+	# are: mid-spin the plain back of the coat is a different picture, not a mirrored one.
+	var torso_top := shoulder_y - 0.04 * H
+	var torso_box := Rect2(cx - 0.92 * H, torso_top, 1.84 * H, (hip_y + 0.15 * H) - torso_top)
+	var torso_regions: Array = ([["suit", suit], ["collar", collar], ["vest", vest],
+			["button", button]] if not facing_back else [["suit", suit], ["collar", collar]])
+	if not art_blit_regions("char/torso_back" if facing_back else "char/torso", torso_box, torso_regions):
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(cx - 0.92 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.30 * H, shoulder_y - 0.04 * H),
+			Vector2(cx + 0.30 * H, shoulder_y - 0.04 * H), Vector2(cx + 0.92 * H, shoulder_y + 0.1 * H),
+			Vector2(cx + 0.8 * H, chest_y), Vector2(cx + 0.5 * H, waist_y), Vector2(cx + 0.66 * H, hip_y + 0.15 * H),
+			Vector2(cx - 0.66 * H, hip_y + 0.15 * H), Vector2(cx - 0.5 * H, waist_y), Vector2(cx - 0.8 * H, chest_y)]), suit)
+		# (the round shoulder caps are gone: they read as epaulettes poking above the
+		# jacket line. The polygon's own sloped corner is the shoulder now.)
+		draw_circle(Vector2(cx - 0.34 * H, chest_y), 0.5 * H, Color(1.0, 0.95, 0.85, 0.05))   # soft chest sheen
 
-	# front-of-body detailing (collar V and the buttoned waistcoat) only shows while the
-	# figure faces the crowd; mid-spin, facing away, the plain back of the coat is seen
-	if not facing_back:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx - 0.05 * H, shoulder_y - 0.02 * H)]), collar)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx + 0.05 * H, shoulder_y - 0.02 * H)]), collar)
-		draw_colored_polygon(vest_shape(cx, H, shoulder_y, waist_y, hip_y), vest)
-		for bi in 3:
-			draw_circle(Vector2(cx, shoulder_y + 0.82 * H + float(bi) * 0.42 * H), 0.06 * H, button)
-	else:
-		# a plain collar band across the back of the neck
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H),
-			Vector2(cx + 0.24 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.24 * H, shoulder_y + 0.1 * H)]), collar)
+		# front-of-body detailing (collar V and the buttoned waistcoat) only shows while the
+		# figure faces the crowd; mid-spin, facing away, the plain back of the coat is seen
+		if not facing_back:
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx - 0.05 * H, shoulder_y - 0.02 * H)]), collar)
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx, chest_y + 0.22 * H), Vector2(cx + 0.05 * H, shoulder_y - 0.02 * H)]), collar)
+			draw_colored_polygon(vest_shape(cx, H, shoulder_y, waist_y, hip_y), vest)
+			for bi in 3:
+				draw_circle(Vector2(cx, shoulder_y + 0.82 * H + float(bi) * 0.42 * H), 0.06 * H, button)
+		else:
+			# a plain collar band across the back of the neck
+			draw_colored_polygon(PackedVector2Array([
+				Vector2(cx - 0.28 * H, shoulder_y - 0.02 * H), Vector2(cx + 0.28 * H, shoulder_y - 0.02 * H),
+				Vector2(cx + 0.24 * H, shoulder_y + 0.1 * H), Vector2(cx - 0.24 * H, shoulder_y + 0.1 * H)]), collar)
 
 	# THE WARDROBE is a purely additive pass over the finished torso - it cannot touch
 	# the IK, the hand targets, prop layering or any sim value. It goes on HERE, above
@@ -13509,6 +13566,19 @@ func costume_palette() -> Dictionary:
 	# game did before the tailor existed and is still the default. A chosen suit is clamped
 	# to what this career has actually reached, so a save that loses reputation (or a demo
 	# build's venue cap) can never leave him in a costume he has no right to.
+	if _charid:
+		# --charid: paint every costume region a unique flat colour so a render becomes a
+		# REGION ID MAP. This is how the per-region body sprites are cut: which pixels are
+		# "suit" and which are "vest" is a question the game can answer exactly, and asking
+		# it is far better than sampling a normal render and hoping two similar browns
+		# separate cleanly. The values are deliberately saturated primaries no costume
+		# would ever contain, so classification is an equality test rather than a nearest
+		# match, and they carry alpha 1 so nothing blends into an ambiguous in-between.
+		return {
+			"suit": Color(1, 0, 0), "suit_dk": Color(0, 1, 0), "vest": Color(0, 0, 1),
+			"collar": Color(1, 1, 0), "glow": Color(1, 0, 1), "shoe": Color(0, 1, 1),
+			"trouser": Color(1, 0.5, 0), "button": Color(0.5, 0, 1),
+		}
 	if outfit_suit >= 0:
 		return venue_data(clampi(outfit_suit, 0, venue_index()))
 	return venue_data(cur_venue())
