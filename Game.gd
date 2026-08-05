@@ -434,8 +434,8 @@ const MARK_WORD := "TOSSA"
 # So the lockup is: "PIXEL" set in the pixel font as a prefix, above the untouched
 # five-prop TOSSA mark. The mark keeps its tuning table, its measured widths and its
 # MARK_RISE/MARK_DROP arithmetic exactly as they were.
-# TODO(title): draw the PIXEL prefix. Deferred until Assets/Fonts/pixel.ttf exists,
-# because the prefix has to be set in that font or the lockup mixes two type styles.
+# The PIXEL prefix is drawn by draw_mark_prefix, inside capsule_mark, so every place the
+# logo appears gets it - title screen, key art, credits and all five store capsules.
 #
 # TITLE_MARK keeps its documented meaning (the name without its final round letter, the
 # ball standing in for that letter). It has no call sites today; it is kept in step with
@@ -2152,6 +2152,9 @@ func _ready() -> void:
 	var chi := ua.find("--charhide")   # dev: leave ONE garment off under --chargear,
 	if chi != -1 and chi + 1 < ua.size():   # so a piece it would occlude can be seen
 		_charhide = ua[chi + 1]
+	if ua.has("--markref"):       # dev: the prop wordmark alone, at its title-screen size
+		_markref = true
+		art_on = false            # photograph the DRAWING, not a bake already replacing it
 	if ua.has("--bgref"):         # dev: the backdrop alone, unlit - see the bg seam
 		_bgref = true
 		art_on = false            # photograph the DRESSING, never a backdrop already replacing it
@@ -11308,6 +11311,7 @@ var _chargear := false             # --chargear: wear every garment (reference r
 var _charback := false             # --charback: draw the figure facing away (the Spin view)
 var _charopen := false             # --charopen: hold the hand open (reference render only)
 var _charhide := ""                # --charhide <id>: one garment to leave off under --chargear
+var _markref := false              # --markref: the prop wordmark alone, for baking it to a sprite
 
 
 func art_boot() -> void:
@@ -11662,6 +11666,14 @@ func _draw() -> void:
 		return
 	if _charref:
 		_draw_char_ref()
+		return
+	if _markref:
+		# --markref: the five props that spell the mark, at the exact size the title screen
+		# uses, on a flat field. The PIXEL prefix is deliberately NOT included: it is type,
+		# it is already crisp in the pixel font, and reducing it by two would destroy it.
+		# The bake is the props; the word draws live on top of it.
+		var mref := get_viewport_rect().size
+		capsule_mark(mref, mark_cy_centred(mref.y, float(MENU_MARK), 0.5), float(MENU_MARK))
 		return
 	if _bgref:
 		# draw_backdrop returns early under this flag, having drawn only the sky gradient
@@ -21675,6 +21687,19 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 # deal taller than the lettering it is standing in for.
 const MARK_RISE := 1.06   # above the baseline, in units of letter height
 const MARK_DROP := 0.17   # ...and below it
+const MARK_PREFIX := 0.46   # ...and the PIXEL prefix's band ABOVE all of that
+const MARK_PREFIX_CAP := 0.34   # the prefix's own letter height, in the same units
+# THE PREFIX IS PART OF THE PICTURE, so it lives in these constants rather than being
+# drawn by one caller. The mark spells MARK_WORD ("TOSSA") in props and cannot spell the
+# game's actual name: capsule_mark builds glyphs out of juggling objects and knows exactly
+# T, O, S and A, and P/I/X/E/L have no honest prop shape. So the lockup is the word PIXEL
+# set in the pixel font, sitting above the five-prop mark and letter-spaced to its width.
+#
+# Putting it here and not at the title screen is the same doctrine the comment above
+# states: a game has one logo. The title screen, the key art, the credits and all five
+# store capsules go through capsule_mark, so they all get the prefix and none of them can
+# drift. mark_height() and mark_cy_centred() both account for the band, which is what
+# keeps everything a caller places underneath in the right place.
 # RECOMPUTED 2026-07-30, when the A's torches became clubs and its fire went with them. The
 # arithmetic is written out so the next change to the letter can redo it rather than guess:
 #   rise = CLUB_LEN * cos(CAP_A_LEAN) * CAP_A_CLUB_SC = 40.3 * 0.8961 * 0.0277 = 1.000
@@ -21706,6 +21731,53 @@ const MENU_MARK := 168    # the title screen's letter height. The prop mark is f
 						   # runs about two thirds of the screen width, which is what a title
 						   # wants; much past that and the T's knife tip reaches the gold frame.
 
+func draw_mark_prefix(s: Vector2, cy: float, size: float) -> void:
+	# THE WORD PIXEL, set in type, above the five props that spell TOSSA.
+	#
+	# It is LETTER-SPACED TO THE MARK'S OWN WIDTH rather than simply centred, which is what
+	# makes the two halves read as one lockup instead of a caption sitting on a picture.
+	# The props below are a wide, airy word; a tight five-letter word under it would look
+	# like a different design. mark_width() is the same measurement capsule_mark lays the
+	# props out with, so the two can never disagree.
+	#
+	# The baseline sits MARK_PREFIX above the letters' cap line, and the cap line is
+	# `size` above the props' baseline (cy is the middle of the letter box, so the props'
+	# cap line is cy - size * 0.5).
+	var word := "PIXEL"
+	var cap := size * MARK_PREFIX_CAP
+	var fs := ps(int(roundf(cap)))
+	if fs <= 0:
+		return
+	var font := title_font()
+	var total := mark_width(size)
+	# the glyphs' own advances, so the SPACING absorbs the difference rather than the
+	# letters being stretched - type does not stretch, it tracks
+	var adv: Array[float] = []
+	var sum := 0.0
+	for i in word.length():
+		var w := font.get_string_size(word[i], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x
+		adv.append(w)
+		sum += w
+	# TRACKING IS CAPPED, and the first version was not. Spreading five letters across the
+	# full width of a five-PROP word puts most of a ball's width between each one, and
+	# "P I X E L" stops reading as a word at all - it reads as five letters that happen to
+	# be in a row. Type tracks; it does not stretch to fit. So the letters take whatever
+	# tracking looks like letter-spacing and the WORD is centred in the mark's width,
+	# rather than being pulled out to its edges.
+	var track := minf((total - sum) / float(maxi(1, word.length() - 1)), cap * 0.55)
+	var span := sum + track * float(maxi(0, word.length() - 1))
+	var x := s.x * 0.5 - span * 0.5
+	var base := cy - size * 0.5 - size * (MARK_PREFIX - MARK_PREFIX_CAP)
+	var col := Color(1.0, 0.90, 0.62, _cap_a)
+	for i in word.length():
+		# the same drop shadow the title text uses, so the prefix sits on the backdrop
+		# rather than floating over it
+		draw_string(font, Vector2(x + 2.0, base + 2.0), word[i], HORIZONTAL_ALIGNMENT_LEFT,
+			-1, ps(fs), Color(0, 0, 0, 0.55 * _cap_a))
+		draw_string(font, Vector2(x, base), word[i], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs), col)
+		x += adv[i] + track
+
+
 func mark_width(size: float) -> float:
 	# THE WHOLE WORD'S WIDTH at a given letter height, out of the same loop capsule_mark lays it
 	# out with (see there). Factored out 2026-07-30 because a caller has to be able to ASK: the
@@ -21730,8 +21802,8 @@ func mark_fit_size(s: Vector2, want: float, frac := 0.88) -> float:
 
 
 func mark_height(size: float) -> float:
-	# the whole picture's height, flame tips to handle butts
-	return size * (MARK_RISE + MARK_DROP)
+	# the whole picture's height, prefix cap to handle butts
+	return size * (MARK_PREFIX + MARK_RISE + MARK_DROP)
 
 
 func mark_cy_centred(sy: float, size: float, at: float = CAP_Y) -> float:
@@ -21742,7 +21814,10 @@ func mark_cy_centred(sy: float, size: float, at: float = CAP_Y) -> float:
 	# MARK_RISE above the baseline against only MARK_DROP below it, so it is wildly
 	# top-heavy. This converts "put the picture's own middle at `at`" into that letter-box
 	# centre, off the same two constants the drawing uses.
-	return sy * at + size * ((MARK_RISE - MARK_DROP) * 0.5 - 0.5)
+	# MARK_PREFIX joins MARK_RISE here because the prefix band sits ABOVE the letters, so
+	# it makes the picture more top-heavy still. Leaving it out would centre the props and
+	# push the word PIXEL off the top of whatever frame this is placed in.
+	return sy * at + size * ((MARK_PREFIX + MARK_RISE - MARK_DROP) * 0.5 - 0.5)
 
 
 func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> void:
@@ -21757,6 +21832,31 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	# font metric. A prop's local origin is its GRIP with the business end at negative y,
 	# which is what places every piece below.
 	_cap_a = clampf(alpha, 0.0, 1.0)
+	if not _markref:   # the bake is the props only - see _draw's --markref branch
+		draw_mark_prefix(s, cy, size)
+	# SEAM: the mark BAKED to a sprite. The logo is the first thing a player sees and it was
+	# the last smooth thing in the game - the props here are cap_ball/cap_ring/cap_knife/
+	# cap_club drawn directly, bypassing the prop seam entirely, so every other object had
+	# become pixels while the title screen stayed vector.
+	#
+	# It is baked rather than assembled from the prop sprites because the mark is a
+	# composition, not a pile of props: the S's are lines of balls at tuned offsets and the
+	# A is two leaning clubs. Re-deriving that from prop_big art would mean reproducing
+	# capsule_mark's layout twice and letting the two drift, which is exactly the failure
+	# the "a game has one logo" note above was written about.
+	#
+	# ONLY AT THE BAKED SIZE. The sprite is 396x106 authored against MENU_MARK, and the
+	# offsets below are measured from the render, in units of the letter height. Any other
+	# size would need a fractional scale, which is the one thing that reliably turns pixel
+	# art back into mush, so every other caller - the credits at 52, a narrow window's
+	# clamped title - correctly falls through to the drawing.
+	if not _markref and is_equal_approx(size, float(MENU_MARK)):
+		var base_y := cy + size * 0.5
+		var box := Rect2(s.x * 0.5 - size * 2.38095, base_y - size * 1.11548,
+			size * 4.71429, size * 1.26190)
+		if art_blit_rect("ui/wordmark", box, Color(1, 1, 1, _cap_a)):
+			_cap_a = 1.0
+			return
 	var gap := size * CAP_GAP
 	var widths: Array[float] = []
 	var total := 0.0
@@ -23189,8 +23289,11 @@ func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, 
 # whatever sits underneath off that number rather than off a guess.
 func draw_wordmark(y: float, size: int, col: Color, s: Vector2) -> void:
 	# `y` is the top of the picture, the same convention the text mark used, so the
-	# baseline sits MARK_RISE letter-heights down from it
-	capsule_mark(s, y + float(size) * MARK_RISE - float(size) * 0.5, float(size), col.a)
+	# baseline sits MARK_RISE letter-heights down from it - plus MARK_PREFIX, because the
+	# picture now opens with the PIXEL band and the props start below it. Leaving that out
+	# drew the word off the top of the frame and clipped the T's knife with it.
+	capsule_mark(s, y + float(size) * (MARK_PREFIX + MARK_RISE) - float(size) * 0.5,
+		float(size), col.a)
 
 
 func draw_dust(s: Vector2, n: int, glow: Color) -> void:

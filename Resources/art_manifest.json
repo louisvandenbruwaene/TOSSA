@@ -109,5 +109,6 @@
   "char/helmet": { "path": "res://Assets/Characters/helmet.png" },
   "char/boot": { "path": "res://Assets/Characters/boot.png" },
   "char/torso_back_suit": { "path": "res://Assets/Characters/torso_back_suit.png" },
-  "char/torso_back_collar": { "path": "res://Assets/Characters/torso_back_collar.png" }
+  "char/torso_back_collar": { "path": "res://Assets/Characters/torso_back_collar.png" },
+  "ui/wordmark": { "path": "res://Assets/UI/wordmark.png" }
 }
