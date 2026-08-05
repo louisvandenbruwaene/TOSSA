@@ -2125,8 +2125,12 @@ func _ready() -> void:
 		art_on = false
 	if ua.has("--artreport"):  # print which seam keys this run reached, and which had art
 		_art_report = true
-	if ua.has("--pixel"):      # capture --shot at 320x180 art density instead of 1280x720
+	if ua.has("--pixel"):      # capture --shot at art density instead of 1280x720
 		_art_pixel = true
+	var pri := ua.find("--propref")   # dev: draw ONE prop isolated, for measuring and for
+	if pri != -1 and pri + 1 < ua.size():   # img2img reference - see _draw_prop_ref
+		_propref = ua[pri + 1]
+		art_on = false            # photograph the DRAWING, never a sprite already replacing it
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -11266,6 +11270,7 @@ var art_asked: Dictionary = {}     # every key any draw call has ever requested
 var art_hits: Dictionary = {}      # ...and the subset that resolved to a real texture
 var _art_pixel := false          # --pixel: downsample the --shot capture to art density
 var _art_report := false           # --artreport: dump both lists on quit
+var _propref := ""                 # --propref <name>: draw only that prop (see _draw_prop_ref)
 
 
 func art_boot() -> void:
@@ -11428,6 +11433,51 @@ func art_key_prop(kind: int) -> String:
 	return "prop/" + n
 
 
+const PROPREF_AT := Vector2(640.0, 420.0)  # where the prop's draw position is put
+const PROPREF_MAG := 6                     # rendered this many times larger than the stage
+# BOTH NUMBERS ARE CONSTRAINED BY THE LONGEST PROP, NOT CHOSEN FOR ROUNDNESS. The capture
+# is the full 1280x720 viewport, and a club is the tall one: it spans about -22.5..+17.8
+# local units about its draw position, so at prop_scale 1.6 and x6 that is -216..+171 px,
+# i.e. y from 204 to 591 with PROPREF_AT.y at 420. x8 put its head off the top of the
+# frame, which silently truncates the very bounding box this mode exists to measure.
+# The draw position sits BELOW centre for the same reason: these props are top-heavy.
+
+
+func _draw_prop_ref() -> void:
+	# --propref <name>: ONE prop, isolated on a flat field, drawn through the real
+	# draw_prop_rich. Two jobs, and both of them are about not guessing.
+	#
+	# 1. SIZES AND PIVOTS ARE DERIVED, NEVER CHOSEN. A prop sprite's texture size is
+	#    (local extent x prop_scale) / ART_PIXEL, and its pivot is the point the game
+	#    ROTATES the shape about - which is emphatically NOT the centre of the shape.
+	#    cap_club and cap_knife both draw_set_transform(p, ang), and a club spans about
+	#    -22.5..+17.8 around that p. Get the pivot wrong and the prop orbits a point
+	#    instead of spinning about it, which reads as bad art and is not. Reading those
+	#    extents out of seven drawing functions by hand is exactly the transcription that
+	#    goes quietly wrong, so: render it, and let the alpha bounding box answer.
+	#    The draw position is PROPREF_AT, a known point, so the pivot falls straight out
+	#    as (PROPREF_AT - bbox.position) / bbox.size on the measuring side.
+	#
+	# 2. THE REFERENCE IMAGE IS THE BRIEF. This render is what PixelLab is given as an
+	#    img2img reference, so the generated art inherits TOSSA's actual silhouette
+	#    instead of a model's idea of "a juggling club". Describing a shape in words and
+	#    hoping is how a remake stops looking like the thing it is remaking.
+	#
+	# MAGNIFIED x8 on purpose: the stage draws a club 64px tall, which is too small to
+	# guide an img2img pass and too coarse to measure a pivot from precisely.
+	#
+	# The seam is forced off before this runs, or a prop that already has a sprite would
+	# photograph its own replacement rather than the drawing being replaced. The halo is
+	# off too: the glow is stage lighting, not the object, and it would swell the measured
+	# box by a soft edge that is not part of the prop.
+	var kind := PROP_BALLS
+	for k in PROPS.size():
+		if str((PROPS[k] as Dictionary)["name"]).to_lower() == _propref:
+			kind = k
+			break
+	draw_prop_rich(kind, PROPREF_AT, Color.WHITE, 0.0, prop_scale(kind) * float(PROPREF_MAG), false)
+
+
 func art_report() -> void:
 	# --artreport: what the running game ASKED the bank for, and what it got. This is the
 	# remaster's to-do list, generated from the code rather than maintained by hand - drive
@@ -11471,6 +11521,10 @@ func art_pixel_preview(img: Image) -> Image:
 
 #region STAGE BACKDROP DRAWING
 func _draw() -> void:
+	# --propref: draw ONE prop, isolated, and nothing else. See _draw_prop_ref.
+	if _propref != "":
+		_draw_prop_ref()
+		return
 	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
 	_draw_state_fade()
