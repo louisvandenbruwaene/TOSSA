@@ -93,5 +93,12 @@
   "char/torso_button":  { "path": "res://Assets/Characters/torso_button.png" },
   "char/legs_trouser":  { "path": "res://Assets/Characters/legs_trouser.png" },
   "bg/backyard":      { "path": "res://Assets/Backgrounds/backyard.png" },
-  "bg/street_corner": { "path": "res://Assets/Backgrounds/street_corner.png" }
+  "bg/street_corner": { "path": "res://Assets/Backgrounds/street_corner.png" },
+  "prop_big/ball": { "path": "res://Assets/Props/big_ball.png" },
+  "prop_big/egg": { "path": "res://Assets/Props/big_egg.png" },
+  "prop_big/ring": { "path": "res://Assets/Props/big_ring.png" },
+  "prop_big/club": { "path": "res://Assets/Props/big_club.png" },
+  "prop_big/knife": { "path": "res://Assets/Props/big_knife.png" },
+  "prop_big/torch": { "path": "res://Assets/Props/big_torch.png" },
+  "prop_big/chainsaw": { "path": "res://Assets/Props/big_chainsaw.png" }
 }

@@ -15120,6 +15120,28 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 	# never more than a handful on screen, so the shop can afford the picture the stage
 	# cannot - which is the right way round for a card whose whole job is to make you
 	# want the thing on it.
+	#
+	# SEAM: A SECOND, LARGER SPRITE PER PROP, and this is the correction to the first
+	# pass rather than an extra. The stage draws a club 13x64 screen px, which is 6x32 at
+	# this density - that is geometry, not a choice, and no art skill puts more pixels
+	# there. But this card magnifies the SAME sprite by an integer zoom (up to 5x for a
+	# ball, 2x for a club, off PROP_ICON_MAG x the card's own `mag`), so a 6x32 club
+	# becomes a 6x32 image blown up, not a detailed one. Blocky on a card whose job is to
+	# sell the object.
+	#
+	# So prop_big/* is authored at CARD size (a club is 48x96) and blitted at zoom 1, one
+	# source pixel to ART_PIXEL screen px, letting the art decide the size instead of the
+	# magnification formula. These are the assets PixelLab is genuinely good at: big
+	# enough to be worth generating, and never in flight where the silhouette has to be
+	# read at speed.
+	#
+	# The tint rule is draw_prop_rich's, restated rather than inherited, because this
+	# call bypasses it: only the ROUND props take the colour, so those are authored
+	# greyscale; club, knife, torch and chainsaw carry their own paint.
+	var big_tinted := not (kind in [PROP_CLUBS, PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW])
+	if art_blit("prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower(), at, 1.0,
+			ang, col if big_tinted else Color.WHITE):
+		return
 	draw_prop_rich(kind, at, col, ang, sc)
 
 
