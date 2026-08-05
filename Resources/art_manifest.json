@@ -78,5 +78,10 @@
   "prop/club":     { "path": "res://Assets/Props/club.png",     "pivot": [0.5, 0.558],   "scale": 1.0 },
   "prop/knife":    { "path": "res://Assets/Props/knife.png",    "pivot": [0.5, 0.624],   "scale": 1.0 },
   "prop/torch":    { "path": "res://Assets/Props/torch.png",    "pivot": [0.441, 0.785], "scale": 1.0 },
-  "prop/chainsaw": { "path": "res://Assets/Props/chainsaw.png", "pivot": [0.438, 0.696], "scale": 1.0 }
+  "prop/chainsaw": { "path": "res://Assets/Props/chainsaw.png", "pivot": [0.438, 0.696], "scale": 1.0 },
+  "bg/small_theatre":    { "path": "res://Assets/Backgrounds/small_theatre.png" },
+  "bg/the_circus":       { "path": "res://Assets/Backgrounds/the_circus.png" },
+  "bg/championship":     { "path": "res://Assets/Backgrounds/championship.png" },
+  "bg/world_arena":      { "path": "res://Assets/Backgrounds/world_arena.png" },
+  "bg/the_midnight_show":{ "path": "res://Assets/Backgrounds/the_midnight_show.png" }
 }
