@@ -100,5 +100,14 @@
   "prop_big/club": { "path": "res://Assets/Props/big_club.png" },
   "prop_big/knife": { "path": "res://Assets/Props/big_knife.png" },
   "prop_big/torch": { "path": "res://Assets/Props/big_torch.png" },
-  "prop_big/chainsaw": { "path": "res://Assets/Props/big_chainsaw.png" }
+  "prop_big/chainsaw": { "path": "res://Assets/Props/big_chainsaw.png" },
+  "char/head_back": { "path": "res://Assets/Characters/head_back.png" },
+  "char/glove_open": { "path": "res://Assets/Characters/glove_open.png" },
+  "char/glove_closed": { "path": "res://Assets/Characters/glove_closed.png" },
+  "char/hat_top": { "path": "res://Assets/Characters/hat_top.png" },
+  "char/glasses": { "path": "res://Assets/Characters/glasses.png" },
+  "char/helmet": { "path": "res://Assets/Characters/helmet.png" },
+  "char/boot": { "path": "res://Assets/Characters/boot.png" },
+  "char/torso_back_suit": { "path": "res://Assets/Characters/torso_back_suit.png" },
+  "char/torso_back_collar": { "path": "res://Assets/Characters/torso_back_collar.png" }
 }

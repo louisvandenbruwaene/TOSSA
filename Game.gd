@@ -2136,10 +2136,22 @@ func _ready() -> void:
 		art_on = false            # same reason: photograph the drawing, not its replacement
 	if ua.has("--artboxes"):      # dev: print where every sized element was drawn, on quit
 		_art_boxes_on = true
-	if ua.has("--charsuppress"):  # dev: the "without" half of the isolation difference
-		_art_suppress = true
+	var csi := ua.find("--charsuppress")   # dev: the "without" half of the isolation
+	if csi != -1:                          # difference. Bare = every char key; with a key
+		_art_suppress = "*"                # argument = only that one (see art_blit_size).
+		if csi + 1 < ua.size() and not str(ua[csi + 1]).begins_with("--"):
+			_art_suppress = ua[csi + 1]
 	if ua.has("--charid"):        # dev: render the costume as a region ID map (see costume_palette)
 		_charid = true
+	if ua.has("--chargear"):      # dev: force every wardrobe piece on, for --charref only
+		_chargear = true
+	if ua.has("--charback"):      # dev: the figure facing away, for the Spin torso art
+		_charback = true
+	if ua.has("--charopen"):      # dev: hold the hand open, for the open-mitt art
+		_charopen = true
+	var chi := ua.find("--charhide")   # dev: leave ONE garment off under --chargear,
+	if chi != -1 and chi + 1 < ua.size():   # so a piece it would occlude can be seen
+		_charhide = ua[chi + 1]
 	if ua.has("--bgref"):         # dev: the backdrop alone, unlit - see the bg seam
 		_bgref = true
 		art_on = false            # photograph the DRESSING, never a backdrop already replacing it
@@ -11289,9 +11301,13 @@ var _propref := ""                 # --propref <name>: draw only that prop (see 
 var _charref := false              # --charref: draw only the juggler, on a flat field
 var _art_boxes_on := false         # --artboxes: record where each sized element is drawn
 var _art_boxes: Dictionary = {}    # key -> Rect2, the last box the game asked for
-var _art_suppress := false         # --charsuppress: claim char/* keys but draw nothing
+var _art_suppress := ""            # --charsuppress [key]: claim that char key (or "*") and draw nothing
 var _charid := false               # --charid: paint costume regions as flat ID colours
 var _bgref := false                # --bgref: draw only sky + dressing, the layers bg/* replaces
+var _chargear := false             # --chargear: wear every garment (reference render only)
+var _charback := false             # --charback: draw the figure facing away (the Spin view)
+var _charopen := false             # --charopen: hold the hand open (reference render only)
+var _charhide := ""                # --charhide <id>: one garment to leave off under --chargear
 
 
 func art_boot() -> void:
@@ -11375,14 +11391,20 @@ func art_blit_size(key: String, center: Vector2, size: Vector2, ang: float = 0.0
 	# sprite arrives, so the texture is fitted to them instead of setting them. Same
 	# true/false contract as art_blit.
 	art_asked[key] = true
-	if _art_suppress and key.begins_with("char/"):
-		# --charsuppress: claim the element and draw NOTHING. This exists so a reference
-		# pass can isolate a part exactly, instead of cropping its bounding box and hoping.
-		# A head is drawn OVER the collar, so its box contains collar pixels in every corner
-		# the head does not cover, and those end up baked into the sprite as a white notch
-		# under the chin. Rendering the figure once with these parts and once without, then
-		# differencing, yields precisely the pixels the part itself produced - no masking
-		# heuristic, no guessing which stray pixels belong to what.
+	if _art_suppress != "" and (_art_suppress == "*" or _art_suppress == key) and key.begins_with("char/"):
+		# --charsuppress [key]: claim the element and draw NOTHING. This exists so a
+		# reference pass can isolate a part exactly, instead of cropping its bounding box
+		# and hoping. A head is drawn OVER the collar, so its box contains collar pixels in
+		# every corner the head does not cover, and those bake into the sprite as a white
+		# notch under the chin. Render the figure once with the part and once without,
+		# difference the two, and what is left is precisely what that part drew.
+		#
+		# IT TAKES A KEY, AND THAT IS NOT OPTIONAL POLISH. Suppressing every char/* at once
+		# works only while no two elements overlap. Turn the wardrobe on and they do: the
+		# top hat and the glasses both sit inside the head's box, so a single all-at-once
+		# difference hands the head sprite its own hat and spectacles, baked in and
+		# impossible to tint or remove. One key at a time costs one render per part and is
+		# the only version that stays correct as parts are added.
 		if _art_boxes_on:
 			_art_boxes[key] = Rect2(center - size.abs() * 0.5, size.abs())
 		return true
@@ -12500,7 +12522,12 @@ func draw_juggler(s: Vector2) -> void:
 	# by scaling the body width by cos(turn angle) about the centreline: full width facing
 	# front, a thin sliver at the profile, mirrored width facing away. facing_back then
 	# swaps the face for the back of the head. In sequence this reads as a real turn.
-	var facing_back := false
+	# --charback: hold the away-facing pose so char/torso_back_* and char/head_back can be
+	# derived. Mid-Spin is otherwise a handful of frames out of a whole turn, which is not
+	# something a reference capture can reliably land on. No width scale is applied: the
+	# art wants the figure at full width, and the game applies the pirouette's squash
+	# itself at draw time.
+	var facing_back := _charback and _charref
 	var spin_on := spinning()
 	var sx := 1.0                                 # body width scale: 1 front, ~0 profile, -1 back
 	if spin_on:
@@ -13561,6 +13588,17 @@ func wearing(id: String) -> bool:
 	# prop, a new trick) should look and play the same for everyone taking it.
 	if tut_active:
 		return false
+	# --chargear: the wardrobe seam keys (hat, glasses, helmet, boots, gloves) can only be
+	# REACHED when the piece is actually worn, so a reference pass with an empty wardrobe
+	# derives nothing for them and the miss looks like a broken script. This forces every
+	# piece on for the isolated figure render only, and it is gated on _charref as well as
+	# its own flag so it can never affect a real career.
+	if _chargear and _charref:
+		# --charhide names one piece to leave OFF. Some garments are mutually exclusive in
+		# the drawing - a top hat wins over a helmet - so with everything worn the loser's
+		# seam key is never reached and its art can never be derived. Hiding the winner is
+		# the only way to photograph it.
+		return id != _charhide
 	return worn_stage(id) >= 0
 
 
@@ -13901,6 +13939,12 @@ func draw_hand(h: int) -> void:
 	if gloved:
 		sk = glove_cloth()
 	var openf := 1.0 - close
+	# --charopen: hold the hand OPEN for a reference render. The open and closed mitts
+	# are separate seam keys, and which one a capture reaches depends on where hclose
+	# happens to be on that tick - so without this the open variants come out empty and
+	# it looks like the deriver failed rather than like the frame simply had shut hands.
+	if _charopen and _charref:
+		openf = 1.0
 	var stretch := lerpf(0.0, 6.0, openf)
 	var mitt_c := pos + Vector2(inward * openf * 1.5, -stretch * 0.5)
 	# SEAM, and the first place the remaster will want an AnimatedSprite2D rather than a
