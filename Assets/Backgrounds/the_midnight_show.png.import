@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bc8gb6bvrd53"
-path="res://.godot/imported/midnight_show.png-dcdac8be7f0d0881406b026afbfe815a.ctex"
+uid="uid://dryfuxlqswiyd"
+path="res://.godot/imported/the_midnight_show.png-4d68b10a68efd2495b82b103621effbe.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Backgrounds/midnight_show.png"
-dest_files=["res://.godot/imported/midnight_show.png-dcdac8be7f0d0881406b026afbfe815a.ctex"]
+source_file="res://Assets/Backgrounds/the_midnight_show.png"
+dest_files=["res://.godot/imported/the_midnight_show.png-4d68b10a68efd2495b82b103621effbe.ctex"]
 
 [params]
 
