@@ -11177,16 +11177,40 @@ func flight_vel(b: Ball) -> Vector2:
 #
 # ART_PIXEL AND THE COORDINATE SPACE. The stage's coordinate space stays 1280x720 and is not
 # negotiable: `inner_pos`/`outer_pos`, every hitbox, `--collcheck`'s clearances and the whole
-# throw model are expressed in it, so changing it would change gameplay. 1280x720 is exactly
-# 4x 320x180, which is the entire reason 320x180 is the right authoring resolution here: a
-# sprite drawn on a 320x180 canvas is blitted at 4x with no resampling, every source pixel
-# landing on an exact 4x4 block, and on the day the real viewport drops to 320x180 every
-# asset is already the correct size. Run `--pixel` to see that endpoint today.
+# throw model are expressed in it, so changing it would change gameplay. The authoring
+# density must therefore divide 1280x720 EXACTLY, or source pixels land on fractional screen
+# blocks and the art crawls. That leaves 640x360 (2x) and 320x180 (4x) as the only sane
+# candidates at 16:9.
+#
+# IT IS 640x360, DECIDED BY MEASUREMENT (Louis, 2026-08-05). The earlier prep pass assumed
+# 320x180 on the grounds that it is the more authentic density, and for the ART it is: a
+# `--pixel` capture of the stage at 4x down shows the juggler at ~86px reading beautifully.
+# The same capture shows why it cannot be the answer here. THE FIGURE SURVIVES THE
+# DOWNSAMPLE AND THE TEXT DOES NOT. A 13px HUD label becomes 3px tall and is not read so
+# much as guessed at, and this game is unusually text-heavy - shop cards carry a stat table,
+# body copy and a hint row; the day hub, sheet, skills and results screens are almost
+# entirely words. Fixing that at 320x180 is not an art job, it is a redesign of ~15 screens
+# into fewer, larger panels with far less to say, and the brief for this fork is to stay as
+# close to TOSSA's design and UI as possible.
+#
+# At 640x360 the arithmetic goes the other way and nothing has to be given up: the juggler
+# is ~172px tall (more detail than 320x180 could hold, not less), a ball is 12px, and a
+# 10-12px bitmap font keeps every existing layout. Two screen pixels per art pixel is still
+# unmistakably pixel art - it is the density Dead Cells and Blasphemous ship at.
+#
+# The one real cost is upstream, not on screen: PixelLab caps a generated image at 400px per
+# side, so a full 640x360 backdrop is two tiles stitched rather than one generation. That is
+# a pipeline problem with a pipeline answer, and it is the right thing to pay for legible UI.
+#
+# Everything below derives from ART_PIXEL, so this stayed a one-constant change. What it is
+# NOT able to do is rescale a PNG: art authored for the old density draws at half size after
+# the switch, which is why the four props registered by the prep pass were unregistered in
+# the same commit. Run `--pixel` to see the endpoint today.
 # ---------------------------------------------------------------------------------------
 
-const ART_PIXEL := 4.0                 # screen units per authored art pixel (1280/320)
-const ART_W := 320                     # the authoring canvas, and the eventual viewport
-const ART_H := 180
+const ART_PIXEL := 2.0                 # screen units per authored art pixel (1280/640)
+const ART_W := 640                     # the authoring canvas, and the eventual viewport
+const ART_H := 360
 const ART_MANIFEST := "res://Resources/art_manifest.json"
 var art_manifest_path := ART_MANIFEST   # --artmanifest <path> points this elsewhere, which
 										# is how the placeholder set is tried on without
