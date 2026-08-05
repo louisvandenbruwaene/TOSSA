@@ -1502,6 +1502,7 @@ const UCARD_ARM := 20.0    # ...but it ignores keys for this long first. An unlo
 # on it, because a reveal has to be the moment the PLAYER finds out, not the moment the
 # game makes up its mind.
 var ucard_flip := -1.0     # atick the flip began; -1 while the card is still face down
+var ucard_queue: Array = [] # [kind, idx] pairs earned mid-run, dealt once it ends (ucard_deferred)
 const UCARD_FLIP := 30.0   # ...and how long the turn takes. Long enough to read as a card
                            # being turned over, short enough not to be a cutscene.
 const UCARD_READ := 16.0   # ...then it ignores keys again for this long, so the press that
@@ -2592,6 +2593,15 @@ func _physics_process(delta: float) -> void:
 	# picture and make a waiting game look like a hung one. Same reasoning, and the same
 	# shape, as the guided-beat hold further down. Above the sheet/shop/pause gate,
 	# because that one returns WITHOUT advancing any clock.
+	#
+	# DEAL ANYTHING THE RUN HELD BACK, one at a time. The gate below is what paces them:
+	# while a card is up ucard_kind is >= 0, so the next one cannot be dealt until this
+	# one has been dismissed. Sits immediately above that gate so a card queued during a
+	# performance appears the very frame the performance stops being live - which is the
+	# results panel, where an unlock has always belonged.
+	if ucard_kind < 0 and not ucard_queue.is_empty() and not ucard_deferred():
+		var q: Array = ucard_queue.pop_front()
+		deal_ucard(int(q[0]), int(q[1]))
 	if ucard_kind >= 0:
 		cine_tick += 1
 		update_hands()
@@ -13508,6 +13518,58 @@ func draw_glow(c: Vector2, r: float, col: Color) -> void:
 	draw_texture_rect(glow_texture(), Rect2(c.x - r, c.y - r, r * 2.0, r * 2.0), false, col)
 
 
+const GLOW_PIX_STEPS := 4     # concentric bands; more reads as a smooth blur again
+
+func draw_glow_pix(c: Vector2, r: float, col: Color) -> void:
+	# THE SAME SOFT POOL, ON THE ART GRID (2026-08-05, Louis: "the glow around the balls
+	# looks strange"). draw_glow stretches a 128px radial gradient texture, which is
+	# exactly right for a big stage wash and exactly wrong at prop scale: around a 12px
+	# ball it is a blurry disc with a soft edge, sitting in a frame where everything else
+	# steps in clean 2px blocks. Blur at that size does not read as light, it reads as a
+	# smudge - the same tell the arms had before draw_capsule_pix.
+	#
+	# So a prop's glow is CONCENTRIC BANDS instead, quantised to the art grid the way
+	# pixel artists have always drawn a lamp: a few nested discs, each one brighter than
+	# the last. Radii snap to whole art pixels so the bands cannot land mid-block, and
+	# each band is filled one draw_rect per art row, which is what gives it hard stepped
+	# edges rather than the antialiased rim draw_circle would.
+	#
+	# The alpha per band follows the same curve glow_texture uses, so a charged prop is
+	# as BRIGHT as it was - only its edge changed. Four bands is the whole budget: at
+	# five or more the steps are close enough together to read as a gradient again, which
+	# is the thing being fixed.
+	if col.a <= 0.004 or r <= 0.0:
+		return
+	for i in GLOW_PIX_STEPS:
+		var t := float(i) / float(GLOW_PIX_STEPS)          # 0 outermost .. -> innermost
+		var br := snappedf(r * (1.0 - t * 0.72), float(ART_PIXEL))
+		if br < float(ART_PIXEL):
+			continue
+		# matches glow_texture's fall-off: a bright core dropping away fast, then a skirt
+		var a := col.a * (0.14 + 0.86 * pow(t, 1.7))
+		fill_disc_pix(c, br, Color(col.r, col.g, col.b, a))
+
+
+func fill_disc_pix(c: Vector2, r: float, col: Color) -> void:
+	# a filled circle rasterised onto the art grid, one draw_rect per art row - the same
+	# technique as draw_capsule_pix, and here for the same reason: draw_circle antialiases
+	# its rim, and a soft rim is what makes a 12px glow look like a smudge.
+	var ap := float(ART_PIXEL)
+	var y0 := snappedf(c.y - r, ap)
+	var rows := int(ceil((r * 2.0) / ap))
+	for i in rows + 1:
+		var y := y0 + float(i) * ap
+		# sample each row at its CENTRE, not its top edge, or the disc sits half a row high
+		var dy := (y + ap * 0.5) - c.y
+		if absf(dy) > r:
+			continue
+		var half := sqrt(maxf(0.0, r * r - dy * dy))
+		var x0 := snappedf(c.x - half, ap)
+		var w := snappedf(half * 2.0, ap)
+		if w >= ap:
+			draw_rect(Rect2(x0, y, w, ap), col)
+
+
 func face_mood() -> int:
 	# -1 wince (just dropped), 0 calm, 1 pleased (on a streak). Shared by the mouth and
 	# the wardrobe pass's brows so the two can never disagree about the expression.
@@ -13530,6 +13592,22 @@ func draw_capsule(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> v
 	draw_colored_polygon(PackedVector2Array([a + n * ra, b + n * rb, b - n * rb, a - n * ra]), col)
 	draw_circle(a, ra, col)
 	draw_circle(b, rb, col)
+
+
+const LIMB_BANDS := 4        # value steps across a limb, matching the body regions'
+const LIMB_FLOOR := 0.64     # and their floor, so a sleeve and its torso agree
+const LIMB_LIGHT_U := -0.42  # and their light
+
+func limb_shade(col: Color, u: float) -> Color:
+	# One band of a lit cylinder, quantised. Shares LIMB_FLOOR / LIMB_LIGHT_U with
+	# scripts/shade_char_regions.py on purpose: the sleeve is the same cloth as the
+	# torso under the same lamp, and two different light directions on one costume is
+	# more obviously wrong than no shading at all was.
+	var lam := clampf(cos(u * (PI * 0.5) - LIMB_LIGHT_U * (PI * 0.5)) * 0.5 + 0.5, 0.0, 1.0)
+	var q := floorf(lam * float(LIMB_BANDS))
+	q = clampf(q, 0.0, float(LIMB_BANDS - 1))
+	var f := LIMB_FLOOR + (1.0 - LIMB_FLOOR) * (q / float(LIMB_BANDS - 1))
+	return Color(col.r * f, col.g * f, col.b * f, col.a)
 
 
 func draw_capsule_pix(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) -> void:
@@ -13592,7 +13670,40 @@ func draw_capsule_pix(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) 
 		if hi > lo:
 			var x0 := floorf(lo / ART_PIXEL) * ART_PIXEL
 			var x1 := ceilf(hi / ART_PIXEL) * ART_PIXEL
-			draw_rect(Rect2(x0, y, x1 - x0, ART_PIXEL), col)
+			# SHADED ACROSS THE LIMB, not across the screen row (2026-08-05, Louis: the
+			# player looks flat). With the torso and legs carrying form, a flat arm was
+			# the last thing on the figure with no volume in it at all.
+			#
+			# The coordinate that matters is the PERPENDICULAR distance from the limb's
+			# own axis, never the position along the row - an arm reaching sideways has
+			# rows that run ALONG it, and shading those would light the elbow differently
+			# from the wrist. `perp` is linear in x at fixed y, so the exact x where each
+			# band begins can be solved rather than sampled, and the near-horizontal case
+			# falls out for free: n.x goes to zero, perp stops varying across the row, and
+			# the row is one flat rect again at the cost it always was.
+			var R := maxf(0.001, (ra + rb) * 0.5)
+			var base := (cy - a.y) * n.y - 0.0
+			if absf(n.x) < 0.02:
+				var u0 := clampf((base - a.x * 0.0) / R, -1.0, 1.0)
+				draw_rect(Rect2(x0, y, x1 - x0, ART_PIXEL), limb_shade(col, u0))
+				y += ART_PIXEL
+				continue
+			# walk the band boundaries in x, clipped to this row's span
+			var xs := PackedFloat32Array([x0])
+			for k in LIMB_BANDS - 1:
+				var thr := -1.0 + 2.0 * float(k + 1) / float(LIMB_BANDS)
+				var xk := a.x + (thr * R - base) / n.x
+				if xk > x0 and xk < x1:
+					xs.append(xk)
+			xs.append(x1)
+			xs.sort()
+			for i in xs.size() - 1:
+				var sx := snappedf(xs[i], float(ART_PIXEL))
+				var ex := snappedf(xs[i + 1], float(ART_PIXEL))
+				if ex <= sx:
+					continue
+				var um := clampf(((sx + ex) * 0.5 - a.x) * n.x / R + base / R, -1.0, 1.0)
+				draw_rect(Rect2(sx, y, ex - sx, ART_PIXEL), limb_shade(col, um))
 		y += ART_PIXEL
 
 
@@ -14433,14 +14544,14 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	# find, which is what 60,000 buys now that the shape itself never goes away.
 	var fl := (0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)) * lit
 	var phos := Color(lerpf(GLOW_PHOS.r, col.r, 0.25), lerpf(GLOW_PHOS.g, col.g, 0.25), lerpf(GLOW_PHOS.b, col.b, 0.25))
-	draw_glow(pos, 26.0 * sc, Color(phos.r, phos.g, phos.b, 0.30 * fl))
+	draw_glow_pix(pos, 26.0 * sc, Color(phos.r, phos.g, phos.b, 0.30 * fl))
 	if kind >= 0:
 		glow_silhouette(pos, kind, sc, ang, Color(phos.r, phos.g, phos.b, 0.85 * fl))
 	# the hot white centre is the single biggest reason an uncharged prop was easy to
 	# track, so it is the KIT'S: a bright point that says exactly where, for the player
 	# who paid for one. Without it the prop is its own dim phosphor and nothing else.
 	if lit >= 0.99:
-		draw_circle(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))
+		fill_disc_pix(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))   # the Kit's hot core, on the grid
 
 
 func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color) -> void:
@@ -14560,12 +14671,15 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		# house lights are poor. Torches are exempt - they are already the thing this
 		# is imitating, and a phosphor bloom on a flame reads as a bug.
 		var gfl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
-		draw_glow(pos, 24.0 * sc, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.26 * gfl))
+		draw_glow_pix(pos, 24.0 * sc, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.26 * gfl))
 	if b.trick >= 0:
 		# a trick throw carries a warm glowing ring so the crowd (and player) reads it as special
 		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
 		draw_arc(pos, (23.0 + 3.0 * pulse) * sc, 0.0, TAU, 26, Color(1.0, 0.86, 0.5, 0.5), 2.5, true)
-		draw_circle(pos, 15.0 * sc, Color(1.0, 0.85, 0.5, 0.14))
+		# a FALL-OFF, not a slab: a flat 14% disc the width of a hand reads as a stain on
+		# the stage rather than as light coming off the prop, which is what it did before
+		# and what a hard pixel edge only made more obvious
+		draw_glow_pix(pos, 17.0 * sc, Color(1.0, 0.85, 0.5, 0.30))
 	draw_prop_body(b, pos, prop_spin_angle(b), sc)
 
 
@@ -17491,12 +17605,33 @@ func card_art_racket() -> void:
 #endregion
 
 
+func ucard_deferred() -> bool:
+	# NEVER MID-PERFORMANCE (2026-08-05, Louis: a run must not be interrupted by an
+	# unlock). The card is not a toast - it HALTS THE WORLD (see the ucard branch in
+	# _physics_process, which advances only cine_tick and the hands) and it EATS the next
+	# two keypresses. Landing that on a live run is the worst possible moment: every prop
+	# in the air freezes, the streak the player was building is interrupted by a modal,
+	# and the two keys it swallows are the throw and catch they were in the middle of.
+	#
+	# And it really could land there. add_xp() calls announce_unlocks(), and XP is awarded
+	# per CATCH and per landed trick - so crossing a level mid-run dealt a card instantly.
+	return game_state == ST_PLAY and running and not results_open
+
+
 func deal_ucard(kind: int, idx: int) -> void:
 	# DEAL ONE. Every place that grants a skill goes through here so the card's three
 	# clocks can never be half-set: `ucard_tick` starts the pop-in, `ucard_flip` at -1
 	# means it is still face down, and `ucard_out_tick` at -1 means it has not been
 	# dismissed. Setting two of the three by hand at each call site is exactly how a card
 	# ends up arriving already turned over.
+	#
+	# It is also the single choke point for the deferral above, which is why that check
+	# lives here rather than at the three grant sites: the skill is still OWNED the moment
+	# it is earned (announce_unlocks has already done that, and the small trick banner
+	# still says so live), and only the CARD waits for the performance to end.
+	if ucard_deferred():
+		ucard_queue.append([kind, idx])
+		return
 	ucard_kind = kind
 	ucard_idx = idx
 	ucard_tick = atick()
