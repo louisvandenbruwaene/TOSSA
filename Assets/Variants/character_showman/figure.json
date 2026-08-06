@@ -1,0 +1,25 @@
+{
+  "height_art": 164,
+  "width_art": 84,
+  "head_bottom": 0.2317,
+  "head_cy": 0.0518,
+  "head_r": 0.0549,
+  "shoulder_y": 0.2378,
+  "shoulder_dx": 0.1159,
+  "corridor": [
+    23,
+    60
+  ],
+  "sleeve": {
+    "sleeve": [
+      56,
+      24,
+      16
+    ],
+    "cuff": [
+      152,
+      120,
+      88
+    ]
+  }
+}
