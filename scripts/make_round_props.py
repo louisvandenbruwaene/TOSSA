@@ -42,6 +42,7 @@ USAGE
   .venv/bin/python scripts/make_round_props.py               # report only
   .venv/bin/python scripts/make_round_props.py --write       # apply (artguard-guarded)
   .venv/bin/python scripts/make_round_props.py --write --force
+  .venv/bin/python scripts/make_round_props.py --write --stage   # the STAGE-size set
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ import artguard
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "Assets" / "Props"
+VARIANTS = ROOT / "Assets" / "Variants"
 
 SS = 8                # supersampling factor, for coverage only
 BANDS = 6             # discrete shading steps - matches the painted props' density
@@ -71,11 +73,32 @@ LIGHT = LIGHT / np.linalg.norm(LIGHT)
 # empty, so they grow here as well as improve.
 SIZES = {"ball": (52, 52), "ring": (62, 62), "egg": (46, 60)}
 
+# THE SAME THREE SOLIDS AT STAGE SIZE (2026-08-06, Louis: "make sure that the character,
+# objects etc look the same everywhere in the game"). The stage sprites were DERIVED from
+# the game's own drawing, and at eleven pixels that derivation gives a flat white disc
+# with a grey rim - so the ball in the shop is a lit sphere and the ball he is actually
+# juggling is a dot. Two objects, one name.
+#
+# There is no reason for that: a sphere is a sphere at any resolution, and the shading
+# here is computed at final resolution rather than downsampled, so eleven pixels get
+# eleven pixels' worth of real bands instead of a blurred copy of fifty-two. Sizes are
+# the EXISTING stage sprites' exact dimensions, because those are set by the game's
+# physical prop scales and are not an art decision to revisit.
+#
+# STAGE_BANDS is lower on purpose. Six bands across eleven pixels is a band every two
+# pixels, which stops reading as shading and starts reading as stripes; four is what a
+# person shading an 11px ball by hand would use.
+STAGE_SIZES = {"ball": (11, 11), "ring": (21, 21), "egg": (10, 13)}
+STAGE_BANDS = 4
+
+
+_bands = BANDS   # swapped to STAGE_BANDS for the stage set; see build()
+
 
 def quantise(v: np.ndarray) -> np.ndarray:
-	"""Lambert term -> one of BANDS discrete values in [GREY_FLOOR, 1]."""
-	b = np.clip(np.floor(v * BANDS), 0, BANDS - 1)
-	return GREY_FLOOR + (1.0 - GREY_FLOOR) * (b / (BANDS - 1))
+	"""Lambert term -> one of _bands discrete values in [GREY_FLOOR, 1]."""
+	b = np.clip(np.floor(v * _bands), 0, _bands - 1)
+	return GREY_FLOOR + (1.0 - GREY_FLOOR) * (b / (_bands - 1))
 
 
 def grids(w: int, h: int):
@@ -173,8 +196,10 @@ def ring(w, h):
 SHAPES = {"ball": sphere, "ring": ring, "egg": egg}
 
 
-def build(name: str, write: bool, force: bool) -> str:
-	w, h = SIZES[name]
+def build(name: str, write: bool, force: bool, stage: bool = False) -> str:
+	global _bands
+	_bands = STAGE_BANDS if stage else BANDS
+	w, h = (STAGE_SIZES if stage else SIZES)[name]
 	val, inside = SHAPES[name](w, h)
 	g = np.clip(np.round(val * 255.0), 0, 255).astype(np.uint8)
 	rgba = np.dstack([g, g, g, np.where(inside, 255, 0).astype(np.uint8)])
@@ -184,7 +209,10 @@ def build(name: str, write: bool, force: bool) -> str:
 	levels = len(np.unique(g[inside]))
 	if not write:
 		return f"{name:5} {rgba.shape[1]:3}x{rgba.shape[0]:<3} {levels} grey levels  (report only)"
-	p = OUT / f"big_{name}.png"
+	# The stage set is a VARIANT, not a replacement: the derived sprites are what ships
+	# until Louis picks otherwise on the F9 panel. See Resources/art_variants/props.*.json.
+	p = (VARIANTS / "props_matched" / f"{name}.png") if stage else (OUT / f"big_{name}.png")
+	p.parent.mkdir(parents=True, exist_ok=True)
 	status = artguard.save_guarded(p, lambda q: Image.fromarray(rgba, "RGBA").save(q), force)
 	return f"{name:5} {rgba.shape[1]:3}x{rgba.shape[0]:<3} {levels} grey levels  [{status}]"
 
@@ -192,9 +220,10 @@ def build(name: str, write: bool, force: bool) -> str:
 def main() -> int:
 	write = "--write" in sys.argv
 	force = "--force" in sys.argv
+	stage = "--stage" in sys.argv
 	names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(SIZES)
 	for n in names:
-		print(build(n, write, force))
+		print(build(n, write, force, stage))
 	if not write:
 		print("\n(pass --write to apply)")
 	return 0

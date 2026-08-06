@@ -9,6 +9,12 @@
     "  3. add a line here, keyed by the seam key",
     "  4. run the game - that element is now a sprite; delete the line to go back",
     "",
+    "DESIGN VARIANTS. Resources/art_variants/<set>.<option>.json is a SECOND manifest of the",
+    "same shape, laid over this one by art_boot: every key it names replaces the sprite here",
+    "and every key it does not name is left alone. That is the whole variant system - see the",
+    "F9 panel (THE LOOK) or --variant <set>:<option>. Option 0 of each set is what ships and",
+    "has no file, so a release build reads this manifest and nothing else.",
+    "",
     "A key with no line here draws procedurally. A line whose file is missing logs one",
     "warning and falls back, so you can reserve a key before the art exists. Keys",
     "beginning with _ are documentation and are skipped.",
@@ -18,7 +24,6 @@
     "That list is generated from the code, so it can never go stale the way this comment",
     "can. The _KEYS block below is a convenience copy."
   ],
-
   "_AUTHORING": {
     "canvas": "640x360 is the art's pixel density; the game's coordinate space stays 1280x720",
     "scale": "1 art pixel is drawn as a 2x2 screen block (ART_PIXEL = 2), no resampling",
@@ -28,7 +33,6 @@
     "pivot": "[0.5,0.5] is the centre; [0.5,1.0] pins the bottom edge to the draw position. For a spinning prop the pivot is NOT the centre - it is the point the game rotates the shape about, derived from the drawing constants rather than eyeballed.",
     "scale_field": "optional multiplier if the art is authored bigger or smaller than its slot"
   },
-
   "_DENSITY_CHANGED": [
     "2026-08-05: the density moved from 320x180 (ART_PIXEL 4) to 640x360 (ART_PIXEL 2).",
     "See the PIXEL-ART RENDER SEAM region in Game.gd for the measurement behind it. Short",
@@ -41,7 +45,6 @@
     "like a bug in the seam and is not. They are being redrawn at 640x360 density.",
     "The old files are still in Assets/Props/ and are inert until a line below names them."
   ],
-
   "_KEYS": {
     "prop/*": "ball egg ring club knife torch chainsaw  (Assets/Props/, round ones tinted, all rotated)",
     "char/*": "head head_back hat_top glasses helmet boot hand_open hand_closed glove_open glove_closed",
@@ -49,7 +52,6 @@
     "ui/*": "keycap card_skill card_trick gear_glasses gear_pie gear_gloves ...",
     "fx/*": "flower_t0 flower_t1 flower_t2 tomato"
   },
-
   "_LIVE": [
     "Below are the real, registered sprites. Everything else is still drawn by code.",
     "",
@@ -71,47 +73,165 @@
     "",
     "Delete any line to send that prop back to procedural. Run with --procart to A/B all."
   ],
-
-  "prop/ball":     { "path": "res://Assets/Props/ball.png",     "pivot": [0.5, 0.5],     "scale": 1.0 },
-  "prop/egg":      { "path": "res://Assets/Props/egg.png",      "pivot": [0.5, 0.5],     "scale": 1.0 },
-  "prop/ring":     { "path": "res://Assets/Props/ring.png",     "pivot": [0.5, 0.5],     "scale": 1.0 },
-  "prop/club":     { "path": "res://Assets/Props/club.png",     "pivot": [0.5, 0.558],   "scale": 1.0 },
-  "prop/knife":    { "path": "res://Assets/Props/knife.png",    "pivot": [0.5, 0.624],   "scale": 1.0 },
-  "prop/torch":    { "path": "res://Assets/Props/torch.png",    "pivot": [0.441, 0.785], "scale": 1.0 },
-  "prop/chainsaw": { "path": "res://Assets/Props/chainsaw.png", "pivot": [0.438, 0.696], "scale": 1.0 },
-  "bg/small_theatre":    { "path": "res://Assets/Backgrounds/small_theatre.png" },
-  "bg/the_circus":       { "path": "res://Assets/Backgrounds/the_circus.png" },
-  "bg/championship":     { "path": "res://Assets/Backgrounds/championship.png" },
-  "bg/world_arena":      { "path": "res://Assets/Backgrounds/world_arena.png" },
-  "bg/the_midnight_show":{ "path": "res://Assets/Backgrounds/the_midnight_show.png" },
-  "char/head":        { "path": "res://Assets/Characters/head.png" },
-  "char/hand_open":   { "path": "res://Assets/Characters/hand_open.png" },
-  "char/hand_closed": { "path": "res://Assets/Characters/hand_closed.png" },
-  "char/torso_suit":    { "path": "res://Assets/Characters/torso_suit.png" },
-  "char/torso_collar":  { "path": "res://Assets/Characters/torso_collar.png" },
-  "char/torso_vest":    { "path": "res://Assets/Characters/torso_vest.png" },
-  "char/torso_button":  { "path": "res://Assets/Characters/torso_button.png" },
-  "char/legs_trouser":  { "path": "res://Assets/Characters/legs_trouser.png" },
-  "bg/backyard":      { "path": "res://Assets/Backgrounds/backyard.png" },
-  "bg/street_corner": { "path": "res://Assets/Backgrounds/street_corner.png" },
-  "prop_big/ball": { "path": "res://Assets/Props/big_ball.png" },
-  "prop_big/egg": { "path": "res://Assets/Props/big_egg.png" },
-  "prop_big/ring": { "path": "res://Assets/Props/big_ring.png" },
-  "prop_big/club": { "path": "res://Assets/Props/big_club.png" },
-  "prop_big/knife": { "path": "res://Assets/Props/big_knife.png" },
-  "prop_big/torch": { "path": "res://Assets/Props/big_torch.png" },
-  "prop_big/chainsaw": { "path": "res://Assets/Props/big_chainsaw.png" },
-  "char/head_back": { "path": "res://Assets/Characters/head_back.png" },
-  "char/glove_open": { "path": "res://Assets/Characters/glove_open.png" },
-  "char/glove_closed": { "path": "res://Assets/Characters/glove_closed.png" },
-  "char/hat_top": { "path": "res://Assets/Characters/hat_top.png" },
-  "char/glasses": { "path": "res://Assets/Characters/glasses.png" },
-  "char/helmet": { "path": "res://Assets/Characters/helmet.png" },
-  "char/boot": { "path": "res://Assets/Characters/boot.png" },
-  "char/torso_back_suit": { "path": "res://Assets/Characters/torso_back_suit.png" },
-  "char/torso_back_collar": { "path": "res://Assets/Characters/torso_back_collar.png" },
-  "ui/menu_backdrop": { "path": "res://Assets/UI/menu_backdrop.png" },
-  "ui/wordmark_168": { "path": "res://Assets/UI/wordmark_168.png" },
-  "ui/wordmark_58":  { "path": "res://Assets/UI/wordmark_58.png" },
-  "ui/wordmark_52":  { "path": "res://Assets/UI/wordmark_52.png" }
+  "prop/ball": {
+    "path": "res://Assets/Props/ball.png",
+    "pivot": [
+      0.5,
+      0.5
+    ],
+    "scale": 1.0
+  },
+  "prop/egg": {
+    "path": "res://Assets/Props/egg.png",
+    "pivot": [
+      0.5,
+      0.5
+    ],
+    "scale": 1.0
+  },
+  "prop/ring": {
+    "path": "res://Assets/Props/ring.png",
+    "pivot": [
+      0.5,
+      0.5
+    ],
+    "scale": 1.0
+  },
+  "prop/club": {
+    "path": "res://Assets/Props/club.png",
+    "pivot": [
+      0.5,
+      0.558
+    ],
+    "scale": 1.0
+  },
+  "prop/knife": {
+    "path": "res://Assets/Props/knife.png",
+    "pivot": [
+      0.5,
+      0.624
+    ],
+    "scale": 1.0
+  },
+  "prop/torch": {
+    "path": "res://Assets/Props/torch.png",
+    "pivot": [
+      0.441,
+      0.785
+    ],
+    "scale": 1.0
+  },
+  "prop/chainsaw": {
+    "path": "res://Assets/Props/chainsaw.png",
+    "pivot": [
+      0.438,
+      0.696
+    ],
+    "scale": 1.0
+  },
+  "bg/small_theatre": {
+    "path": "res://Assets/Backgrounds/small_theatre.png"
+  },
+  "bg/the_circus": {
+    "path": "res://Assets/Backgrounds/the_circus.png"
+  },
+  "bg/championship": {
+    "path": "res://Assets/Backgrounds/championship.png"
+  },
+  "bg/world_arena": {
+    "path": "res://Assets/Backgrounds/world_arena.png"
+  },
+  "bg/the_midnight_show": {
+    "path": "res://Assets/Backgrounds/the_midnight_show.png"
+  },
+  "char/head": {
+    "path": "res://Assets/Characters/head.png"
+  },
+  "char/hand_open": {
+    "path": "res://Assets/Characters/hand_open.png"
+  },
+  "char/hand_closed": {
+    "path": "res://Assets/Characters/hand_closed.png"
+  },
+  "char/torso_suit": {
+    "path": "res://Assets/Characters/torso_suit.png"
+  },
+  "char/torso_collar": {
+    "path": "res://Assets/Characters/torso_collar.png"
+  },
+  "char/torso_vest": {
+    "path": "res://Assets/Characters/torso_vest.png"
+  },
+  "char/torso_button": {
+    "path": "res://Assets/Characters/torso_button.png"
+  },
+  "char/legs_trouser": {
+    "path": "res://Assets/Characters/legs_trouser.png"
+  },
+  "bg/backyard": {
+    "path": "res://Assets/Backgrounds/backyard.png"
+  },
+  "bg/street_corner": {
+    "path": "res://Assets/Backgrounds/street_corner.png"
+  },
+  "prop_big/ball": {
+    "path": "res://Assets/Props/big_ball.png"
+  },
+  "prop_big/egg": {
+    "path": "res://Assets/Props/big_egg.png"
+  },
+  "prop_big/ring": {
+    "path": "res://Assets/Props/big_ring.png"
+  },
+  "prop_big/club": {
+    "path": "res://Assets/Props/big_club.png"
+  },
+  "prop_big/knife": {
+    "path": "res://Assets/Props/big_knife.png"
+  },
+  "prop_big/torch": {
+    "path": "res://Assets/Props/big_torch.png"
+  },
+  "prop_big/chainsaw": {
+    "path": "res://Assets/Props/big_chainsaw.png"
+  },
+  "char/head_back": {
+    "path": "res://Assets/Characters/head_back.png"
+  },
+  "char/glove_open": {
+    "path": "res://Assets/Characters/glove_open.png"
+  },
+  "char/glove_closed": {
+    "path": "res://Assets/Characters/glove_closed.png"
+  },
+  "char/hat_top": {
+    "path": "res://Assets/Characters/hat_top.png"
+  },
+  "char/glasses": {
+    "path": "res://Assets/Characters/glasses.png"
+  },
+  "char/helmet": {
+    "path": "res://Assets/Characters/helmet.png"
+  },
+  "char/boot": {
+    "path": "res://Assets/Characters/boot.png"
+  },
+  "char/torso_back_suit": {
+    "path": "res://Assets/Characters/torso_back_suit.png"
+  },
+  "char/torso_back_collar": {
+    "path": "res://Assets/Characters/torso_back_collar.png"
+  },
+  "ui/menu_backdrop": {
+    "path": "res://Assets/UI/menu_backdrop.png"
+  },
+  "ui/wordmark_168": {
+    "path": "res://Assets/UI/wordmark_168.png"
+  },
+  "ui/wordmark_58": {
+    "path": "res://Assets/UI/wordmark_58.png"
+  },
+  "ui/wordmark_52": {
+    "path": "res://Assets/UI/wordmark_52.png"
+  }
 }
