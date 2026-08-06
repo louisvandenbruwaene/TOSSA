@@ -116,7 +116,7 @@
   "prop/torch": {
     "path": "res://Assets/Props/torch.png",
     "pivot": [
-      0.441,
+      0.5,
       0.785
     ],
     "scale": 1.0
@@ -124,7 +124,7 @@
   "prop/chainsaw": {
     "path": "res://Assets/Props/chainsaw.png",
     "pivot": [
-      0.438,
+      0.5,
       0.696
     ],
     "scale": 1.0

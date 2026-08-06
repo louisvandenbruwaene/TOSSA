@@ -1598,7 +1598,7 @@ var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop
 #
 # Option 0 of every set IS the shipped default, so a release build (which never opens
 # the panel) always draws option 0 and needs no variant files present at all.
-var art_variants := {"character": 0, "props": 0, "lighting": 0}
+var art_variants := {"character": 0, "lighting": 0}
 const VARIANT_DEFS := [
 	{"id": "character", "name": "The performer",
 	 "desc": "How the juggler himself is painted - stage, tailor's mirror, skills preview and title screen all follow this, because they are one renderer now. Alpha is identical between the options, so his stance, proportions and silhouette never move; only the shading inside them does.",
@@ -1606,11 +1606,13 @@ const VARIANT_DEFS := [
 		{"key": "classic", "name": "Classic", "hint": "flat cloth, the traced original"},
 		{"key": "volume", "name": "Volume", "hint": "deeper falloff, a lit edge - rounder"},
 		{"key": "inked", "name": "Inked", "hint": "a dark contour and brighter cloth inside it"}]},
-	{"id": "props", "name": "The objects",
-	 "desc": "Stage props against shop-card props. The cards have always been the richer painting (volumetric, lit from the upper left) and the stage set the flatter derived one, so the same ball is two objects depending on which screen you are looking at. 'Matched' rebuilds the stage set from the card art so a ball is one ball everywhere.",
-	 "opts": [
-		{"key": "classic", "name": "Classic", "hint": "derived from the game's own drawing"},
-		{"key": "matched", "name": "Matched", "hint": "stage art rebuilt from the shop cards"}]},
+	# THE OBJECTS ARE NO LONGER A CHOICE, and that is the rule this panel runs on: an
+	# experiment that wins leaves it. It shipped for one session as classic/matched and
+	# Louis's answer was "the shop designs for the objects are decent, use those
+	# everywhere" - so prop/* is derived from prop_big/* in the base manifest, the title
+	# wordmark bakes off the same art (see mark_prop), and there is nothing left to pick
+	# between. The loser's art and its variant manifest were deleted rather than left
+	# stranded; git has them.
 	{"id": "lighting", "name": "Stage light",
 	 "desc": "The grade over a venue: how far the backdrop falls back behind the performer, and how warm the spill is. Purely a wash over finished art - it moves no pixel and costs one rect, so it is safe to judge on feel alone.",
 	 "opts": [
@@ -21807,6 +21809,48 @@ func cap_warm_rim(p: Vector2, r: float, amt: float) -> void:
 		maxf(1.0, r * 0.15), true)
 
 
+func mark_prop(key: String, pos: Vector2, ang: float, long_px: float, tint: Color,
+		mid_local: float = 0.0) -> bool:
+	# THE WORDMARK'S PROPS, FROM THE SAME ART AS THE SHOP CARD (2026-08-06, Louis: "the shop
+	# designs for the objects are decent, use those everywhere! right now the titlescreen and
+	# performance uses different ones").
+	#
+	# The stage was the easy half - prop/* is derived from prop_big/* now, so the objects in
+	# the air already match the objects in the shop. The title screen was the third design:
+	# capsule_mark draws cap_ball/cap_ring/cap_knife/cap_club DIRECTLY, bypassing the prop
+	# seam entirely, so the logo kept the vector drawings after everything else became art.
+	#
+	# `long_px` is the extent the caller wants along the prop's LONG axis, which is the
+	# measurement every letter in the mark is laid out from. The sprite is fitted to it and
+	# its short axis follows the art's own aspect, so a letter's spine lands exactly where
+	# the drawing would have put it.
+	#
+	# A FRACTIONAL FIT IS ACCEPTABLE **HERE AND ONLY HERE**, and that is not a lapse in the
+	# no-fractional-scale rule: the mark is BAKED (--markref plus scripts/pixelise_mark.py)
+	# and the bake reduces the whole composition to the art grid afterwards, so this render
+	# is an intermediate that no player ever sees. Do not copy this into a live draw path.
+	if not art_bank.has(key):
+		return false
+	var e: Dictionary = art_bank[key]
+	var tex: Texture2D = e["tex"]
+	var ts := Vector2(tex.get_size())
+	if ts.x <= 0.0 or ts.y <= 0.0:
+		return false
+	var k := long_px / maxf(ts.x, ts.y)
+	# `mid_local` IS THE WHOLE DIFFICULTY WITH THE T AND THE A. cap_knife and cap_club draw
+	# from the GRIP, with the business end at negative local y - so the shape is NOT centred
+	# on the point the caller passes, and the letters are laid out against that convention
+	# (the T deliberately offsets by CAP_KNIFE_MID to hang its crossbar on the balance point
+	# rather than on the guard). A sprite quad IS centred. Handing the same anchor to both
+	# therefore slides the sprite by half a prop, which on a letterform is not a nudge - the
+	# T's bar detaches from its stem. Passing the drawing's own midpoint puts the sprite's
+	# centre exactly where the drawing's centre was, and every layout constant still holds.
+	# `mid_local` arrives already scaled to pixels by the caller, since only the caller
+	# knows which of the prop's own constants its layout was measured against.
+	_art_quad(tex, pos + Vector2(0.0, mid_local).rotated(ang), ts * k * 0.5, ang, tint)
+	return true
+
+
 func cap_ball(p: Vector2, col_in: Color, r: float) -> void:
 	# THE BALL IS A STITCHED THING, NOT A GLASS ONE (2026-07-28, Louis: the balls "still
 	# look a bit strange"). This is the third attempt at a round prop and the first one
@@ -22571,13 +22615,23 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				# CENTRE THE BAR ON ITS OWN MIDDLE, not on its grip: anchoring by the
 				# origin (which is the guard, not the balance point) hung the whole
 				# crossbar to one side of the stem.
-				cap_knife(Vector2(x + w * 0.5 + CAP_KNIFE_MID * bsc, top), PI * 0.5, bsc)
+				var bar_at := Vector2(x + w * 0.5 + CAP_KNIFE_MID * bsc, top)
+				if not mark_prop("prop_big/knife", bar_at, PI * 0.5, CAP_KNIFE_LEN * bsc,
+						Color.WHITE, CAP_KNIFE_MID * bsc):
+					cap_knife(bar_at, PI * 0.5, bsc)
 				# ...and the stem stands ON the baseline: its butt is its lowest point.
-				cap_knife(Vector2(x + w * 0.5, base - CAP_KNIFE_BUTT * ssc), 0.0, ssc)
+				var stem_at := Vector2(x + w * 0.5, base - CAP_KNIFE_BUTT * ssc)
+				if not mark_prop("prop_big/knife", stem_at, 0.0, CAP_KNIFE_LEN * ssc,
+						Color.WHITE, CAP_KNIFE_MID * ssc):
+					cap_knife(stem_at, 0.0, ssc)
 			"O":
 				var rc := Vector2(x + ring_r, base - size_l * 0.46)
 				draw_glow(rc, ring_r * 1.30, ca(Color(0.45, 0.78, 1.0, 0.20)))
-				cap_ring(rc, ca(Color(0.45, 0.75, 0.95)), ring_r)
+				# THE O IS THE SHOP'S RING, not a second drawing of one - see mark_prop.
+				# The round props are centre-pivoted and radially symmetric, so swapping the
+				# art in cannot shift a letterform the way it could for the T's knives.
+				if not mark_prop("prop_big/ring", rc, 0.0, ring_r * 2.0, ca(Color(0.45, 0.75, 0.95))):
+					cap_ring(rc, ca(Color(0.45, 0.75, 0.95)), ring_r)
 			"S":
 				# an S is two loops: the top one sweeps from its right tip up over and down
 				# to the waist, the bottom one carries on from the waist round to the left.
@@ -22602,10 +22656,14 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				# bottom loop still starts at 1, so the waist gets one ball and never two.
 				for j in range(1, nb):
 					var a1 := lerpf(0.0, -1.5 * PI, float(j) / float(nb - 1))
-					cap_ball(c1 + Vector2(cos(a1), sin(a1)) * s_r, cap_s_color(j), br)
+					var p1 := c1 + Vector2(cos(a1), sin(a1)) * s_r
+					if not mark_prop("prop_big/ball", p1, 0.0, br * 2.0, cap_s_color(j)):
+						cap_ball(p1, cap_s_color(j), br)
 				for j in range(1, nb - 1):
 					var a2 := lerpf(-0.5 * PI, PI, float(j) / float(nb - 1))
-					cap_ball(c2 + Vector2(cos(a2), sin(a2)) * s_r, cap_s_color(j + nb), br)
+					var p2 := c2 + Vector2(cos(a2), sin(a2)) * s_r
+					if not mark_prop("prop_big/ball", p2, 0.0, br * 2.0, cap_s_color(j + nb)):
+						cap_ball(p2, cap_s_color(j + nb), br)
 			"A":
 				# TWO CLUBS THAT MEET, AND A DASH OF BALLS ACROSS THEM (2026-07-30, Louis: "change the
 				# two torches into clubs and change to four balls to the two middle balls for the dash of
@@ -22635,8 +22693,11 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				var bar_off := CLUB_BUTT_Y - CLUB_LEN * CAP_CROSSBAR_AT
 				var bar_l := foot_l + Vector2(0.0, bar_off).rotated(lean) * csc
 				var bar_r := foot_r + Vector2(0.0, bar_off).rotated(-lean) * csc
-				cap_club(foot_l, lean, csc)
-				cap_club(foot_r, -lean, csc)
+				var club_mid := (CLUB_BUTT_Y + CLUB_NOSE_Y) * 0.5 * csc
+				if not mark_prop("prop_big/club", foot_l, lean, CLUB_LEN * csc, Color.WHITE, club_mid):
+					cap_club(foot_l, lean, csc)
+				if not mark_prop("prop_big/club", foot_r, -lean, CLUB_LEN * csc, Color.WHITE, club_mid):
+					cap_club(foot_r, -lean, csc)
 				# THE DASH IS THE TWO MIDDLE BALLS OF THE FOUR (2026-07-30, Louis). Four balls spanning
 				# stroke to stroke made the crossbar a solid bar wedged into the letter; the two middle
 				# ones leave daylight either side, which is what the crossbar of a stencilled A looks

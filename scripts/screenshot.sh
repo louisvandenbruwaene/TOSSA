@@ -90,13 +90,6 @@ declare -a TARGETS=(
   "look_char_classic:60:tailor:--variant character:classic --tailor 0"
   "look_char_volume:60:tailor:--variant character:volume --tailor 0"
   "look_char_inked:60:tailor:--variant character:inked --tailor 0"
-  # The props look is photographed ON STAGE with `--prop 0` (balls), not in the shop: the
-  # shop shows prop_big/* (the CARD art), which this variant deliberately does not touch,
-  # so a shop capture of both options came back byte-identical - the exact tell this
-  # harness's duplicate check exists to raise, and here it was the target that was wrong
-  # rather than the flag.
-  "look_props_classic:700:play:--variant props:classic --demo --booking --venue 3 --prop 0"
-  "look_props_matched:700:play:--variant props:matched --demo --booking --venue 3 --prop 0"
   "look_light_classic:700:play:--variant lighting:classic --demo --booking --venue 3"
   "look_light_depth:700:play:--variant lighting:depth --demo --booking --venue 3"
   "look_light_warm:700:play:--variant lighting:warm --demo --booking --venue 3"

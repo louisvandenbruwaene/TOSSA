@@ -36,9 +36,9 @@ an A/B, `--artreport` lists every key the running session actually reached.
 **DESIGN VARIANTS RIDE THAT SEAM, AND COST ALMOST NO CODE.** A variant is a SECOND manifest
 overlaid on the first (`Resources/art_variants/<set>.<option>.json`): same keys, different PNGs.
 `art_boot` reads the base and then each chosen overlay, so no drawing code knows a variant exists.
-Three sets are on the F9 panel under THE LOOK - `character` (classic/volume/inked), `props`
-(classic/matched) and `lighting` (classic/depth/warm, a code-side grade rather than art). Option
-0 is always the shipped default and needs no files, so a release build reads exactly one manifest.
+Two sets are on the F9 panel under THE LOOK - `character` and `lighting` (a code-side grade
+rather than art). Option 0 is always the shipped default and needs no files, so a release build
+reads exactly one manifest.
 `--variant <set>:<option>` picks one for a single run WITHOUT touching the settings file, which is
 how `screenshot.sh` captures every look without changing Louis's own choice. A look that wins
 ships by being copied into the base manifest, the same rule the F9 booleans follow.
@@ -65,9 +65,14 @@ screen pixels tall and some three. Callers that place hands themselves must snap
 - **The character is TRACED, never generated.** A generated juggler comes back with realistic
   proportions and the arms down, which is a different character. `scripts/gen_char_refs.sh` drives
   the five flags this needs.
-- **Two sizes per prop.** `prop/*` is the stage sprite (tiny, derived); `prop_big/*` is the shop
-  card (PixelLab, blitted at zoom 1 so the ART decides the size). A stage club is 6x32 art px and
-  no art skill puts more pixels there, but a card magnifies it, so the card needs its own asset.
+- **Two sizes per prop, ONE design.** `prop_big/*` is the shop card (PixelLab, blitted at zoom 1)
+  and is the SOURCE: `prop/*` is derived from it by `scripts/derive_stage_props.py` (round props by
+  `make_round_props.py --stage`, from the same analytic model that draws their cards), and the title
+  wordmark bakes off it too via `mark_prop`. Before 2026-08-06 these were three unrelated pieces of
+  art and a player met three different clubs. **A prop's LENGTH is fixed** by `prop_scale` and the
+  collision geometry, so a derivation keeps the stage sprite's pixel height and only the width
+  follows the card. **Measure the card's INK, not its canvas** - by canvas the club looked 2.6x too
+  fat and by ink it was 6->7 art px.
 
 **Hard-won gotchas, each one paid for:**
 
