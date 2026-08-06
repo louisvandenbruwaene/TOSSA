@@ -88,8 +88,13 @@ declare -a TARGETS=(
   # the screen the character-consistency work was aimed at. --variant does NOT touch the
   # settings file (the panel does), so a capture sweep never changes Louis's own choice.
   "look_char_classic:60:tailor:--variant character:classic --tailor 0"
-  "look_char_volume:60:tailor:--variant character:volume --tailor 0"
-  "look_char_inked:60:tailor:--variant character:inked --tailor 0"
+  "look_char_natural:60:tailor:--variant character:natural --tailor 0"
+  "look_char_showman:60:tailor:--variant character:showman --tailor 0"
+  "look_char_acrobat:60:tailor:--variant character:acrobat --tailor 0"
+  # ...and each design ON STAGE too, because the tailor's mirror is a still T-pose and the
+  # thing a generated body most has to survive is the arms MOVING to a real catch.
+  "look_stage_natural:700:play:--variant character:natural --demo --booking --venue 3"
+  "look_stage_acrobat:700:play:--variant character:acrobat --demo --booking --venue 3"
   "look_light_classic:700:play:--variant lighting:classic --demo --booking --venue 3"
   "look_light_depth:700:play:--variant lighting:depth --demo --booking --venue 3"
   "look_light_warm:700:play:--variant lighting:warm --demo --booking --venue 3"

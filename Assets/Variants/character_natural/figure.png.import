@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://b2q16labrj124"
-path="res://.godot/imported/glove_closed.png-1ca7b12cbeb660fbfa317a54e6edb006.ctex"
+uid="uid://m7cfglwdykfd"
+path="res://.godot/imported/figure.png-59be07bb48897e1b8c680df6f49ea810.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Variants/character_volume/glove_closed.png"
-dest_files=["res://.godot/imported/glove_closed.png-1ca7b12cbeb660fbfa317a54e6edb006.ctex"]
+source_file="res://Assets/Variants/character_natural/figure.png"
+dest_files=["res://.godot/imported/figure.png-59be07bb48897e1b8c680df6f49ea810.ctex"]
 
 [params]
 

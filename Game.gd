@@ -1601,11 +1601,12 @@ var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop
 var art_variants := {"character": 0, "lighting": 0}
 const VARIANT_DEFS := [
 	{"id": "character", "name": "The performer",
-	 "desc": "How the juggler himself is painted - stage, tailor's mirror, skills preview and title screen all follow this, because they are one renderer now. Alpha is identical between the options, so his stance, proportions and silhouette never move; only the shading inside them does.",
+	 "desc": "WHOLE BODIES, not shading passes. Classic is the traced original and the only one that still changes costume per venue; the other three are painted figures with their own build, their own coat and their own shoulders. His HANDS are in the same place in all of them - that is the mechanic and it does not move for a costume - but a broader pair of shoulders makes the same catch a shorter reach, which is where the long arms went.",
 	 "opts": [
-		{"key": "classic", "name": "Classic", "hint": "flat cloth, the traced original"},
-		{"key": "volume", "name": "Volume", "hint": "deeper falloff, a lit edge - rounder"},
-		{"key": "inked", "name": "Inked", "hint": "a dark contour and brighter cloth inside it"}]},
+		{"key": "classic", "name": "Classic", "hint": "the traced original - recolours per venue"},
+		{"key": "natural", "name": "Natural", "hint": "black tailcoat, gold waistcoat, real proportions"},
+		{"key": "showman", "name": "Showman", "hint": "long red ringmaster's coat, broad build"},
+		{"key": "acrobat", "name": "Acrobat", "hint": "striped singlet, bare arms, lean"}]},
 	# THE OBJECTS ARE NO LONGER A CHOICE, and that is the rule this panel runs on: an
 	# experiment that wins leaves it. It shipped for one session as classic/matched and
 	# Louis's answer was "the shop designs for the objects are decent, use those
@@ -7729,9 +7730,81 @@ func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
 	# roots at 6.58 head units where the stage placed them at 6.38, so the little figure's
 	# arms hung a fifth of a head unit lower than the real one's - small enough never to be
 	# noticed and exactly the kind of drift a second copy of a body produces.
-	var dx := 0.9 * H
-	var y := floor_y - 6.38 * H
-	return Vector2(cx - dx, y) if h == LEFT else Vector2(cx + dx, y)
+	#
+	# A GENERATED DESIGN OVERRIDES BOTH NUMBERS, and this is the single most important line
+	# in the whole design feature: it is where a different body reaches the arms. The hands
+	# do not move - they are the mechanic - so moving the shoulder is the ONLY way an arm's
+	# length can change, and a broad-shouldered design gets shorter, more natural arms for
+	# free. See fit_char_design.py for how the joint is measured off the painting.
+	if fig_design_on():
+		var fh := fig_design_height()
+		var dx := float(fig_design.get("shoulder_dx", 0.13)) * fh
+		var y := floor_y - (1.0 - float(fig_design.get("shoulder_y", 0.20))) * fh
+		return Vector2(cx - dx, y) if h == LEFT else Vector2(cx + dx, y)
+	var dx0 := 0.9 * H
+	var y0 := floor_y - 6.38 * H
+	return Vector2(cx - dx0, y0) if h == LEFT else Vector2(cx + dx0, y0)
+
+
+func fig_design_on() -> bool:
+	# A design is live only when BOTH its geometry and its picture arrived. A manifest that
+	# names a figure whose PNG is missing must fall back to the traced juggler whole, never
+	# to a bodiless pair of arms hanging in the air at a stranger's shoulder width.
+	return not fig_design.is_empty() and art_bank.has("char/figure")
+
+
+func fig_design_height() -> float:
+	# the design's own height in SCREEN pixels: its art, at exactly ART_PIXEL screen pixels
+	# per art pixel. Read off the texture rather than trusted from the manifest, so the two
+	# can never disagree about the one number every landmark is a fraction of.
+	if not art_bank.has("char/figure"):
+		return 0.0
+	return float((art_bank["char/figure"] as Dictionary)["tex"].get_size().y) * ART_PIXEL
+
+
+func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
+	# A GENERATED PERFORMER, drawn as one picture. Everything the traced figure splits into
+	# costume regions - jacket, waistcoat, collar, buttons, trousers - is painted here, so
+	# there is nothing to recolour and nothing to assemble.
+	#
+	# THE PER-VENUE COSTUME DOES NOT SURVIVE THIS, and that was Louis's call on 2026-08-06
+	# ("one outfit per design"): costume_palette swaps five colours a venue, and a painting
+	# has one set. The venue still reaches him as a light TINT - warm at the Backyard, cool
+	# at the World Arena - which is a lamp on the same coat rather than a different coat.
+	# The traced 'classic' figure keeps the full wardrobe recolour.
+	#
+	# NEVER RESAMPLED. The quad is the texture's own size times ART_PIXEL, so one art pixel
+	# is exactly two screen pixels, the same as every other sprite in the game.
+	var tex: Texture2D = (art_bank["char/figure"] as Dictionary)["tex"]
+	var sz := Vector2(tex.get_size()) * ART_PIXEL
+	var pos := art_snap(Vector2(cx - sz.x * 0.5, floor_y - sz.y))
+	art_hits["char/figure"] = true
+	draw_colored_polygon(PackedVector2Array([
+		pos, pos + Vector2(sz.x, 0.0), pos + sz, pos + Vector2(0.0, sz.y)]), tint, art_uv, tex)
+
+
+func venue_figure_tint() -> Color:
+	# THE HOUSE'S LIGHT ON A PAINTED COSTUME. The traced juggler changes clothes per venue;
+	# a generated design cannot, so the venue reaches him the way a real stage would - as
+	# the colour of the lamp. Deliberately gentle (a fifth of the way toward the venue's own
+	# glow, and never darker than 0.86): this has to read as the Midnight Show being colder
+	# than the Circus, not as the performer owning seven coats.
+	var g: Color = venue_data(cur_venue())["glow"]
+	var k := 0.20
+	return Color(clampf(lerpf(1.0, g.r, k), 0.86, 1.0),
+		clampf(lerpf(1.0, g.g, k), 0.86, 1.0),
+		clampf(lerpf(1.0, g.b, k), 0.86, 1.0))
+
+
+func fig_design_col(key: String, fallback: Color) -> Color:
+	# a colour the fitter sampled off the painting (the sleeve, the cuff), so the arms the
+	# game draws are the same cloth as the coat they hang from. On the acrobat this comes
+	# back as SKIN, which is correct - his design has no sleeves.
+	var v: Variant = fig_design.get(key, null)
+	if typeof(v) != TYPE_ARRAY or (v as Array).size() < 3:
+		return fallback
+	var arr := v as Array
+	return Color(float(arr[0]) / 255.0, float(arr[1]) / 255.0, float(arr[2]) / 255.0)
 
 
 func columns_side_lanes() -> int:
@@ -11492,6 +11565,9 @@ const ART_PIXEL := 2.0                 # screen units per authored art pixel (12
 const ART_W := 640                     # the authoring canvas, and the eventual viewport
 const ART_H := 360
 const ART_MANIFEST := "res://Resources/art_manifest.json"
+var fig_design: Dictionary = {}   # the active character design's landmark geometry, from a
+                                  # variant manifest's _FIGURE block. EMPTY means the traced
+                                  # juggler, whose proportions live in fig_ys as constants.
 var art_manifest_path := ART_MANIFEST   # --artmanifest <path> points this elsewhere, which
 										# is how the placeholder set is tried on without
 										# editing (or risking) the real manifest
@@ -11525,6 +11601,7 @@ func art_boot() -> void:
 	# Read the manifest once at startup. A missing/!empty manifest is the NORMAL state on this
 	# branch and must stay completely silent - it means "no art authored yet", not an error.
 	art_bank.clear()          # re-entrant: an F9 variant change reboots the bank in place
+	fig_design.clear()        # ...and so does the active design's landmark geometry
 	art_read_manifest(art_manifest_path, true)
 	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
 	# no file, so a release build reads exactly one manifest and this loop does nothing.
@@ -11557,10 +11634,18 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 	if typeof(parsed) != TYPE_DICTIONARY:
 		push_warning("art: %s is not a JSON object - running fully procedural" % path)
 		return
-	for key: String in (parsed as Dictionary).keys():
+	var pd := parsed as Dictionary
+	if pd.has("_FIGURE") and typeof(pd["_FIGURE"]) == TYPE_DICTIONARY:
+		# A GENERATED CHARACTER DESIGN carries geometry, not just pictures. The traced
+		# juggler's proportions are constants in fig_ys; a design painted from scratch has
+		# its own, and the one thing the game must get right is where its ARMS leave the
+		# body - because those are drawn live, to hand positions that never move. See
+		# fig_design_on / draw_figure_design.
+		fig_design = (pd["_FIGURE"] as Dictionary).duplicate(true)
+	for key: String in pd.keys():
 		if key.begins_with("_"):
 			continue                          # "_comment" and friends are documentation
-		var e: Variant = (parsed as Dictionary)[key]
+		var e: Variant = pd[key]
 		if typeof(e) != TYPE_DICTIONARY:
 			continue
 		var fpath := str((e as Dictionary).get("path", ""))
@@ -12872,8 +12957,17 @@ func draw_juggler(s: Vector2) -> void:
 	# Show's whole point is a costume that nearly vanishes, and a hard white cuff
 	# would light the performer straight back up
 	var cuff := collar
-	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit, cuff)
-	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit, cuff)
+	var sleeve := suit
+	if fig_design_on():
+		# THE ARMS ARE THE DESIGN'S OWN CLOTH. They are drawn live rather than painted, so
+		# without this a generated performer wears his coat on his body and the venue's
+		# costume colour on his sleeves - the exact seam this whole feature exists to
+		# avoid. fit_char_design.py samples both colours off the painting before it cuts
+		# the arms off, which is the only moment they still exist to be sampled.
+		sleeve = fig_design_col("sleeve", suit)
+		cuff = fig_design_col("cuff", collar)
+	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, sleeve, cuff)
+	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, sleeve, cuff)
 
 	# hands (and any held balls) on top of the arms
 	draw_hand(LEFT)
@@ -13021,6 +13115,30 @@ func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
 	# fractional number of screen pixels per art pixel is mush, and that is the one thing
 	# pixel art cannot survive.
 	var floor_y: float = ys["floor"]
+	# A GENERATED DESIGN REPLACES THIS WHOLE FUNCTION with one picture. It goes first, so
+	# nothing below it can half-apply: the wardrobe's hat, the boots and the costume regions
+	# are all things a painted figure already has, and drawing them over it would be a man
+	# wearing two coats. The arms and hands are still the caller's, and still the game's.
+	if fig_design_on():
+		draw_figure_design(cx, floor_y, venue_figure_tint())
+		# A DESIGN CANNOT WEAR THE COSTUME, BUT IT CAN WEAR A CROWN. The coat is painted, so
+		# the wardrobe's jacket/waistcoat/boots have nothing to attach to - but the hat, the
+		# helmet and the glasses sit on a head, and the fitter measured where that is. This
+		# matters because THE TAILOR IS A SHOP: it says "trying it on" under the mirror, and
+		# a mirror that shows nothing when you buy a top hat is not a style limitation, it
+		# is a broken screen. The crown is drawn in the design's own accent so it belongs to
+		# the outfit rather than to the venue.
+		var fh := fig_design_height()
+		var head_c := Vector2(cx, floor_y - (1.0 - float(fig_design.get("head_cy", 0.06))) * fh)
+		var head_rr := float(fig_design.get("head_r", 0.055)) * fh
+		var acc := fig_design_col("cuff", cols["accent"])
+		if wearing("glasses") and not facing_back:
+			draw_worn_glasses(head_c, head_rr, acc)
+		if wearing("hat"):
+			draw_top_hat(head_c, head_rr, fig_design_col("sleeve", cols["suit_dk"]), acc, acc)
+		elif wearing("helmet"):
+			draw_worn_helmet(head_c, head_rr, acc, acc)
+		return
 	var hip_y: float = ys["hip"]
 	var knee_y: float = ys["knee"]
 	var waist_y: float = ys["waist"]
@@ -20030,8 +20148,10 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# the stage's own arms and hands: draw_capsule_pix limbs shaded across their width, the
 	# traced mitt, the real glove. `close` is 0 - a figure at rest holds its hands open,
 	# which is also the pose that shows a glove best, and showing one is why this exists.
-	draw_arm(fig_shoulder(o.x, floor_y, H, LEFT), hl, LEFT, skin, suit, collar)
-	draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT), hr, RIGHT, skin, suit, collar)
+	var pv_sleeve := fig_design_col("sleeve", suit) if fig_design_on() else suit
+	var pv_cuff := fig_design_col("cuff", collar) if fig_design_on() else collar
+	draw_arm(fig_shoulder(o.x, floor_y, H, LEFT), hl, LEFT, skin, pv_sleeve, pv_cuff)
+	draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT), hr, RIGHT, skin, pv_sleeve, pv_cuff)
 	draw_mitt(hl, 0.0, 1.0)
 	draw_mitt(hr, 0.0, -1.0)
 	if turn > 0.0:

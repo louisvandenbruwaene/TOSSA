@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bldq5nahky2th"
-path="res://.godot/imported/torso_collar.png-b87e8ef40c0b6e78d69ae97bec00ef2c.ctex"
+uid="uid://ctc1hyv6wvxyw"
+path="res://.godot/imported/figure.png-da8a84393571975f68954d6c6f9bf7fc.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Variants/character_volume/torso_collar.png"
-dest_files=["res://.godot/imported/torso_collar.png-b87e8ef40c0b6e78d69ae97bec00ef2c.ctex"]
+source_file="res://Assets/Variants/character_showman/figure.png"
+dest_files=["res://.godot/imported/figure.png-da8a84393571975f68954d6c6f9bf7fc.ctex"]
 
 [params]
 

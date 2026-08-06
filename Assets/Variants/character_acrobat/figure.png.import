@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://do6fgkvj3vsip"
-path="res://.godot/imported/torso_suit.png-250c9de392e2162cc65056970e1758f4.ctex"
+uid="uid://dubieo523qa1q"
+path="res://.godot/imported/figure.png-8b79ec74e1f375073b3ef727d0dd041d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Variants/character_volume/torso_suit.png"
-dest_files=["res://.godot/imported/torso_suit.png-250c9de392e2162cc65056970e1758f4.ctex"]
+source_file="res://Assets/Variants/character_acrobat/figure.png"
+dest_files=["res://.godot/imported/figure.png-8b79ec74e1f375073b3ef727d0dd041d.ctex"]
 
 [params]
 

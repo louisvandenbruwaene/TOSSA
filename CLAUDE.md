@@ -62,9 +62,18 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
   alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a
   model's idea of a juggling club.
-- **The character is TRACED, never generated.** A generated juggler comes back with realistic
-  proportions and the arms down, which is a different character. `scripts/gen_char_refs.sh` drives
-  the five flags this needs.
+- **The DEFAULT character is TRACED** (`scripts/gen_char_refs.sh` drives the five flags), and it
+  is the only look that still recolours per venue. **Alternate designs ARE generated**, though -
+  Louis reversed the never-generate rule on 2026-08-06 asking for real alternate bodies with more
+  natural arms. `scripts/fit_char_design.py` fits a PixelLab figure to the game's skeleton.
+  **THE GENERATED FIGURE HAS NO ARMS**, and that is the whole trick: hand positions are the
+  mechanic (`outer_pos`/`inner_pos`, every pattern's choreography) so they never move, but arms
+  are solved by IK to wherever the hand is this frame and a painted-on arm would freeze. The
+  fitter cuts them off and hands the game a shoulder point plus the sleeve colour it sampled
+  before cutting. **Arm length is therefore a consequence of the body**: wider shoulders make the
+  same catch a shorter reach, which is how the over-long arms were fixed without touching a
+  single gameplay number. A design carries its own landmark geometry in the variant manifest's
+  `_FIGURE` block and is drawn at its own native size - never resampled.
 - **Two sizes per prop, ONE design.** `prop_big/*` is the shop card (PixelLab, blitted at zoom 1)
   and is the SOURCE: `prop/*` is derived from it by `scripts/derive_stage_props.py` (round props by
   `make_round_props.py --stage`, from the same analytic model that draws their cards), and the title
