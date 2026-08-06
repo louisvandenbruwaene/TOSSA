@@ -209,9 +209,10 @@ def build(name: str, write: bool, force: bool, stage: bool = False) -> str:
 	levels = len(np.unique(g[inside]))
 	if not write:
 		return f"{name:5} {rgba.shape[1]:3}x{rgba.shape[0]:<3} {levels} grey levels  (report only)"
-	# The stage set is a VARIANT, not a replacement: the derived sprites are what ships
-	# until Louis picks otherwise on the F9 panel. See Resources/art_variants/props.*.json.
-	p = (VARIANTS / "props_matched" / f"{name}.png") if stage else (OUT / f"big_{name}.png")
+	# BOTH SIZES ARE THE SHIPPED ART now (2026-08-06, Louis: "the shop designs for the
+	# objects are decent, use those everywhere"). The stage set was briefly an F9 variant;
+	# it is simply the stage sprite, because one object should not have two designs.
+	p = OUT / (f"{name}.png" if stage else f"big_{name}.png")
 	p.parent.mkdir(parents=True, exist_ok=True)
 	status = artguard.save_guarded(p, lambda q: Image.fromarray(rgba, "RGBA").save(q), force)
 	return f"{name:5} {rgba.shape[1]:3}x{rgba.shape[0]:<3} {levels} grey levels  [{status}]"
