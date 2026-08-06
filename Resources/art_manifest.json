@@ -144,29 +144,11 @@
   "bg/the_midnight_show": {
     "path": "res://Assets/Backgrounds/the_midnight_show.png"
   },
-  "char/head": {
-    "path": "res://Assets/Characters/head.png"
-  },
   "char/hand_open": {
     "path": "res://Assets/Characters/hand_open.png"
   },
   "char/hand_closed": {
     "path": "res://Assets/Characters/hand_closed.png"
-  },
-  "char/torso_suit": {
-    "path": "res://Assets/Characters/torso_suit.png"
-  },
-  "char/torso_collar": {
-    "path": "res://Assets/Characters/torso_collar.png"
-  },
-  "char/torso_vest": {
-    "path": "res://Assets/Characters/torso_vest.png"
-  },
-  "char/torso_button": {
-    "path": "res://Assets/Characters/torso_button.png"
-  },
-  "char/legs_trouser": {
-    "path": "res://Assets/Characters/legs_trouser.png"
   },
   "bg/backyard": {
     "path": "res://Assets/Backgrounds/backyard.png"
@@ -195,9 +177,6 @@
   "prop_big/chainsaw": {
     "path": "res://Assets/Props/big_chainsaw.png"
   },
-  "char/head_back": {
-    "path": "res://Assets/Characters/head_back.png"
-  },
   "char/glove_open": {
     "path": "res://Assets/Characters/glove_open.png"
   },
@@ -216,12 +195,6 @@
   "char/boot": {
     "path": "res://Assets/Characters/boot.png"
   },
-  "char/torso_back_suit": {
-    "path": "res://Assets/Characters/torso_back_suit.png"
-  },
-  "char/torso_back_collar": {
-    "path": "res://Assets/Characters/torso_back_collar.png"
-  },
   "ui/menu_backdrop": {
     "path": "res://Assets/UI/menu_backdrop.png"
   },
@@ -233,5 +206,66 @@
   },
   "ui/wordmark_52": {
     "path": "res://Assets/UI/wordmark_52.png"
+  },
+  "_FIGURE": {
+    "height_art": 164,
+    "width_art": 84,
+    "shoulder_y": 0.2378,
+    "shoulder_dx": 0.1159,
+    "head_bottom": 0.2317,
+    "sleeve": [
+      56,
+      24,
+      16
+    ],
+    "cuff": [
+      152,
+      120,
+      88
+    ],
+    "head_cy": 0.0518,
+    "head_r": 0.0549
+  },
+  "_ANIM": {
+    "char/juggle_cascade": {
+      "reach": [
+        31.5,
+        32.5,
+        32.5,
+        32.5,
+        33.0,
+        33.5,
+        33.5,
+        36.5,
+        43.5,
+        43.5
+      ],
+      "frames": 10
+    },
+    "char/juggle_columns": {
+      "reach": [
+        26.5,
+        26.5,
+        26.5,
+        26.5,
+        27.5,
+        28.5,
+        29.0,
+        31.5,
+        32.5,
+        33.5,
+        46.5
+      ],
+      "frames": 11
+    }
+  },
+  "char/figure": {
+    "path": "res://Assets/Characters/showman/figure.png"
+  },
+  "char/juggle_cascade": {
+    "path": "res://Assets/Characters/showman/juggle_cascade.png"
+  },
+  "char/juggle_columns": {
+    "path": "res://Assets/Characters/showman/juggle_columns.png"
   }
 }
