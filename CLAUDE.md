@@ -33,6 +33,26 @@ is not in the PIXEL ART section is inherited from TOSSA and still true.
 manifest and that element goes back to being drawn. `--procart` forces everything procedural for
 an A/B, `--artreport` lists every key the running session actually reached.
 
+**DESIGN VARIANTS RIDE THAT SEAM, AND COST ALMOST NO CODE.** A variant is a SECOND manifest
+overlaid on the first (`Resources/art_variants/<set>.<option>.json`): same keys, different PNGs.
+`art_boot` reads the base and then each chosen overlay, so no drawing code knows a variant exists.
+Three sets are on the F9 panel under THE LOOK - `character` (classic/volume/inked), `props`
+(classic/matched) and `lighting` (classic/depth/warm, a code-side grade rather than art). Option
+0 is always the shipped default and needs no files, so a release build reads exactly one manifest.
+`--variant <set>:<option>` picks one for a single run WITHOUT touching the settings file, which is
+how `screenshot.sh` captures every look without changing Louis's own choice. A look that wins
+ships by being copied into the base manifest, the same rule the F9 booleans follow.
+
+**ONE FIGURE RENDERER, EVERYWHERE.** `draw_figure_body` draws the performer from the trousers to
+the hat for every screen; `fig_ys` owns the eight-head canon; `draw_arm` and `draw_mitt` are shared
+too. This is not tidiness - `draw_mini_juggler` used to carry its own copy of the whole body, and
+that copy was never moved onto the sprite seam, so the tailor's mirror and the skills preview
+showed a smooth vector man beside a pixel-art stage. **A preview may not pick its own figure
+height**: `fig_scale_H` snaps a wanted size to a whole (or exact half) multiple of the stage
+figure, because a region sprite fitted to a box 1.148x its authored size draws some rows two
+screen pixels tall and some three. Callers that place hands themselves must snap through
+`fig_preview_k` first, or the body scales and the arms do not.
+
 **DERIVE, DO NOT GENERATE, ANYTHING SMALL OR ANYTHING WITH A CHARACTER IN IT.**
 
 - **PixelLab's floor is 1024 pixels of AREA.** At this density that rules it out for every stage
@@ -67,6 +87,14 @@ an A/B, `--artreport` lists every key the running session actually reached.
 - **Tinted props are authored GREYSCALE** (`ball`, `egg`, `ring` only) because the game multiplies
   them by a colour and a multiply can only darken. They need `GREY_FLOOR = 0.45` or their rim
   pixels multiply down to near-black and read as holes in the silhouette.
+- **A TINTED SPRITE MUST STORE A RATIO, NOT A BRIGHTNESS**, and that is a bug you can look
+  straight at without seeing. The hands were traced from a render in which they were already
+  skin-coloured, so `hand_open` was a flat mask at 0.45 luminance; multiplied by skin (0.87, 0.63,
+  0.43) the performer's bare hands came out near (0.39, 0.28, 0.19) - two lumps of wood on the
+  ends of his sleeves, on every screen. The lit side of anything the game tints has to reach pure
+  white. `scripts/shade_char_hands.py` fixes them by fitting a SPHERE, not a distance-transform
+  dome: at twelve pixels the interior of a dome is one flat plateau three pixels in, so all the
+  shading ends up in a one-pixel rim and the palm comes back uniformly white.
 - **Generators put round props on a PLINTH** even when told not to, and it is fused to the
   silhouette so a width-threshold filter misses it. `scripts/trim_plinth.py` detects it properly
   (convexity break plus a luminance drop) and explains why the obvious rule fails.

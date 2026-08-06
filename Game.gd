@@ -1584,6 +1584,40 @@ var debug_mode := false   # debug build: free stat editing in the character shee
 # value here, or a missing key silently ships the other look.
 var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop_v2": true,
 	"hand_spring": true, "gaze_track": true}
+# ART VARIANTS (2026-08-06, Louis: "implement multiple designs and let me choose them
+# with F9"). An experiment is a YES/NO; a DESIGN is a one-of-N, and squeezing a
+# three-way look choice into two booleans gives four states, two of which are nonsense.
+# So the panel now carries a second row type: a named list, cycled with left/right.
+#
+# WHY THIS COSTS ALMOST NO CODE. The art seam already says that
+# `Resources/art_manifest.json` ALONE decides whether a key is a sprite or a drawing.
+# A variant is therefore just a SECOND manifest overlaid on the first: same keys,
+# different PNGs. Nothing in the 24k lines of drawing code knows a variant exists, and
+# a look that wins ships by being copied into the base manifest - the same
+# "an experiment that wins leaves the panel" rule the booleans above follow.
+#
+# Option 0 of every set IS the shipped default, so a release build (which never opens
+# the panel) always draws option 0 and needs no variant files present at all.
+var art_variants := {"character": 0, "props": 0, "lighting": 0}
+const VARIANT_DEFS := [
+	{"id": "character", "name": "The performer",
+	 "desc": "How the juggler himself is painted - stage, tailor's mirror, skills preview and title screen all follow this, because they are one renderer now. Alpha is identical between the options, so his stance, proportions and silhouette never move; only the shading inside them does.",
+	 "opts": [
+		{"key": "classic", "name": "Classic", "hint": "flat cloth, the traced original"},
+		{"key": "volume", "name": "Volume", "hint": "deeper falloff, a lit edge - rounder"},
+		{"key": "inked", "name": "Inked", "hint": "a dark contour and brighter cloth inside it"}]},
+	{"id": "props", "name": "The objects",
+	 "desc": "Stage props against shop-card props. The cards have always been the richer painting (volumetric, lit from the upper left) and the stage set the flatter derived one, so the same ball is two objects depending on which screen you are looking at. 'Matched' rebuilds the stage set from the card art so a ball is one ball everywhere.",
+	 "opts": [
+		{"key": "classic", "name": "Classic", "hint": "derived from the game's own drawing"},
+		{"key": "matched", "name": "Matched", "hint": "stage art rebuilt from the shop cards"}]},
+	{"id": "lighting", "name": "Stage light",
+	 "desc": "The grade over a venue: how far the backdrop falls back behind the performer, and how warm the spill is. Purely a wash over finished art - it moves no pixel and costs one rect, so it is safe to judge on feel alone.",
+	 "opts": [
+		{"key": "classic", "name": "Classic", "hint": "the backdrop as painted"},
+		{"key": "depth", "name": "Depth", "hint": "the room sinks, the performer stays lit"},
+		{"key": "warm", "name": "Warm", "hint": "tungsten spill, a heavier vignette"}]},
+]
 var debug_panel_open := false
 var debug_panel_sel := 0
 const EXPERIMENT_DEFS := [
@@ -2124,6 +2158,38 @@ func _ready() -> void:
 	# --- pixel-art remaster flags (PIXELTOSSA); see the PIXEL-ART RENDER SEAM region ---
 	if ua.has("--procart"):    # force every art key to miss: the A/B against a sprite
 		art_on = false
+	# --variant <set>:<option>, repeatable: pick a design for this run without touching the
+	# saved settings. This is what lets screenshot.sh photograph all three performer looks in
+	# one pass - the panel writes to the settings file, and a capture harness that did that
+	# would leave Louis's own chosen look changed behind it.
+	#
+	# THE BANK IS ALREADY BUILT by the time this block runs (art_boot is up at the top, so
+	# the bitmap font is registered before setup_font). Rather than hoist a third flag above
+	# load_settings the way --artmanifest had to be, this just re-reads the manifests once
+	# at the end - the textures are in Godot's resource cache, so the second read is free.
+	var vchanged := false
+	for vi in ua.size():
+		if ua[vi] != "--variant" or vi + 1 >= ua.size():
+			continue
+		var spec := ua[vi + 1].split(":")
+		if spec.size() != 2:
+			push_warning("--variant wants <set>:<option>, got '%s'" % ua[vi + 1])
+			continue
+		var vdef := variant_def(spec[0])
+		if vdef.is_empty():
+			push_warning("--variant: no design set named '%s'" % spec[0])
+			continue
+		var found := -1
+		for oi in (vdef["opts"] as Array).size():
+			if String(((vdef["opts"] as Array)[oi] as Dictionary)["key"]) == spec[1]:
+				found = oi
+		if found < 0:
+			push_warning("--variant: '%s' has no option '%s'" % [spec[0], spec[1]])
+			continue
+		art_variants[String(vdef["id"])] = found
+		vchanged = true
+	if vchanged:
+		art_boot()
 	if ua.has("--artreport"):  # print which seam keys this run reached, and which had art
 		_art_report = true
 	if ua.has("--pixel"):      # capture --shot at art density instead of 1280x720
@@ -3270,11 +3336,13 @@ func open_pause() -> void:
 
 
 func debug_panel_input(kc: int) -> void:
-	# EXPERIMENTS: a tiny, debug-only list (F9 opens/closes it from anywhere, live
-	# over whatever screen is already open) - up/down picks one, Enter/Space flips
-	# it on the spot, and the change is visible the next time that screen draws
-	# (no restart, no code edit). See EXPERIMENT_DEFS for what's on it.
-	var n := EXPERIMENT_DEFS.size()
+	# EXPERIMENTS AND DESIGNS: a tiny, debug-only list (F9 opens/closes it from anywhere,
+	# live over whatever screen is already open) - up/down picks a row, and what a row
+	# DOES depends on which kind it is. The variants come first because they are the
+	# reason this panel gets opened now: left/right walks a design's options, and the
+	# art is swapped under the frame you are already looking at.
+	var nv := VARIANT_DEFS.size()
+	var n := nv + EXPERIMENT_DEFS.size()
 	match kc:
 		KEY_UP:
 			debug_panel_sel = (debug_panel_sel + n - 1) % n
@@ -3282,16 +3350,38 @@ func debug_panel_input(kc: int) -> void:
 		KEY_DOWN:
 			debug_panel_sel = (debug_panel_sel + 1) % n
 			play_sfx("ui", -16.0)
+		KEY_LEFT, KEY_RIGHT:
+			if debug_panel_sel < nv:
+				debug_panel_step(debug_panel_sel, -1 if kc == KEY_LEFT else 1)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
-			var eid := String(EXPERIMENT_DEFS[debug_panel_sel]["id"])
-			experiments[eid] = not exp_on(eid)
-			save_settings()
-			play_sfx("ui2", -13.0)
+			# Enter ADVANCES a design and TOGGLES an experiment, so the one key that has
+			# always meant "change this row" still does, whichever kind of row it is.
+			if debug_panel_sel < nv:
+				debug_panel_step(debug_panel_sel, 1)
+			else:
+				var eid := String(EXPERIMENT_DEFS[debug_panel_sel - nv]["id"])
+				experiments[eid] = not exp_on(eid)
+				save_settings()
+				play_sfx("ui2", -13.0)
 		KEY_ESCAPE:
 			# F9 also closes it, but that's caught globally above _input's state
 			# dispatch (same spot F11 is), so it never reaches this match at all
 			debug_panel_open = false
 			play_sfx("ui2", -14.0)
+
+
+func debug_panel_step(row: int, dir: int) -> void:
+	# Walk one design's options and rebuild the art bank so the change is on screen
+	# immediately. WRAPS rather than clamping: three options with a hard stop at each end
+	# makes comparing the first against the last a four-key journey, and the whole value
+	# of this panel is flipping A/B/A in front of one frame until the eye decides.
+	var d: Dictionary = VARIANT_DEFS[row]
+	var vid := String(d["id"])
+	var cnt: int = (d["opts"] as Array).size()
+	art_variants[vid] = ((int(art_variants.get(vid, 0)) + dir) % cnt + cnt) % cnt
+	save_settings()
+	art_rebank()
+	play_sfx("ui2", -13.0)
 
 
 func pause_input(kc: int) -> void:
@@ -7114,6 +7204,16 @@ func load_settings() -> void:
 					var eid := String(def["id"])   # added later always starts at its own
 					if loaded_exp.has(eid):        # default rather than a missing key
 						experiments[eid] = bool(loaded_exp[eid])
+			var loaded_var = cf.get_value("opt", "variants", art_variants)
+			if loaded_var is Dictionary:
+				for def in VARIANT_DEFS:
+					var vid := String(def["id"])
+					if loaded_var.has(vid):
+						# CLAMPED ON THE WAY IN, not trusted. This file survives a code
+						# change that shortens an option list, and an out-of-range index
+						# would otherwise reach variant() every frame for the rest of the
+						# session. Option 0 is always the shipped default.
+						art_variants[vid] = clampi(int(loaded_var[vid]), 0, (def["opts"] as Array).size() - 1)
 
 
 func save_settings() -> void:
@@ -7135,6 +7235,7 @@ func save_settings() -> void:
 	cf.set_value("keys", "pad_cycle", PAD_CYCLE)
 	if OS.is_debug_build():
 		cf.set_value("opt", "experiments", experiments)
+		cf.set_value("opt", "variants", art_variants)
 	cf.save(SETTINGS_PATH)
 
 
@@ -7618,11 +7719,17 @@ func shoulder_pos(h: int) -> Vector2:
 	# so an attach point ON the line let half the deltoid peak above the silhouette
 	# (Louis: shoulders belong at shoulder height, not over it).
 	var s := get_viewport_rect().size
-	var c := s.x * 0.5
-	var H := s.y * 0.056
-	var y := s.y * 0.80 - 6.38 * H
+	return fig_shoulder(s.x * 0.5, s.y * 0.80, fig_stage_H(s), h)
+
+
+func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
+	# ...the same point on ANY figure, at any size. The preview used to place its own arm
+	# roots at 6.58 head units where the stage placed them at 6.38, so the little figure's
+	# arms hung a fifth of a head unit lower than the real one's - small enough never to be
+	# noticed and exactly the kind of drift a second copy of a body produces.
 	var dx := 0.9 * H
-	return Vector2(c - dx, y) if h == LEFT else Vector2(c + dx, y)
+	var y := floor_y - 6.38 * H
+	return Vector2(cx - dx, y) if h == LEFT else Vector2(cx + dx, y)
 
 
 func columns_side_lanes() -> int:
@@ -11415,12 +11522,38 @@ var _markref_size := 0.0           # ...at this letter height (default MENU_MARK
 func art_boot() -> void:
 	# Read the manifest once at startup. A missing/!empty manifest is the NORMAL state on this
 	# branch and must stay completely silent - it means "no art authored yet", not an error.
-	if not FileAccess.file_exists(art_manifest_path):
+	art_bank.clear()          # re-entrant: an F9 variant change reboots the bank in place
+	art_read_manifest(art_manifest_path, true)
+	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
+	# no file, so a release build reads exactly one manifest and this loop does nothing.
+	# Overlay order is VARIANT_DEFS order; two sets are not expected to claim the same key,
+	# and if they ever do the later set wins, which is at least a rule rather than a race.
+	for d: Dictionary in VARIANT_DEFS:
+		var vid := String(d["id"])
+		var opt := variant(vid)
+		if int(art_variants.get(vid, 0)) == 0:
+			continue
+		var vpath := "res://Resources/art_variants/%s.%s.json" % [vid, opt]
+		if not FileAccess.file_exists(vpath):
+			# A variant with no art file is not an error either: it is how a look is
+			# reserved on the panel before its generator has been run. It simply draws
+			# the base art, which is the honest thing for "this look does not exist yet".
+			continue
+		art_read_manifest(vpath, false)
+
+
+func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
+	# Shared by the base manifest and every variant overlay. Entries land in art_bank by
+	# key, so an overlay REPLACES a base entry for the same key and leaves the rest alone -
+	# that is what lets a character variant ship only the parts it actually repaints.
+	if not FileAccess.file_exists(path):
+		if not quiet_if_missing:
+			push_warning("art: variant manifest %s missing" % path)
 		return
-	var raw := FileAccess.get_file_as_string(art_manifest_path)
+	var raw := FileAccess.get_file_as_string(path)
 	var parsed: Variant = JSON.parse_string(raw)
 	if typeof(parsed) != TYPE_DICTIONARY:
-		push_warning("art: %s is not a JSON object - running fully procedural" % art_manifest_path)
+		push_warning("art: %s is not a JSON object - running fully procedural" % path)
 		return
 	for key: String in (parsed as Dictionary).keys():
 		if key.begins_with("_"):
@@ -11428,14 +11561,14 @@ func art_boot() -> void:
 		var e: Variant = (parsed as Dictionary)[key]
 		if typeof(e) != TYPE_DICTIONARY:
 			continue
-		var path := str((e as Dictionary).get("path", ""))
-		if path == "" or not ResourceLoader.exists(path):
+		var fpath := str((e as Dictionary).get("path", ""))
+		if fpath == "" or not ResourceLoader.exists(fpath):
 			# a manifest line whose file is not there yet is a PLAN, not a failure - it is
 			# exactly how you reserve a key before drawing the art. Loud enough to find,
 			# quiet enough to leave in place for weeks.
-			push_warning("art: '%s' -> %s not found, falling back to procedural" % [key, path])
+			push_warning("art: '%s' -> %s not found, falling back to procedural" % [key, fpath])
 			continue
-		var tex: Variant = load(path)
+		var tex: Variant = load(fpath)
 		if not (tex is Texture2D):
 			continue
 		var piv: Variant = (e as Dictionary).get("pivot", [0.5, 0.5])
@@ -11448,7 +11581,16 @@ func art_boot() -> void:
 			"scale": float((e as Dictionary).get("scale", 1.0)),
 		}
 	if art_bank.size() > 0:
-		print("art: %d sprite(s) registered from %s" % [art_bank.size(), art_manifest_path])
+		print("art: %d sprite(s) registered after %s" % [art_bank.size(), path])
+
+
+func art_rebank() -> void:
+	# Re-read every manifest and redraw. This is what an F9 variant change calls, and the
+	# reason a look can be judged by flipping between them in front of the same frame
+	# rather than by launching twice and remembering. Cheap - a few dozen small textures,
+	# all already in Godot's resource cache after the first read.
+	art_boot()
+	queue_redraw()
 
 
 func art_snap(v: Vector2) -> Vector2:
@@ -11975,6 +12117,7 @@ func draw_backdrop(s: Vector2) -> void:
 	# take (`veil`), so a dark house keeps its detail without any venue losing its depth.
 	draw_rect(Rect2(0, 0, s.x, fy), Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5,
 		float(v.get("veil", 0.42))))
+	draw_stage_grade(s, fy, glow)
 
 	# spotlight cone from above centre: it narrows and warms a touch as a streak
 	# builds, the light literally rewarding focus (ART doc, Section 2)
@@ -12078,6 +12221,42 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var up := absf(sin(atick() * 0.09 + float(i)))                     # hands up!
 				draw_circle(Vector2(hx - hr, hy - hr - 4.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
 				draw_circle(Vector2(hx + hr, hy - hr - 5.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
+
+
+func draw_stage_grade(s: Vector2, fy: float, glow: Color) -> void:
+	# THE STAGE-LIGHT VARIANT (F9 > THE LOOK > Stage light). A wash laid over the finished
+	# backdrop and UNDER the spotlight cone, so it changes how far the room sits behind the
+	# performer without touching a single pixel of the painting or of the light that
+	# reacts to the player. That placement is the whole design: put it after the cone and
+	# it would dull the one thing on this screen that rewards a streak.
+	#
+	# It is a grade, not scenery, so it costs a handful of rects and can be judged purely
+	# on feel - which is what makes it a fair thing to put on the panel. The backdrops
+	# themselves cannot be varied this cheaply: seven venues times three looks is
+	# twenty-one paintings, and five of the seven are PixelLab generations that would have
+	# to be re-run and re-mirrored.
+	match variant("lighting"):
+		"depth":
+			# THE ROOM SINKS. A second cool veil over the backdrop only - the performer is
+			# lit by the cone that comes after this, so pushing the room back pushes HIM
+			# forward for free. Graded top-down rather than flat: the ceiling of a big
+			# house is the part that should read as far away, and the seats near the
+			# stage lip are the part that should not.
+			draw_gradient_v(Rect2(0, 0, s.x, fy), Color(0.04, 0.05, 0.10, 0.40),
+				Color(0.04, 0.05, 0.10, 0.10), 10)
+		"warm":
+			# TUNGSTEN SPILL AND A HEAVIER VIGNETTE. Real theatre light is not white, and
+			# the corners of a lit stage fall off hard because the lanterns are all aimed
+			# at the middle of it. The spill is the venue's OWN glow colour rather than a
+			# fixed amber, so a house keeps its identity - the Midnight Show does not
+			# suddenly warm up into the Circus.
+			draw_rect(Rect2(0, 0, s.x, fy), Color(glow.r, glow.g, glow.b, 0.10))
+			var vw := s.x * 0.22
+			draw_gradient_h(Rect2(0, 0, vw, fy), Color(0.02, 0.01, 0.02, 0.45), Color(0.02, 0.01, 0.02, 0.0), 8)
+			draw_gradient_h(Rect2(s.x - vw, 0, vw, fy), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.45), 8)
+			draw_gradient_v(Rect2(0, 0, s.x, fy * 0.30), Color(0.02, 0.01, 0.02, 0.40), Color(0.02, 0.01, 0.02, 0.0), 8)
+		_:
+			pass   # "classic": the backdrop as painted, which is what has always shipped
 
 
 func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
@@ -12601,7 +12780,7 @@ func draw_juggler(s: Vector2) -> void:
 	# head one eighth of the height, the crotch
 	# at the vertical midpoint, a drawn-in waist. H is the head unit off the floor line.
 	var floor_y := s.y * 0.80
-	var H := s.y * 0.056
+	var H := fig_stage_H(s)
 
 	# body language: the feet stay planted but the trunk BREATHES, and a fresh catch
 	# is absorbed with a soft knee-dip of the whole upper body, so the figure reads
@@ -12612,13 +12791,14 @@ func draw_juggler(s: Vector2) -> void:
 		if cfd >= 0 and cfd < 12:
 			dip = maxf(dip, 5.0 * (1.0 - float(cfd) / 12.0))
 
-	var hip_y := floor_y - 4.0 * H + dip * 0.25
-	var knee_y := floor_y - 2.0 * H
-	var waist_y := floor_y - 5.0 * H + dip * 0.55
-	var chest_y := floor_y - 6.0 * H + dip * 0.8
-	var shoulder_y := floor_y - 6.72 * H + dip
-	var head := Vector2(cx, floor_y - 7.5 * H + dip)
-	var head_r := 0.52 * H
+	var ys := fig_ys(cx, floor_y, H, dip)
+	var hip_y: float = ys["hip"]
+	var knee_y: float = ys["knee"]
+	var waist_y: float = ys["waist"]
+	var chest_y: float = ys["chest"]
+	var shoulder_y: float = ys["shoulder"]
+	var head: Vector2 = ys["head"]
+	var head_r: float = ys["head_r"]
 
 	# a soft ground shadow so the figure stands ON the stage instead of floating (drawn
 	# BEFORE the spin transform, so it stays put on the ground while the body turns)
@@ -12653,6 +12833,207 @@ func draw_juggler(s: Vector2) -> void:
 			sx = 0.14 if sx >= 0.0 else -0.14
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
+	# THE BODY, drawn by the ONE renderer every screen shares (2026-08-06, Louis: "make
+	# sure that the character, objects etc look the same everywhere in the game, from
+	# titlescreen to shop, to performance"). Everything from the trousers up to the hat
+	# used to exist TWICE - once here and once in draw_mini_juggler - and the second copy
+	# had never been carried across to the sprite seam, so the tailor's mirror and the
+	# skills preview were still showing a smooth vector man while the stage showed a
+	# pixel-art one. Two copies of a figure is exactly what the wardrobe pass refused to
+	# write and it was already here. See draw_figure_body.
+	#
+	# gaze_track (F9 experiment): aim the eyes at whichever prop is due to land soonest -
+	# the very ball hand_target already has its (empty) hand travelling out to meet. Just
+	# a scan of `balls`, no different in spirit from hand_target's own `inc` search. It
+	# stays with the CALLER rather than moving into the shared renderer, because it is the
+	# one thing on the figure that reads the live simulation - a mirror has no next catch.
+	var gaze := Vector2.ZERO
+	if exp_on("gaze_track") and not facing_back:
+		var watch: Ball = null
+		for b in balls:
+			if b.state == STATE_FLIGHT and (watch == null or b.land_tick < watch.land_tick):
+				watch = b
+		if watch != null:
+			gaze = flight_pos(watch) - head
+	draw_figure_body(cx, H, ys,
+		{"suit": suit, "suit_dk": suit_dk, "vest": vest, "collar": collar,
+			"accent": accent, "skin": skin, "hair": hair, "button": button},
+		facing_back, spin_on, sx, gaze)
+	if spin_on:                                                            # back to the body width-scale for the arms
+		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
+
+	# arms follow the hands via a 2-bone solve, so the choreography animates
+	# (their shoulder roots ride the same body dip as the trunk). The wardrobe's cuff
+	# is drawn INSIDE draw_arm, on the solved wrist, so it can never float free of the
+	# arm the way a body-relative guess does.
+	# the cuff is the venue's OWN collar colour, never a fixed white: the Midnight
+	# Show's whole point is a costume that nearly vanishes, and a hard white cuff
+	# would light the performer straight back up
+	var cuff := collar
+	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit, cuff)
+	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit, cuff)
+
+	# hands (and any held balls) on top of the arms
+	draw_hand(LEFT)
+	draw_hand(RIGHT)
+
+	# THE PIPING, over the now-glowing costume. These were the whole effect once (six
+	# strips of tape on a near-black suit); with the costume itself in phosphor they do
+	# the job good piping does on real evening dress - they pick out the shoulder line,
+	# the cummerbund and the outseam, so the figure has EDGES at a distance instead of
+	# being one bright mass. Brighter than the cloth they sit on, or they vanish into it.
+	if glow_suit_lit():
+		# ONLY the trouser outseams are left of the old tape. The two horizontal runs
+		# (across the shoulders, round the waist) were struck straight across the figure
+		# rather than along any seam, so against a costume that now glows by itself they
+		# read as bars laid over the man. The two arm runs were worse: they were drawn
+		# shoulder-to-HAND as one straight chord while the arm itself bends at the elbow,
+		# so the line left the sleeve and crossed open air - a wire, not piping. The
+		# sleeve is lit cloth now and needs no help; the bare forearm reading as skin is
+		# correct, because he is wearing a glowing costume, not covered in phosphor.
+		#
+		# AND THE LEG RUN WAS MAKING THE ARMS' OWN MISTAKE (2026-07-28, Louis: "make the
+		# glow in the dark legs look better"). It was hip -> floor as ONE straight chord
+		# while the leg is two tapering capsules with a knee between them: measured against
+		# the shapes actually drawn above, the seam started 0.13H inside the thigh and
+		# finished 0.03H OUTSIDE the calf, so a line meant to be a seam left the cloth and
+		# ended in open air beside the ankle. It is a POLYLINE now, with a vertex at the
+		# knee, and every x is derived from the capsule centres and half-widths right
+		# there in the leg block rather than eyeballed - the thigh is 0.46H wide about
+		# cx±0.40H, the calf 0.30H about cx±0.34H, so the outer face is 0.63H then 0.49H
+		# then 0.42H, and the seam sits just inside each.
+		#
+		# A TURN-UP AT THE ANKLE is the other half of the fix, and it is the mark that
+		# gives the leg an END. A single stripe down a limb reads as a stick; a bright band
+		# across the hem reads as a trouser over a shoe, which is what is actually there.
+		var seam_l := PackedVector2Array([
+			Vector2(cx - 0.50 * H, hip_y + 0.02 * H),
+			Vector2(cx - 0.40 * H, knee_y),
+			Vector2(cx - 0.35 * H, floor_y - 0.22 * H)])
+		var seam_r := PackedVector2Array([
+			Vector2(cx + 0.50 * H, hip_y + 0.02 * H),
+			Vector2(cx + 0.40 * H, knee_y),
+			Vector2(cx + 0.35 * H, floor_y - 0.22 * H)])
+		draw_glow_seam(seam_l, 2.0, 1.0)
+		draw_glow_seam(seam_r, 2.0, 1.0)
+		# ...and the turn-up sits at whatever the trouser's real hem is: at the ankle bare,
+		# or at the top of a boot shaft when the wardrobe has put one there. A band drawn
+		# across the middle of a boot is a band drawn on the wrong garment.
+		var hem_y := floor_y - (0.54 if wearing("boots") else 0.21) * H
+		for hemx in [-0.34 * H, 0.34 * H]:
+			draw_glow_seam(PackedVector2Array([
+				Vector2(cx + hemx - 0.15 * H, hem_y),
+				Vector2(cx + hemx + 0.15 * H, hem_y)]), 2.4, 0.9)
+	# done with the (possibly spinning) figure: return to screen space, then lay the
+	# sweeping motion streaks over the top so the turn reads as fast
+	if spin_on:
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_spin_streaks(Vector2(cx, (shoulder_y + hip_y) * 0.5))
+
+
+func fig_ys(cx: float, floor_y: float, H: float, dip: float) -> Dictionary:
+	# THE EIGHT-HEAD CANON, in one place. Head one eighth of the height, the crotch at the
+	# vertical midpoint, a drawn-in waist - which is what makes the juggler read as a real
+	# adult rather than a game mascot, and is the single thing about him that must never
+	# drift. It was written out twice (draw_juggler and draw_mini_juggler) with the same
+	# seven numbers copied by hand, which is a stance waiting to be reshaped by a typo in
+	# a screen nobody was looking at.
+	#
+	# `dip` is the body language - a breath, plus a knee-absorb on a fresh catch - and it
+	# rides the trunk in DECREASING amounts down the body (full at the shoulders, a
+	# quarter at the hips, none at the knees) because that is how a standing person
+	# absorbs: the feet stay planted. A preview passes 0 and gets the same figure at rest.
+	return {
+		"floor": floor_y,
+		"hip": floor_y - 4.0 * H + dip * 0.25,
+		"knee": floor_y - 2.0 * H,
+		"waist": floor_y - 5.0 * H + dip * 0.55,
+		"chest": floor_y - 6.0 * H + dip * 0.8,
+		"shoulder": floor_y - 6.72 * H + dip,
+		"head": Vector2(cx, floor_y - 7.5 * H + dip),
+		"head_r": 0.52 * H,
+	}
+
+
+const FIG_HAND_LINE := 4.099   # head units from the resting hand line down to the floor.
+                               # PV_FLOOR / PV_HEAD, kept as a PROPORTION rather than the
+                               # two preview pixel constants, so it still means the same
+                               # thing after fig_scale_H has snapped H to another size.
+
+
+func fig_stage_H(s: Vector2) -> float:
+	# The head unit the STAGE figure is drawn at, and therefore the size every char/*
+	# sprite was traced at. Every other screen's figure is a whole multiple of this.
+	return s.y * 0.056
+
+
+func fig_scale_H(want: float) -> float:
+	# SNAP A WANTED FIGURE HEIGHT TO ONE THE SPRITES CAN ACTUALLY BE DRAWN AT.
+	#
+	# The body is per-region sprites (art_blit_regions), authored by tracing the figure at
+	# the stage's own H. art_blit_size then FITS that texture to whatever box it is given,
+	# so a caller that picks its H by fitting a panel - which is exactly what the tailor's
+	# mirror did, solving k from the panel height and landing on 1.148x the stage size -
+	# gets each source pixel drawn across 2.3 screen pixels. Some rows come out two
+	# pixels tall and some three, and the whole man crawls and shimmers. It is the one
+	# failure pixel art cannot survive, and it is invisible in the code that causes it.
+	#
+	# So the ratio to the stage figure is snapped to a multiple of a HALF. A half is legal
+	# and a quarter is not, and that is arithmetic rather than taste: the stage draws one
+	# art pixel as ART_PIXEL (2) screen pixels, so a half-size figure draws it as 1 and a
+	# one-and-a-half-size figure as 3 - both whole numbers. 1.25x would be 2.5 and is the
+	# mush this exists to prevent. The caller gets a figure a little off the size it asked
+	# for, and a crisp one; the alternative is the size it asked for and a shimmering one.
+	var base := fig_stage_H(get_viewport_rect().size)
+	var ratio := maxf(round(want / maxf(base, 0.001) * 2.0) * 0.5, 0.5)
+	return base * ratio
+
+
+func fig_preview_k(want: float) -> float:
+	# THE k A CALLER WILL ACTUALLY GET, so it can place the hands and the floor in
+	# agreement with the body it is about to be handed. The tailor solves its k from the
+	# panel height and then uses that same k for PV_FLOOR and PV_OUTER; if only the body
+	# were snapped, the hands would stay out at the unsnapped reach and the arms would
+	# come out 15% too long - which is precisely what happened on the first attempt, and
+	# it reads as a different, lankier man rather than as a scaling bug.
+	return fig_scale_H(PV_HEAD * want) / PV_HEAD
+
+
+func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
+		facing_back: bool, spin_on: bool, sx: float, gaze: Vector2) -> void:
+	# THE PERFORMER, AND THERE IS ONLY ONE OF HIM. Trousers, boots, neck, jacket, the
+	# wardrobe pass, the head and whatever is on it - everything between the floor and the
+	# top hat, for every screen in the game. The arms and hands are the caller's, because
+	# only the stage has a live simulation to put them anywhere interesting.
+	#
+	# WHY IT IS A FUNCTION AND NOT A SECOND COPY. This block was duplicated into
+	# draw_mini_juggler when the preview was written, and the two then drifted for exactly
+	# as long as the fork has existed: draw_juggler was moved onto the sprite seam
+	# (art_blit_regions for the torso and legs, a traced head, a rasterised arm) and the
+	# copy was not. The result was a game whose main character was pixel art in the act
+	# and smooth vector shapes in the tailor's mirror, in the one room whose entire
+	# purpose is showing you what you look like.
+	#
+	# EVERY LENGTH IS A MULTIPLE OF H, so the same code serves both sizes. What it does
+	# NOT do is let a caller pick H freely - see fig_scale_H: a region sprite blitted at a
+	# fractional number of screen pixels per art pixel is mush, and that is the one thing
+	# pixel art cannot survive.
+	var floor_y: float = ys["floor"]
+	var hip_y: float = ys["hip"]
+	var knee_y: float = ys["knee"]
+	var waist_y: float = ys["waist"]
+	var chest_y: float = ys["chest"]
+	var shoulder_y: float = ys["shoulder"]
+	var head: Vector2 = ys["head"]
+	var head_r: float = ys["head_r"]
+	var suit: Color = cols["suit"]
+	var suit_dk: Color = cols["suit_dk"]
+	var vest: Color = cols["vest"]
+	var collar: Color = cols["collar"]
+	var accent: Color = cols["accent"]
+	var skin: Color = cols["skin"]
+	var hair: Color = cols["hair"]
+	var button: Color = cols["button"]
 	# legs: a narrow pelvis, thighs tapering to the knee, calves to the ankle, shoes
 	var shoe := Color(0.20, 0.12, 0.09)
 	# THE TROUSERS ARE THEIR OWN RUNG OF THE LADDER (2026-07-28, Louis: "make the glow in
@@ -12746,17 +13127,6 @@ func draw_juggler(s: Vector2) -> void:
 	# otherwise it would squash to a thin oval at the profile.
 	if spin_on:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	# gaze_track (F9 experiment): aim the eyes at whichever prop is due to land soonest -
-	# the very ball hand_target already has its (empty) hand travelling out to meet. Just
-	# a scan of `balls`, no different in spirit from hand_target's own `inc` search.
-	var gaze := Vector2.ZERO
-	if exp_on("gaze_track") and not facing_back:
-		var watch: Ball = null
-		for b in balls:
-			if b.state == STATE_FLIGHT and (watch == null or b.land_tick < watch.land_tick):
-				watch = b
-		if watch != null:
-			gaze = flight_pos(watch) - head
 	draw_head(head, head_r, hair, skin, facing_back, gaze)
 	if wearing("glasses") and not facing_back:
 		draw_worn_glasses(head, head_r, accent)
@@ -12770,76 +13140,6 @@ func draw_juggler(s: Vector2) -> void:
 		draw_top_hat(head, head_r, suit_dk, vest, accent)
 	elif wearing("helmet"):
 		draw_worn_helmet(head, head_r, vest, accent)
-	if spin_on:                                                            # back to the body width-scale for the arms
-		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
-
-	# arms follow the hands via a 2-bone solve, so the choreography animates
-	# (their shoulder roots ride the same body dip as the trunk). The wardrobe's cuff
-	# is drawn INSIDE draw_arm, on the solved wrist, so it can never float free of the
-	# arm the way a body-relative guess does.
-	# the cuff is the venue's OWN collar colour, never a fixed white: the Midnight
-	# Show's whole point is a costume that nearly vanishes, and a hard white cuff
-	# would light the performer straight back up
-	var cuff := collar
-	draw_arm(shoulder_pos(LEFT) + Vector2(0, dip), hpos[LEFT], LEFT, skin, suit, cuff)
-	draw_arm(shoulder_pos(RIGHT) + Vector2(0, dip), hpos[RIGHT], RIGHT, skin, suit, cuff)
-
-	# hands (and any held balls) on top of the arms
-	draw_hand(LEFT)
-	draw_hand(RIGHT)
-
-	# THE PIPING, over the now-glowing costume. These were the whole effect once (six
-	# strips of tape on a near-black suit); with the costume itself in phosphor they do
-	# the job good piping does on real evening dress - they pick out the shoulder line,
-	# the cummerbund and the outseam, so the figure has EDGES at a distance instead of
-	# being one bright mass. Brighter than the cloth they sit on, or they vanish into it.
-	if glow_suit_lit():
-		# ONLY the trouser outseams are left of the old tape. The two horizontal runs
-		# (across the shoulders, round the waist) were struck straight across the figure
-		# rather than along any seam, so against a costume that now glows by itself they
-		# read as bars laid over the man. The two arm runs were worse: they were drawn
-		# shoulder-to-HAND as one straight chord while the arm itself bends at the elbow,
-		# so the line left the sleeve and crossed open air - a wire, not piping. The
-		# sleeve is lit cloth now and needs no help; the bare forearm reading as skin is
-		# correct, because he is wearing a glowing costume, not covered in phosphor.
-		#
-		# AND THE LEG RUN WAS MAKING THE ARMS' OWN MISTAKE (2026-07-28, Louis: "make the
-		# glow in the dark legs look better"). It was hip -> floor as ONE straight chord
-		# while the leg is two tapering capsules with a knee between them: measured against
-		# the shapes actually drawn above, the seam started 0.13H inside the thigh and
-		# finished 0.03H OUTSIDE the calf, so a line meant to be a seam left the cloth and
-		# ended in open air beside the ankle. It is a POLYLINE now, with a vertex at the
-		# knee, and every x is derived from the capsule centres and half-widths right
-		# there in the leg block rather than eyeballed - the thigh is 0.46H wide about
-		# cx±0.40H, the calf 0.30H about cx±0.34H, so the outer face is 0.63H then 0.49H
-		# then 0.42H, and the seam sits just inside each.
-		#
-		# A TURN-UP AT THE ANKLE is the other half of the fix, and it is the mark that
-		# gives the leg an END. A single stripe down a limb reads as a stick; a bright band
-		# across the hem reads as a trouser over a shoe, which is what is actually there.
-		var seam_l := PackedVector2Array([
-			Vector2(cx - 0.50 * H, hip_y + 0.02 * H),
-			Vector2(cx - 0.40 * H, knee_y),
-			Vector2(cx - 0.35 * H, floor_y - 0.22 * H)])
-		var seam_r := PackedVector2Array([
-			Vector2(cx + 0.50 * H, hip_y + 0.02 * H),
-			Vector2(cx + 0.40 * H, knee_y),
-			Vector2(cx + 0.35 * H, floor_y - 0.22 * H)])
-		draw_glow_seam(seam_l, 2.0, 1.0)
-		draw_glow_seam(seam_r, 2.0, 1.0)
-		# ...and the turn-up sits at whatever the trouser's real hem is: at the ankle bare,
-		# or at the top of a boot shaft when the wardrobe has put one there. A band drawn
-		# across the middle of a boot is a band drawn on the wrong garment.
-		var hem_y := floor_y - (0.54 if wearing("boots") else 0.21) * H
-		for hemx in [-0.34 * H, 0.34 * H]:
-			draw_glow_seam(PackedVector2Array([
-				Vector2(cx + hemx - 0.15 * H, hem_y),
-				Vector2(cx + hemx + 0.15 * H, hem_y)]), 2.4, 0.9)
-	# done with the (possibly spinning) figure: return to screen space, then lay the
-	# sweeping motion streaks over the top so the turn reads as fast
-	if spin_on:
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		draw_spin_streaks(Vector2(cx, (shoulder_y + hip_y) * 0.5))
 
 
 func draw_performer_polish(cx: float, h: float, shoulder_y: float, chest_y: float,
@@ -13598,15 +13898,39 @@ const LIMB_BANDS := 4        # value steps across a limb, matching the body regi
 const LIMB_FLOOR := 0.64     # and their floor, so a sleeve and its torso agree
 const LIMB_LIGHT_U := -0.42  # and their light
 
+# THE ARMS FOLLOW THE CHOSEN LOOK, and they have to. The torso and legs are SPRITES, so a
+# character variant swaps their files; the arms are RASTERISED LIVE (see draw_capsule_pix -
+# a limb stretches every frame, so it cannot be a sprite) and would otherwise keep the
+# default shading while the body changed under them. A "volume" jacket with a "classic"
+# sleeve attached to it is worse than either look on its own, and it is the exact failure
+# the LIMB_* constants were written to prevent between the torso and the sleeve.
+#
+# The numbers are the same profiles as LOOKS in scripts/shade_char_regions.py. Two
+# tables, not one, because one lives in Python and one in GDScript - keep them in step.
+func limb_prof() -> Array:
+	match variant("character"):
+		"volume": return [5, 0.46, -0.48]
+		"inked":  return [3, 0.74, -0.40]
+		_:        return [LIMB_BANDS, LIMB_FLOOR, LIMB_LIGHT_U]
+
+
+func limb_bands() -> int:
+	return int(limb_prof()[0])
+
+
 func limb_shade(col: Color, u: float) -> Color:
-	# One band of a lit cylinder, quantised. Shares LIMB_FLOOR / LIMB_LIGHT_U with
-	# scripts/shade_char_regions.py on purpose: the sleeve is the same cloth as the
-	# torso under the same lamp, and two different light directions on one costume is
-	# more obviously wrong than no shading at all was.
-	var lam := clampf(cos(u * (PI * 0.5) - LIMB_LIGHT_U * (PI * 0.5)) * 0.5 + 0.5, 0.0, 1.0)
-	var q := floorf(lam * float(LIMB_BANDS))
-	q = clampf(q, 0.0, float(LIMB_BANDS - 1))
-	var f := LIMB_FLOOR + (1.0 - LIMB_FLOOR) * (q / float(LIMB_BANDS - 1))
+	# One band of a lit cylinder, quantised. Shares its floor and its light direction with
+	# scripts/shade_char_regions.py on purpose: the sleeve is the same cloth as the torso
+	# under the same lamp, and two different light directions on one costume is more
+	# obviously wrong than no shading at all was.
+	var prof := limb_prof()
+	var bands := int(prof[0])
+	var fl := float(prof[1])
+	var lu := float(prof[2])
+	var lam := clampf(cos(u * (PI * 0.5) - lu * (PI * 0.5)) * 0.5 + 0.5, 0.0, 1.0)
+	var q := floorf(lam * float(bands))
+	q = clampf(q, 0.0, float(bands - 1))
+	var f := fl + (1.0 - fl) * (q / float(bands - 1))
 	return Color(col.r * f, col.g * f, col.b * f, col.a)
 
 
@@ -13690,8 +14014,9 @@ func draw_capsule_pix(a: Vector2, b: Vector2, wa: float, wb: float, col: Color) 
 				continue
 			# walk the band boundaries in x, clipped to this row's span
 			var xs := PackedFloat32Array([x0])
-			for k in LIMB_BANDS - 1:
-				var thr := -1.0 + 2.0 * float(k + 1) / float(LIMB_BANDS)
+			var nb := limb_bands()
+			for k in nb - 1:
+				var thr := -1.0 + 2.0 * float(k + 1) / float(nb)
 				var xk := a.x + (thr * R - base) / n.x
 				if xk > x0 and xk < x1:
 					xs.append(xk)
@@ -14125,19 +14450,14 @@ func glove_cloth() -> Color:
 	return venue_data(cur_venue())["collar"]
 
 
-func draw_hand(h: int) -> void:
-	var pos: Vector2 = hpos[h]
-	var close: float = hclose[h]
-	var inward := 1.0 if h == LEFT else -1.0          # +x points toward centre for L
-
-	# catch glow
-	var g := 0.0
-	var cf := tick - int(catch_flash[h])
-	if cf >= 0 and cf < 14:
-		g = 1.0 - float(cf) / 14.0
-	if g > 0.0:
-		draw_circle(pos, 20.0 + g * 12.0, Color(1.0, 0.82, 0.45, 0.35 * g))
-
+func draw_mitt(pos: Vector2, close: float, inward: float) -> void:
+	# ONE HAND, EVERYWHERE. The mitt and the silk glove, at the figure's real proportions,
+	# for the stage, the tailor's mirror and the skills preview alike. It is split out of
+	# draw_hand because only the stage has props to rest in the palm afterwards - the shape
+	# of the hand itself has never been screen-specific and should not have been written
+	# twice. `inward` is +1 for the LEFT hand and -1 for the RIGHT: it mirrors one asset
+	# onto both sides and points the thumb toward the body, the same convention the rack
+	# icon uses.
 	# a clean rounded mitt with NO fingers (Louis: they looked bad and are not
 	# needed): a palm disc with a soft cup that stretches up a little to receive
 	# when open and settles round when closed
@@ -14211,6 +14531,25 @@ func draw_hand(h: int) -> void:
 			# the silk's own sheen: one small filled highlight, up and left like every other
 			# light on this stage
 			fill_ellipse(pos + Vector2(-3.6, -4.6 - stretch * 0.4), 4.2, 2.8, Color(1, 1, 1, 0.30))
+
+func draw_hand(h: int) -> void:
+	var pos: Vector2 = hpos[h]
+	var close: float = hclose[h]
+	var inward := 1.0 if h == LEFT else -1.0          # +x points toward centre for L
+
+	# catch glow
+	var g := 0.0
+	var cf := tick - int(catch_flash[h])
+	if cf >= 0 and cf < 14:
+		g = 1.0 - float(cf) / 14.0
+	if g > 0.0:
+		draw_circle(pos, 20.0 + g * 12.0, Color(1.0, 0.82, 0.45, 0.35 * g))
+
+	# THE MITT, drawn by the one hand renderer every screen shares - see draw_mitt. It
+	# used to live inline here, which meant the tailor's mirror (the room whose entire
+	# job is showing a garment) drew its own plain circle for a hand and its own
+	# hand-tuned lump for a glove, at proportions that agreed with neither.
+	draw_mitt(pos, close, inward)
 
 	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
 	# drawn at stage centre while held. That was a fix for an older hand placement: the
@@ -16709,6 +17048,30 @@ func exp_on(id: String) -> bool:
 	return bool(experiments.get(id, true))
 
 
+func variant_def(id: String) -> Dictionary:
+	for d: Dictionary in VARIANT_DEFS:
+		if String(d["id"]) == id:
+			return d
+	return {}
+
+
+func variant(id: String) -> String:
+	# THE ONE PLACE A VARIANT IS READ, for the same reason exp_on exists: a reader that
+	# writes its own fallback is a reader that can disagree with the declaration. Returns
+	# the OPTION KEY ("classic", "volume", ...) rather than an index, so a caller reads as
+	# prose and a reordered list cannot silently change what it means. Out of range - an
+	# old settings file naming an option since removed - falls back to option 0, which is
+	# always the shipped default.
+	var d := variant_def(id)
+	if d.is_empty():
+		return "classic"
+	var opts: Array = d["opts"]
+	var i := int(art_variants.get(id, 0))
+	if i < 0 or i >= opts.size():
+		i = 0
+	return String((opts[i] as Dictionary)["key"])
+
+
 func draw_debug_panel() -> void:
 	# EXPERIMENTS (F9): a small, always-on-top list of alternate screens/behaviours
 	# that can be flipped on without ever touching the code - see debug_panel_input
@@ -16717,34 +17080,83 @@ func draw_debug_panel() -> void:
 	var s := get_viewport_rect().size
 	var font := game_font()
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.03, 0.55))
-	var pw := 560.0
+	var pw := 620.0
 	# A ROW GROWS INTO THE SPACE THE LIST IS NOT USING. A flat 80 was tuned for four
 	# entries and trimmed the two longest descriptions at that; with one entry left it
 	# would waste most of the card and still trim. Dividing a fixed budget by the count
 	# means a short list explains itself properly and a long one still fits on screen.
-	var row_h := clampf(380.0 / float(maxi(EXPERIMENT_DEFS.size(), 1)), 80.0, 190.0)
-	var ph := 100.0 + row_h * float(EXPERIMENT_DEFS.size())
+	#
+	# A DESIGN ROW IS TALLER THAN AN EXPERIMENT ROW because it carries a whole row of
+	# options under its name, and the options are the thing being chosen between - the
+	# name alone ("The performer") says nothing about what pressing right will do.
+	var nv := VARIANT_DEFS.size()
+	var rows := nv + EXPERIMENT_DEFS.size()
+	# THE BUDGET IS THE SCREEN, not a tuned constant. The old 380 was picked when the list
+	# was four entries long; at nine rows it overflowed the window by 32px and cut the last
+	# experiment's state off the bottom. Solving row_h from the space actually available
+	# means adding a tenth row can never do that again.
+	const PANEL_CHROME := 116.0     # title, two section captions and the footer hint
+	const VROW_EXTRA := 26.0        # a design row's option pills and hint line
+	var budget := s.y - 24.0 - PANEL_CHROME - VROW_EXTRA * float(nv)
+	var row_h := clampf(budget / float(maxi(rows, 1)), 46.0, 150.0)
+	var vrow_h := row_h + VROW_EXTRA
+	var ph := PANEL_CHROME + vrow_h * float(nv) + row_h * float(EXPERIMENT_DEFS.size())
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.07, 0.09, 0.13, 0.98), Color(0.5, 0.8, 1.0, 0.6), 2.0, 16.0, 22.0)
-	draw_string(font, Vector2(px, py + 34.0), "EXPERIMENTS", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(22), Color(0.7, 0.9, 1.0))
+	draw_string(font, Vector2(px, py + 34.0), "DESIGNS AND EXPERIMENTS", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(22), Color(0.7, 0.9, 1.0))
 	draw_string(font, Vector2(px, py + 54.0), "debug build only  -  never reaches a release export", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(11), Color(0.55, 0.65, 0.7))
-	var oy := py + 76.0
+	var ry := py + 76.0
+	draw_string(font, Vector2(px + 20.0, ry), "THE LOOK", HORIZONTAL_ALIGNMENT_LEFT, pw - 40.0, ps(11), Color(0.5, 0.72, 0.85))
+	ry += 12.0
+	for i in nv:
+		var vdef: Dictionary = VARIANT_DEFS[i]
+		var vid := String(vdef["id"])
+		var opts: Array = vdef["opts"]
+		var cur := clampi(int(art_variants.get(vid, 0)), 0, opts.size() - 1)
+		var sel := i == debug_panel_sel
+		if sel:
+			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, vrow_h - 8.0), Color(0.5, 0.8, 1.0, 0.10))
+			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, vrow_h - 8.0), Color(0.5, 0.8, 1.0, 0.5), false, 1.5)
+		draw_fit_string(font, Vector2(px + 20.0, ry + 16.0), String(vdef["name"]), HORIZONTAL_ALIGNMENT_LEFT,
+			pw - 260.0, 15, Color(1.0, 0.95, 0.8) if sel else Color(0.8, 0.78, 0.72))
+		# THE OPTIONS AS A ROW OF PILLS, not a single "2/3". The whole panel exists so a
+		# choice can be made by eye, and a counter tells you where you are without ever
+		# telling you what the alternatives were - so a look never gets tried once.
+		var ox := px + pw - 24.0
+		for j in range(opts.size() - 1, -1, -1):
+			var o: Dictionary = opts[j]
+			var oname := String(o["name"])
+			var ow := font.get_string_size(oname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 16.0
+			ox -= ow
+			var live := j == cur
+			if live:
+				draw_rect(Rect2(ox, ry + 2.0, ow, 20.0), Color(0.5, 0.8, 1.0, 0.22 if sel else 0.12))
+				draw_rect(Rect2(ox, ry + 2.0, ow, 20.0), Color(0.6, 0.86, 1.0, 0.8 if sel else 0.4), false, 1.0)
+			draw_string(font, Vector2(ox, ry + 17.0), oname, HORIZONTAL_ALIGNMENT_CENTER, ow, ps(12),
+				Color(1.0, 0.97, 0.88) if live else Color(0.5, 0.5, 0.52))
+			ox -= 6.0
+		draw_string(font, Vector2(px + 20.0, ry + 36.0), String((opts[cur] as Dictionary)["hint"]),
+			HORIZONTAL_ALIGNMENT_LEFT, pw - 40.0, ps(11), Color(0.72, 0.82, 0.62))
+		draw_wrap_fit(font, String(vdef["desc"]), Rect2(px + 20.0, ry + 44.0, pw - 40.0, vrow_h - 52.0), 10, Color(0.62, 0.6, 0.58))
+		ry += vrow_h
+	draw_string(font, Vector2(px + 20.0, ry), "BEHAVIOUR", HORIZONTAL_ALIGNMENT_LEFT, pw - 40.0, ps(11), Color(0.5, 0.72, 0.85))
+	ry += 12.0
 	for i in EXPERIMENT_DEFS.size():
 		var edef: Dictionary = EXPERIMENT_DEFS[i]
 		var eid := String(edef["id"])
 		var on := exp_on(eid)
-		var sel := i == debug_panel_sel
-		var ry := oy + float(i) * row_h
-		if sel:
+		var esel := (i + nv) == debug_panel_sel
+		if esel:
 			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, row_h - 8.0), Color(0.5, 0.8, 1.0, 0.10))
 			draw_rect(Rect2(px + 10.0, ry - 4.0, pw - 20.0, row_h - 8.0), Color(0.5, 0.8, 1.0, 0.5), false, 1.5)
-		var namecol := Color(1.0, 0.95, 0.8) if sel else Color(0.8, 0.78, 0.72)
+		var namecol := Color(1.0, 0.95, 0.8) if esel else Color(0.8, 0.78, 0.72)
 		draw_fit_string(font, Vector2(px + 20.0, ry + 16.0), String(edef["name"]), HORIZONTAL_ALIGNMENT_LEFT, pw - 140.0, 15, namecol)
 		var statecol := Color(0.55, 0.95, 0.55) if on else Color(0.7, 0.6, 0.55)
 		draw_string(font, Vector2(px + pw - 100.0, ry + 16.0), "ON" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(15), statecol)
 		draw_wrap_fit(font, String(edef["desc"]), Rect2(px + 20.0, ry + 26.0, pw - 40.0, row_h - 34.0), 10, Color(0.62, 0.6, 0.58))
-	draw_string(font, Vector2(px, py + ph - 20.0), "up / down  -  Enter toggles  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(12), Color(0.6, 0.68, 0.72))
+		ry += row_h
+	draw_string(font, Vector2(px, py + ph - 20.0), "up / down picks  -  left / right changes a look  -  Enter  -  F9 / Esc closes", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(12), Color(0.6, 0.68, 0.72))
 
 
 #region SKILL CARDS - the Balatro-style deck
@@ -18747,7 +19159,11 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	# exists to show off both under two pixels. `k` is solved from the panel rather than
 	# picked: the canon is eight heads plus the hat's own reach above it.
 	var t := float(atick())
-	var k := clampf((mirror.size.y - 96.0) / (PV_FLOOR + PV_HEAD * 4.2), 1.0, 2.6)
+	# ...snapped through fig_preview_k, so the hands below are placed for the body that
+	# will actually be drawn. The mirror keeps a little more air above his hat than the
+	# solved fit wanted; that is the price of a crisp figure and it is worth paying in the
+	# one room whose whole job is looking closely at him.
+	var k := fig_preview_k(clampf((mirror.size.y - 96.0) / (PV_FLOOR + PV_HEAD * 4.2), 1.0, 2.6))
 	# `o` IS THE HAND LINE, not the head - that is the preview's own convention (the floor
 	# sits PV_FLOOR below it), and reading it as the head is what put his arms up over his
 	# shoulders in a V on the first try. Hands rest AT the line, out at the catch point,
@@ -19545,32 +19961,32 @@ func pv_state(legs: Array, tsec: float) -> Dictionary:
 	return {"pos": Vector2.ZERO, "behind": false}
 
 
-func draw_mini_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Color,
-		k: float = 1.0) -> void:
-	# draw_arm at preview scale: same two-bone solve, same outward elbow bow, widths
-	# scaled by PV_K so the little figure keeps the real one's proportions. `k` scales the
-	# whole thing again for callers that want the same figure bigger - see draw_mini_juggler.
-	var bend := 1.0 if h == LEFT else -1.0
-	var reach := (hand - shoulder).length()
-	var bone := maxf(46.0 * PV_K * k, reach * 0.56)
-	var elbow := solve_elbow(shoulder, hand, bone, bone, bend)
-	var wrist := hand + (elbow - hand).normalized() * 3.2 * k
-	draw_capsule(shoulder, elbow, 19.0 * PV_K * k, 14.0 * PV_K * k, sleeve)
-	draw_capsule(elbow, wrist, 13.0 * PV_K * k, 10.0 * PV_K * k, sleeve)   # cloth to the wrist
-	draw_circle(elbow, 7.0 * PV_K * k, sleeve)
-
-
 func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: float = 1.0) -> void:
-	# the same performer, small: draw_juggler's eight-head canon at PV_HEAD, in the
-	# CURRENT venue's costume colours, and turning through a Spin the same way the real
-	# figure does (body width scaled by cos, the head kept round outside that scale).
-	# ONE WARDROBE, TWO SIZES (2026-07-28 evening). The little figure used to be the base
-	# costume only - jacket, waistcoat, collar - so the Skills preview and, more to the
-	# point, the TAILOR's own mirror would have shown a man who owned a top hat standing
-	# there bare-headed. Everything below now goes through the same `wearing()` test and the
-	# same `draw_performer_polish` / `draw_top_hat` / `draw_stage_boot` the stage figure
-	# uses; only `h` differs. Two copies of a costume is the thing the original wardrobe
-	# pass refused to do, and it would have been just as wrong here.
+	# THE SAME PERFORMER AS THE STAGE, and now literally so (2026-08-06, Louis: "make sure
+	# that the character ... look the same everywhere in the game, from titlescreen to
+	# shop, to performance"). This function used to carry its own copy of the body - its
+	# own jacket polygon, its own legs, its own arms, its own hands - and that copy was
+	# never moved onto the sprite seam when draw_juggler was. The tailor's mirror and the
+	# skills preview were therefore showing a smooth vector man with ball hands, next to a
+	# stage showing a shaded pixel-art one, and the mirror is the one screen in the game
+	# that exists purely to show you what you look like.
+	#
+	# What is left here is the three things that genuinely are this caller's business: how
+	# big the figure is, where its hands are, and the Spin streaks. Everything else is
+	# draw_figure_body, draw_arm and draw_mitt - the stage's own. draw_mini_arm went with
+	# it: an arm at "preview scale" was a second set of limb widths for one body.
+	#
+	# `k` IS NOW A REQUEST, NOT A SCALE. See fig_scale_H: the body is per-region sprites,
+	# and a sprite fitted to a box 1.148x its authored size draws some rows two screen
+	# pixels tall and some three. The tailor solved exactly that k out of its panel
+	# height. So the wanted size is snapped to a whole multiple of the stage figure, and
+	# the layout gives a little instead of the art.
+	var H := fig_scale_H(PV_HEAD * k)
+	# THE HAND LINE IS THIS CALLER'S ORIGIN (`o`), not the head - reading it as the head is
+	# what once put the arms up in a V. The floor sits FIG_HAND_LINE head units below it,
+	# which is PV_FLOOR/PV_HEAD written as a proportion so it survives H being snapped.
+	var floor_y := o.y + FIG_HAND_LINE * H
+	var ys := fig_ys(o.x, floor_y, H, 0.0)
 	var v := costume_palette()
 	var suit: Color = v["suit"]
 	var suit_dk: Color = v["suit_dk"]
@@ -19579,22 +19995,21 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	var accent: Color = v["glow"]
 	var skin := Color(0.87, 0.64, 0.45)
 	var hair := Color(0.28, 0.16, 0.11)
-	# `k` SCALES THE WHOLE FIGURE, and it is a parameter rather than an outer transform for
-	# a specific reason: draw_stage_boot and the spin branch both call draw_set_transform
-	# themselves, and Godot REPLACES rather than composes - so a caller wrapping this in a
-	# scale would have it silently thrown away by the first boot drawn. Every length below
-	# is a multiple of H or of PV_K, so one factor threaded through is exact.
-	var H := PV_HEAD * k
-	var floor_y := o.y + PV_FLOOR * k
-	var hip_y := floor_y - 4.0 * H
-	var knee_y := floor_y - 2.0 * H
-	var waist_y := floor_y - 5.0 * H
-	var chest_y := floor_y - 6.0 * H
-	var sh_y := floor_y - 6.72 * H
-	var head := Vector2(o.x, floor_y - 7.5 * H)
-	var head_r := 0.52 * H
-	fill_ellipse(Vector2(o.x, floor_y + 1.0), 30.0 * k, 5.0 * k, Color(0, 0, 0, 0.28))   # ground shadow
+	var button := Color(0.34, 0.20, 0.11)
+	# THE GLOWING KIT REACHES THE MIRROR TOO. It is a costume, it is the most expensive
+	# thing in the shop, and it used to be visible only on stage - so the one room built
+	# for trying clothes on could not show the piece most worth trying on. Same five-colour
+	# ladder draw_juggler recolours with, not a second set of numbers.
+	if glow_suit_lit():
+		suit = Color(0.20, 0.72, 0.40)
+		suit_dk = Color(0.10, 0.42, 0.24)
+		vest = Color(0.78, 1.0, 0.86)
+		collar = Color(0.90, 1.0, 0.94)
+		accent = Color(0.70, 1.0, 0.80)
+	draw_shadow(Vector2(o.x, floor_y + 2.0), 2.38 * H)   # the stage's own 96px, in head units
 
+	# a turn scales the body width by cos about the centreline, exactly as a live Spin
+	# does on stage; the head and hat are drawn outside it by draw_figure_body itself.
 	var sx := 1.0
 	var facing_back := false
 	if turn > 0.0:
@@ -19604,76 +20019,24 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 			sx = 0.16 if sx >= 0.0 else -0.16
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
-	var shoe := Color(0.20, 0.12, 0.09)
-	draw_capsule(Vector2(o.x - 0.4 * H, hip_y), Vector2(o.x - 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
-	draw_capsule(Vector2(o.x - 0.34 * H, knee_y), Vector2(o.x - 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
-	draw_capsule(Vector2(o.x + 0.4 * H, hip_y), Vector2(o.x + 0.34 * H, knee_y), 0.46 * H, 0.3 * H, suit_dk)
-	draw_capsule(Vector2(o.x + 0.34 * H, knee_y), Vector2(o.x + 0.32 * H, floor_y - 0.16 * H), 0.3 * H, 0.2 * H, suit_dk)
-	if wearing("boots"):
-		draw_stage_boot(Vector2(o.x - 0.34 * H, floor_y), H, -1.0, shoe, collar, accent)
-		draw_stage_boot(Vector2(o.x + 0.34 * H, floor_y), H, 1.0, shoe, collar, accent)
-	else:
-		fill_ellipse(Vector2(o.x - 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
-		fill_ellipse(Vector2(o.x + 0.34 * H, floor_y - 0.1 * H), 0.52 * H, 0.2 * H, shoe)
-	draw_colored_polygon(PackedVector2Array([   # neck
-		Vector2(o.x - 0.18 * H, head.y + head_r - 0.05 * H), Vector2(o.x + 0.18 * H, head.y + head_r - 0.05 * H),
-		Vector2(o.x + 0.23 * H, sh_y + 0.14 * H), Vector2(o.x - 0.23 * H, sh_y + 0.14 * H)]), skin)
-	draw_colored_polygon(PackedVector2Array([   # jacket
-		Vector2(o.x - 0.92 * H, sh_y + 0.1 * H), Vector2(o.x - 0.30 * H, sh_y - 0.04 * H),
-		Vector2(o.x + 0.30 * H, sh_y - 0.04 * H), Vector2(o.x + 0.92 * H, sh_y + 0.1 * H),
-		Vector2(o.x + 0.8 * H, chest_y), Vector2(o.x + 0.5 * H, waist_y), Vector2(o.x + 0.66 * H, hip_y + 0.15 * H),
-		Vector2(o.x - 0.66 * H, hip_y + 0.15 * H), Vector2(o.x - 0.5 * H, waist_y), Vector2(o.x - 0.8 * H, chest_y)]), suit)
-	if facing_back:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(o.x - 0.28 * H, sh_y - 0.02 * H), Vector2(o.x + 0.28 * H, sh_y - 0.02 * H),
-			Vector2(o.x + 0.24 * H, sh_y + 0.1 * H), Vector2(o.x - 0.24 * H, sh_y + 0.1 * H)]), collar)
-	else:
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(o.x - 0.28 * H, sh_y - 0.02 * H), Vector2(o.x, chest_y + 0.22 * H), Vector2(o.x - 0.05 * H, sh_y - 0.02 * H)]), collar)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(o.x + 0.28 * H, sh_y - 0.02 * H), Vector2(o.x, chest_y + 0.22 * H), Vector2(o.x + 0.05 * H, sh_y - 0.02 * H)]), collar)
-		draw_colored_polygon(vest_shape(o.x, H, sh_y, waist_y, hip_y), vest)
-	draw_performer_polish(o.x, H, sh_y, chest_y, waist_y, hip_y, knee_y, floor_y,
-		suit, suit_dk, vest, collar, accent, facing_back)
-	if turn > 0.0:
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)   # the head keeps its round size through a turn
-	# the SAME head the stage figure draws, at this figure's own radius (11.5px against
-	# the stage's 21). It used to be a second, hand-written face here - two dots and an
-	# arc - which is how it came to have no fringe and a mouth that never changed with
-	# the mood. draw_head scales everything off r and drops the finest marks below their
-	# own thresholds, so one call covers both sizes.
-	draw_head(head, head_r, hair, skin, facing_back)
-	if wearing("glasses") and not facing_back:
-		draw_worn_glasses(head, head_r, accent)
-	if wearing("hat"):
-		draw_top_hat(head, head_r, suit_dk, vest, accent)
-	elif wearing("helmet"):
-		draw_worn_helmet(head, head_r, vest, accent)
+	draw_figure_body(o.x, H, ys,
+		{"suit": suit, "suit_dk": suit_dk, "vest": vest, "collar": collar,
+			"accent": accent, "skin": skin, "hair": hair, "button": button},
+		facing_back, turn > 0.0, sx, Vector2.ZERO)
 	if turn > 0.0:
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
-	draw_mini_arm(Vector2(o.x - 0.9 * H, sh_y + 0.14 * H), hl, LEFT, skin, suit, k)
-	draw_mini_arm(Vector2(o.x + 0.9 * H, sh_y + 0.14 * H), hr, RIGHT, skin, suit, k)
-	# GLOVED HANDS GET THEIR REAL SHAPE HERE TOO NOW (2026-07-31, Louis: "the gloves still
-	# look horrible ... in the tailor"), not the flat circle a bare hand already correctly
-	# is - this preview exists specifically to SHOW a garment, and a glove drawn as a plain
-	# dot is indistinguishable from no glove at all except by colour. Same mitt_shape() the
-	# stage hand and the rack icon use, with the same inward-thumb convention (LEFT bulges
-	# toward +x, RIGHT toward -x) so the mirror agrees with what the stage actually draws.
-	var mitt := glove_cloth() if wearing("gloves") else skin
-	if wearing("gloves"):
-		# a bigger bump than the stage hand's own 0.62 (2026-07-31): at this small a radius
-		# the same proportional bump anti-aliases away to a barely-there wobble, and the
-		# whole point here is that a glove reads as a glove, not just a different colour
-		draw_colored_polygon(mitt_shape(hl, 5.4 * k, 5.4 * k, -1.15, 1.1), mitt)
-		draw_colored_polygon(mitt_shape(hr, 5.4 * k, 5.4 * k, PI + 1.15, 1.1), mitt)
-	else:
-		draw_circle(hl, 5.4 * k, mitt)
-		draw_circle(hr, 5.4 * k, mitt)
+	# the stage's own arms and hands: draw_capsule_pix limbs shaded across their width, the
+	# traced mitt, the real glove. `close` is 0 - a figure at rest holds its hands open,
+	# which is also the pose that shows a glove best, and showing one is why this exists.
+	draw_arm(fig_shoulder(o.x, floor_y, H, LEFT), hl, LEFT, skin, suit, collar)
+	draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT), hr, RIGHT, skin, suit, collar)
+	draw_mitt(hl, 0.0, 1.0)
+	draw_mitt(hr, 0.0, -1.0)
 	if turn > 0.0:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# the same sweeping streaks the real Spin lays over the turn, so the little
 		# figure reads as MOVING rather than as a squashed one
-		var mid := Vector2(o.x, (sh_y + hip_y) * 0.5)
+		var mid := Vector2(o.x, (float(ys["shoulder"]) + float(ys["hip"])) * 0.5)
 		for si in 3:
 			var rr := (16.0 + float(si) * 7.0) * k
 			var a0 := turn * TAU + float(si) * 0.6
@@ -23964,7 +24327,7 @@ func throw_from_crowd(kind: String, tier: int, side: float = 0.0) -> void:
 	# flatter, faster arc, because nobody lobs a tomato. It bursts on arrival rather than
 	# joining the pile (see tomato_step): the point of it is that the room hit him.
 	if kind == "tomato":
-		var H := s.y * 0.056
+		var H := fig_stage_H(s)
 		thrown.append({"kind": kind, "tier": tier, "from": from,
 			"to": Vector2(s.x * 0.5 + randf_range(-0.85, 0.85) * H, fy - randf_range(4.2, 6.7) * H),
 			"born": tick, "land": tick + FLOWER_FLIGHT - 12 + randi_range(-4, 4),
