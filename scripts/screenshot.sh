@@ -81,20 +81,15 @@ declare -a TARGETS=(
   "purist_legend:60:legend:--legend"
   "gameover:60:gameover:--gameover"
   "demo_wallcard:60:demowall:--wallcard"
-  # --- the F9 DESIGNS, one capture per option ------------------------------
-  # Every look on the panel gets a baseline, because a look with no capture is a look
-  # nobody can compare to last week's. The tailor is the target for the performer,
-  # because the mirror is the biggest, stillest picture of him in the game - it is also
-  # the screen the character-consistency work was aimed at. --variant does NOT touch the
-  # settings file (the panel does), so a capture sweep never changes Louis's own choice.
-  "look_char_classic:60:tailor:--variant character:classic --tailor 0"
-  "look_char_natural:60:tailor:--variant character:natural --tailor 0"
-  "look_char_showman:60:tailor:--variant character:showman --tailor 0"
-  "look_char_acrobat:60:tailor:--variant character:acrobat --tailor 0"
-  # ...and each design ON STAGE too, because the tailor's mirror is a still T-pose and the
-  # thing a generated body most has to survive is the arms MOVING to a real catch.
-  "look_stage_natural:700:play:--variant character:natural --demo --booking --venue 3"
-  "look_stage_acrobat:700:play:--variant character:acrobat --demo --booking --venue 3"
+  # --- the juggling ANIMATION, sampled across its sweep ---------------------
+  # The performer is no longer a choice, so there is nothing to A/B - but the animation is
+  # picked per frame from the hand positions, so what needs a baseline is that the SWEEP
+  # still happens. Three ticks a few frames apart should show three different poses; if
+  # they ever come back identical the picker has stuck, which is exactly the failure the
+  # duplicate-frame guard below catches.
+  "juggle_a:700:play:--demo --booking --venue 3 --prop 0"
+  "juggle_b:712:play:--demo --booking --venue 3 --prop 0"
+  "juggle_c:724:play:--demo --booking --venue 3 --prop 0"
   "look_light_classic:700:play:--variant lighting:classic --demo --booking --venue 3"
   "look_light_depth:700:play:--variant lighting:depth --demo --booking --venue 3"
   "look_light_warm:700:play:--variant lighting:warm --demo --booking --venue 3"

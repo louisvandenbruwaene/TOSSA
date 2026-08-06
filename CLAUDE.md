@@ -62,18 +62,22 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
   alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a
   model's idea of a juggling club.
-- **The DEFAULT character is TRACED** (`scripts/gen_char_refs.sh` drives the five flags), and it
-  is the only look that still recolours per venue. **Alternate designs ARE generated**, though -
-  Louis reversed the never-generate rule on 2026-08-06 asking for real alternate bodies with more
-  natural arms. `scripts/fit_char_design.py` fits a PixelLab figure to the game's skeleton.
-  **THE GENERATED FIGURE HAS NO ARMS**, and that is the whole trick: hand positions are the
-  mechanic (`outer_pos`/`inner_pos`, every pattern's choreography) so they never move, but arms
-  are solved by IK to wherever the hand is this frame and a painted-on arm would freeze. The
-  fitter cuts them off and hands the game a shoulder point plus the sleeve colour it sampled
-  before cutting. **Arm length is therefore a consequence of the body**: wider shoulders make the
-  same catch a shorter reach, which is how the over-long arms were fixed without touching a
-  single gameplay number. A design carries its own landmark geometry in the variant manifest's
-  `_FIGURE` block and is drawn at its own native size - never resampled.
+- **THE PERFORMER IS THE SHOWMAN**, a PixelLab-generated ringmaster - Louis reversed the
+  never-generate rule on 2026-08-06 and then picked him over the traced figure and two other
+  designs. He lives in the base manifest (`Assets/Characters/showman/`) with landmark geometry
+  in `_FIGURE` and two juggling strips in `_ANIM`. The traced figure survives only as the seam's
+  procedural fallback, which is what makes the manifest architecture work and is not a look
+  anyone chooses.
+- **THE ANIMATION IS INDEXED BY THE HANDS, NOT BY A CLOCK.** This is the whole reconciliation
+  between painted animation and physics: a loop on a timer drifts against the player's throws
+  within seconds, because the PLAYER decides when a throw happens. `fig_anim_pick` reads the
+  sim's own `hpos` and looks up the frame whose hands are nearest, so there is no phase to keep
+  in sync. `scripts/fit_juggle_anim.py` measures every frame and writes the sorted table.
+  **The FURTHEST hand decides**, not the average - a generated strip is symmetric while a
+  cascade's hands are antiphase, and averaging parks the figure mid-sweep so every catch lands
+  35px outside the palm. **The strip is chosen by the PATTERN** (columns has its own) and only
+  the frame within it by reach; searching both strips as one pool flips between two different
+  body poses on adjacent ticks. **`draw_arm` is not called at all while a strip is live.**
 - **Two sizes per prop, ONE design.** `prop_big/*` is the shop card (PixelLab, blitted at zoom 1)
   and is the SOURCE: `prop/*` is derived from it by `scripts/derive_stage_props.py` (round props by
   `make_round_props.py --stage`, from the same analytic model that draws their cards), and the title

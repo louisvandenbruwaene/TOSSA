@@ -1598,15 +1598,14 @@ var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop
 #
 # Option 0 of every set IS the shipped default, so a release build (which never opens
 # the panel) always draws option 0 and needs no variant files present at all.
-var art_variants := {"character": 0, "lighting": 0}
+var art_variants := {"lighting": 0}
 const VARIANT_DEFS := [
-	{"id": "character", "name": "The performer",
-	 "desc": "WHOLE BODIES, not shading passes. Classic is the traced original and the only one that still changes costume per venue; the other three are painted figures with their own build, their own coat and their own shoulders. His HANDS are in the same place in all of them - that is the mechanic and it does not move for a costume - but a broader pair of shoulders makes the same catch a shorter reach, which is where the long arms went.",
-	 "opts": [
-		{"key": "classic", "name": "Classic", "hint": "the traced original - recolours per venue"},
-		{"key": "natural", "name": "Natural", "hint": "black tailcoat, gold waistcoat, real proportions"},
-		{"key": "showman", "name": "Showman", "hint": "long red ringmaster's coat, broad build"},
-		{"key": "acrobat", "name": "Acrobat", "hint": "striped singlet, bare arms, lean"}]},
+	# THE PERFORMER IS NO LONGER A CHOICE EITHER (2026-08-06, Louis: "showman! it looks
+	# great ... Please get rid of all others (natural, acrobat, classic)"). The SHOWMAN is
+	# the juggler. His figure and his two juggling strips are in the base manifest, the
+	# other two generated bodies are deleted, and the traced figure survives only as the
+	# seam's procedural fallback - which is what makes the manifest architecture work and
+	# is not a design anyone picks between. Same rule as always: a winner leaves the panel.
 	# THE OBJECTS ARE NO LONGER A CHOICE, and that is the rule this panel runs on: an
 	# experiment that wins leaves it. It shipped for one session as classic/matched and
 	# Louis's answer was "the shop designs for the objects are decent, use those
@@ -7746,6 +7745,12 @@ func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
 	return Vector2(cx - dx0, y0) if h == LEFT else Vector2(cx + dx0, y0)
 
 
+func fig_anim_live() -> bool:
+	# A juggling STRIP is loaded and usable. Distinct from fig_design_on: a design can ship
+	# a still figure before it has been animated, and the still still needs procedural arms.
+	return not fig_anim.is_empty() and not fig_anim_pick(0.0).is_empty()
+
+
 func fig_design_on() -> bool:
 	# A design is live only when BOTH its geometry and its picture arrived. A manifest that
 	# names a figure whose PNG is missing must fall back to the traced juggler whole, never
@@ -7762,6 +7767,48 @@ func fig_design_height() -> float:
 	return float((art_bank["char/figure"] as Dictionary)["tex"].get_size().y) * ART_PIXEL
 
 
+func fig_anim_pick(cx: float) -> Dictionary:
+	# WHICH FRAME OF THE JUGGLING ANIMATION, chosen from the HANDS rather than from a clock.
+	#
+	# This is the whole reconciliation between a painted animation and a physics-driven
+	# game, and it is worth stating plainly because the obvious alternative is a trap: play
+	# the loop on a timer and it looks right for two seconds and then drifts, because the
+	# PLAYER decides when a throw happens and a timer does not. There is no phase here.
+	# The simulation already knows exactly how far out each hand is this instant; the strip
+	# is a table sorted by that same number; so the picture is a lookup on the truth.
+	#
+	# THE STRIP IS CHOSEN BY THE PATTERN, THE FRAME BY THE HANDS. Searching both strips as
+	# one pool was the first design and it is wrong in a way that only shows up in motion:
+	# measured, the cascade strip spans 28.0..51.5 art px of reach and the columns strip
+	# 28.5..47.0, so they overlap almost entirely. A nearest-reach lookup across both then
+	# flips between two DIFFERENT BODY POSES on adjacent ticks - the elbows snap in and out
+	# while the hands barely move. The reach says how far the hands are; it cannot say what
+	# the rest of the man is doing, and that is what the pattern knows.
+	var key := "char/juggle_columns" if pattern == COLUMNS else "char/juggle_cascade"
+	if not fig_anim.has(key) or not art_bank.has(key):
+		key = "char/juggle_cascade"
+	if not fig_anim.has(key) or not art_bank.has(key):
+		return {}
+	# THE FURTHEST HAND DECIDES, not the average of the two. A generated strip is SYMMETRIC
+	# (both painted arms do the same thing) while a cascade's real hands are in ANTIPHASE -
+	# one out catching while the other is in throwing. Averaging those two gives a number
+	# that is always mid-sweep, so the figure never reaches out at all and every catch lands
+	# a good 35px outside the painted palm. Following the outermost hand means the arms
+	# extend when a catch is actually being made, which is the moment the player is looking
+	# at; the cost is that the other hand is drawn further out than it really is, and a ball
+	# resting slightly off a palm is far less noticeable than a catch missing the hand.
+	var want := (maxf(absf(hpos[LEFT].x - cx), absf(hpos[RIGHT].x - cx))) / ART_PIXEL
+	var reach: Array = (fig_anim[key] as Dictionary)["reach"]
+	var best := 0
+	var best_err := INF
+	for i in reach.size():
+		var err := absf(float(reach[i]) - want)
+		if err < best_err:
+			best_err = err
+			best = i
+	return {"key": key, "frame": best, "n": reach.size()}
+
+
 func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
 	# A GENERATED PERFORMER, drawn as one picture. Everything the traced figure splits into
 	# costume regions - jacket, waistcoat, collar, buttons, trousers - is painted here, so
@@ -7775,12 +7822,45 @@ func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
 	#
 	# NEVER RESAMPLED. The quad is the texture's own size times ART_PIXEL, so one art pixel
 	# is exactly two screen pixels, the same as every other sprite in the game.
+	#
+	# A JUGGLING ANIMATION WINS OVER THE STILL FIGURE when one is loaded - the still is only
+	# what a design ships before it has been animated, and what the tailor's mirror uses.
+	var pick := fig_anim_pick(cx)
+	if not pick.is_empty():
+		draw_figure_frame(String(pick["key"]), int(pick["frame"]), int(pick["n"]), cx, floor_y, tint)
+		return
+	if not art_bank.has("char/figure"):
+		return
 	var tex: Texture2D = (art_bank["char/figure"] as Dictionary)["tex"]
 	var sz := Vector2(tex.get_size()) * ART_PIXEL
 	var pos := art_snap(Vector2(cx - sz.x * 0.5, floor_y - sz.y))
 	art_hits["char/figure"] = true
 	draw_colored_polygon(PackedVector2Array([
 		pos, pos + Vector2(sz.x, 0.0), pos + sz, pos + Vector2(0.0, sz.y)]), tint, art_uv, tex)
+
+
+func draw_figure_frame(key: String, frame: int, n: int, cx: float, floor_y: float,
+		tint: Color) -> void:
+	# ONE CELL OF A HORIZONTAL STRIP. The strip is n cells wide, so the frame's UVs are a
+	# vertical slice of the texture - which is why this cannot go through art_blit_size:
+	# every other blit in the game uses the whole texture and art_uv is a constant.
+	#
+	# The quad is the CELL's own size times ART_PIXEL, so the animation is pinned to the
+	# same grid as everything else and a frame change cannot shift the figure by half a
+	# pixel. Feet on the floor line, centred on cx: the body is the anchor, and the arms
+	# move within it, which is the same relationship a real performer has with the boards.
+	if not art_bank.has(key) or n <= 0:
+		return
+	art_hits[key] = true
+	var tex: Texture2D = (art_bank[key] as Dictionary)["tex"]
+	var cell := Vector2(tex.get_size().x / float(n), tex.get_size().y)
+	var sz := cell * ART_PIXEL
+	var p := art_snap(Vector2(cx - sz.x * 0.5, floor_y - sz.y))
+	var u0 := float(frame) / float(n)
+	var u1 := float(frame + 1) / float(n)
+	var uv := PackedVector2Array([Vector2(u0, 0.0), Vector2(u1, 0.0), Vector2(u1, 1.0), Vector2(u0, 1.0)])
+	draw_colored_polygon(PackedVector2Array([
+		p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]), tint, uv, tex)
 
 
 func venue_figure_tint() -> Color:
@@ -11565,6 +11645,10 @@ const ART_PIXEL := 2.0                 # screen units per authored art pixel (12
 const ART_W := 640                     # the authoring canvas, and the eventual viewport
 const ART_H := 360
 const ART_MANIFEST := "res://Resources/art_manifest.json"
+var fig_anim: Dictionary = {}     # key -> {"reach": [...]}, the juggling strips' frame table.
+                                  # Keyed by seam key so a strip is registered exactly like
+                                  # any other sprite and fig_anim_pick can search them as one
+                                  # pool - see the _ANIM block in a variant manifest.
 var fig_design: Dictionary = {}   # the active character design's landmark geometry, from a
                                   # variant manifest's _FIGURE block. EMPTY means the traced
                                   # juggler, whose proportions live in fig_ys as constants.
@@ -11602,6 +11686,7 @@ func art_boot() -> void:
 	# branch and must stay completely silent - it means "no art authored yet", not an error.
 	art_bank.clear()          # re-entrant: an F9 variant change reboots the bank in place
 	fig_design.clear()        # ...and so does the active design's landmark geometry
+	fig_anim.clear()          # ...and its animation frame tables
 	art_read_manifest(art_manifest_path, true)
 	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
 	# no file, so a release build reads exactly one manifest and this loop does nothing.
@@ -11642,6 +11727,13 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 		# body - because those are drawn live, to hand positions that never move. See
 		# fig_design_on / draw_figure_design.
 		fig_design = (pd["_FIGURE"] as Dictionary).duplicate(true)
+	if pd.has("_ANIM") and typeof(pd["_ANIM"]) == TYPE_DICTIONARY:
+		# EACH ANIMATION STRIP'S FRAME TABLE: seam key -> {"reach": [...]}, one entry per
+		# cell, sorted by how far that frame's hands are from the centreline. That sort is
+		# the whole interface - fig_anim_pick does a nearest lookup on it and needs to know
+		# nothing else about the animation.
+		for k: String in (pd["_ANIM"] as Dictionary).keys():
+			fig_anim[k] = ((pd["_ANIM"] as Dictionary)[k] as Dictionary).duplicate(true)
 	for key: String in pd.keys():
 		if key.begins_with("_"):
 			continue                          # "_comment" and friends are documentation
@@ -12958,6 +13050,15 @@ func draw_juggler(s: Vector2) -> void:
 	# would light the performer straight back up
 	var cuff := collar
 	var sleeve := suit
+	# THE ANIMATION HAS ITS OWN ARMS, so the IK ones must not be drawn over them. This is
+	# the line that actually answers "these old overlapping arms look awful": with a strip
+	# loaded, draw_arm is not called at all and the two crossing capsules are simply gone.
+	# The HANDS still are (draw_hand below), because a hand holds props and shows a catch
+	# flash, and both of those are gameplay feedback rather than anatomy.
+	if fig_anim_live():
+		draw_hand(LEFT)
+		draw_hand(RIGHT)
+		return
 	if fig_design_on():
 		# THE ARMS ARE THE DESIGN'S OWN CLOTH. They are drawn live rather than painted, so
 		# without this a generated performer wears his coat on his body and the venue's
@@ -14669,7 +14770,13 @@ func draw_hand(h: int) -> void:
 	# used to live inline here, which meant the tailor's mirror (the room whose entire
 	# job is showing a garment) drew its own plain circle for a hand and its own
 	# hand-tuned lump for a glove, at proportions that agreed with neither.
-	draw_mitt(pos, close, inward)
+	#
+	# ...unless the figure is ANIMATED, in which case the hands are painted into the frame
+	# and a mitt on top is a second hand growing out of the first. The catch glow above and
+	# the held props below still draw: those are gameplay feedback, not anatomy, and they
+	# have to keep reading identically whatever the figure is made of.
+	if not fig_anim_live():
+		draw_mitt(pos, close, inward)
 
 	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
 	# drawn at stage centre while held. That was a fix for an older hand placement: the
@@ -20148,12 +20255,17 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# the stage's own arms and hands: draw_capsule_pix limbs shaded across their width, the
 	# traced mitt, the real glove. `close` is 0 - a figure at rest holds its hands open,
 	# which is also the pose that shows a glove best, and showing one is why this exists.
-	var pv_sleeve := fig_design_col("sleeve", suit) if fig_design_on() else suit
-	var pv_cuff := fig_design_col("cuff", collar) if fig_design_on() else collar
-	draw_arm(fig_shoulder(o.x, floor_y, H, LEFT), hl, LEFT, skin, pv_sleeve, pv_cuff)
-	draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT), hr, RIGHT, skin, pv_sleeve, pv_cuff)
-	draw_mitt(hl, 0.0, 1.0)
-	draw_mitt(hr, 0.0, -1.0)
+	# THE MIRROR SHOWS THE ANIMATED FIGURE TOO, arms and all. draw_figure_body has already
+	# blitted a frame of the juggling strip, which carries its own painted arms - so drawing
+	# the IK pair over it would put the very sausages Louis asked to be rid of back on the
+	# one screen built for looking closely at him. There is nothing to add here at all.
+	if not fig_anim_live():
+		var pv_sleeve := fig_design_col("sleeve", suit) if fig_design_on() else suit
+		var pv_cuff := fig_design_col("cuff", collar) if fig_design_on() else collar
+		draw_arm(fig_shoulder(o.x, floor_y, H, LEFT), hl, LEFT, skin, pv_sleeve, pv_cuff)
+		draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT), hr, RIGHT, skin, pv_sleeve, pv_cuff)
+		draw_mitt(hl, 0.0, 1.0)
+		draw_mitt(hr, 0.0, -1.0)
 	if turn > 0.0:
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		# the same sweeping streaks the real Spin lays over the turn, so the little

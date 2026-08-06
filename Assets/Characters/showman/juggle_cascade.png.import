@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://m7cfglwdykfd"
-path="res://.godot/imported/figure.png-59be07bb48897e1b8c680df6f49ea810.ctex"
+uid="uid://cr2e56a07wduh"
+path="res://.godot/imported/juggle_cascade.png-2208c3a28a68b3af2c9f2de0eda40f03.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Variants/character_natural/figure.png"
-dest_files=["res://.godot/imported/figure.png-59be07bb48897e1b8c680df6f49ea810.ctex"]
+source_file="res://Assets/Characters/showman/juggle_cascade.png"
+dest_files=["res://.godot/imported/juggle_cascade.png-2208c3a28a68b3af2c9f2de0eda40f03.ctex"]
 
 [params]
 
