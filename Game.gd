@@ -2234,6 +2234,10 @@ func _ready() -> void:
 	if ua.has("--menuref"):       # dev: the title proscenium alone, dustless - see draw_menuref
 		_menuref = true
 		art_on = false            # photograph the DRAWING, never the bake already replacing it
+	if ua.has("--extref"):        # dev: one venue EXTERIOR alone, dustless - see draw_venue_exterior
+		var eri := ua.find("--extref")
+		_extref = int(ua[eri + 1]) if eri + 1 < ua.size() else 0
+		art_on = false            # photograph the DRAWING, never the bake already replacing it
 	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
 		debug_mode = true
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
@@ -6719,7 +6723,7 @@ func tut_ball_pos(b: Ball) -> Vector2:
 		var st := stack(h)
 		var i := st.find(b)
 		if i >= 0:
-			return hpos[h] + Vector2(0.0, -3.0 - float(i) * 6.0)
+			return fig_hand_pos(h) + Vector2(0.0, -3.0 - float(i) * 6.0)
 	return Vector2.ZERO
 
 
@@ -6805,7 +6809,7 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 			continue
 		if do_goal != "" and do_goal != ("catch_l" if h == LEFT else "catch_r") and guard_h != h:
 			continue
-		var hp: Vector2 = hpos[h]
+		var hp: Vector2 = fig_hand_pos(h)
 		# NO MORE RING (2026-07-31, Louis: "the circle that surrounds the ball ... it's
 		# jagged or just positioned wrong or both ... just get rid of that circle around
 		# the ball in the tutorial"). The bare key letter below is the whole prompt now.
@@ -6834,7 +6838,7 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 		var wants: bool = (goal == "throw_r" and hh == RIGHT) or (goal == "throw_l" and hh == LEFT) \
 			or bool(step.get("guide", false)) or String(step.get("prompt", "")) == "trick"
 		# OUTWARD, NOT OVERHEAD - see the catch ring just above for the same move.
-		draw_tut_key(font, hpos[hh] + Vector2((62.0 if hh == RIGHT else -62.0), -18.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
+		draw_tut_key(font, fig_hand_pos(hh) + Vector2((62.0 if hh == RIGHT else -62.0), -18.0), String(kt[hh]), Color(1.0, 0.82, 0.5), 0.85 if wants else 0.4)
 
 
 #endregion
@@ -7683,6 +7687,22 @@ func stage_center() -> Vector2:
 	# the juggling hand height: about the figure's waist on the eight-head canon, so
 	# the hands scoop at a natural level and the arms keep a natural (canon) length
 	var s := get_viewport_rect().size
+	# A PAINTED PERFORMER OWNS THE HAND LINE, because he cannot be asked to move to it.
+	#
+	# 0.57 of the viewport is the canon and it is right for the drawn juggler, whose head
+	# unit scales with the window. A painted one is a FIXED-SIZE sprite - it must never be
+	# resampled, a fractional scale being the one thing pixel art cannot survive - so his
+	# palms sit a fixed distance above the boards while the boards themselves move with the
+	# window. This project stretches with aspect "expand", so any window that is not 16:9
+	# slides the two apart: measured at 1280x803 the props flew to a line 11px below his
+	# hands, and the gap grows with the window. Reading the line off the painting closes it
+	# at every size at once, and at the reference 1280x720 it lands within 1.4px of 0.57 -
+	# the canon was never wrong, it just could not follow him.
+	if fig_anim_live():
+		var cell := float(fig_arms.get("cell_h", 0))
+		var hpy := float(fig_arms.get("hand_py", 0.0))
+		if cell > 0.0:
+			return Vector2(s.x * 0.5, s.y * 0.80 - (cell - hpy - 0.5) * ART_PIXEL)
 	return Vector2(s.x * 0.5, s.y * 0.57)
 
 
@@ -7746,9 +7766,15 @@ func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
 
 
 func fig_anim_live() -> bool:
-	# A juggling STRIP is loaded and usable. Distinct from fig_design_on: a design can ship
-	# a still figure before it has been animated, and the still still needs procedural arms.
-	return not fig_anim.is_empty() and not fig_anim_pick(0.0).is_empty()
+	# PAINTED ARMS are loaded and usable. Distinct from fig_design_on: a design can ship a
+	# still figure before it has been animated, and the still still needs procedural arms.
+	#
+	# Both banks and both textures, or none of it. A half-loaded bank would draw a man with
+	# one painted arm and one solved one, which is worse than either on its own.
+	return (not fig_arms.is_empty()
+		and art_bank.has("char/juggle_arms") and art_bank.has("char/juggle_body")
+		and not (fig_arms.get("left", []) as Array).is_empty()
+		and not (fig_arms.get("right", []) as Array).is_empty())
 
 
 func fig_design_on() -> bool:
@@ -7767,46 +7793,74 @@ func fig_design_height() -> float:
 	return float((art_bank["char/figure"] as Dictionary)["tex"].get_size().y) * ART_PIXEL
 
 
-func fig_anim_pick(cx: float) -> Dictionary:
-	# WHICH FRAME OF THE JUGGLING ANIMATION, chosen from the HANDS rather than from a clock.
+func fig_arm_bank(h: int) -> Array:
+	return (fig_arms.get("right" if h == RIGHT else "left", []) as Array)
+
+
+func fig_arm_pick(h: int, cx: float) -> Dictionary:
+	# WHICH PAINTED ARM THIS HAND IS WEARING, chosen from that hand rather than from a clock.
 	#
-	# This is the whole reconciliation between a painted animation and a physics-driven
-	# game, and it is worth stating plainly because the obvious alternative is a trap: play
-	# the loop on a timer and it looks right for two seconds and then drifts, because the
-	# PLAYER decides when a throw happens and a timer does not. There is no phase here.
-	# The simulation already knows exactly how far out each hand is this instant; the strip
-	# is a table sorted by that same number; so the picture is a lookup on the truth.
+	# This is the whole reconciliation between painted animation and a physics-driven game,
+	# and it is worth stating plainly because the obvious alternative is a trap: play the
+	# loop on a timer and it looks right for two seconds and then drifts, because the PLAYER
+	# decides when a throw happens and a timer does not. There is no phase here. The
+	# simulation already knows exactly how far out this hand is; the bank is a table sorted
+	# by that same number; so the picture is a lookup on the truth.
 	#
-	# THE STRIP IS CHOSEN BY THE PATTERN, THE FRAME BY THE HANDS. Searching both strips as
-	# one pool was the first design and it is wrong in a way that only shows up in motion:
-	# measured, the cascade strip spans 28.0..51.5 art px of reach and the columns strip
-	# 28.5..47.0, so they overlap almost entirely. A nearest-reach lookup across both then
-	# flips between two DIFFERENT BODY POSES on adjacent ticks - the elbows snap in and out
-	# while the hands barely move. The reach says how far the hands are; it cannot say what
-	# the rest of the man is doing, and that is what the pattern knows.
-	var key := "char/juggle_columns" if pattern == COLUMNS else "char/juggle_cascade"
-	if not fig_anim.has(key) or not art_bank.has(key):
-		key = "char/juggle_cascade"
-	if not fig_anim.has(key) or not art_bank.has(key):
+	# ONE HAND, ONE LOOKUP - and that is the 2026-08-07 change. The first version of this
+	# picked a WHOLE-BODY frame from the furthest hand, and it could only ever be right about
+	# one of the two: a cascade's hands are in ANTIPHASE (one out catching while the other is
+	# in throwing) while a generated strip is symmetric, so whichever hand lost the argument
+	# had its prop drawn a good 35px out in open air. Arms that are picked independently have
+	# no argument to lose. Sixteen source frames also stop being sixteen poses and become
+	# sixteen squared, which is the other half of "the animation looks jumpy".
+	var bank := fig_arm_bank(h)
+	if bank.is_empty():
 		return {}
-	# THE FURTHEST HAND DECIDES, not the average of the two. A generated strip is SYMMETRIC
-	# (both painted arms do the same thing) while a cascade's real hands are in ANTIPHASE -
-	# one out catching while the other is in throwing. Averaging those two gives a number
-	# that is always mid-sweep, so the figure never reaches out at all and every catch lands
-	# a good 35px outside the painted palm. Following the outermost hand means the arms
-	# extend when a catch is actually being made, which is the moment the player is looking
-	# at; the cost is that the other hand is drawn further out than it really is, and a ball
-	# resting slightly off a palm is far less noticeable than a catch missing the hand.
-	var want := (maxf(absf(hpos[LEFT].x - cx), absf(hpos[RIGHT].x - cx))) / ART_PIXEL
-	var reach: Array = (fig_anim[key] as Dictionary)["reach"]
-	var best := 0
+	var want := absf(hpos[h].x - cx) / ART_PIXEL
+	var best: Dictionary = bank[0]
 	var best_err := INF
-	for i in reach.size():
-		var err := absf(float(reach[i]) - want)
+	for e: Dictionary in bank:
+		var err := absf(float(e["reach"]) - want)
 		if err < best_err:
 			best_err = err
-			best = i
-	return {"key": key, "frame": best, "n": reach.size()}
+			best = e
+	return best
+
+
+func fig_body_origin(cx: float, floor_y: float) -> Vector2:
+	# The top-left of the performer's own cell, on the art grid. Everything painted - the
+	# body, both arms, and the palms the props rest in - is placed as an offset from here, so
+	# they cannot drift apart no matter which arm is chosen.
+	#
+	# Centred on the BODY'S ink, not on the cell: the cell is as wide as the widest arm pose
+	# in the source animation, and that is not symmetric about the man.
+	if not art_bank.has("char/juggle_body"):
+		return Vector2.ZERO
+	var tex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
+	var sz := Vector2(tex.get_size()) * ART_PIXEL
+	var bcx := float(fig_arms.get("body_cx", tex.get_size().x * 0.5))
+	return art_snap(Vector2(cx - (bcx + 0.5) * ART_PIXEL, floor_y - sz.y))
+
+
+func fig_hand_pos(h: int) -> Vector2:
+	# WHERE THE HAND IS ACTUALLY DRAWN - which is not always where the simulation says it is.
+	#
+	# The sim's hpos is the mechanic and never moves for anything. But the painted arm can
+	# only be at one of the reaches the bank happens to hold, and its palm is wherever the
+	# generator put it, so the two are within an art pixel or two of each other rather than
+	# on top of each other. A prop is drawn IN A HAND, so it follows the painted palm; the
+	# catch that earns it is still decided by hpos, which no drawing code can touch.
+	#
+	# Falls back to hpos exactly, so every screen without painted arms is unchanged.
+	if not fig_anim_live():
+		return hpos[h]
+	var s := get_viewport_rect().size
+	var pick := fig_arm_pick(h, s.x * 0.5)
+	if pick.is_empty():
+		return hpos[h]
+	var org := fig_body_origin(s.x * 0.5, s.y * 0.80)
+	return org + Vector2(float(pick["px"]) + 0.5, float(pick["py"]) + 0.5) * ART_PIXEL
 
 
 func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
@@ -7823,11 +7877,10 @@ func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
 	# NEVER RESAMPLED. The quad is the texture's own size times ART_PIXEL, so one art pixel
 	# is exactly two screen pixels, the same as every other sprite in the game.
 	#
-	# A JUGGLING ANIMATION WINS OVER THE STILL FIGURE when one is loaded - the still is only
-	# what a design ships before it has been animated, and what the tailor's mirror uses.
-	var pick := fig_anim_pick(cx)
-	if not pick.is_empty():
-		draw_figure_frame(String(pick["key"]), int(pick["frame"]), int(pick["n"]), cx, floor_y, tint)
+	# PAINTED ARMS WIN OVER THE STILL FIGURE when a bank is loaded - the still is only what a
+	# design ships before it has been animated, and what the tailor's mirror falls back to.
+	if fig_anim_live():
+		draw_figure_arms(cx, floor_y, tint)
 		return
 	if not art_bank.has("char/figure"):
 		return
@@ -7839,28 +7892,55 @@ func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
 		pos, pos + Vector2(sz.x, 0.0), pos + sz, pos + Vector2(0.0, sz.y)]), tint, art_uv, tex)
 
 
-func draw_figure_frame(key: String, frame: int, n: int, cx: float, floor_y: float,
-		tint: Color) -> void:
-	# ONE CELL OF A HORIZONTAL STRIP. The strip is n cells wide, so the frame's UVs are a
-	# vertical slice of the texture - which is why this cannot go through art_blit_size:
-	# every other blit in the game uses the whole texture and art_uv is a constant.
+func draw_figure_arms(cx: float, floor_y: float, tint: Color) -> void:
+	# THE PERFORMER IN THREE PIECES: a body that never moves, and two arms that do.
 	#
-	# The quad is the CELL's own size times ART_PIXEL, so the animation is pinned to the
-	# same grid as everything else and a frame change cannot shift the figure by half a
-	# pixel. Feet on the floor line, centred on cx: the body is the anchor, and the arms
-	# move within it, which is the same relationship a real performer has with the boards.
-	if not art_bank.has(key) or n <= 0:
+	# The body is one sprite with its sleeves ending at the shoulder, so nothing about it
+	# depends on what the hands are doing; each arm is a separate little picture chosen by
+	# its own hand. That split is what lets the two hands disagree, which is the whole point
+	# (see fig_arm_pick), and it also means the man cannot twitch: a body drawn from a
+	# per-frame cell shifts a pixel whenever the frame changes, and this one never does.
+	#
+	# Feet on the floor line, arms placed as whole-art-pixel offsets from the body's own
+	# corner, so the joint at the shoulder is exact at every reach.
+	if not art_bank.has("char/juggle_body"):
 		return
-	art_hits[key] = true
-	var tex: Texture2D = (art_bank[key] as Dictionary)["tex"]
-	var cell := Vector2(tex.get_size().x / float(n), tex.get_size().y)
-	var sz := cell * ART_PIXEL
-	var p := art_snap(Vector2(cx - sz.x * 0.5, floor_y - sz.y))
-	var u0 := float(frame) / float(n)
-	var u1 := float(frame + 1) / float(n)
-	var uv := PackedVector2Array([Vector2(u0, 0.0), Vector2(u1, 0.0), Vector2(u1, 1.0), Vector2(u0, 1.0)])
+	art_hits["char/juggle_body"] = true
+	var btex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
+	var org := fig_body_origin(cx, floor_y)
+	var bsz := Vector2(btex.get_size()) * ART_PIXEL
 	draw_colored_polygon(PackedVector2Array([
-		p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]), tint, uv, tex)
+		org, org + Vector2(bsz.x, 0.0), org + bsz, org + Vector2(0.0, bsz.y)]), tint, art_uv, btex)
+	for h in [LEFT, RIGHT]:
+		draw_figure_arm(fig_arm_pick(h, cx), org, tint)
+
+
+func draw_figure_arm(e: Dictionary, org: Vector2, tint: Color) -> void:
+	# ONE CELL OF THE ARM ATLAS. The atlas is a uniform grid, so a slot number is a division
+	# and the UVs are a sub-rect - which is why this cannot go through art_blit_size, where
+	# every blit uses the whole texture and art_uv is a constant.
+	if e.is_empty() or not art_bank.has("char/juggle_arms"):
+		return
+	art_hits["char/juggle_arms"] = true
+	var tex: Texture2D = (art_bank["char/juggle_arms"] as Dictionary)["tex"]
+	var ts := Vector2(tex.get_size())
+	var cols := maxi(1, int(fig_arms.get("atlas_cols", 8)))
+	var aw := float(fig_arms.get("atlas_w", 1))
+	var ah := float(fig_arms.get("atlas_h", 1))
+	var slot := int(e["slot"])
+	var col := slot % cols
+	var row := slot / cols
+	var u0 := (float(col) * aw) / ts.x
+	var v0 := (float(row) * ah) / ts.y
+	var u1 := u0 + aw / ts.x
+	var v1 := v0 + ah / ts.y
+	var p := org + Vector2(float(e["ox"]), float(e["oy"])) * ART_PIXEL
+	var sz := Vector2(aw, ah) * ART_PIXEL
+	draw_colored_polygon(
+		PackedVector2Array([p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]),
+		tint,
+		PackedVector2Array([Vector2(u0, v0), Vector2(u1, v0), Vector2(u1, v1), Vector2(u0, v1)]),
+		tex)
 
 
 func venue_figure_tint() -> Color:
@@ -11501,6 +11581,17 @@ func update_hands() -> void:
 		print("t%4d  L x=%6.1f aim=%6.1f dc=%5.1f hold=%d   R x=%6.1f aim=%6.1f dc=%5.1f hold=%d" % [
 			tick, hpos[LEFT].x, hand_target(LEFT).x, hand_target(LEFT).x - c, int(not stack(LEFT).is_empty()),
 			hpos[RIGHT].x, hand_target(RIGHT).x, hand_target(RIGHT).x - c, int(not stack(RIGHT).is_empty())])
+		# THE RESIDUAL between the hand the simulation has and the hand that is PAINTED.
+		# This is the number "the objects must align with the hands" reduces to, and it is the
+		# only honest way to check it: a still frame cannot tell a hand that is simply LATE to
+		# a catch (correct, and what the smoothing is for) from an arm bank with no entry
+		# anywhere near that reach (a hole in the art). Both are screen px, and the bank is
+		# quantised in ART px, so 2 here is one step of the table.
+		if fig_anim_live():
+			var dl: Vector2 = fig_hand_pos(LEFT) - hpos[LEFT]
+			var dr: Vector2 = fig_hand_pos(RIGHT) - hpos[RIGHT]
+			print("      palm-vs-hand  L dx=%5.1f dy=%5.1f   R dx=%5.1f dy=%5.1f" % [
+				dl.x, dl.y, dr.x, dr.y])
 
 
 func add_popup(pos: Vector2, text: String, col: Color) -> void:
@@ -11645,10 +11736,11 @@ const ART_PIXEL := 2.0                 # screen units per authored art pixel (12
 const ART_W := 640                     # the authoring canvas, and the eventual viewport
 const ART_H := 360
 const ART_MANIFEST := "res://Resources/art_manifest.json"
-var fig_anim: Dictionary = {}     # key -> {"reach": [...]}, the juggling strips' frame table.
-                                  # Keyed by seam key so a strip is registered exactly like
-                                  # any other sprite and fig_anim_pick can search them as one
-                                  # pool - see the _ANIM block in a variant manifest.
+var fig_arms: Dictionary = {}     # the performer's ARM BANK, from a manifest's _ARMS block:
+                                  # {"left": [...], "right": [...]} plus the atlas geometry.
+                                  # Each entry is one arm at one reach, with the painted
+                                  # palm's position measured off it - see fig_arm_pick.
+                                  # EMPTY means the figure's arms are solved live instead.
 var fig_design: Dictionary = {}   # the active character design's landmark geometry, from a
                                   # variant manifest's _FIGURE block. EMPTY means the traced
                                   # juggler, whose proportions live in fig_ys as constants.
@@ -11673,6 +11765,7 @@ var _art_suppress := ""            # --charsuppress [key]: claim that char key (
 var _charid := false               # --charid: paint costume regions as flat ID colours
 var _bgref := false                # --bgref: draw only sky + dressing, the layers bg/* replaces
 var _menuref := false              # --menuref: draw only the title proscenium, dustless
+var _extref := -1                  # --extref <vi>: draw only that venue's exterior, dustless
 var _chargear := false             # --chargear: wear every garment (reference render only)
 var _charback := false             # --charback: draw the figure facing away (the Spin view)
 var _charopen := false             # --charopen: hold the hand open (reference render only)
@@ -11686,7 +11779,7 @@ func art_boot() -> void:
 	# branch and must stay completely silent - it means "no art authored yet", not an error.
 	art_bank.clear()          # re-entrant: an F9 variant change reboots the bank in place
 	fig_design.clear()        # ...and so does the active design's landmark geometry
-	fig_anim.clear()          # ...and its animation frame tables
+	fig_arms.clear()          # ...and its arm bank
 	art_read_manifest(art_manifest_path, true)
 	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
 	# no file, so a release build reads exactly one manifest and this loop does nothing.
@@ -11727,13 +11820,12 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 		# body - because those are drawn live, to hand positions that never move. See
 		# fig_design_on / draw_figure_design.
 		fig_design = (pd["_FIGURE"] as Dictionary).duplicate(true)
-	if pd.has("_ANIM") and typeof(pd["_ANIM"]) == TYPE_DICTIONARY:
-		# EACH ANIMATION STRIP'S FRAME TABLE: seam key -> {"reach": [...]}, one entry per
-		# cell, sorted by how far that frame's hands are from the centreline. That sort is
-		# the whole interface - fig_anim_pick does a nearest lookup on it and needs to know
-		# nothing else about the animation.
-		for k: String in (pd["_ANIM"] as Dictionary).keys():
-			fig_anim[k] = ((pd["_ANIM"] as Dictionary)[k] as Dictionary).duplicate(true)
+	if pd.has("_ARMS") and typeof(pd["_ARMS"]) == TYPE_DICTIONARY:
+		# THE ARM BANK: two lists of arms, "left" and "right", each entry an atlas slot plus
+		# the reach it was painted at and the position of its palm. Sorted by reach, which is
+		# the whole interface - fig_arm_pick does a nearest lookup on that one number and
+		# needs to know nothing else about how the animation was made.
+		fig_arms = (pd["_ARMS"] as Dictionary).duplicate(true)
 	for key: String in pd.keys():
 		if key.begins_with("_"):
 			continue                          # "_comment" and friends are documentation
@@ -12103,6 +12195,15 @@ func _draw() -> void:
 	if _menuref:
 		# --menuref: the title screen's proscenium alone, dustless. See draw_menuref.
 		draw_menuref(get_viewport_rect().size)
+		return
+	if _extref >= 0:
+		# --extref <vi>: ONE VENUE EXTERIOR, exactly as the card composes it and with the one
+		# moving layer suppressed. Same split every bake in this project makes: the bake holds
+		# the SCENERY and whatever drifts is drawn live over it. draw_dust reads _extref and
+		# returns, so a re-bake can never double the motes into the picture.
+		ext_center = true       # every live call site composes the hero mid-frame
+		draw_venue_exterior(get_viewport_rect().size, _extref)
+		ext_center = false
 		return
 	var t0 := Time.get_ticks_usec() if _fps else 0
 	_draw_screen()
@@ -14091,6 +14192,102 @@ func fill_disc_pix(c: Vector2, r: float, col: Color) -> void:
 			draw_rect(Rect2(x0, y, w, ap), col)
 
 
+func draw_arc_pix(c: Vector2, r: float, thick: float, b0: float, b1: float, col: Color) -> void:
+	# ONE BAND OF THE CROWD DIAL, rasterised onto the art grid.
+	#
+	# draw_arc(..., antialiased) is a polyline with soft edges, and on the gauge that shows
+	# twice over: the band's rim is a grey fringe, and where two zones meet the two fringes
+	# blend into a third colour that belongs to neither. A fuel gauge is exactly the kind of
+	# instrument whose whole job is to have crisp, countable zones.
+	#
+	# ANALYTIC SPANS, NOT A PER-PIXEL TEST. For each art row the annulus contributes at most
+	# two x-intervals - solve the two circles - and the sector's two rays cut the row at
+	# x = dy / tan(angle), which is monotonic across the dial's own domain. So the whole band
+	# costs one pass over about thirty rows instead of a few thousand atan2 calls a frame.
+	#
+	# DOMAIN: PI <= b0 < b1 <= TAU, i.e. the upper half in Godot's y-down space, which is the
+	# half a dial sweeps. That is not a general arc routine and does not pretend to be.
+	var ap := float(ART_PIXEL)
+	var ro := r + thick * 0.5
+	var ri := maxf(0.0, r - thick * 0.5)
+	var y0 := snappedf(c.y - ro, ap)
+	var rows := int(ceil(ro / ap)) + 2
+	for i in rows:
+		var y := y0 + float(i) * ap
+		var dy := (y + ap * 0.5) - c.y
+		if dy > 0.0 or absf(dy) > ro:
+			continue
+		var xo := sqrt(maxf(0.0, ro * ro - dy * dy))
+		var xi := sqrt(maxf(0.0, ri * ri - dy * dy))
+		# the sector, as an x range on this row. tan goes to zero at both ends of the
+		# domain, which is a HORIZONTAL ray - the limit is the correct infinity, not an
+		# error, so it is clamped to the row rather than guarded against.
+		var lo := ray_x(dy, b0, -ro)
+		var hi := ray_x(dy, b1, ro)
+		for seg in ([[-xo, -xi], [xi, xo]] if xi > 0.0 else [[-xo, xo]]):
+			var a := maxf(float(seg[0]), lo)
+			var b := minf(float(seg[1]), hi)
+			if b - a < ap * 0.5:
+				continue
+			var sx := snappedf(c.x + a, ap)
+			var sw := snappedf(b - a, ap)
+			if sw >= ap:
+				draw_rect(Rect2(sx, y, sw, ap), col)
+
+
+func ray_x(dy: float, ang: float, far: float) -> float:
+	# where the ray at `ang` crosses the horizontal line dy, relative to the centre. `far` is
+	# what to return when the ray is horizontal and never crosses at all.
+	var t := tan(ang)
+	if absf(t) < 1e-6:
+		return far
+	return dy / t
+
+
+func draw_spoke_pix(c: Vector2, ang: float, r0: float, r1: float, w: float, col: Color) -> void:
+	# A RADIAL RUN OF ART PIXELS: the needle, the zone ticks and the peak pin.
+	#
+	# All three were antialiased polygons or draw_lines, and the needle was the worst thing
+	# in the HUD - a smooth white blade with a soft grey edge, sitting on a dial the player
+	# is asked to read at a glance. Stepped, it looks like an instrument.
+	#
+	# Width TAPERS from w at the hub to one art pixel at the tip, which is what made the
+	# original a blade rather than a stick, and is free here.
+	var ap := float(ART_PIXEL)
+	var d := Vector2(cos(ang), sin(ang))
+	var perp := Vector2(-d.y, d.x)
+	var steps := int(ceil((r1 - r0) / ap)) + 1
+	for i in steps + 1:
+		var t := float(i) / float(maxi(1, steps))
+		var at := c + d * lerpf(r0, r1, t)
+		var half := maxf(ap * 0.5, lerpf(w, ap, t) * 0.5)
+		var n := int(ceil(half * 2.0 / ap))
+		for k in n:
+			var off := (float(k) - float(n - 1) * 0.5) * ap
+			draw_rect(Rect2(art_snap(at + perp * off), Vector2(ap, ap)), col)
+
+
+func draw_ring_pix(c: Vector2, r: float, w: float, col: Color) -> void:
+	# a hollow circle on the art grid: the same row solve as fill_disc_pix run twice, so the
+	# ring's own inner edge is as hard as its outer one. draw_arc(..., TAU) antialiases both.
+	var ap := float(ART_PIXEL)
+	var ro := r + w * 0.5
+	var ri := maxf(0.0, r - w * 0.5)
+	var y0 := snappedf(c.y - ro, ap)
+	for i in int(ceil(ro * 2.0 / ap)) + 2:
+		var y := y0 + float(i) * ap
+		var dy := (y + ap * 0.5) - c.y
+		if absf(dy) > ro:
+			continue
+		var xo := sqrt(maxf(0.0, ro * ro - dy * dy))
+		var xi := sqrt(maxf(0.0, ri * ri - dy * dy))
+		for seg in ([[-xo, -xi], [xi, xo]] if xi > 0.0 else [[-xo, xo]]):
+			var sx := snappedf(c.x + float(seg[0]), ap)
+			var sw := snappedf(float(seg[1]) - float(seg[0]), ap)
+			if sw >= ap:
+				draw_rect(Rect2(sx, y, sw, ap), col)
+
+
 func face_mood() -> int:
 	# -1 wince (just dropped), 0 calm, 1 pleased (on a streak). Shared by the mouth and
 	# the wardrobe pass's brows so the two can never disagree about the expression.
@@ -14754,7 +14951,7 @@ func draw_mitt(pos: Vector2, close: float, inward: float) -> void:
 			fill_ellipse(pos + Vector2(-3.6, -4.6 - stretch * 0.4), 4.2, 2.8, Color(1, 1, 1, 0.30))
 
 func draw_hand(h: int) -> void:
-	var pos: Vector2 = hpos[h]
+	var pos: Vector2 = fig_hand_pos(h)
 	var close: float = hclose[h]
 	var inward := 1.0 if h == LEFT else -1.0          # +x points toward centre for L
 
@@ -15001,7 +15198,7 @@ func draw_charge_gauges() -> void:
 			continue
 		var hold := clampi(tick - int(charge_start[h]), 0, HOLD_MAX)
 		var f := float(hold) / float(HOLD_MAX)
-		var pos: Vector2 = hpos[h]
+		var pos: Vector2 = fig_hand_pos(h)
 		var gx := pos.x + (-30.0 if h == LEFT else 30.0) - 3.0
 		var gh := 52.0
 		var gy := pos.y + 10.0
@@ -16082,16 +16279,98 @@ func soft_card(r: Rect2, fill: Color, border: Color, border_w: float = 1.0, radi
 	# call, so a shared, mutated instance draws exactly what a fresh one would - and a
 	# busy screen (the shop deals sixteen of these, the HUD several a frame at 120Hz)
 	# stops churning two objects per card through the allocator.
-	var sb := _sb_card
-	sb.bg_color = fill
-	sb.set_corner_radius_all(int(radius))
-	sb.border_color = border
-	sb.set_border_width_all(int(ceil(border_w)))
-	sb.shadow_size = int(shadow) if shadow > 0.0 else 0
+	# ...AND IT IS DRAWN ON THE ART GRID NOW (2026-08-07). Everything above still holds; what
+	# changed is the rasteriser. StyleBoxFlat rounds its corners with an antialiased arc and
+	# blurs its shadow, and those were the last smooth curves in the HUD - a crisp bitmap
+	# number sitting inside a soft vector frame, on every panel, on every screen. This is the
+	# highest-leverage pixel fix in the file precisely because soft_card is shared: forty-odd
+	# call sites, from the shop's sixteen cards to the rail, all corrected at one point.
+	draw_card_pix(r, fill, border, border_w, radius, shadow)
+
+
+# A digital quarter-circle, per radius: how far row i of a corner is inset from the edge.
+# Cached because the same handful of radii are asked for hundreds of times a frame.
+var _pix_corner: Dictionary = {}
+
+
+func pix_corner(radius_art: int) -> PackedInt32Array:
+	# THE STAIRCASE A ROUNDED CORNER BECOMES when it has to land on whole pixels.
+	#
+	# Sampled at each row's CENTRE, which is the same rule draw_capsule_pix learned the hard
+	# way: sampling a row's top edge biases every span upward and a near-flat curve shifts by
+	# a whole pixel. The result at radius 4 is the classic 2-1-1-0 step, which is what a pixel
+	# artist draws by hand - not a coincidence, it is what a circle actually is at that size.
+	if _pix_corner.has(radius_art):
+		return _pix_corner[radius_art]
+	var out := PackedInt32Array()
+	var rr := float(radius_art)
+	for i in radius_art:
+		var dy := rr - (float(i) + 0.5)
+		var dx := sqrt(maxf(0.0, rr * rr - dy * dy))
+		out.append(clampi(radius_art - int(round(dx)), 0, radius_art))
+	_pix_corner[radius_art] = out
+	return out
+
+
+func draw_card_pix(r: Rect2, fill: Color, border: Color, border_w: float,
+		radius: float, shadow: float) -> void:
+	# One rounded card, in whole art pixels: a hard offset shadow, a stepped fill, and a
+	# one-pixel ring that follows the same steps.
+	#
+	# DRAWN AS ROWS, not as a mask. The middle of the card is a single rect and only the
+	# corner rows need their own, so a panel costs about (2 * radius + 1) draw calls however
+	# big it is - cheaper than the StyleBoxFlat it replaces, which had to build an
+	# antialiased arc and a blurred shadow every frame.
+	var p := art_snap(r.position)
+	var q := art_snap(r.position + r.size)
+	var w := q.x - p.x
+	var h := q.y - p.y
+	if w < ART_PIXEL * 2.0 or h < ART_PIXEL * 2.0:
+		return
+	var rows := int(h / ART_PIXEL)
+	var rad := clampi(int(round(radius / ART_PIXEL)), 0, mini(rows / 2, int(w / ART_PIXEL) / 2))
+	var ins := pix_corner(rad)
+
+	# how far row i is inset on each side (art px)
+	var inset := func(i: int) -> int:
+		if i < rad:
+			return ins[i]
+		if i >= rows - rad:
+			return ins[rows - 1 - i]
+		return 0
+
+	# THE SHADOW IS A HARD OFFSET COPY, not a blur. A blurred shadow is a gradient of
+	# partial alpha, i.e. the one thing this density cannot represent - it came out as a
+	# grey fringe a pixel or two wide that read as a smudge round every panel rather than
+	# as depth. One art pixel down and right, at the same alpha, is what a pixel artist
+	# does and it reads as more solid, not less.
 	if shadow > 0.0:
-		sb.shadow_color = Color(0.0, 0.0, 0.0, 0.38)
-		sb.shadow_offset = Vector2(0.0, 3.0)
-	draw_style_box(sb, r)
+		var so := ART_PIXEL
+		for i in rows:
+			var d := float(inset.call(i)) * ART_PIXEL
+			draw_rect(Rect2(p.x + d + so, p.y + float(i) * ART_PIXEL + so,
+				w - d * 2.0, ART_PIXEL), Color(0.0, 0.0, 0.0, 0.38))
+
+	for i in rows:
+		var d := float(inset.call(i)) * ART_PIXEL
+		draw_rect(Rect2(p.x + d, p.y + float(i) * ART_PIXEL, w - d * 2.0, ART_PIXEL), fill)
+
+	if border_w <= 0.0 or border.a <= 0.0:
+		return
+	# THE RING follows the same staircase. Each row contributes its own left and right edge,
+	# widened to bridge whatever step its neighbours make - without that bridge the corner
+	# comes out as a dotted diagonal, because two rows offset by a pixel share no column.
+	var bw := maxf(ART_PIXEL, round(border_w / ART_PIXEL) * ART_PIXEL)
+	for i in rows:
+		var d := float(inset.call(i)) * ART_PIXEL
+		var y := p.y + float(i) * ART_PIXEL
+		if i == 0 or i == rows - 1:
+			draw_rect(Rect2(p.x + d, y, w - d * 2.0, ART_PIXEL), border)
+			continue
+		var nb := maxf(float(inset.call(i - 1)), float(inset.call(i + 1))) * ART_PIXEL
+		var e := maxf(bw, nb - d + ART_PIXEL)
+		draw_rect(Rect2(p.x + d, y, e, ART_PIXEL), border)
+		draw_rect(Rect2(p.x + w - d - e, y, e, ART_PIXEL), border)
 
 
 func hud_panel(r: Rect2, glow: bool = false) -> void:
@@ -16287,29 +16566,23 @@ func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color
 	# a labelled progress bar used across the rails (target / crowd / stamina / xp).
 	# Rounded track and fill with a soft top highlight on the fill, so it reads like a
 	# lit bar rather than a plain block.
+	#
+	# ON THE ART GRID, through the same stepped-corner rasteriser every panel uses. These
+	# were three antialiased StyleBoxFlats - and unlike a panel's corner, a bar's cap is a
+	# HALF-CIRCLE at the very end of a bright shape against a dark track, which is where a
+	# soft edge shows most. Note the styleboxes were also allocated fresh on every call,
+	# three per bar per frame; soft_card had already learned that lesson and this had not.
 	var rad := minf(h * 0.5, 7.0)
-	var track := StyleBoxFlat.new()
-	track.bg_color = Color(0.16, 0.11, 0.09, 0.9)
-	track.set_corner_radius_all(int(rad))
-	track.border_color = Color(0.0, 0.0, 0.0, 0.55)
-	track.set_border_width_all(1)
-	track.anti_aliasing = true
-	draw_style_box(track, Rect2(x, y, w, h))
+	draw_card_pix(Rect2(x, y, w, h), Color(0.16, 0.11, 0.09, 0.9),
+		Color(0.0, 0.0, 0.0, 0.55), 1.0, rad, 0.0)
 	var fw := w * clampf(frac, 0.0, 1.0)
 	if fw > 2.0:
-		var bar := StyleBoxFlat.new()
-		bar.bg_color = fill
-		bar.set_corner_radius_all(int(rad))
-		bar.anti_aliasing = true
-		draw_style_box(bar, Rect2(x, y, fw, h))
-		# a faint lighter sheen across the top of the fill for a lit, rounded look
-		var sh := StyleBoxFlat.new()
-		sh.bg_color = Color(1.0, 1.0, 1.0, 0.16)
-		sh.set_corner_radius_all(int(rad))
-		sh.corner_radius_bottom_left = 0
-		sh.corner_radius_bottom_right = 0
-		sh.anti_aliasing = true
-		draw_style_box(sh, Rect2(x, y, fw, h * 0.5))
+		draw_card_pix(Rect2(x, y, fw, h), fill, Color(0, 0, 0, 0), 0.0, rad, 0.0)
+		# a faint lighter sheen across the top of the fill for a lit, rounded look. Square
+		# at the bottom, so it stays a sheen ON the bar rather than a second bar inside it:
+		# the top half only, with the cap radius kept at the top corners.
+		draw_card_pix(Rect2(x, y, fw, h * 0.5), Color(1.0, 1.0, 1.0, 0.16),
+			Color(0, 0, 0, 0), 0.0, rad, 0.0)
 	if label != "":
 		draw_string(game_font(), Vector2(x + 8, y + h - 4.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(10), Color(0.08, 0.04, 0.03, 0.85))
 
@@ -16377,40 +16650,37 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	frac = clampf(frac, 0.0, 1.0)
 	var a0 := PI          # 180 degrees: empty, hard left
 	var a1 := TAU         # 360: full, hard right
+	# THE WHOLE INSTRUMENT IS ON THE ART GRID (2026-08-07). Every shape below used to be an
+	# antialiased primitive - draw_arc for the bands, draw_line for the ticks, two smooth
+	# polygons for the needle, draw_circle for the hub - and it sat in the left rail beside
+	# crisp bitmap numbers looking like a screenshot of a different game. See draw_arc_pix
+	# and draw_spoke_pix; the shapes and the sizes are unchanged, only the rasteriser.
 	# the dial face, then each zone as one thick arc over it
-	draw_arc(c, r, a0, a1, 30, Color(0.05, 0.04, 0.05, 0.85), 13.0, true)
+	draw_arc_pix(c, r, 13.0, a0, a1, Color(0.05, 0.04, 0.05, 0.85))
 	var from := 0.0
 	for z in GAUGE_ZONES:
 		var to := float(z["to"])
 		var zc: Color = z["col"]
 		var lit := frac >= from - 0.001   # zones already passed burn bright, the rest are dim
-		draw_arc(c, r, lerpf(a0, a1, from), lerpf(a0, a1, to), 14,
-			Color(zc.r, zc.g, zc.b, GAUGE_LIT if lit else GAUGE_DIM), 11.0, true)
+		draw_arc_pix(c, r, 11.0, lerpf(a0, a1, from), lerpf(a0, a1, to),
+			Color(zc.r, zc.g, zc.b, GAUGE_LIT if lit else GAUGE_DIM))
 		from = to
 	# ticks at every zone edge, so the bands read as a scale and not as decoration
 	for z2 in GAUGE_ZONES:
-		var ta := lerpf(a0, a1, float(z2["to"]))
-		var td := Vector2(cos(ta), sin(ta))
-		draw_line(c + td * (r - 8.0), c + td * (r + 8.0), Color(0.06, 0.05, 0.05, 0.9), 2.0)
+		draw_spoke_pix(c, lerpf(a0, a1, float(z2["to"])), r - 8.0, r + 8.0, 2.0,
+			Color(0.06, 0.05, 0.05, 0.9))
 	# the best the room ever got this act: a bright pin left standing on the dial
 	if peak > 0.0:
-		var pa := lerpf(a0, a1, clampf(peak, 0.0, 1.0))
-		var pd := Vector2(cos(pa), sin(pa))
-		draw_line(c + pd * (r - 9.0), c + pd * (r + 9.0), Color(1.0, 0.97, 0.85, 0.75), 2.0)
+		draw_spoke_pix(c, lerpf(a0, a1, clampf(peak, 0.0, 1.0)), r - 9.0, r + 9.0, 2.0,
+			Color(1.0, 0.97, 0.85, 0.75))
 	# THE NEEDLE: a tapered blade off a hub, with a counterweight behind the pivot
 	var na := lerpf(a0, a1, frac)
-	var nd := Vector2(cos(na), sin(na))
-	var perp := Vector2(-nd.y, nd.x)
 	var tipc := gauge_color(frac)
 	# a dark under-blade first, so the white needle reads against a lit zone too
-	draw_colored_polygon(PackedVector2Array([
-		c + nd * (r + 3.0), c + perp * 5.0 - nd * 7.0, c - perp * 5.0 - nd * 7.0]),
-		Color(0.08, 0.06, 0.07, 0.85))
-	draw_colored_polygon(PackedVector2Array([
-		c + nd * (r + 1.0), c + perp * 3.4 - nd * 6.0, c - perp * 3.4 - nd * 6.0]),
-		Color(1.0, 0.96, 0.90))
-	draw_circle(c, 5.6, Color(0.10, 0.08, 0.09))
-	draw_circle(c, 3.2, tipc)
+	draw_spoke_pix(c, na, -7.0, r + 3.0, 10.0, Color(0.08, 0.06, 0.07, 0.85))
+	draw_spoke_pix(c, na, -6.0, r + 1.0, 6.0, Color(1.0, 0.96, 0.90))
+	fill_disc_pix(c, 5.6, Color(0.10, 0.08, 0.09))
+	fill_disc_pix(c, 3.2, tipc)
 	# the readout goes BELOW the hub: the needle sweeps the upper half only, so this is
 	# the one spot on the instrument it can never cross (it did, over the number)
 	if label != "":
@@ -16419,8 +16689,8 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# in the red, the band itself pulses: the one number in the game that kills a set
 	if frac <= float(GAUGE_ZONES[0]["to"]):
 		var warn := 0.35 + 0.35 * sin(float(tick) * 0.16)
-		draw_arc(c, r, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])), 12,
-			Color(1.0, 0.35, 0.28, warn), 11.0, true)
+		draw_arc_pix(c, r, 11.0, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])),
+			Color(1.0, 0.35, 0.28, warn))
 
 
 func fit_text(font: Font, text: String, w: float, size: int) -> String:
@@ -17527,7 +17797,12 @@ func _card_rosette(c: Vector2, k: float, kc: Color, amul: float, spin: float) ->
 	# the trick back's mark: two rings of rays on opposite spins. Split out of the back so the
 	# same rosette can be struck three times down the card at three sizes - which is how an
 	# ornamental card back fills its height without inventing a second motif for the job.
-	draw_set_transform(c, spin, Vector2.ONE * k)
+	# ON THE ART GRID: the origin snapped so the pitch means the real grid, and the pitch
+	# published so the rays land on it. The rays are polygons and were never antialiased,
+	# but at this scale one screen pixel of stair step is HALF an art pixel - detail at
+	# twice the density of everything around it, which reads as a soft edge.
+	_cap_px = cap_grid(k)
+	draw_set_transform(art_snap(c), spin, Vector2.ONE * k)
 	for ring in 2:
 		var n := 12 if ring == 0 else 8
 		var r0 := 0.14 + 0.13 * float(ring)
@@ -17540,6 +17815,7 @@ func _card_rosette(c: Vector2, k: float, kc: Color, amul: float, spin: float) ->
 			draw_colored_polygon(PackedVector2Array([dir * r0 + perp, dir * r1, dir * r0 - perp]),
 				ca(Color(kc.r, kc.g, kc.b, (0.30 if ring == 0 else 0.20) * amul)))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_cap_px = 0.0
 
 
 func draw_skill_card_back_v2(r: Rect2, is_trick: bool, a: float, lift: float = 1.0) -> void:
@@ -17583,8 +17859,8 @@ func draw_skill_card_back_v2(r: Rect2, is_trick: bool, a: float, lift: float = 1
 		_card_rosette(c, k, kc, 1.0, t)
 		for sgn: float in [-1.0, 1.0]:
 			_card_rosette(c + Vector2(0.0, sgn * plate.size.y * 0.335), k * 0.42, kc, 0.72, -t * 0.7)
-		draw_circle(c, k * 0.105, ca(Color(kc.r, kc.g, kc.b, 0.30)))
-		draw_circle(c, k * 0.075, ca(Color(f.r * 1.6, f.g * 1.6, f.b * 1.6, 0.95)))
+		fill_disc_pix(c, k * 0.105, ca(Color(kc.r, kc.g, kc.b, 0.30)))
+		fill_disc_pix(c, k * 0.075, ca(Color(f.r * 1.6, f.g * 1.6, f.b * 1.6, 0.95)))
 		draw_star4(c, k * 0.062, ca(Color(kc.r, kc.g, kc.b, 0.85)))
 	else:
 		# the weave: continuous waves, every other row in antiphase, so consecutive rows bow
@@ -17603,10 +17879,10 @@ func draw_skill_card_back_v2(r: Rect2, is_trick: bool, a: float, lift: float = 1
 				var u := float(sg) / 32.0
 				pts.append(Vector2(lerpf(x0, x1, u), y + sin(u * TAU * 1.75 + phase) * step * 0.40))
 			draw_polyline(pts, ca(Color(kc.r, kc.g, kc.b, 0.24)), maxf(1.0, 1.7 * lift))
-		draw_circle(c, k * 0.095, ca(Color(f.r * 1.35, f.g * 1.35, f.b * 1.45, 0.98)))
-		draw_circle(c, k * 0.085, ca(Color(kc.r, kc.g, kc.b, 0.22)))
-		draw_arc(c, k * 0.062, 0.0, TAU, 28, ca(Color(kc.r, kc.g, kc.b, 0.75)), maxf(1.0, 1.5 * lift), true)
-		draw_circle(c, k * 0.026, ca(Color(kc.r, kc.g, kc.b, 0.8)))
+		fill_disc_pix(c, k * 0.095, ca(Color(f.r * 1.35, f.g * 1.35, f.b * 1.45, 0.98)))
+		fill_disc_pix(c, k * 0.085, ca(Color(kc.r, kc.g, kc.b, 0.22)))
+		draw_ring_pix(c, k * 0.062, maxf(ART_PIXEL, 1.5 * lift), ca(Color(kc.r, kc.g, kc.b, 0.75)))
+		fill_disc_pix(c, k * 0.026, ca(Color(kc.r, kc.g, kc.b, 0.8)))
 	_cap_a = 1.0
 
 
@@ -17700,7 +17976,13 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 	# if the waterfall is ever improved, its reflection improves with it.
 	var flip := -1.0 if id == "rcasc" else 1.0
 	_cap_a = a
-	draw_set_transform(box.get_center(), 0.0, Vector2(k, k * flip))
+	# THE ORIGIN IS SNAPPED FIRST, and that is the precondition for everything the cap_*
+	# helpers do: they land a unit coordinate on the art grid by rounding it to a multiple of
+	# ART_PIXEL / k, which is only the art grid if the point the whole space hangs from is on
+	# it too. Snap the origin, publish the pitch, and every circle and ribbon inside the
+	# illustration rasterises like the rest of the game.
+	_cap_px = cap_grid(k)
+	draw_set_transform(art_snap(box.get_center()), 0.0, Vector2(k, k * flip))
 	match id:
 		"spin":       card_art_spin()
 		"btb":        card_art_btb()
@@ -17725,6 +18007,7 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 			up + Vector2(-k * 0.012, k * 0.13), up + Vector2(-k * 0.012, -k * 0.095),
 			up + Vector2(-k * 0.033, -k * 0.095)]), ca(Color(0.72, 0.92, 1.0, 0.70)))
 	_cap_a = 1.0
+	_cap_px = 0.0
 
 
 func card_art_spin() -> void:
@@ -17754,7 +18037,7 @@ func card_art_spin() -> void:
 		Vector2(-0.016, 0.294), Vector2(0.020, 0.294), Vector2(0.024, 0.352),
 		Vector2(0.010, 0.376), Vector2(-0.008, 0.372), Vector2(-0.014, 0.340)]), tulle_lo)
 	for rb: float in [-1.0, 1.0]:   # the ribbons, crossed at the ankle
-		draw_line(Vector2(rb * 0.004, 0.296), Vector2(rb * 0.052, 0.238), tulle_lo, 0.012)
+		cap_seg(Vector2(rb * 0.004, 0.296), Vector2(rb * 0.052, 0.238), tulle_lo, 0.012)
 	# LIMBS ARE CAPSULES, NOT HAND-WRITTEN POLYGONS, and that is a correctness rule rather
 	# than a shortcut. The first version drew each arm and the raised leg as one eight-point
 	# outline - out along the top edge, back along the bottom - and at the shoulder the two
@@ -17770,39 +18053,39 @@ func card_art_spin() -> void:
 		Vector2(0.250, 0.184)]), tulle_lo)
 	# THE TUTU: three plates, darkest underneath. One soft ellipse is a skirt; the stack is
 	# what makes it stiff, and stiffness is the whole silhouette of classical ballet.
-	fill_ellipse(Vector2(0.0, 0.070), 0.250, 0.052, tulle_lo)
-	fill_ellipse(Vector2(0.0, 0.044), 0.238, 0.058, tulle_mid)
-	fill_ellipse(Vector2(0.0, 0.018), 0.216, 0.062, tulle)
+	cap_ell(Vector2(0.0, 0.070), 0.250, 0.052, tulle_lo)
+	cap_ell(Vector2(0.0, 0.044), 0.238, 0.058, tulle_mid)
+	cap_ell(Vector2(0.0, 0.018), 0.216, 0.062, tulle)
 	# the bodice, boned: a narrow taper with a centre seam and a sweetheart neckline
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-0.056, 0.030), Vector2(0.056, 0.030), Vector2(0.046, -0.120),
 		Vector2(0.026, -0.150), Vector2(0.0, -0.136), Vector2(-0.026, -0.150),
 		Vector2(-0.046, -0.120)]), bodice)
-	draw_line(Vector2(0.0, -0.130), Vector2(0.0, 0.026), ca(Color(0.78, 0.32, 0.50)), 0.010)
+	cap_seg(Vector2(0.0, -0.130), Vector2(0.0, 0.026), ca(Color(0.78, 0.32, 0.50)), 0.010)
 	# ARMS IN THIRD ARABESQUE: one reaching forward and up along the line of the raised leg,
 	# one held back. Tapering polygons, never arcs - an arc has constant width and square ends,
 	# which at this size is a coat hanger rather than an arm.
 	# the forward arm, in two capsules so it bends at the elbow the way an arm does
 	draw_capsule(Vector2(-0.040, -0.112), Vector2(-0.140, -0.208), 0.062, 0.048, skin)
 	draw_capsule(Vector2(-0.140, -0.208), Vector2(-0.244, -0.306), 0.048, 0.030, skin)
-	draw_circle(Vector2(-0.250, -0.312), 0.020, skin)               # the hand
+	cap_disc(Vector2(-0.250, -0.312), 0.020, skin)               # the hand
 	# ...and the one held back, lower and behind, which is what makes it an arabesque rather
 	# than a shrug
 	draw_capsule(Vector2(0.044, -0.104), Vector2(0.166, -0.052), 0.058, 0.044, skin_sh)
 	draw_capsule(Vector2(0.166, -0.052), Vector2(0.268, 0.008), 0.044, 0.028, skin_sh)
-	draw_circle(Vector2(0.274, 0.014), 0.019, skin_sh)
+	cap_disc(Vector2(0.274, 0.014), 0.019, skin_sh)
 	# head, neck, and the bun - the second-cheapest ballerina cue after the tutu
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-0.020, -0.158), Vector2(0.020, -0.158), Vector2(0.018, -0.196), Vector2(-0.018, -0.196)]), skin)
-	draw_circle(Vector2(0.0, -0.236), 0.056, skin)
+	cap_disc(Vector2(0.0, -0.236), 0.056, skin)
 	draw_colored_polygon(PackedVector2Array([   # the hair, drawn flat to the skull
 		Vector2(-0.056, -0.246), Vector2(-0.034, -0.288), Vector2(0.020, -0.294),
 		Vector2(0.054, -0.262), Vector2(0.048, -0.230), Vector2(-0.046, -0.222)]), hair)
-	draw_circle(Vector2(0.062, -0.272), 0.032, hair)
-	draw_circle(Vector2(0.070, -0.280), 0.014, ca(Color(0.46, 0.29, 0.20)))
+	cap_disc(Vector2(0.062, -0.272), 0.032, hair)
+	cap_disc(Vector2(0.070, -0.280), 0.014, ca(Color(0.46, 0.29, 0.20)))
 	# the two marks that make a face at 0.05 of a card: a lowered lash line and a small mouth
-	draw_line(Vector2(-0.030, -0.242), Vector2(-0.014, -0.240), ca(Color(0.28, 0.18, 0.14)), 0.010)
-	draw_line(Vector2(0.014, -0.240), Vector2(0.030, -0.242), ca(Color(0.28, 0.18, 0.14)), 0.010)
+	cap_seg(Vector2(-0.030, -0.242), Vector2(-0.014, -0.240), ca(Color(0.28, 0.18, 0.14)), 0.010)
+	cap_seg(Vector2(0.014, -0.240), Vector2(0.030, -0.242), ca(Color(0.28, 0.18, 0.14)), 0.010)
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-0.012, -0.212), Vector2(0.012, -0.212), Vector2(0.0, -0.200)]), ca(Color(0.80, 0.34, 0.42)))
 
@@ -17825,10 +18108,10 @@ func card_art_btb() -> void:
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-0.300, 0.470), Vector2(-0.246, 0.070), Vector2(-0.120, -0.030),
 		Vector2(0.120, -0.030), Vector2(0.246, 0.070), Vector2(0.300, 0.470)]), coat)
-	draw_line(Vector2(0.0, -0.020), Vector2(0.0, 0.460), coat_lo, 0.016)
+	cap_seg(Vector2(0.0, -0.020), Vector2(0.0, 0.460), coat_lo, 0.016)
 	draw_colored_polygon(PackedVector2Array([   # the collar
 		Vector2(-0.104, -0.026), Vector2(0.104, -0.026), Vector2(0.086, 0.026), Vector2(-0.086, 0.026)]), coat_lo)
-	draw_circle(Vector2(0.0, -0.118), 0.108, skin)
+	cap_disc(Vector2(0.0, -0.118), 0.108, skin)
 	draw_colored_polygon(PackedVector2Array([   # all hair: this is the back of a head
 		Vector2(-0.110, -0.106), Vector2(-0.092, -0.208), Vector2(0.0, -0.242),
 		Vector2(0.092, -0.208), Vector2(0.110, -0.106), Vector2(0.0, -0.076)]), ca(Color(0.22, 0.15, 0.11)))
@@ -17837,7 +18120,7 @@ func card_art_btb() -> void:
 		Vector2(-0.248, 0.096), Vector2(-0.300, 0.180), Vector2(-0.268, 0.286),
 		Vector2(-0.148, 0.324), Vector2(-0.040, 0.320), Vector2(-0.036, 0.264),
 		Vector2(-0.150, 0.264), Vector2(-0.226, 0.234), Vector2(-0.238, 0.166)]), coat_lo)
-	draw_circle(Vector2(-0.014, 0.292), 0.050, skin)
+	cap_disc(Vector2(-0.014, 0.292), 0.050, skin)
 	# THE FAN OF CARDS in that hand, splayed. Drawn last so it sits clear of the body, and
 	# angled outward so the fan reads as a fan rather than as a stack.
 	for k in 5:
@@ -17848,7 +18131,7 @@ func card_art_btb() -> void:
 		draw_colored_polygon(PackedVector2Array([
 			root + s * 0.030, root - s * 0.030,
 			root - s * 0.044 + d * 0.210, root + s * 0.044 + d * 0.210]), card_face)
-		draw_line(root - s * 0.030, root - s * 0.044 + d * 0.210, card_edge, 0.008)
+		cap_seg(root - s * 0.030, root - s * 0.044 + d * 0.210, card_edge, 0.008)
 	# one pip on the nearest card, which is what stops the fan reading as a hand of blank paper
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(0.086, 0.176), Vector2(0.114, 0.208), Vector2(0.086, 0.240), Vector2(0.058, 0.208)]),
@@ -17952,7 +18235,7 @@ func card_art_waterfall() -> void:
 		Vector2(-0.50, -0.34), Vector2(0.50, -0.34), Vector2(0.50, 0.10), Vector2(-0.50, 0.10)]), far)
 	for b in 4:
 		var by := -0.30 + float(b) * 0.100
-		draw_line(Vector2(-0.50, by), Vector2(0.50, by + 0.012), ca(Color(0.22, 0.24, 0.25)), 0.014)
+		cap_seg(Vector2(-0.50, by), Vector2(0.50, by + 0.012), ca(Color(0.22, 0.24, 0.25)), 0.014)
 	# THE TWO NEAR WALLS, bedded. Each course is a filled band with a slightly different tone
 	# and an irregular lower edge - strata, not stripes.
 	for side: float in [-1.0, 1.0]:
@@ -17968,7 +18251,7 @@ func card_art_waterfall() -> void:
 				Vector2(side * (inner - jag * 0.6), y1), Vector2(side * outer, y1)]), tone)
 			# a lit top edge on every other course - the light comes from the sky slot above
 			if c % 2 == 0:
-				draw_line(Vector2(side * outer, y0 + 0.004), Vector2(side * (inner + jag), y0 + 0.018),
+				cap_seg(Vector2(side * outer, y0 + 0.004), Vector2(side * (inner + jag), y0 + 0.018),
 					rock_hi, 0.012)
 		# moss on the wet inner lip, which is the one colour note that says these rocks are wet
 		draw_colored_polygon(PackedVector2Array([
@@ -18006,16 +18289,16 @@ func card_art_waterfall() -> void:
 	surf.append(Vector2(-0.50, 0.50))
 	draw_colored_polygon(surf, pool)
 	for mz in 5:
-		fill_ellipse(Vector2(0.0, 0.222 - float(mz) * 0.020), 0.30 - float(mz) * 0.030,
+		cap_ell(Vector2(0.0, 0.222 - float(mz) * 0.020), 0.30 - float(mz) * 0.030,
 			0.070 - float(mz) * 0.009, mist)
 	for f in 9:
 		var fx := -0.30 + float(f) * 0.075
-		draw_circle(Vector2(fx, 0.226 + 0.014 * sin(float(f) * 1.9)),
+		cap_disc(Vector2(fx, 0.226 + 0.014 * sin(float(f) * 1.9)),
 			0.030 - 0.008 * float(f % 3), ca(Color(0.95, 0.98, 1.0, 0.75)))
 	# the ripple rings spreading out from the impact
 	for rr in 3:
 		var ryv := 0.290 + float(rr) * 0.052
-		draw_line(Vector2(-0.20 - float(rr) * 0.08, ryv), Vector2(0.20 + float(rr) * 0.08, ryv),
+		cap_seg(Vector2(-0.20 - float(rr) * 0.08, ryv), Vector2(0.20 + float(rr) * 0.08, ryv),
 			ca(Color(0.70, 0.88, 1.0, 0.26)), 0.010)
 	# FOREGROUND BOULDERS, darkest of all, closing the bottom corners. They are what turn a
 	# flat elevation into a view of somewhere.
@@ -18024,7 +18307,7 @@ func card_art_waterfall() -> void:
 			Vector2(side2 * 0.50, 0.500), Vector2(side2 * 0.50, 0.330),
 			Vector2(side2 * 0.360, 0.300), Vector2(side2 * 0.250, 0.360),
 			Vector2(side2 * 0.230, 0.500)]), rock_lo)
-		draw_line(Vector2(side2 * 0.480, 0.340), Vector2(side2 * 0.350, 0.316), rock, 0.014)
+		cap_seg(Vector2(side2 * 0.480, 0.340), Vector2(side2 * 0.350, 0.316), rock, 0.014)
 
 
 func card_art_temple() -> void:
@@ -18120,14 +18403,14 @@ func card_art_duck(baby: bool) -> void:
 	var cy := 0.130 if not baby else 0.165
 	# THE BODY, an egg lying down rather than a circle: a duck's back is long and its breast
 	# is deep, and a round body reads as a chick toy at any age.
-	fill_ellipse(Vector2(0.0, cy), body_w, body_h, yolk)
-	fill_ellipse(Vector2(-body_w * 0.18, cy - body_h * 0.22), body_w * 0.70, body_h * 0.58, yolk_hi)
+	cap_ell(Vector2(0.0, cy), body_w, body_h, yolk)
+	cap_ell(Vector2(-body_w * 0.18, cy - body_h * 0.22), body_w * 0.70, body_h * 0.58, yolk_hi)
 	# the folded wing - one shape, and the only mark that says the body has feathers on it
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-body_w * 0.36, cy - body_h * 0.10), Vector2(body_w * 0.10, cy - body_h * 0.34),
 		Vector2(body_w * 0.52, cy + body_h * 0.06), Vector2(body_w * 0.06, cy + body_h * 0.30),
 		Vector2(-body_w * 0.30, cy + body_h * 0.18)]), yolk_lo)
-	draw_line(Vector2(-body_w * 0.20, cy + body_h * 0.10), Vector2(body_w * 0.34, cy + body_h * 0.02),
+	cap_seg(Vector2(-body_w * 0.20, cy + body_h * 0.10), Vector2(body_w * 0.34, cy + body_h * 0.02),
 		ca(Color(0.80, 0.58, 0.12, 0.55)), 0.010)
 	# the tail, which an adult has and a duckling barely does
 	if not baby:
@@ -18139,8 +18422,8 @@ func card_art_duck(baby: bool) -> void:
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-body_w * 0.30, cy - body_h * 0.52), Vector2(-body_w * 0.86, hc.y + head_r * 0.60),
 		Vector2(-body_w * 0.36, hc.y + head_r * 0.66), Vector2(-body_w * 0.02, cy - body_h * 0.44)]), yolk)
-	draw_circle(hc, head_r, yolk)
-	draw_circle(hc + Vector2(-head_r * 0.24, -head_r * 0.28), head_r * 0.62, yolk_hi)
+	cap_disc(hc, head_r, yolk)
+	cap_disc(hc + Vector2(-head_r * 0.24, -head_r * 0.28), head_r * 0.62, yolk_hi)
 	# THE BILL: a wedge with a shorter lower mandible under it. A single triangle is a beak
 	# and belongs on a sparrow; the two-part flat bill is the whole species.
 	draw_colored_polygon(PackedVector2Array([
@@ -18149,18 +18432,18 @@ func card_art_duck(baby: bool) -> void:
 	draw_colored_polygon(PackedVector2Array([
 		hc + Vector2(-head_r * 0.62, 0.030), hc + Vector2(-head_r * 0.62 - bill_l * 0.80, 0.034),
 		hc + Vector2(-head_r * 0.62 - bill_l * 0.74, 0.052), hc + Vector2(-head_r * 0.52, 0.050)]), bill_lo)
-	draw_circle(hc + Vector2(-head_r * 0.30, -head_r * 0.16), head_r * 0.155, ca(Color(0.16, 0.12, 0.10)))
-	draw_circle(hc + Vector2(-head_r * 0.34, -head_r * 0.22), head_r * 0.058, ca(Color(1, 1, 1, 0.85)))
+	cap_disc(hc + Vector2(-head_r * 0.30, -head_r * 0.16), head_r * 0.155, ca(Color(0.16, 0.12, 0.10)))
+	cap_disc(hc + Vector2(-head_r * 0.34, -head_r * 0.22), head_r * 0.058, ca(Color(1, 1, 1, 0.85)))
 	# ...and the water it sits on, which is one flat band and the only thing on the card that
 	# is not the duck. Without it the bird is floating in the middle of a rectangle.
 	var wl := cy + body_h * 0.52
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-0.50, wl), Vector2(0.50, wl), Vector2(0.50, 0.50), Vector2(-0.50, 0.50)]),
 		ca(Color(0.34, 0.58, 0.78, 0.75)))
-	draw_line(Vector2(-0.50, wl), Vector2(0.50, wl), ca(Color(0.70, 0.88, 1.0, 0.60)), 0.014)
+	cap_seg(Vector2(-0.50, wl), Vector2(0.50, wl), ca(Color(0.70, 0.88, 1.0, 0.60)), 0.014)
 	for rp in 3:
 		var rr := 0.10 + float(rp) * 0.085
-		draw_line(Vector2(-rr - 0.10, wl + 0.040 + float(rp) * 0.036),
+		cap_seg(Vector2(-rr - 0.10, wl + 0.040 + float(rp) * 0.036),
 			Vector2(rr + 0.10, wl + 0.040 + float(rp) * 0.036), ca(Color(0.70, 0.88, 1.0, 0.22)), 0.010)
 
 
@@ -18202,12 +18485,12 @@ func card_art_racket() -> void:
 		var u := (float(m) / 6.0) * 2.0 - 1.0
 		var sx := hx + u * (rx - 0.040)
 		var h := sqrt(maxf(1.0 - u * u, 0.0)) * (ry - 0.036)
-		draw_line(Vector2(sx, hy - h), Vector2(sx, hy + h), strung, 0.009)
+		cap_seg(Vector2(sx, hy - h), Vector2(sx, hy + h), strung, 0.009)
 	for n in 9:
 		var v := (float(n) / 8.0) * 2.0 - 1.0
 		var sy := hy + v * (ry - 0.036)
 		var w := sqrt(maxf(1.0 - v * v, 0.0)) * (rx - 0.040)
-		draw_line(Vector2(hx - w, sy), Vector2(hx + w, sy), strung, 0.009)
+		cap_seg(Vector2(hx - w, sy), Vector2(hx + w, sy), strung, 0.009)
 	var rim := PackedVector2Array()
 	for i4 in 41:
 		var t3 := TAU * float(i4) / 40.0
@@ -18228,15 +18511,15 @@ func card_art_racket() -> void:
 	for i5 in 7:
 		var t4 := float(i5) / 6.0
 		var p := g0.lerp(g1, t4)
-		draw_line(p - Vector2(0.056, 0.014), p + Vector2(0.056, -0.014), grip_hi, 0.010)
+		cap_seg(p - Vector2(0.056, 0.014), p + Vector2(0.056, -0.014), grip_hi, 0.010)
 	draw_colored_polygon(PackedVector2Array([
 		g1 + Vector2(0.072, -0.004), g1 - Vector2(0.072, 0.004),
 		g1 + Vector2(-0.066, 0.034), g1 + Vector2(0.066, 0.034)]), frame_lo)
 	# THE BALL, at rest beside it: a felt sphere with the seam that makes it a tennis ball and
 	# not an orange. Two arcs, and the nap along the top edge.
 	var bp := Vector2(0.300, 0.318)
-	draw_circle(bp, 0.112, ca(Color(0.78, 0.92, 0.30)))
-	draw_circle(bp + Vector2(-0.026, -0.030), 0.082, ca(Color(0.86, 0.96, 0.44)))
+	cap_disc(bp, 0.112, ca(Color(0.78, 0.92, 0.30)))
+	cap_disc(bp + Vector2(-0.026, -0.030), 0.082, ca(Color(0.86, 0.96, 0.44)))
 	draw_arc(bp + Vector2(0.098, 0.0), 0.108, PI * 0.60, PI * 1.40, 18, ca(Color(0.99, 1.0, 0.94)), 0.016, true)
 	draw_arc(bp - Vector2(0.098, 0.0), 0.108, -PI * 0.40, PI * 0.40, 18, ca(Color(0.99, 1.0, 0.94)), 0.016, true)
 
@@ -22031,8 +22314,93 @@ const CAP_FIRE := Color(1.0, 0.58, 0.20)   # what the torches throw onto everyth
 # nothing drawn afterwards can inherit a half-faded mark.
 var _cap_a := 1.0
 
+# THE ART GRID, EXPRESSED IN THE CURRENT UNIT SPACE. The card art and the wordmark both draw
+# in fractions of a size k under draw_set_transform(origin, 0, Vector2.ONE * k), so a screen-
+# space snap is meaningless inside them - snapping to 2 would snap to two whole cards. What
+# lands on the grid there is a multiple of ART_PIXEL / k, PROVIDED the transform's origin is
+# itself art-snapped. Set it beside _cap_a whenever a unit space is entered; 0.0 means "not in
+# one", and every helper below then falls back to its smooth original.
+var _cap_px := 0.0
+
 func ca(c: Color) -> Color:
 	return Color(c.r, c.g, c.b, c.a * _cap_a) if _cap_a < 1.0 else c
+
+
+func cap_grid(k: float) -> float:
+	# the unit-space pitch for a space scaled by k, or 0 if k is too small to be worth it
+	return (ART_PIXEL / k) if k > ART_PIXEL else 0.0
+
+
+func cap_disc(c: Vector2, r: float, col: Color) -> void:
+	# A FILLED CIRCLE IN UNIT SPACE, on the art grid - the same row-by-row rasteriser as
+	# fill_disc_pix, but stepping in units of _cap_px instead of screen pixels.
+	#
+	# The card faces were full of draw_circle: eyes, hubs, berries, the ballerina's bun. Every
+	# one of them antialiases its rim, and a soft rim is what stops a 20px circle reading as a
+	# drawn shape and makes it read as a blur - beside polygons that are already hard-edged,
+	# on the one screen the player stops to look at.
+	if _cap_px <= 0.0:
+		draw_circle(c, r, col)
+		return
+	var g := _cap_px
+	var rows := int(ceil(r * 2.0 / g)) + 2
+	var y0 := snappedf(c.y - r, g)
+	for i in rows:
+		var y := y0 + float(i) * g
+		var dy := (y + g * 0.5) - c.y          # sample each row at its CENTRE
+		if absf(dy) > r:
+			continue
+		var half := sqrt(maxf(0.0, r * r - dy * dy))
+		var x0 := snappedf(c.x - half, g)
+		var w := snappedf(half * 2.0, g)
+		if w >= g:
+			draw_rect(Rect2(x0, y, w, g), col)
+
+
+func cap_ell(c: Vector2, rx: float, ry: float, col: Color) -> void:
+	# ...and an ellipse, which is the same solve with the row scaled
+	if _cap_px <= 0.0 or rx <= 0.0 or ry <= 0.0:
+		fill_ellipse(c, rx, ry, col)
+		return
+	var g := _cap_px
+	var rows := int(ceil(ry * 2.0 / g)) + 2
+	var y0 := snappedf(c.y - ry, g)
+	for i in rows:
+		var y := y0 + float(i) * g
+		var t := ((y + g * 0.5) - c.y) / ry
+		if absf(t) > 1.0:
+			continue
+		var half := rx * sqrt(maxf(0.0, 1.0 - t * t))
+		var x0 := snappedf(c.x - half, g)
+		var w := snappedf(half * 2.0, g)
+		if w >= g:
+			draw_rect(Rect2(x0, y, w, g), col)
+
+
+func cap_seg(a: Vector2, b: Vector2, col: Color, w: float = -1.0) -> void:
+	# A THICK LINE IN UNIT SPACE, on the art grid. draw_line antialiases, and on a card these
+	# are ribbons, seams and whiskers - the thin things, where a soft edge is all there is.
+	#
+	# Walked along the segment rather than scanned by row, because these are short and often
+	# near-horizontal, and a row scan gives a near-horizontal line one enormous row.
+	# argument order follows draw_line, so the substitution at the call sites is mechanical
+	if _cap_px <= 0.0:
+		draw_line(a, b, col, w)
+		return
+	var g := _cap_px
+	if w <= 0.0:
+		w = g
+	var d := b - a
+	var n := maxi(1, int(ceil(d.length() / (g * 0.5))))
+	var perp := Vector2(-d.y, d.x).normalized() * (w * 0.5)
+	for i in n + 1:
+		var t := float(i) / float(n)
+		var at := a + d * t
+		var m := maxi(1, int(ceil(w / g)))
+		for j in m:
+			var o := (float(j) - float(m - 1) * 0.5) * g
+			var pt := at + perp.normalized() * o if perp.length() > 0.0 else at
+			draw_rect(Rect2(snappedf(pt.x, g), snappedf(pt.y, g), g, g), col)
 
 
 func cap_warm_rim(p: Vector2, r: float, amt: float) -> void:
@@ -24007,12 +24375,23 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# the STAGE CARD: a portrait of the venue you are about to play, its rung on the
 	# ladder, the record to beat, and how the next stage opens. The exterior drifts
 	# in a slow push so the card feels composed rather than static.
-	var ez := 1.0 + 0.07 * clampf(float(cine_tick) / 340.0, 0.0, 1.0)
-	draw_set_transform(s * 0.5 * (1.0 - ez), 0.0, Vector2(ez, ez))
+	# THE PUSH-IN IS GONE, and the exterior is why. The card used to zoom from 1.00 to 1.07
+	# over its life so it would "feel composed rather than static" - but that is a FRACTIONAL
+	# SCALE applied to the whole picture, the one thing pixel art cannot survive, and the
+	# exterior is a baked sprite now. Every frame of the card would resample every pixel of
+	# it, which is exactly the smoothness the bake exists to remove.
+	#
+	# A whole-art-pixel slide would have been lossless and was tried: it needs the picture
+	# drawn oversize so the trailing edge never shows, and art_blit_rect stretches a sprite
+	# to its box - so drawing it 16px wide of 1280 resamples it by 1.0125 and gives back the
+	# same problem in a subtler form. It would want a bake at its own odd size, for three
+	# seconds of drift.
+	#
+	# So the card is still, and its life is the fade-in, the drifting dust and the marquee.
+	# A portrait of a venue is allowed to be a portrait.
 	ext_center = true    # the card is a portrait of the venue: hero mid-frame
 	draw_venue_exterior(s, establish_venue)
 	ext_center = false
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var fin := clampf(float(cine_tick) / 26.0, 0.0, 1.0)
 	if fin < 1.0:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
@@ -24207,7 +24586,18 @@ func draw_gradient_v(r: Rect2, top: Color, bot: Color, steps: int = 22) -> void:
 	# Strips TILE exactly (each one's bottom is the next one's top) rather than
 	# overlapping: an overlap doubled the alpha of semi-transparent gradients at
 	# every seam, which showed as dark horizontal lines (e.g. over the menu balls).
+	#
+	# A REFERENCE RENDER GETS EVERY STEP IT CAN, and this turned out to matter more than
+	# any setting in the reducer. Twenty-odd strips across a 475px sky is an 18px band, and
+	# on screen that is invisible because the two colours either side of a seam are nearly
+	# identical - but SNAPPED TO 48 COLOURS they land on different palette entries, and the
+	# invisible seam becomes a hard stripe across the card. The first exterior bake came out
+	# looking like a deckchair. Chasing it in the dither threshold was the wrong end: the
+	# bands were in the source. One strip per art pixel gives the reducer a smooth ramp to
+	# dither, and costs nothing because this path only ever runs to make a picture.
 	var n := maxi(1, steps)
+	if _extref >= 0 or _menuref or _bgref:
+		n = maxi(n, int(r.size.y / ART_PIXEL))
 	for i in n:
 		var f := float(i) / float(n)
 		var y0 := r.position.y + r.size.y * float(i) / float(n)
@@ -24290,7 +24680,17 @@ func draw_wordmark(y: float, size: int, col: Color, s: Vector2) -> void:
 
 
 func draw_dust(s: Vector2, n: int, glow: Color) -> void:
-	# warm motes drifting up through the light, a subtle atmosphere layer
+	# warm motes drifting up through the light, a subtle atmosphere layer.
+	#
+	# NEVER BAKED. Dust is the one thing in an exterior or a proscenium that moves, so every
+	# bake in this project holds the scenery and leaves this drawing live on top - and this
+	# early return is what stops a re-bake painting the motes permanently into the picture.
+	if _extref >= 0 or _menuref:
+		return
+	# ON THE ART GRID. A mote was a 2.8px square at a fractional position, which at this
+	# density is a soft grey smudge straddling four art pixels rather than a speck of dust -
+	# the one thing in front of a crisp pixel backdrop, and the blurriest thing on screen.
+	# One whole art pixel, snapped: 2x2 screen px, hard edges, same size and drift.
 	for i in n:
 		var seed := float(i) * 41.3
 		var bx := fposmod(sin(seed) * 43758.5, 1.0)
@@ -24299,7 +24699,8 @@ func draw_dust(s: Vector2, n: int, glow: Color) -> void:
 		var px := bx * s.x + sin(atick() * 0.01 + seed) * 12.0
 		var py := by * s.y
 		var a := 0.10 + 0.10 * sin(atick() * 0.03 + seed)
-		draw_rect(Rect2(px - 1.4, py - 1.4, 2.8, 2.8), Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
+		draw_rect(Rect2(art_snap(Vector2(px, py)), Vector2(ART_PIXEL, ART_PIXEL)),
+			Color(glow.r, glow.g, glow.b, maxf(0.0, a)))
 
 
 #endregion
@@ -25176,7 +25577,27 @@ func draw_popups(font: Font) -> void:
 #region VENUE EXTERIOR ART (CUTSCENES)
 # --- venue exteriors: the "where", shared by establishing cards and wide shots -
 
+const EXT_KEYS := ["backyard", "street_corner", "small_theatre", "the_circus",
+	"championship", "world_arena", "the_midnight_show"]
+
+
 func draw_venue_exterior(s: Vector2, vi: int) -> void:
+	# THE VENUE PORTRAIT, shown before every act and twice more in the day hub.
+	#
+	# Baked the same way the stage backdrops and the title proscenium are: the SCENERY is a
+	# sprite and the one moving layer is drawn live over it. What the bake buys here is not
+	# speed, it is that a moon is a circle and a big top is a fan of diagonals, and both of
+	# those are antialiased however carefully the code snaps its vertices - so this was one
+	# of the last screens where crisp pixel props stood in front of a smooth drawing.
+	#
+	# The stars ARE baked, unlike the dust, and that is an improvement rather than a
+	# compromise: a star was a 2.6px rect at a fractional position, i.e. a grey smudge over
+	# four art pixels. Baked it becomes a hard speck. What it loses is the twinkle, and a
+	# card that is on screen for three seconds spends them drifting dust instead.
+	if art_blit_rect("ui/ext_" + EXT_KEYS[clampi(vi, 0, EXT_KEYS.size() - 1)],
+			Rect2(Vector2.ZERO, s)):
+		draw_venue_exterior_dust(s, vi)
+		return
 	match vi:
 		0: ext_backyard(s)
 		1: ext_street(s)
@@ -25187,6 +25608,13 @@ func draw_venue_exterior(s: Vector2, vi: int) -> void:
 		_: ext_midnight(s)   # The Midnight Show (2026-07-18): its own dim exterior, not
 							 # the World Arena's - the same "genuinely dark" promise the
 							 # stage backdrop already keeps (see draw_venue_dressing)
+
+
+func draw_venue_exterior_dust(s: Vector2, vi: int) -> void:
+	# the count and colour each exterior passes to draw_dust, kept beside the bake because
+	# the drawing that used to own them no longer runs
+	var n := 18 if vi == 0 else (14 if vi == 2 else 16)
+	draw_dust(s, n, Color(1.0, 0.85, 0.55) if vi == 0 else Color(1.0, 0.8, 0.5))
 
 
 func ext_backyard(s: Vector2) -> void:

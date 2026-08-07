@@ -24,8 +24,15 @@ is not in the PIXEL ART section is inherited from TOSSA and still true.
    `Resources/palette/` (including a .gpl Aseprite loads). Selective or no outlines, restrained
    shading, no thick black 16-bit outlines.
 4. **Grid-snap the geometry, sprite the pictures.** Panels, bars and the spotlight cone stay
-   procedural. The spotlight must keep narrowing and warming as a streak builds, so it can never
-   be baked into a backdrop.
+   procedural but are rasterised on the art grid. The spotlight must keep narrowing and warming
+   as a streak builds, so it can never be baked into a backdrop.
+   The grid rasterisers, all one draw_rect per art row: `fill_disc_pix` / `draw_ring_pix` /
+   `draw_glow_pix` (circles), `draw_capsule_pix` (limbs), `draw_arc_pix` + `draw_spoke_pix`
+   (the crowd dial's bands, ticks and needle), `draw_card_pix` (every rounded panel and bar -
+   `soft_card` alone is forty-odd call sites, which makes it the highest-leverage pixel fix in
+   the file). Inside a `draw_set_transform` unit space - the card illustrations, the wordmark -
+   a screen-space snap means nothing: snap the transform's ORIGIN, publish `_cap_px` =
+   `ART_PIXEL / k`, and use `cap_disc` / `cap_ell` / `cap_seg`.
 
 **THE SEAM IS THE WHOLE ARCHITECTURE.** `Game.gd` never names a PNG. `art_blit` /
 `art_blit_size` / `art_blit_rect` / `art_blit_regions` take a key like `prop/club`, and
@@ -65,19 +72,44 @@ screen pixels tall and some three. Callers that place hands themselves must snap
 - **THE PERFORMER IS THE SHOWMAN**, a PixelLab-generated ringmaster - Louis reversed the
   never-generate rule on 2026-08-06 and then picked him over the traced figure and two other
   designs. He lives in the base manifest (`Assets/Characters/showman/`) with landmark geometry
-  in `_FIGURE` and two juggling strips in `_ANIM`. The traced figure survives only as the seam's
+  in `_FIGURE` and his arm bank in `_ARMS`. The traced figure survives only as the seam's
   procedural fallback, which is what makes the manifest architecture work and is not a look
   anyone chooses.
 - **THE ANIMATION IS INDEXED BY THE HANDS, NOT BY A CLOCK.** This is the whole reconciliation
   between painted animation and physics: a loop on a timer drifts against the player's throws
-  within seconds, because the PLAYER decides when a throw happens. `fig_anim_pick` reads the
-  sim's own `hpos` and looks up the frame whose hands are nearest, so there is no phase to keep
-  in sync. `scripts/fit_juggle_anim.py` measures every frame and writes the sorted table.
-  **The FURTHEST hand decides**, not the average - a generated strip is symmetric while a
-  cascade's hands are antiphase, and averaging parks the figure mid-sweep so every catch lands
-  35px outside the palm. **The strip is chosen by the PATTERN** (columns has its own) and only
-  the frame within it by reach; searching both strips as one pool flips between two different
-  body poses on adjacent ticks. **`draw_arm` is not called at all while a strip is live.**
+  within seconds, because the PLAYER decides when a throw happens. `fig_arm_pick` reads the
+  sim's own `hpos` and looks up the arm whose reach is nearest, so there is no phase to keep
+  in sync. **`draw_arm` is not called at all while a bank is live.**
+- **THE PERFORMER IS A BODY AND TWO ARMS, NOT A STRIP OF WHOLE FRAMES** (2026-08-07). Whole-body
+  frames could only ever be right about ONE hand - a cascade's hands are in ANTIPHASE while a
+  generated strip is symmetric - so whichever hand lost the argument had its prop drawn ~35px
+  out in open air. `scripts/build_arm_bank.py` takes every generated frame apart into a body
+  that never moves and two arm layers that do (`scripts/armlib.py`), and the game picks each
+  arm from its own hand. Sixteen source frames stop being sixteen poses and become sixteen
+  squared, and the banks POOL ACROSS GENERATIONS, so the reach table is dense (27 entries over
+  30..61 art px) rather than seven frames bunched at one reach.
+  - **An arm layer is the frame's whole half of the arm band, deliberately.** The obvious layer
+    is "the pixels that moved" and it SEVERS the arms: at close reach the sleeve lies flat on
+    the coat, so most of the limb is opaque in every frame. Taking the half-band cannot sever
+    anything and costs nothing, because the half a torso that comes with it lands on a body
+    made from the median of the same pixels.
+  - **The height of the palms is the check that matters, and reach cannot see it.** Every
+    generation before 2026-08-07 painted them 55-77% up the figure where the game's hand line
+    is 50.5%, so props were drawn up to 40px below the painted hands in every run. Ask for
+    "hands kept LOW at hip height, never above the belt" and expect to re-roll. **The model
+    will not paint tucked hands at hip height** - five attempts, every phrasing; it raises them
+    to the waist, because that is what a person does. So the bank is dense across the CATCHING
+    range and clamps at the resting end, where a held prop follows the painted palm anyway.
+  - **`fig_hand_pos` is where a prop is drawn; `hpos` is where the catch is decided.** Held
+    props, the catch glow, the charge gauge and the tutorial keys all follow the painted palm.
+  - **A painted performer owns the hand line.** He is a fixed-size sprite and the stage is laid
+    out in fractions of the viewport, and the project stretches with aspect "expand" - so at any
+    window that is not 16:9 the boards move and he does not. `stage_center` reads the bank's
+    own `hand_py`; measured at 1280x803 that closed an 11px gap that grew with the window.
+  - **The hands must be painted in the colours of his FACE.** Layers snapped independently to
+    the 48 colours came back with GOLD hands at some reaches and skin at others - which in play
+    is his hands changing colour as he reaches out. Distance thresholds do not separate skin
+    from the coat's frogging; set membership against the face's own colours does.
 - **Two sizes per prop, ONE design.** `prop_big/*` is the shop card (PixelLab, blitted at zoom 1)
   and is the SOURCE: `prop/*` is derived from it by `scripts/derive_stage_props.py` (round props by
   `make_round_props.py --stage`, from the same analytic model that draws their cards), and the title
@@ -102,6 +134,21 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   at all. `--force` overwrites, `--relock` re-baselines.
 - **Prop pivots are NOT centres** (a club tumbles about 55.8% down its sprite), and prop scales are
   fractional, so prop sprites must be pinned to exact integer screen-pixels per art pixel.
+- **A BAKE IS ONLY AS SMOOTH AS ITS SOURCE.** `draw_gradient_v` paints about twenty strips -
+  invisible on screen, hard stripes once snapped to 48 colours, and the first venue-exterior
+  bake came back looking like a deckchair. No reducer setting can undo a band that is already
+  in its input; the reference-render branch in `draw_gradient_v` gives one strip per art pixel.
+- **Ordered dither and error diffusion are not interchangeable.** Bayer mixes the two NEAREST
+  palette entries by their distance ratio, which is right when they are a hair apart (the title
+  proscenium, one slow near-black wash) and wrong when the true colour is far from both (a dusk
+  sky crossing the palette's sparsest region), where it plateaus. `pixelise_ext.py` uses
+  serpentine Floyd-Steinberg with the error CLAMPED - unclamped it speckles a blue sky red,
+  because the palette has no purples and the whole residual lands on one neighbour.
+- **A fractional scale is the one thing pixel art cannot survive, and animations hide them.**
+  The establishing card's 1.00-to-1.07 push-in had to go when the exterior became a sprite. A
+  whole-art-pixel slide is lossless but needs the picture drawn oversize, and `art_blit_rect`
+  stretches a sprite to its box - so drawing it 16px wide of 1280 resamples it by 1.0125 and
+  gives the same problem back in a subtler form.
 - **Tinted props are authored GREYSCALE** (`ball`, `egg`, `ring` only) because the game multiplies
   them by a colour and a multiply can only darken. They need `GREY_FLOOR = 0.45` or their rim
   pixels multiply down to near-black and read as holes in the silhouette.

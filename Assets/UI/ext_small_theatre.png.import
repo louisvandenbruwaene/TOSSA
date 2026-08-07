@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dj4komifg1v0g"
-path="res://.godot/imported/juggle_columns.png-dfe9ed150f86ae132173dba210a25b14.ctex"
+uid="uid://cyby2gba68kxe"
+path="res://.godot/imported/ext_small_theatre.png-2e25f62d6dd71861ed888d19c8a76879.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Characters/showman/juggle_columns.png"
-dest_files=["res://.godot/imported/juggle_columns.png-dfe9ed150f86ae132173dba210a25b14.ctex"]
+source_file="res://Assets/UI/ext_small_theatre.png"
+dest_files=["res://.godot/imported/ext_small_theatre.png-2e25f62d6dd71861ed888d19c8a76879.ctex"]
 
 [params]
 
