@@ -94,6 +94,27 @@ else
   log_warn "4. Collision sweep skipped (--quick)."
 fi
 
+if [[ $QUICK -eq 0 ]]; then
+  # --- 4b. The stop gesture -------------------------------------------------
+  log_head "4b. Full-hand catching / the stop gesture (--parkcheck)"
+  # FIVE PROPS, NOT THREE, and the harness will tell you why if you change it: at three or
+  # four a hand parks on the LAST catch of the set, so nothing is ever incoming afterwards
+  # and the reach half of the rule is never exercised at all.
+  log="$WORK/parkcheck.log"
+  run_headless 60 "$log" --demo --booking --venue 3 --prop 0 --balls 5 --parkcheck --shotat 6000 || true
+  if grep -q "parkcheck FAIL" "$log"; then
+    grep "parkcheck" "$log" | sed 's/^/    /'
+    fail "The full-hand catch rule regressed (see above)."
+  elif grep -q "parkcheck OK" "$log"; then
+    grep "parkcheck" "$log" | sed 's/^/    /'
+  else
+    fail "--parkcheck printed no verdict (the gesture never ran - did the demo reach a goal?)."
+  fi
+  scan_run_log "$log" || FAIL=1
+else
+  log_warn "4b. Stop-gesture check skipped (--quick)."
+fi
+
 # --- 5. Uncalled-function scan (advisory, matches CLAUDE.md's own technique) -
 log_head "5. Uncalled-function scan (advisory)"
 EXCLUDE_RE='^(_ready|_draw|_physics_process|_input|_unhandled_input|_process|_notification|_enter_tree|_exit_tree|_on_.*|_click|_mix_into)$'

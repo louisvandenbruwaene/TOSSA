@@ -97,15 +97,37 @@ REACH_STEP = 1.0        # one bank entry per art pixel of reach: finer than the 
 # every phrasing, because that is what a person actually does.
 UP_TOL = 0.024
 
-# ...except close in, where it is graded. Below this reach the arms are tucked against the
-# body, and the model will not paint that at hip height in any phrasing - it raises the hands
-# to the waist, because that is what a person does. The choice there is between an approximate
-# arm and NO arm, and the approximate one wins: a tucked hand is usually HOLDING (in columns it
-# has gone to stand under its own lane, about to throw), and a held prop follows the painted
-# palm, so most of the error is absorbed before anyone sees it. Accuracy still rules the
-# catching range, which is where a prop arrives on a path the painting does not control.
-INNER_REACH = 30.0
-INNER_UP_TOL = 0.075
+# THE HAND LINE IS NOT FLAT, and pretending it was is what made the inner poses bad.
+#
+# The first version of this file demanded one height at every reach and then loosened the
+# tolerance close in, because the model would not paint a tucked hand at hip height however
+# the prompt was phrased. It raises the palm as the arm folds - and it is right to, that is
+# what a forearm does. Measured across all nineteen generations: 58-65% of the figure's height
+# at reach 24-30, 49-51% at 45-54, and rising again past 57.
+#
+# The game now has the same curve (see HAND_IN_LIFT in Game.gd), so the fitter can ask for the
+# pose it actually wants instead of tolerating the one it gets. The U-shape is not a curve fit
+# either - it is the two hand SLOTS. The inner slot is lifted and the outer is not, so reach
+# tracks height on the way out; and a COLUMNS hand stands under its own lane while still on
+# the inner slot, which is why the far reaches are lifted too.
+LIFT_UP = 0.067          # how much higher the inner slot sits, as a fraction of figure height
+LIFT_IN = (24.0, 30.0)   # ...fully lifted out to here
+LIFT_FLAT = (46.0, 56.0) # ...flat across the catching range
+LIFT_OUT = 64.0          # ...and lifted again where columns' outer lanes live
+
+PALM_BOX = (12, 12)      # the cut-out hand, in art px
+PALM_SHIFT = 4           # ...offset toward the body, because the palm point is the extremity
+
+
+def lift_at(reach: float) -> float:
+	"""How far above the base hand line a palm belongs at this reach, 0..LIFT_UP."""
+	if reach <= LIFT_IN[1]:
+		return LIFT_UP
+	if reach < LIFT_FLAT[0]:
+		return LIFT_UP * (LIFT_FLAT[0] - reach) / (LIFT_FLAT[0] - LIFT_IN[1])
+	if reach <= LIFT_FLAT[1]:
+		return 0.0
+	return LIFT_UP * min(1.0, (reach - LIFT_FLAT[1]) / (LIFT_OUT - LIFT_FLAT[1]))
 
 
 def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
@@ -320,9 +342,9 @@ def pick(cands: list[dict], side: str, axis: float, target_py: float) -> list[di
 			# still disagree by a pixel or two once one is slid onto the other's body, and
 			# that pixel is a whole art pixel here. This is also the number the game will
 			# live with, so it is the one worth minimising.
-			py_err = abs(c["py"] - target_py)
-			tol = INNER_UP_TOL if want < INNER_REACH else UP_TOL
-			if py_err > tol * (c["cell"][1] - 1):
+			want_py = target_py - lift_at(want) * (c["cell"][1] - 1)
+			py_err = abs(c["py"] - want_py)
+			if py_err > UP_TOL * (c["cell"][1] - 1):
 				continue
 			key = (py_err, abs(c["reach"] - want))
 			if best_key is None or key < best_key:
@@ -423,11 +445,22 @@ def main() -> int:
 		meta["left" if c["side"] == "L" else "right"].append(rec)
 	meta["left"].sort(key=lambda r: r["reach"])
 	meta["right"].sort(key=lambda r: r["reach"])
+	# THE HAND LINE REPORTED TO THE GAME IS THE BASE (flat) ONE, measured only from entries in
+	# the catching range. A median across the whole bank would average the lifted inner poses
+	# into it and quietly raise stage_center for every screen - the curve is a property of the
+	# pose, not of where the performer stands.
+	flat = [r["py"] for r in meta["left"] + meta["right"]
+			if LIFT_FLAT[0] <= r["reach"] <= LIFT_FLAT[1]]
 	pys = [r["py"] for r in meta["left"] + meta["right"]]
-	meta["hand_py"] = round(float(np.median(pys)), 1) if pys else round(target_py, 1)
-	spread = (max(pys) - min(pys)) if pys else 0.0
+	meta["hand_py"] = round(float(np.median(flat)), 1) if flat else round(target_py, 1)
+	lifted = [r for r in meta["left"] if r["reach"] <= LIFT_IN[1]]
 	print(f"hand line at row {meta['hand_py']} of {ch} (canon says {target_py:.1f}); "
-		  f"palms spread {spread:.0f} art px = {spread * 2:.0f} screen px")
+		  f"{len(flat)} entries in the flat catching range, "
+		  f"{len(lifted)} lifted inner pose(s) per side")
+	if lifted:
+		hi = min(r["py"] for r in lifted)
+		print(f"innermost palm sits {meta['hand_py'] - hi:.0f} art px "
+			  f"({(meta['hand_py'] - hi) * 2:.0f} screen px) above the catch line")
 
 	# THE ARMS ARE SNAPPED TO THE BODY'S OWN COLOURS, not to the full 48.
 	#
@@ -444,6 +477,41 @@ def main() -> int:
 	# sleeve and cuff are too.
 	atlas = snap(atlas, body_pal)
 	print(f"arms snapped to the body's own {len(body_pal)} colours")
+
+	# THE PERFORMER'S OWN PALM, cut out on its own (2026-08-07).
+	#
+	# It exists for exactly one case and it is worth naming: a COLUMNS hand standing under a
+	# central lane, where the bank simply has no arm (see fig_palm_far in Game.gd). The prop
+	# stays on its lane because that is where it is, and something has to be holding it. The
+	# traced figure's mitt was tried first and is far too big beside this character - it is
+	# drawn to the old juggler's proportions and reads as a pale lump on his trousers. His own
+	# hand, cut from the frame the bank already chose, cannot be the wrong size or the wrong
+	# colour.
+	#
+	# Taken from a MID-REACH entry in the flat catching range: the arm is at full extension
+	# there, so the hand is seen cleanly rather than foreshortened against the coat.
+	mids = [c for c in banks["L"] if LIFT_FLAT[0] <= c["reach"] <= LIFT_FLAT[1]]
+	palm_meta = {}
+	if mids:
+		e = min(mids, key=lambda c: abs(c["py"] - target_py))
+		lay = e["layer"]
+		lpx, lpy = e["px"] - e["ox"], e["py"] - e["oy"]
+		# the palm point is the arm's outermost pixel, so the hand lies INWARD of it: the box
+		# is shifted toward the body rather than centred, or half of it is empty air
+		x0 = max(0, int(lpx - PALM_BOX[0] // 2 + PALM_SHIFT))
+		y0 = max(0, int(lpy - PALM_BOX[1] // 2))
+		x1 = min(lay.shape[1], x0 + PALM_BOX[0])
+		y1 = min(lay.shape[0], y0 + PALM_BOX[1])
+		patch = snap(lay[y0:y1, x0:x1], body_pal)
+		palm_meta = {"w": int(patch.shape[1]), "h": int(patch.shape[0]),
+					 "ax": round(float(lpx - x0), 1), "ay": round(float(lpy - y0), 1)}
+		meta["palm"] = palm_meta
+		if write:
+			artguard.save_guarded(OUT / "palm_l.png",
+				lambda q: Image.fromarray(patch, "RGBA").save(q), force)
+			artguard.save_guarded(OUT / "palm_r.png",
+				lambda q: Image.fromarray(patch[:, ::-1], "RGBA").save(q), force)
+		print(f"palm patch {patch.shape[1]}x{patch.shape[0]} from the reach-{e['reach']:.0f} arm")
 
 	if sheet:
 		_write_sheet(sheet, body, entries, cw, ch)
