@@ -535,9 +535,14 @@ const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher 
 # than wanted. Lifting the slot to meet the drawing makes the mechanic and the picture agree,
 # and the elbow bend comes free because it is painted into the frames that now qualify.
 #
-# 22px is 7% of the figure's height - one hand's height, which is "slight" at this scale and
-# is what the measured curve asks for (0.505 -> 0.572 of the way up).
-const HAND_IN_LIFT := 22.0
+# THE NUMBER IS THE ELBOW BEND. Sorting the inner-reach poses by palm height and looking at
+# them (arm band only, 5x) says it plainly: at 60-62% of the way up the arm hangs STRAIGHT with
+# the hand at the hip, the forearm starts to fold at about 64%, and by 66-70% it is a clean bent
+# elbow with the palm up at the waistcoat. A first pass used 22px, which targets 57% and
+# therefore picked the straight poses - Louis looked at it and said the elbows still do not
+# bend, and he was right. 42px is 13% of the figure, targeting 63.5%, which is where the fold
+# starts. Keep it in step with LIFT_UP in build_arm_bank.py.
+const HAND_IN_LIFT := 42.0
 const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
 const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
 const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line
@@ -7840,10 +7845,17 @@ func fig_arm_pick(h: int, cx: float) -> Dictionary:
 	# had its prop drawn a good 35px out in open air. Arms that are picked independently have
 	# no argument to lose. Sixteen source frames also stop being sixteen poses and become
 	# sixteen squared, which is the other half of "the animation looks jumpy".
+	return fig_arm_pick_at(h, absf(hpos[h].x - cx) / ART_PIXEL)
+
+
+func fig_arm_pick_at(h: int, want: float) -> Dictionary:
+	# the bank lookup itself, taking the wanted reach in ART PIXELS. Split out so a PREVIEW
+	# can drive it from its own hands: the skills screen has its own little simulation and
+	# its own hand positions, and reading the stage's hpos there gave the mini juggler arms
+	# that had nothing to do with the props it was juggling.
 	var bank := fig_arm_bank(h)
 	if bank.is_empty():
 		return {}
-	var want := absf(hpos[h].x - cx) / ART_PIXEL
 	var best: Dictionary = bank[0]
 	var best_err := INF
 	for e: Dictionary in bank:
@@ -7854,7 +7866,25 @@ func fig_arm_pick(h: int, cx: float) -> Dictionary:
 	return best
 
 
-func fig_body_origin(cx: float, floor_y: float) -> Vector2:
+func fig_preview_px() -> float:
+	# screen pixels per art pixel for a PREVIEW of the painted performer. Exactly half the
+	# stage's ART_PIXEL, so every source pixel still lands on a whole screen pixel; anything
+	# between the two is a fractional resample and is the one thing pixel art cannot survive.
+	return maxf(1.0, ART_PIXEL * 0.5)
+
+
+func fig_preview_floor(o: Vector2) -> float:
+	# where the painted figure's FEET go when its hand line is at `o`. Read off the bank's own
+	# measured hand row rather than from PV_FLOOR: PV_FLOOR is the traced juggler's proportion
+	# and the showman is not that man, so using it stood him through the floor.
+	var px := fig_preview_px()
+	if not art_bank.has("char/juggle_body") or fig_arms.is_empty():
+		return o.y + PV_FLOOR
+	var tex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
+	return o.y + (float(tex.get_size().y) - float(fig_arms.get("hand_py", 81.0))) * px
+
+
+func fig_body_origin(cx: float, floor_y: float, px: float = ART_PIXEL) -> Vector2:
 	# The top-left of the performer's own cell, on the art grid. Everything painted - the
 	# body, both arms, and the palms the props rest in - is placed as an offset from here, so
 	# they cannot drift apart no matter which arm is chosen.
@@ -7864,9 +7894,9 @@ func fig_body_origin(cx: float, floor_y: float) -> Vector2:
 	if not art_bank.has("char/juggle_body"):
 		return Vector2.ZERO
 	var tex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
-	var sz := Vector2(tex.get_size()) * ART_PIXEL
+	var sz := Vector2(tex.get_size()) * px
 	var bcx := float(fig_arms.get("body_cx", tex.get_size().x * 0.5))
-	return art_snap(Vector2(cx - (bcx + 0.5) * ART_PIXEL, floor_y - sz.y))
+	return art_snap(Vector2(cx - (bcx + 0.5) * px, floor_y - sz.y))
 
 
 func fig_hand_pos(h: int) -> Vector2:
@@ -7954,7 +7984,8 @@ func fig_palm_far(h: int) -> bool:
 		get_viewport_rect().size.x * 0.5).size() > 0
 
 
-func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
+func draw_figure_design(cx: float, floor_y: float, tint: Color, px: float = ART_PIXEL,
+		want_l: float = -1.0, want_r: float = -1.0) -> void:
 	# A GENERATED PERFORMER, drawn as one picture. Everything the traced figure splits into
 	# costume regions - jacket, waistcoat, collar, buttons, trousers - is painted here, so
 	# there is nothing to recolour and nothing to assemble.
@@ -7971,19 +8002,20 @@ func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
 	# PAINTED ARMS WIN OVER THE STILL FIGURE when a bank is loaded - the still is only what a
 	# design ships before it has been animated, and what the tailor's mirror falls back to.
 	if fig_anim_live():
-		draw_figure_arms(cx, floor_y, tint)
+		draw_figure_arms(cx, floor_y, tint, px, want_l, want_r)
 		return
 	if not art_bank.has("char/figure"):
 		return
 	var tex: Texture2D = (art_bank["char/figure"] as Dictionary)["tex"]
-	var sz := Vector2(tex.get_size()) * ART_PIXEL
+	var sz := Vector2(tex.get_size()) * px
 	var pos := art_snap(Vector2(cx - sz.x * 0.5, floor_y - sz.y))
 	art_hits["char/figure"] = true
 	draw_colored_polygon(PackedVector2Array([
 		pos, pos + Vector2(sz.x, 0.0), pos + sz, pos + Vector2(0.0, sz.y)]), tint, art_uv, tex)
 
 
-func draw_figure_arms(cx: float, floor_y: float, tint: Color) -> void:
+func draw_figure_arms(cx: float, floor_y: float, tint: Color, px: float = ART_PIXEL,
+		want_l: float = -1.0, want_r: float = -1.0) -> void:
 	# THE PERFORMER IN THREE PIECES: a body that never moves, and two arms that do.
 	#
 	# The body is one sprite with its sleeves ending at the shoulder, so nothing about it
@@ -7998,15 +8030,20 @@ func draw_figure_arms(cx: float, floor_y: float, tint: Color) -> void:
 		return
 	art_hits["char/juggle_body"] = true
 	var btex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
-	var org := fig_body_origin(cx, floor_y)
-	var bsz := Vector2(btex.get_size()) * ART_PIXEL
+	var org := fig_body_origin(cx, floor_y, px)
+	var bsz := Vector2(btex.get_size()) * px
 	draw_colored_polygon(PackedVector2Array([
 		org, org + Vector2(bsz.x, 0.0), org + bsz, org + Vector2(0.0, bsz.y)]), tint, art_uv, btex)
+	# A PREVIEW DRIVES ITS OWN ARMS. Passing the wanted reach explicitly is what lets the
+	# skills screen show the performer juggling ITS OWN little pattern; without it the mini
+	# juggler read the stage's hpos, so its arms answered a simulation that is not on screen.
 	for h in [LEFT, RIGHT]:
-		draw_figure_arm(fig_arm_pick(h, cx), org, tint)
+		var want := want_l if h == LEFT else want_r
+		var pick := fig_arm_pick(h, cx) if want < 0.0 else fig_arm_pick_at(h, want)
+		draw_figure_arm(pick, org, tint, px)
 
 
-func draw_figure_arm(e: Dictionary, org: Vector2, tint: Color) -> void:
+func draw_figure_arm(e: Dictionary, org: Vector2, tint: Color, px: float = ART_PIXEL) -> void:
 	# ONE CELL OF THE ARM ATLAS. The atlas is a uniform grid, so a slot number is a division
 	# and the UVs are a sub-rect - which is why this cannot go through art_blit_size, where
 	# every blit uses the whole texture and art_uv is a constant.
@@ -8025,8 +8062,8 @@ func draw_figure_arm(e: Dictionary, org: Vector2, tint: Color) -> void:
 	var v0 := (float(row) * ah) / ts.y
 	var u1 := u0 + aw / ts.x
 	var v1 := v0 + ah / ts.y
-	var p := org + Vector2(float(e["ox"]), float(e["oy"])) * ART_PIXEL
-	var sz := Vector2(aw, ah) * ART_PIXEL
+	var p := org + Vector2(float(e["ox"]), float(e["oy"])) * px
+	var sz := Vector2(aw, ah) * px
 	draw_colored_polygon(
 		PackedVector2Array([p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]),
 		tint,
@@ -8565,7 +8602,14 @@ func catch_full_on() -> bool:
 	# The consequence is deliberate and Louis called it: catching into a full hand ENDS odd-prop
 	# juggling and limits even-prop juggling, because the hand that did it cannot feed the
 	# pattern any more. That is the point. It is a way to bring a set down, not a way to run one.
-	return set_catch_full or goals_hit >= 1
+	# `_parkcheck` FORCES IT ON rather than waiting for the autoplayer to earn a goal, and
+	# that is the difference between a test and a coin toss: the demo is not frame
+	# deterministic, so gating the harness on goals_hit >= 1 made it pass standalone and fail
+	# under validate.sh about one run in three. What is under test is the parking, the reach
+	# and the throw lockout - not whether an autoplayer happened to score well enough.
+	# A FLAG, NOT THE SETTING: writing set_catch_full would be a dev run editing Louis's own
+	# settings file, which is a mistake this project has already paid for once.
+	return set_catch_full or _parkcheck or goals_hit >= 1
 
 
 func hand_can_throw(h: int) -> bool:
@@ -11920,6 +11964,7 @@ var _charid := false               # --charid: paint costume regions as flat ID 
 var _bgref := false                # --bgref: draw only sky + dressing, the layers bg/* replaces
 var _menuref := false              # --menuref: draw only the title proscenium, dustless
 var _extref := -1                  # --extref <vi>: draw only that venue's exterior, dustless
+const PARK_START := 600            # --parkcheck: ticks of ordinary juggling before collecting
 var _parkcheck := false            # --parkcheck: autoplay the stop gesture and audit the result
 var _park_seen := [false, false]   # ...which hands actually parked while it did
 var _park_reach := 0.0             # ...and how far one reached for an incoming prop
@@ -12165,6 +12210,36 @@ func _art_quad(tex: Texture2D, c: Vector2, half: Vector2, ang: float, tint: Colo
 	draw_colored_polygon(pts, tint, art_uv, tex)
 
 
+func art_blit_fit(key: String, box: Rect2, tint: Color = Color.WHITE) -> bool:
+	# A PICTURE CENTRED IN A BOX AT A WHOLE-PIXEL SCALE, never stretched to fill it.
+	#
+	# art_blit_rect stretches, which is right for a backdrop that must cover the frame and
+	# wrong for an illustration: the SAME card art is drawn in the Skills screen's 208x256
+	# window and again on the unlock card, which is bigger, so one of the two would always be
+	# a fractional resample - the one thing pixel art cannot survive. This takes the largest
+	# whole multiple of ART_PIXEL that fits and centres it, so the picture is crisp at both
+	# sizes and the bigger card simply carries more margin.
+	art_asked[key] = true
+	if not art_on or not art_bank.has(key):
+		return false
+	var tex: Texture2D = (art_bank[key] as Dictionary)["tex"]
+	var t := Vector2(tex.get_size())
+	if t.x <= 0.0 or t.y <= 0.0:
+		return false
+	# WHOLE SCREEN PIXELS PER ART PIXEL, so any k >= 1 is exact. ART_PIXEL (2) is "full size"
+	# and 1 is half - both lossless, anything between is not, so the scale is floored rather
+	# than fitted. k of 0 means the box is smaller than the picture's own pixels.
+	var k := floorf(minf(box.size.x / t.x, box.size.y / t.y))
+	if k < 1.0:
+		return false
+	art_hits[key] = true
+	var sz := t * k
+	var p := art_snap(box.position + (box.size - sz) * 0.5)
+	draw_colored_polygon(PackedVector2Array([
+		p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]), tint, art_uv, tex)
+	return true
+
+
 func art_blit_rect(key: String, box: Rect2, tint: Color = Color.WHITE) -> bool:
 	# For elements sized by their BOX rather than by the art: backdrops, panels, card frames.
 	# The texture is stretched to the box, so a 9-slice-ish asset should be authored at the
@@ -12208,11 +12283,12 @@ func art_blit_prop(kind: int, pos: Vector2, sc: float, ang: float, tint: Color) 
 	# live, on top, every frame - which is the only way it can move, and moving is what a
 	# fire does. See strip_torch_flame for why the bake stops at the wick.
 	if key == "prop/torch":
-		draw_sprite_torch_flame(pos, ang, sc, zoom)
+		draw_sprite_torch_flame("prop/torch", "stage", pos, ang, sc, zoom)
 	return true
 
 
-func draw_sprite_torch_flame(pos: Vector2, ang: float, sc: float, zoom: int) -> void:
+func draw_sprite_torch_flame(key: String, which: String, pos: Vector2, ang: float, sc: float,
+		zoom: int) -> void:
 	# The live flame, fitted to the SPRITE's fire rather than to the vector drawing's.
 	#
 	# The two are not the same size and that is not a defect: the stage torch is derived from
@@ -12220,18 +12296,19 @@ func draw_sprite_torch_flame(pos: Vector2, ang: float, sc: float, zoom: int) -> 
 	# drawing had. Placing the live fire from TORCH_WICK/TORCH_FLAME_H would have it start
 	# seven art pixels below where the painted one did, floating clear of the wick it belongs
 	# to. So the geometry comes from the picture, measured when the flame was stripped off it.
-	if torch_flame.is_empty() or not art_bank.has("prop/torch"):
+	var fm: Dictionary = torch_flame.get(which, {})
+	if fm.is_empty() or not art_bank.has(key):
 		return
-	var e: Dictionary = art_bank["prop/torch"]
+	var e: Dictionary = art_bank[key]
 	var tex: Texture2D = e["tex"]
 	var pv: Vector2 = e["pivot"]
 	var hpx := float(tex.get_size().y)
 	# art px -> the prop's own LOCAL units, so the flame turns with the tumble like everything
 	# else the transform below carries. One art px is ART_PIXEL screen px at zoom 1.
 	var u := ART_PIXEL * float(zoom) / maxf(sc, 0.001)
-	var base_y := (float(torch_flame.get("base_row", 0)) - pv.y * hpx) * u
-	var fh := float(torch_flame.get("height", 0)) * u
-	var hw := float(torch_flame.get("half_width", 1.0)) * u
+	var base_y := (float(fm.get("base_row", 0)) - pv.y * hpx) * u
+	var fh := float(fm.get("height", 0)) * u
+	var hw := float(fm.get("half_width", 1.0)) * u
 	if fh <= 0.0:
 		return
 	var t := fire_clock()
@@ -12242,6 +12319,11 @@ func draw_sprite_torch_flame(pos: Vector2, ang: float, sc: float, zoom: int) -> 
 	# ON THE ART GRID. Drawn as plain polygons the fire stepped at ONE SCREEN PIXEL while the
 	# coat and the handle beside it stepped at two - a vector flame pasted onto pixel art, and
 	# the most obvious remaining seam in the game once the props themselves were sprites.
+	# a card is a still, close-up portrait and can afford the outer aura the stage cannot -
+	# the same concession draw_torch_flame's `rich` makes, for the same reason
+	if which == "card":
+		fill_flame_pix(pos, ang, sc, b, fh * 1.22 * fl, fw * 1.30, sway * 1.2,
+			Color(1.0, 0.32, 0.06, 0.35))
 	fill_flame_pix(pos, ang, sc, b, fh * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
 	fill_flame_pix(pos, ang, sc, b, fh * 0.68 * fl, fw * 0.68, sway * 0.7, Color(1.0, 0.72, 0.20, 0.95))
 	fill_flame_pix(pos, ang, sc, b + Vector2(0.0, -u * 0.5), fh * 0.39 * fl, fw * 0.42,
@@ -13511,7 +13593,8 @@ func fig_preview_k(want: float) -> float:
 
 
 func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
-		facing_back: bool, spin_on: bool, sx: float, gaze: Vector2) -> void:
+		facing_back: bool, spin_on: bool, sx: float, gaze: Vector2,
+		px: float = ART_PIXEL, want_l: float = -1.0, want_r: float = -1.0) -> void:
 	# THE PERFORMER, AND THERE IS ONLY ONE OF HIM. Trousers, boots, neck, jacket, the
 	# wardrobe pass, the head and whatever is on it - everything between the floor and the
 	# top hat, for every screen in the game. The arms and hands are the caller's, because
@@ -13535,7 +13618,13 @@ func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
 	# are all things a painted figure already has, and drawing them over it would be a man
 	# wearing two coats. The arms and hands are still the caller's, and still the game's.
 	if fig_design_on():
-		draw_figure_design(cx, floor_y, venue_figure_tint())
+		# A PAINTED FIGURE IS A FIXED-SIZE SPRITE and used to ignore `H` completely, so a
+		# PREVIEW asking for a small performer got a full stage-sized one that ran straight
+		# out of its panel - which is most of why the skills screen's mini juggler looked
+		# wrong. `px` is screen pixels per art pixel: ART_PIXEL (2) on stage, and 1 for a
+		# preview, which is HALF SIZE EXACTLY and therefore still lossless. Nothing between
+		# is offered, because nothing between is a whole number of screen pixels.
+		draw_figure_design(cx, floor_y, venue_figure_tint(), px, want_l, want_r)
 		# A DESIGN CANNOT WEAR THE COSTUME, BUT IT CAN WEAR A CROWN. The coat is painted, so
 		# the wardrobe's jacket/waistcoat/boots have nothing to attach to - but the hat, the
 		# helmet and the glasses sit on a head, and the fitter measured where that is. This
@@ -15315,16 +15404,18 @@ func draw_targets() -> void:
 		# a clacked ball (hard mode) catches ONLY inside the Perfect window
 		# (same frames as normal): its ring stays warning-hot outside it, so
 		# the taught timing never lies about what will actually catch
+		# ON THE ART GRID. This ring is the single most-looked-at thing on the stage - it is
+		# the timing cue the whole game is played off - and it was the last antialiased circle
+		# in front of the player, sitting over crisp props and a crisp performer.
 		if adiff <= wp:
-			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 1.0, 0.9, 0.95), 5.0, true)
-			draw_circle(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
+			draw_ring_pix(b.to_pos, r, 5.0, Color(1.0, 1.0, 0.9, 0.95))
+			fill_disc_pix(b.to_pos, r * 0.55, Color(1.0, 0.95, 0.7, 0.25))
 		elif adiff <= good_window():
-			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(1.0, 0.88, 0.5, 0.9), 4.0, true)
+			draw_ring_pix(b.to_pos, r, 4.0, Color(1.0, 0.88, 0.5, 0.9))
 		elif adiff <= late_window() and dd < 0:
-			draw_arc(b.to_pos, r, 0.0, TAU, 40, Color(0.9, 0.62, 0.35, 0.7), 3.0, true)
+			draw_ring_pix(b.to_pos, r, 3.0, Color(0.9, 0.62, 0.35, 0.7))
 		else:
-			draw_arc(b.to_pos, r, 0.0, TAU, 40,
-				Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t), 2.0 + 3.0 * t, true)
+			draw_ring_pix(b.to_pos, r, 2.0 + 3.0 * t, Color(1.0, 0.9, 0.5, 0.14 + 0.5 * t))
 
 
 func _btb_behind(b: Ball) -> bool:
@@ -16527,8 +16618,14 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 	# whenever a sprite replaces a drawing: draw_shop_card computes `mag` from the space
 	# actually left, expressly so a prop cannot "grow out through its own card", and that
 	# `mag` only ever reached the procedural path.
-	if art_blit("prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower(),
-			pos + Vector2(0.0, bob), 1.0, ang, col if big_tinted else Color.WHITE):
+	var bkey := "prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower()
+	if art_blit(bkey, pos + Vector2(0.0, bob), 1.0, ang, col if big_tinted else Color.WHITE):
+		# A CARD IS A STILL PORTRAIT OF AN OBJECT, AND FIRE IS NOT AN OBJECT. Same seam, same
+		# fix as the stage torch: the sprite is the handle and the flame is drawn live over it,
+		# so a torch burns wherever it is shown - the shop, the skills preview, anywhere else
+		# that reaches this one function.
+		if kind == PROP_TORCHES:
+			draw_sprite_torch_flame(bkey, "card", pos + Vector2(0.0, bob), ang, 1.0, 1)
 		return
 	draw_prop_rich(kind, at, col, ang, sc)
 
@@ -18259,6 +18356,35 @@ func draw_skill_card_art(r: Rect2, is_trick: bool, idx: int, a: float) -> void:
 	# implementation, which also guarantees the two cards are the same joke told twice -
 	# if the waterfall is ever improved, its reflection improves with it.
 	var flip := -1.0 if id == "rcasc" else 1.0
+	# THE PAINTED ILLUSTRATION, if there is one (2026-08-07, Louis: "the cards still look
+	# awful"). The drawings below stay as the seam's fallback, exactly as the traced juggler
+	# does behind the showman - delete a ui/card_* line from the manifest and that card goes
+	# back to being drawn. Reverse Cascade still borrows the Cascade's picture and still
+	# flips it, which is the whole joke.
+	# ...MEASURED AGAINST `r`, NOT THE INSET BOX. The 5.5% inset above exists because the
+	# DRAWINGS run full-bleed - the Shower's water and the Temple's floor are solid blocks that
+	# clipped visibly across the frame's rounded corners. A painted illustration carries its own
+	# transparent margin, so it does not need the inset; and it cannot afford it either, since
+	# the art is authored at exactly the window's size and any shrink drops it below the whole
+	# 2x scale art_blit_fit insists on, silently falling back to the drawing.
+	var akey := "ui/card_" + ("cascade" if id == "rcasc" else id)
+	if art_bank.has(akey):
+		# ONCE A CARD HAS A PAINTING, IT NEVER SHOWS THE DRAWING AGAIN - not even for a frame.
+		# The unlock card fades in and TURNS OVER (a horizontal squash), so both its alpha and
+		# its width are in motion: gating on either one meant the vector fallback flickered
+		# through mid-animation, which is worse than any single frame being imperfect. Alpha
+		# rides the tint, and a box too narrow for the picture simply shows nothing - the card
+		# is edge-on at that moment and there is nothing to read anyway.
+		var tint := Color(1.0, 1.0, 1.0, a)
+		if flip > 0.0:
+			art_blit_fit(akey, r, tint)
+		else:
+			# upside down, about the box's own centre so the picture cannot drift as it turns
+			var c0 := art_snap(r.get_center())
+			draw_set_transform(c0, 0.0, Vector2(1.0, -1.0))
+			art_blit_fit(akey, Rect2(r.position - c0, r.size), tint)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
 	_cap_a = a
 	# THE ORIGIN IS SNAPPED FIRST, and that is the precondition for everything the cap_*
 	# helpers do: they land a unit coordinate on the art grid by rounding it to a multiple of
@@ -20775,11 +20901,16 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# pixels tall and some three. The tailor solved exactly that k out of its panel
 	# height. So the wanted size is snapped to a whole multiple of the stage figure, and
 	# the layout gives a little instead of the art.
+	# THE PAINTED PERFORMER GETS HALF SCALE HERE, and the layout is built from HIS height
+	# rather than from the traced figure's head unit: those two are not the same man and the
+	# preview was sized for the wrong one. fig_preview_px is 1 screen px per art px - exact,
+	# lossless, and about half the stage figure, which is what a panel this size can hold.
+	var px := fig_preview_px()
 	var H := fig_scale_H(PV_HEAD * k)
 	# THE HAND LINE IS THIS CALLER'S ORIGIN (`o`), not the head - reading it as the head is
 	# what once put the arms up in a V. The floor sits FIG_HAND_LINE head units below it,
 	# which is PV_FLOOR/PV_HEAD written as a proportion so it survives H being snapped.
-	var floor_y := o.y + FIG_HAND_LINE * H
+	var floor_y := fig_preview_floor(o) if fig_anim_live() else (o.y + FIG_HAND_LINE * H)
 	var ys := fig_ys(o.x, floor_y, H, 0.0)
 	var v := costume_palette()
 	var suit: Color = v["suit"]
@@ -20813,10 +20944,13 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 			sx = 0.16 if sx >= 0.0 else -0.16
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
+	# the arms answer THIS preview's hands, in the painted figure's own art pixels
+	var wl := absf(hl.x - o.x) / px
+	var wr := absf(hr.x - o.x) / px
 	draw_figure_body(o.x, H, ys,
 		{"suit": suit, "suit_dk": suit_dk, "vest": vest, "collar": collar,
 			"accent": accent, "skin": skin, "hair": hair, "button": button},
-		facing_back, turn > 0.0, sx, Vector2.ZERO)
+		facing_back, turn > 0.0, sx, Vector2.ZERO, px, wl, wr)
 	if turn > 0.0:
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 	# the stage's own arms and hands: draw_capsule_pix limbs shaded across their width, the
@@ -20969,11 +21103,16 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	# card names the skill underneath in 27pt anyway, so this would only repeat it.
 	if not caption:
 		return
+	# TWO LINES, NOT TWO COLUMNS. Side by side each half got inner.size.x * 0.5 and the note
+	# is a sentence - "round the back, out past the free hand" - so it shrank to its floor and
+	# then TRUNCATED, which is the no-overflow rule being satisfied by cutting the words off.
+	# There is clear sky here (the figure's head starts a hundred pixels down), so the note
+	# takes its own line at the full width and fits whole.
 	var head_w := inner.size.x - 24.0
-	draw_fit_string(font, inner.position + Vector2(6.0, 16.0), ename.to_upper(), HORIZONTAL_ALIGNMENT_LEFT,
-		head_w * 0.5, 14, Color(1.0, 0.88, 0.58))
-	draw_fit_string(font, inner.position + Vector2(inner.size.x - 6.0 - head_w * 0.5, 16.0), String(data["note"]),
-		HORIZONTAL_ALIGNMENT_RIGHT, head_w * 0.5, 12, Color(0.78, 0.72, 0.62))
+	draw_fit_string(font, inner.position + Vector2(6.0, 16.0), ename.to_upper(),
+		HORIZONTAL_ALIGNMENT_LEFT, head_w, 14, Color(1.0, 0.88, 0.58))
+	draw_fit_string(font, inner.position + Vector2(6.0, 32.0), String(data["note"]),
+		HORIZONTAL_ALIGNMENT_LEFT, head_w, 12, Color(0.78, 0.72, 0.62))
 
 
 func tracks_legs(tr: Dictionary) -> Array:
@@ -26533,7 +26672,10 @@ func parkcheck_collecting() -> bool:
 	# pattern and exactly wrong for testing the one mechanic that depends on not doing that. So
 	# under this flag, the moment a goal is banked the autoplayer stops throwing and catches
 	# everything that arrives, full hand or not: catch the set, hold it, done.
-	return _parkcheck and goals_hit >= 1
+	# ...after a stretch of ordinary juggling, so the pattern is actually running when the
+	# gesture starts. Tick-based for the same reason catch_full_on is flag-based: it must not
+	# depend on how well the autoplayer happens to be doing.
+	return _parkcheck and tick >= PARK_START
 
 
 func parkcheck_step() -> void:
@@ -26582,7 +26724,7 @@ func parkcheck_step() -> void:
 		# air to reach for and the case simply does not arise. It needs five, where the
 		# collecting hand still has props coming after it has taken its second.
 		print("parkcheck: reach not exercised at %d props - a hand parks on the last catch "
-			% balls.size() + "here, so nothing is ever incoming afterwards. Try --balls 5.")
+			% balls.size() + "here, so nothing is left in the air afterwards. Try more props.")
 	else:
 		print("parkcheck FAIL: a parked hand reached only %.0fpx, no further than its dead "
 			% _park_reach + "throw slot (%.0f)" % HAND_IN_DX)

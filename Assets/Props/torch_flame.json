@@ -1,5 +1,12 @@
 {
-  "base_row": 14,
-  "height": 14,
-  "half_width": 3.5
+  "stage": {
+    "base_row": 14,
+    "height": 14,
+    "half_width": 3.5
+  },
+  "card": {
+    "base_row": 34,
+    "height": 31,
+    "half_width": 9.5
+  }
 }
