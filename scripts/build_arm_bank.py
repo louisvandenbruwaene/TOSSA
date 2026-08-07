@@ -66,7 +66,13 @@ PALETTE = ROOT / "Resources" / "palette" / "palette.png"
 # seven. So a seven-object columns hand reaches 120 screen px = 60 art px out, ten past
 # anything the cascade ever asks for, and clamping there is a stub arm on the busiest
 # pattern in the game.
-REACH_LO = 24.0
+# ...AND THE INNER END IS NOT inner_pos EITHER. COL_HAND_MIN was removed from Game.gd in
+# 2026-07-28 ("the hand goes to the column, ALL THE WAY"), so a columns hand stands under its
+# own lane even when that lane is inside the torso. Measured over a 7-ball columns run: the
+# right hand spends 74% of its time inside reach 30 and 36% of it inside reach 20, and touches
+# 0 - dead centre - on the middle lane. A bank that starts at 30 leaves the busiest pattern in
+# the game with a stub arm most of the time.
+REACH_LO = 0.0
 REACH_HI = 64.0
 REACH_STEP = 1.0        # one bank entry per art pixel of reach: finer than the eye at 2x
 
@@ -90,6 +96,16 @@ REACH_STEP = 1.0        # one bank entry per art pixel of reach: finer than the 
 # do it: asked for hands tucked at hip height it raises them to the waist every time, in
 # every phrasing, because that is what a person actually does.
 UP_TOL = 0.024
+
+# ...except close in, where it is graded. Below this reach the arms are tucked against the
+# body, and the model will not paint that at hip height in any phrasing - it raises the hands
+# to the waist, because that is what a person does. The choice there is between an approximate
+# arm and NO arm, and the approximate one wins: a tucked hand is usually HOLDING (in columns it
+# has gone to stand under its own lane, about to throw), and a held prop follows the painted
+# palm, so most of the error is absorbed before anyone sees it. Accuracy still rules the
+# catching range, which is where a prop arrives on a path the painting does not control.
+INNER_REACH = 30.0
+INNER_UP_TOL = 0.075
 
 
 def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
@@ -305,7 +321,8 @@ def pick(cands: list[dict], side: str, axis: float, target_py: float) -> list[di
 			# that pixel is a whole art pixel here. This is also the number the game will
 			# live with, so it is the one worth minimising.
 			py_err = abs(c["py"] - target_py)
-			if py_err > UP_TOL * (c["cell"][1] - 1):
+			tol = INNER_UP_TOL if want < INNER_REACH else UP_TOL
+			if py_err > tol * (c["cell"][1] - 1):
 				continue
 			key = (py_err, abs(c["reach"] - want))
 			if best_key is None or key < best_key:

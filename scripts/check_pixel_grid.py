@@ -37,6 +37,21 @@ TWO THINGS THIS NUMBER IS NOT:
 BASELINE 2026-08-05 (the commit that added this file): title 35% - the worst,
 its curtains, swags and boards are all still procedural; shop 25%; day hub 21%;
 in-act stage 17%; results 5.8%.
+
+2026-08-07, after the exteriors were baked and the HUD chrome, the crowd dial and
+the unlock cards were moved onto the grid: title 15%, shop 8.5%, day hub 10.4%,
+results 2.9%, establish 12%, unlock card 13.6%. The stage screens read HIGHER than
+the 2026-08-05 baseline (17% -> 13-29%) and that is not a regression - a live-act
+frame varies that much between identical runs, which is exactly why only the static
+screens are comparable at all.
+
+WHAT IS LEFT IS DELIBERATE, and knowing that is worth more than the number. Every
+one of the remaining large blocks is either TEXT (rendered at screen density on
+purpose) or a soft LIGHT wash - `draw_glow`'s pool behind an unlock-card
+illustration, the spotlight cone, the venue glow. Those are lighting, not art, and
+converting them is a downgrade: measured on the stage, four bands is the most a
+`draw_glow_pix` fall-off can carry before it reads as a gradient again, and a 300px
+card pool in four bands is three visible steps. Do not chase this number to zero.
 """
 
 import sys

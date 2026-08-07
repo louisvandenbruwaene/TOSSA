@@ -7793,6 +7793,12 @@ func fig_design_height() -> float:
 	return float((art_bank["char/figure"] as Dictionary)["tex"].get_size().y) * ART_PIXEL
 
 
+# how far the painted palm may sit from the simulation's hand and still be drawn to. 14 screen
+# px is 7 art px: past that the bank has no entry anywhere near this reach, which is a fact
+# about the art rather than a rounding error, and the prop belongs on its real path.
+const FIG_PALM_MAX := 14.0
+
+
 func fig_arm_bank(h: int) -> Array:
 	return (fig_arms.get("right" if h == RIGHT else "left", []) as Array)
 
@@ -7860,7 +7866,25 @@ func fig_hand_pos(h: int) -> Vector2:
 	if pick.is_empty():
 		return hpos[h]
 	var org := fig_body_origin(s.x * 0.5, s.y * 0.80)
-	return org + Vector2(float(pick["px"]) + 0.5, float(pick["py"]) + 0.5) * ART_PIXEL
+	var palm := org + Vector2(float(pick["px"]) + 0.5, float(pick["py"]) + 0.5) * ART_PIXEL
+	# ...BUT ONLY WHILE THE PAINTING IS ACTUALLY NEAR THE HAND, and this guard is what makes
+	# the whole idea safe at the edges.
+	#
+	# COLUMNS reaches where no painting does. COL_HAND_MIN was removed in 2026-07-28 so a hand
+	# stands under its own lane even when that lane is inside the torso: measured over a 7-ball
+	# run the right hand spends 36% of its time inside reach 20 and touches dead centre. No arm
+	# bank covers that - a pose with the arms crossed in front of the body is invisible to the
+	# motion-based fitter, because an arm that never leaves the silhouette never moves against
+	# it - so the nearest painted arm out there is a long way off.
+	#
+	# Following the palm THEN would be actively wrong: a ball waiting to go up the middle lane
+	# would be drawn 50px to one side of that lane and would jump back to it on the throw. So
+	# past this distance the mechanic wins and the prop is drawn where it really is. Inside it -
+	# every cascade, and columns at ordinary counts - the palm wins and the prop sits in the
+	# hand. Each rule is right in its own regime and the swap happens where they agree.
+	if palm.distance_to(hpos[h]) > FIG_PALM_MAX:
+		return hpos[h]
+	return palm
 
 
 func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
