@@ -110,7 +110,15 @@ UP_TOL = 0.024
 # either - it is the two hand SLOTS. The inner slot is lifted and the outer is not, so reach
 # tracks height on the way out; and a COLUMNS hand stands under its own lane while still on
 # the inner slot, which is why the far reaches are lifted too.
-LIFT_UP = 0.067          # how much higher the inner slot sits, as a fraction of figure height
+# HOW MUCH HIGHER THE INNER SLOT SITS, as a fraction of the figure's height.
+#
+# THIS NUMBER IS THE ELBOW BEND, and that is not obvious until you look at the poses sorted by
+# palm height (which is how it was picked, at 5x, arm band only). Measured on the candidates at
+# reach 23-30: at 60-62% up the arm hangs STRAIGHT down with the hand at the hip; the forearm
+# only starts to fold at about 64%, and by 66-70% it is a clean bent elbow with the palm up at
+# the waistcoat. 0.067 put the target at 57% and therefore selected the straight ones - which is
+# exactly what Louis saw and said. 0.13 puts it at 63.5% and selects the bend.
+LIFT_UP = 0.13
 LIFT_IN = (24.0, 30.0)   # ...fully lifted out to here
 LIFT_FLAT = (46.0, 56.0) # ...flat across the catching range
 LIFT_OUT = 64.0          # ...and lifted again where columns' outer lanes live
@@ -264,6 +272,13 @@ def gather(dirs: list[Path]) -> tuple[np.ndarray, list[dict]]:
 		  f"{body_width(ref[3]):.0f}px vs "
 		  f"{', '.join(f'{t[0].name} {body_width(t[3]):.0f}' for t in loaded if t is not ref)})")
 	ref_body, ref_static = ref[2], ref[3]
+	# THE DIFF NEEDS ONE PALETTE AND ONE COORDINATE SYSTEM. Snapping the reference body first
+	# means every frame is later compared against the same 38-odd colours, so a generation's
+	# own slight colour drift lands on the SAME entry and reads as "no difference" - which is
+	# what stops a torso being mistaken for an arm. See armlib.split_layer.
+	pal = np.asarray(Image.open(PALETTE).convert("RGB")).reshape(-1, 3).astype(int)
+	ref_body = snap(ref_body, pal)
+	ref_pal = np.unique(ref_body[ref_body[..., 3] > 0][:, :3], axis=0)
 	cands: list[dict] = []
 	for d, frames, body, static in loaded:
 		if static is ref_static:
@@ -281,8 +296,12 @@ def gather(dirs: list[Path]) -> tuple[np.ndarray, list[dict]]:
 			p = armlib.palms(f, static)
 			if not p:
 				continue
+			# INTO THE REFERENCE BODY'S FRAME AND PALETTE FIRST, then split. Both are
+			# preconditions for the diff: a layer compared against a body it is not aligned
+			# with, or not painted in the same colours as, differs everywhere.
+			fr = snap(armlib.place_into(f, dx, dy, ref_body.shape), pal)
 			for side in ("L", "R"):
-				layer, lx, ly = armlib.split_layer(f, side)
+				layer, lx, ly = armlib.split_layer(fr, side, ref_body, ref_pal)
 				if layer.size == 0:
 					continue
 				px, py = p[side]
@@ -292,9 +311,9 @@ def gather(dirs: list[Path]) -> tuple[np.ndarray, list[dict]]:
 					"up": float(p[side + "up"]),
 					"layer": layer,
 					# everything below is in the REFERENCE body's coordinates
-					"ox": lx + dx, "oy": ly + dy,
+					"ox": lx, "oy": ly,
 					"px": px + dx, "py": py + dy,
-					"cell": (w, h), "cx": cx,
+					"cell": ref_body.shape[:2][::-1], "cx": (ref_body.shape[1] - 1) * 0.5,
 				})
 	return ref_body, cands
 
@@ -386,7 +405,6 @@ def main() -> int:
 	# HANDS THAT ARE NOT THE RIGHT COLOUR ARE NOT HANDS - see armlib.skin_colours. Done
 	# before selection rather than after, so a rejected pose leaves no gap in the table.
 	pal = np.asarray(Image.open(PALETTE).convert("RGB")).reshape(-1, 3).astype(int)
-	body = snap(body, pal)
 	body_pal = np.unique(body[body[..., 3] > 0][:, :3], axis=0)
 	skin = _snap_rgb(armlib.skin_colours(body).astype(float), body_pal)
 	skin_set = {tuple(int(v) for v in c) for c in skin}

@@ -97,11 +97,16 @@ fi
 if [[ $QUICK -eq 0 ]]; then
   # --- 4b. The stop gesture -------------------------------------------------
   log_head "4b. Full-hand catching / the stop gesture (--parkcheck)"
-  # FIVE PROPS, NOT THREE, and the harness will tell you why if you change it: at three or
-  # four a hand parks on the LAST catch of the set, so nothing is ever incoming afterwards
-  # and the reach half of the rule is never exercised at all.
+  # SIX PROPS AND AN EXPLICIT CASCADE, and both are load-bearing:
+  #   - below six a hand parks on the LAST catch of the set, so nothing is left in the air
+  #     afterwards and the reach half of the rule is never exercised (the harness says so).
+  #   - the reach assertion is a CASCADE property. A columns hand stands under its own lane,
+  #     and the inner lanes sit closer to centre than the throw slot does, so "a parked hand
+  #     reaches further than 54px" is simply not true there - and the save's own pattern is
+  #     whatever it was left on, which made this read as a failure at seven props.
   log="$WORK/parkcheck.log"
-  run_headless 60 "$log" --demo --booking --venue 3 --prop 0 --balls 5 --parkcheck --shotat 6000 || true
+  run_headless 60 "$log" --demo --booking --venue 3 --prop 0 --pattern cascade --balls 6 \
+    --parkcheck --shotat 6000 || true
   if grep -q "parkcheck FAIL" "$log"; then
     grep "parkcheck" "$log" | sed 's/^/    /'
     fail "The full-hand catch rule regressed (see above)."

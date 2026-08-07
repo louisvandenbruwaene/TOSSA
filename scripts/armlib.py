@@ -186,38 +186,65 @@ def palms(frame: np.ndarray, static: np.ndarray) -> dict:
 	return out
 
 
-def split_layer(frame: np.ndarray, side: str) -> tuple[np.ndarray, int, int]:
-	"""One side's ARM LAYER: the frame's whole half of the arm band.
+def split_layer(frame: np.ndarray, side: str, body: np.ndarray, ref_pal) -> tuple:
+	"""One side's ARM: only the pixels that differ from the body underneath.
 
-	DELIBERATELY GENEROUS, and that is the design rather than laziness. The obvious layer is
-	"the pixels that moved", and it severs the arms: at the innermost reach the sleeve lies
-	flat against the coat, so most of the limb is opaque in every frame and a subtractive mask
-	keeps only the hand, leaving it floating in the air with no arm attached to it.
+	THE FIRST VERSION TOOK THE WHOLE HALF-BAND, torso and all, and that shipped a performer
+	CUT IN HALF (Louis, 2026-08-07). The reasoning was that a subtractive mask severs an arm -
+	at close reach the sleeve lies flat on the coat, so most of the limb is opaque in every
+	frame and "the pixels that moved" keeps only the hand. True, and it does not matter: the
+	severed pixels are severed precisely because they are IDENTICAL to the coat beneath them,
+	and the body draws that coat. Dropping them changes nothing on screen.
+	
+	What taking the whole half-band DID do is put half a torso in every layer - and the two
+	arms are chosen independently, from different generations, so the man got generation A's
+	lapel on one side and generation B's on the other, meeting down the centreline. There is
+	no offset that fixes that; the layers simply must not carry a torso.
 
-	Taking the entire half-band instead cannot sever anything. It costs nothing either: the
-	half a torso that comes along is drawn over a body whose torso is the MEDIAN of the same
-	pixels, so it lands on top of itself. The seam runs down the centreline, where the vest
-	and bow tie are identical in every frame, and the band stops above the coat hem and below
-	the chin, so the two halves never disagree about anything a viewer can see.
+	So an arm is: opaque here, and either the body is transparent here (it is outside the
+	silhouette - a real reach) or the colour differs from the body's (a sleeve shading the
+	coat, a hand over the vest). Snapped to the body's own palette FIRST, so generation-to-
+	generation colour drift snaps onto the same entry and reads as "no difference" instead of
+	as a torso-shaped arm.
 
-	Returns (RGBA layer cropped to its own ink, x offset, y offset in the cell)."""
-	h, w = frame.shape[:2]
+	`frame` and `body` must already be in the SAME coordinates - see gather()."""
+	h, w = body.shape[:2]
 	cx = (w - 1) * 0.5
 	y0, y1 = band_rows(h)
-	keep = np.zeros((h, w), dtype=bool)
+	fa = frame[..., 3] > 127
+	ba = body[..., 3] > 0
+	differs = np.any(frame[..., :3] != body[..., :3], axis=-1)
+	arm = fa & (~ba | differs)
+	arm[:y0] = False
+	arm[y1:] = False
 	xs = np.arange(w)
-	col = (xs <= cx) if side == "L" else (xs > cx)
-	keep[y0:y1, :] = col[None, :]
-	keep &= frame[..., 3] > 127
-	ys, xx = np.where(keep)
+	arm &= ((xs <= cx) if side == "L" else (xs > cx))[None, :]
+	# a limb survives being eroded; a one-pixel rim of dither noise along an edge does not
+	core = ndimage.binary_erosion(arm, np.ones((2, 2)))
+	lab, n = ndimage.label(arm, np.ones((3, 3)))
+	keep = [l for l in np.unique(lab[core]) if l and int((lab == l).sum()) >= 25]
+	arm = np.isin(lab, keep)
+	ys, xx = np.where(arm)
 	if xx.size == 0:
 		return np.zeros((0, 0, 4), np.uint8), 0, 0
 	ax0, ax1, ay0, ay1 = int(xx.min()), int(xx.max()), int(ys.min()), int(ys.max())
 	sub = np.zeros((ay1 - ay0 + 1, ax1 - ax0 + 1, 4), np.uint8)
-	k = keep[ay0:ay1 + 1, ax0:ax1 + 1]
+	k = arm[ay0:ay1 + 1, ax0:ax1 + 1]
 	f = frame[ay0:ay1 + 1, ax0:ax1 + 1]
 	sub[k] = np.dstack([f[..., :3], np.full(f.shape[:2], 255)])[k].astype(np.uint8)
 	return sub, ax0, ay0
+
+
+def place_into(frame: np.ndarray, dx: int, dy: int, shape: tuple) -> np.ndarray:
+	"""This generation's frame, shifted into the REFERENCE body's coordinates."""
+	out = np.zeros((shape[0], shape[1], 4), dtype=frame.dtype)
+	sy0, sx0 = max(0, -dy), max(0, -dx)
+	dy0, dx0 = max(0, dy), max(0, dx)
+	hh = min(frame.shape[0] - sy0, shape[0] - dy0)
+	ww = min(frame.shape[1] - sx0, shape[1] - dx0)
+	if hh > 0 and ww > 0:
+		out[dy0:dy0 + hh, dx0:dx0 + ww] = frame[sy0:sy0 + hh, sx0:sx0 + ww]
+	return out
 
 
 def mirror_about(layer: np.ndarray, x0: int, axis: float) -> tuple[np.ndarray, float]:

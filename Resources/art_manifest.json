@@ -172,7 +172,7 @@
     "path": "res://Assets/Props/big_knife.png"
   },
   "prop_big/torch": {
-    "path": "res://Assets/Props/big_torch.png"
+    "path": "res://Assets/Props/big_torch_body.png"
   },
   "prop_big/chainsaw": {
     "path": "res://Assets/Props/big_chainsaw.png"
@@ -239,96 +239,96 @@
     "cell_w": 155,
     "cell_h": 164,
     "atlas_cols": 8,
-    "atlas_w": 65,
+    "atlas_w": 64,
     "atlas_h": 81,
     "body_cx": 76.5,
     "hand_py": 81.0,
     "left": [
       {
         "slot": 0,
-        "reach": 21.0,
-        "ox": 49,
-        "oy": 28,
-        "px": 56.0,
-        "py": 66.5
+        "reach": 25.5,
+        "ox": 48,
+        "oy": 27,
+        "px": 51.0,
+        "py": 60.5
       },
       {
         "slot": 1,
-        "reach": 23.5,
+        "reach": 26.0,
         "ox": 49,
-        "oy": 29,
-        "px": 53.0,
-        "py": 67.0
+        "oy": 27,
+        "px": 50.0,
+        "py": 59.0
       },
       {
         "slot": 2,
-        "reach": 27.0,
-        "ox": 48,
-        "oy": 28,
-        "px": 49.0,
-        "py": 66.0
+        "reach": 26.5,
+        "ox": 50,
+        "oy": 27,
+        "px": 50.0,
+        "py": 57.5
       },
       {
         "slot": 3,
         "reach": 28.0,
         "ox": 49,
-        "oy": 28,
+        "oy": 27,
         "px": 49.0,
-        "py": 70.5
+        "py": 60.0
       },
       {
         "slot": 4,
-        "reach": 29.5,
-        "ox": 47,
+        "reach": 29.0,
+        "ox": 46,
         "oy": 27,
         "px": 47.0,
-        "py": 70.0
+        "py": 59.0
       },
       {
         "slot": 5,
-        "reach": 31.5,
+        "reach": 30.0,
         "ox": 45,
-        "oy": 29,
-        "px": 45.0,
-        "py": 75.0
+        "oy": 27,
+        "px": 46.0,
+        "py": 59.0
       },
       {
         "slot": 6,
-        "reach": 33.5,
-        "ox": 42,
+        "reach": 31.5,
+        "ox": 45,
         "oy": 27,
-        "px": 43.0,
-        "py": 69.5
+        "px": 45.0,
+        "py": 61.0
       },
       {
         "slot": 7,
-        "reach": 35.0,
-        "ox": 41,
+        "reach": 35.5,
+        "ox": 40,
         "oy": 27,
         "px": 41.0,
-        "py": 75.0
+        "py": 69.0
       },
       {
         "slot": 8,
-        "reach": 36.5,
+        "reach": 37.5,
         "ox": 39,
-        "oy": 29,
-        "px": 40.0,
-        "py": 73.0
+        "oy": 27,
+        "px": 39.0,
+        "py": 71.0
       },
       {
         "slot": 9,
-        "reach": 36.5,
-        "ox": 40,
-        "oy": 29,
-        "px": 40.0,
-        "py": 75.0
+        "reach": 39.5,
+        "ox": 37,
+        "oy": 27,
+        "px": 37.0,
+        "py": 70.0
       },
       {
         "slot": 10,
         "reach": 41.5,
         "ox": 34,
-        "oy": 28,
+        "oy": 27,
         "px": 35.0,
         "py": 76.5
       },
@@ -336,7 +336,7 @@
         "slot": 11,
         "reach": 42.5,
         "ox": 34,
-        "oy": 28,
+        "oy": 27,
         "px": 34.0,
         "py": 78.0
       },
@@ -344,7 +344,7 @@
         "slot": 12,
         "reach": 44.5,
         "ox": 31,
-        "oy": 28,
+        "oy": 27,
         "px": 32.0,
         "py": 78.0
       },
@@ -352,7 +352,7 @@
         "slot": 13,
         "reach": 46.0,
         "ox": 30,
-        "oy": 29,
+        "oy": 27,
         "px": 30.0,
         "py": 81.0
       },
@@ -361,8 +361,8 @@
         "reach": 47.0,
         "ox": 29,
         "oy": 27,
-        "px": 29.0,
-        "py": 82.5
+        "px": 30.0,
+        "py": 83.5
       },
       {
         "slot": 15,
@@ -376,7 +376,7 @@
         "slot": 16,
         "reach": 49.0,
         "ox": 27,
-        "oy": 29,
+        "oy": 27,
         "px": 27.0,
         "py": 81.5
       },
@@ -384,7 +384,7 @@
         "slot": 17,
         "reach": 50.0,
         "ox": 26,
-        "oy": 28,
+        "oy": 27,
         "px": 26.0,
         "py": 83.0
       },
@@ -392,7 +392,7 @@
         "slot": 18,
         "reach": 51.0,
         "ox": 25,
-        "oy": 29,
+        "oy": 27,
         "px": 26.0,
         "py": 80.5
       },
@@ -416,7 +416,7 @@
         "slot": 21,
         "reach": 54.0,
         "ox": 22,
-        "oy": 28,
+        "oy": 27,
         "px": 22.0,
         "py": 81.0
       },
@@ -424,7 +424,7 @@
         "slot": 22,
         "reach": 55.0,
         "ox": 21,
-        "oy": 29,
+        "oy": 27,
         "px": 22.0,
         "py": 78.0
       },
@@ -434,313 +434,265 @@
         "ox": 19,
         "oy": 27,
         "px": 20.0,
-        "py": 78.5
+        "py": 78.0
       },
       {
         "slot": 24,
         "reach": 58.0,
         "ox": 18,
-        "oy": 29,
-        "px": 18.0,
-        "py": 77.0
+        "oy": 27,
+        "px": 19.0,
+        "py": 75.0
       },
       {
         "slot": 25,
-        "reach": 59.0,
-        "ox": 17,
+        "reach": 58.5,
+        "ox": 18,
         "oy": 27,
-        "px": 17.0,
-        "py": 76.5
+        "px": 18.0,
+        "py": 72.5
       },
       {
         "slot": 26,
         "reach": 60.0,
         "ox": 16,
-        "oy": 28,
-        "px": 16.0,
-        "py": 78.0
+        "oy": 27,
+        "px": 17.0,
+        "py": 69.5
       },
       {
         "slot": 27,
-        "reach": 61.0,
-        "ox": 15,
-        "oy": 29,
-        "px": 16.0,
-        "py": 74.0
-      },
-      {
-        "slot": 28,
-        "reach": 62.0,
-        "ox": 14,
-        "oy": 27,
-        "px": 15.0,
-        "py": 72.5
-      },
-      {
-        "slot": 29,
-        "reach": 63.0,
-        "ox": 13,
-        "oy": 27,
-        "px": 13.0,
-        "py": 71.5
-      },
-      {
-        "slot": 30,
-        "reach": 64.0,
-        "ox": 12,
+        "reach": 64.5,
+        "ox": 11,
         "oy": 27,
         "px": 12.0,
-        "py": 71.0
+        "py": 62.0
       }
     ],
     "right": [
       {
-        "slot": 31,
-        "reach": 21.0,
+        "slot": 28,
+        "reach": 25.5,
+        "ox": 78,
+        "oy": 27,
+        "px": 102.0,
+        "py": 60.5
+      },
+      {
+        "slot": 29,
+        "reach": 26.0,
+        "ox": 78,
+        "oy": 27,
+        "px": 103.0,
+        "py": 59.0
+      },
+      {
+        "slot": 30,
+        "reach": 26.5,
         "ox": 75,
-        "oy": 28,
-        "px": 97.0,
-        "py": 66.5
+        "oy": 27,
+        "px": 103.0,
+        "py": 57.5
+      },
+      {
+        "slot": 31,
+        "reach": 28.0,
+        "ox": 75,
+        "oy": 27,
+        "px": 104.0,
+        "py": 60.0
       },
       {
         "slot": 32,
-        "reach": 23.5,
-        "ox": 76,
-        "oy": 29,
-        "px": 100.0,
-        "py": 67.0
+        "reach": 29.0,
+        "ox": 78,
+        "oy": 27,
+        "px": 106.0,
+        "py": 59.0
       },
       {
         "slot": 33,
-        "reach": 27.0,
+        "reach": 30.0,
         "ox": 78,
-        "oy": 28,
-        "px": 104.0,
-        "py": 66.0
+        "oy": 27,
+        "px": 107.0,
+        "py": 59.0
       },
       {
         "slot": 34,
-        "reach": 28.0,
+        "reach": 31.5,
         "ox": 75,
-        "oy": 28,
-        "px": 104.0,
-        "py": 70.5
+        "oy": 27,
+        "px": 108.0,
+        "py": 61.0
       },
       {
         "slot": 35,
-        "reach": 29.5,
-        "ox": 76,
+        "reach": 35.5,
+        "ox": 78,
         "oy": 27,
-        "px": 106.0,
-        "py": 70.0
+        "px": 112.0,
+        "py": 69.0
       },
       {
         "slot": 36,
-        "reach": 31.5,
-        "ox": 76,
-        "oy": 29,
-        "px": 108.0,
-        "py": 75.0
+        "reach": 37.5,
+        "ox": 75,
+        "oy": 27,
+        "px": 114.0,
+        "py": 71.0
       },
       {
         "slot": 37,
-        "reach": 33.5,
-        "ox": 77,
+        "reach": 39.5,
+        "ox": 75,
         "oy": 27,
-        "px": 110.0,
-        "py": 69.5
+        "px": 116.0,
+        "py": 70.0
       },
       {
         "slot": 38,
-        "reach": 35.0,
-        "ox": 76,
-        "oy": 27,
-        "px": 112.0,
-        "py": 75.0
-      },
-      {
-        "slot": 39,
-        "reach": 36.5,
-        "ox": 77,
-        "oy": 29,
-        "px": 113.0,
-        "py": 73.0
-      },
-      {
-        "slot": 40,
-        "reach": 36.5,
-        "ox": 76,
-        "oy": 29,
-        "px": 113.0,
-        "py": 75.0
-      },
-      {
-        "slot": 41,
         "reach": 41.5,
-        "ox": 77,
-        "oy": 28,
+        "ox": 78,
+        "oy": 27,
         "px": 118.0,
         "py": 76.5
       },
       {
-        "slot": 42,
+        "slot": 39,
         "reach": 42.5,
-        "ox": 76,
-        "oy": 28,
+        "ox": 75,
+        "oy": 27,
         "px": 119.0,
         "py": 78.0
       },
       {
-        "slot": 43,
+        "slot": 40,
         "reach": 44.5,
-        "ox": 77,
-        "oy": 28,
+        "ox": 78,
+        "oy": 27,
         "px": 121.0,
         "py": 78.0
       },
       {
-        "slot": 44,
+        "slot": 41,
         "reach": 46.0,
-        "ox": 76,
-        "oy": 29,
+        "ox": 75,
+        "oy": 27,
         "px": 123.0,
         "py": 81.0
       },
       {
-        "slot": 45,
+        "slot": 42,
         "reach": 47.0,
-        "ox": 76,
+        "ox": 78,
         "oy": 27,
-        "px": 124.0,
-        "py": 82.5
+        "px": 123.0,
+        "py": 83.5
       },
       {
-        "slot": 46,
+        "slot": 43,
         "reach": 48.0,
-        "ox": 77,
+        "ox": 78,
         "oy": 27,
         "px": 124.0,
         "py": 80.0
       },
       {
-        "slot": 47,
+        "slot": 44,
         "reach": 49.0,
-        "ox": 76,
-        "oy": 29,
+        "ox": 75,
+        "oy": 27,
         "px": 126.0,
         "py": 81.5
       },
       {
-        "slot": 48,
+        "slot": 45,
         "reach": 50.0,
-        "ox": 76,
-        "oy": 28,
+        "ox": 75,
+        "oy": 27,
         "px": 127.0,
         "py": 83.0
       },
       {
-        "slot": 49,
+        "slot": 46,
         "reach": 51.0,
-        "ox": 77,
-        "oy": 29,
+        "ox": 78,
+        "oy": 27,
         "px": 127.0,
         "py": 80.5
       },
       {
-        "slot": 50,
+        "slot": 47,
         "reach": 52.0,
-        "ox": 76,
+        "ox": 75,
         "oy": 27,
         "px": 129.0,
         "py": 81.0
+      },
+      {
+        "slot": 48,
+        "reach": 53.0,
+        "ox": 78,
+        "oy": 27,
+        "px": 129.0,
+        "py": 81.0
+      },
+      {
+        "slot": 49,
+        "reach": 54.0,
+        "ox": 75,
+        "oy": 27,
+        "px": 131.0,
+        "py": 81.0
+      },
+      {
+        "slot": 50,
+        "reach": 55.0,
+        "ox": 78,
+        "oy": 27,
+        "px": 131.0,
+        "py": 78.0
       },
       {
         "slot": 51,
-        "reach": 53.0,
-        "ox": 77,
+        "reach": 57.0,
+        "ox": 78,
         "oy": 27,
-        "px": 129.0,
-        "py": 81.0
+        "px": 133.0,
+        "py": 78.0
       },
       {
         "slot": 52,
-        "reach": 54.0,
-        "ox": 76,
-        "oy": 28,
-        "px": 131.0,
-        "py": 81.0
+        "reach": 58.0,
+        "ox": 78,
+        "oy": 27,
+        "px": 134.0,
+        "py": 75.0
       },
       {
         "slot": 53,
-        "reach": 55.0,
-        "ox": 77,
-        "oy": 29,
-        "px": 131.0,
-        "py": 78.0
-      },
-      {
-        "slot": 54,
-        "reach": 57.0,
-        "ox": 77,
+        "reach": 58.5,
+        "ox": 75,
         "oy": 27,
-        "px": 133.0,
-        "py": 78.5
-      },
-      {
-        "slot": 55,
-        "reach": 58.0,
-        "ox": 76,
-        "oy": 29,
         "px": 135.0,
-        "py": 77.0
-      },
-      {
-        "slot": 56,
-        "reach": 59.0,
-        "ox": 76,
-        "oy": 27,
-        "px": 136.0,
-        "py": 76.5
-      },
-      {
-        "slot": 57,
-        "reach": 60.0,
-        "ox": 76,
-        "oy": 28,
-        "px": 137.0,
-        "py": 78.0
-      },
-      {
-        "slot": 58,
-        "reach": 61.0,
-        "ox": 77,
-        "oy": 29,
-        "px": 137.0,
-        "py": 74.0
-      },
-      {
-        "slot": 59,
-        "reach": 62.0,
-        "ox": 77,
-        "oy": 27,
-        "px": 138.0,
         "py": 72.5
       },
       {
-        "slot": 60,
-        "reach": 63.0,
-        "ox": 76,
+        "slot": 54,
+        "reach": 60.0,
+        "ox": 78,
         "oy": 27,
-        "px": 140.0,
-        "py": 71.5
+        "px": 136.0,
+        "py": 69.5
       },
       {
-        "slot": 61,
-        "reach": 64.0,
-        "ox": 76,
+        "slot": 55,
+        "reach": 64.5,
+        "ox": 78,
         "oy": 27,
         "px": 141.0,
-        "py": 71.0
+        "py": 62.0
       }
     ],
     "palm": {
@@ -772,14 +724,45 @@
     "path": "res://Assets/UI/ext_the_midnight_show.png"
   },
   "_TORCH": {
-    "base_row": 14,
-    "height": 14,
-    "half_width": 3.5
+    "stage": {
+      "base_row": 14,
+      "height": 14,
+      "half_width": 3.5
+    },
+    "card": {
+      "base_row": 34,
+      "height": 31,
+      "half_width": 9.5
+    }
   },
   "char/palm_l": {
     "path": "res://Assets/Characters/showman/palm_l.png"
   },
   "char/palm_r": {
     "path": "res://Assets/Characters/showman/palm_r.png"
+  },
+  "ui/card_spin": {
+    "path": "res://Assets/UI/cards/spin.png"
+  },
+  "ui/card_btb": {
+    "path": "res://Assets/UI/cards/btb.png"
+  },
+  "ui/card_high": {
+    "path": "res://Assets/UI/cards/high.png"
+  },
+  "ui/card_cascade": {
+    "path": "res://Assets/UI/cards/cascade.png"
+  },
+  "ui/card_columns": {
+    "path": "res://Assets/UI/cards/columns.png"
+  },
+  "ui/card_shower": {
+    "path": "res://Assets/UI/cards/shower.png"
+  },
+  "ui/card_halfshower": {
+    "path": "res://Assets/UI/cards/halfshower.png"
+  },
+  "ui/card_tennis": {
+    "path": "res://Assets/UI/cards/tennis.png"
   }
 }

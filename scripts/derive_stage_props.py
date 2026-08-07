@@ -236,8 +236,23 @@ def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool) -> str
 	p = PROPS / f"{name}.png"
 	status = artguard.save_guarded(p, lambda q: Image.fromarray(out, "RGBA").save(q), force)
 	if flame:
-		(PROPS / "torch_flame.json").write_text(json.dumps(flame, indent=2) + "\n")
-		msg += f"  flame base row {flame['base_row']}, {flame['height']}px tall (drawn live)"
+		# ...AND THE CARD'S FIRE IS LIVE TOO (2026-08-07, Louis: "the fire only moves when
+		# juggling, not in the shop"). He is right, and the reason is the same seam in a
+		# second place: the shop blits prop_big/torch and returns, so the drawing that owns
+		# the animation never runs there either. A card is a still portrait of an OBJECT, but
+		# fire is not an object.
+		#
+		# The PixelLab painting itself is never touched - it is the source both sizes derive
+		# from. A flameless copy is written beside it and that is what the manifest points at.
+		big = np.asarray(Image.open(PROPS / f"big_{name}.png").convert("RGBA")).astype(int)
+		big_body, big_flame = strip_torch_flame(big)
+		if write:
+			artguard.save_guarded(PROPS / "big_torch_body.png",
+				lambda q: Image.fromarray(big_body.astype(np.uint8), "RGBA").save(q), force)
+		(PROPS / "torch_flame.json").write_text(
+			json.dumps({"stage": flame, "card": big_flame}, indent=2) + "\n")
+		msg += (f"  flame stage row {flame['base_row']}/{flame['height']}px, "
+				f"card row {big_flame['base_row']}/{big_flame['height']}px (both drawn live)")
 	return msg + f"  [{status}]"
 
 
