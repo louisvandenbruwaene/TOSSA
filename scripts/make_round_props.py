@@ -180,7 +180,16 @@ def ring(w, h):
 	# the torus normal: at distance d from the centre, the tube's cross-section angle
 	# is phi = asin((d - R_mid) / R_tube), and the normal leans radially by sin(phi)
 	# while facing the viewer by cos(phi).
-	r_mid, r_tube = 0.72, 0.26
+	# THINNER, AND THE OUTER RADIUS IS DELIBERATELY UNCHANGED (2026-08-07, Louis: "the juggle
+	# rings are too thick"). At 0.72/0.26 the tube was 53% of the outer diameter - the hole was
+	# smaller than the metal round it, which is a quoit, not a juggling ring. A real one is
+	# nearer 13%; 27% is as thin as this density can carry, because the stage ring is 21px
+	# across and the tube has to survive a box filter and still show a lit and a shaded side.
+	#
+	# r_mid + r_tube stays 0.98, so the SILHOUETTE is the same size as before. That matters
+	# beyond looks: a prop's outer extent is collision geometry, and only its art is being
+	# changed here - collcheck must read identically after this, and it does.
+	r_mid, r_tube = 0.845, 0.135
 	xs, ys = ss_grids(w, h)
 	d_ss = np.sqrt(xs ** 2 + ys ** 2)
 	inside = coverage(np.abs(d_ss - r_mid) <= r_tube, w, h)

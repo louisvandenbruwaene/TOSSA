@@ -524,6 +524,20 @@ const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher 
 # THE STANCE, as two numbers instead of two loose literals inside inner_pos/outer_pos:
 # everything that has to stay INSIDE the arms' reach (the Columns lane band below) reads
 # them, so the stance and the things measured against it can never drift apart.
+# HOW MUCH HIGHER THE INWARD HAND SITS (2026-08-07, Louis: "the inwards hand position should
+# have a slight inward lower arm bend in the elbow with the hand and its palm coming higher").
+#
+# THIS IS WHAT THE ART ALREADY WANTED. Every generated animation raises the palm as the arm
+# tucks - measured across all nineteen of them, the palm sits at 58-65% of the figure's height
+# at the inner reach against 49-51% at the outer, because that is what a person's forearm does
+# when it folds in. The bank used to fight it: the fitter demanded one flat hand line and the
+# inner entries were accepted only on a loosened tolerance, i.e. the pose was tolerated rather
+# than wanted. Lifting the slot to meet the drawing makes the mechanic and the picture agree,
+# and the elbow bend comes free because it is painted into the frames that now qualify.
+#
+# 22px is 7% of the figure's height - one hand's height, which is "slight" at this scale and
+# is what the measured curve asks for (0.505 -> 0.572 of the way up).
+const HAND_IN_LIFT := 22.0
 const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
 const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
 const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line
@@ -1286,6 +1300,9 @@ var charge_start := [0, 0]
 var hpos := [Vector2.ZERO, Vector2.ZERO]  # smoothed current hand position
 var hvel: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]  # hand_spring only: carried velocity, px/tick
 var hclose := [0.0, 0.0]                  # 0 open (ready), 1 closed (holding)
+var hand_parked := [false, false]         # this hand caught while already holding, so it is
+                                          # a CATCHING hand now and may not throw again this
+                                          # run - see catch_full_on / on_catch / on_throw_press
 var catch_flash := [-999, -999]
 var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
 var last_drop_tick := -999               # for the juggler's wince expression
@@ -2234,6 +2251,8 @@ func _ready() -> void:
 	if ua.has("--menuref"):       # dev: the title proscenium alone, dustless - see draw_menuref
 		_menuref = true
 		art_on = false            # photograph the DRAWING, never the bake already replacing it
+	if ua.has("--parkcheck"):     # dev: autoplay the STOP GESTURE and audit it - see parkcheck_step
+		_parkcheck = true
 	if ua.has("--extref"):        # dev: one venue EXTERIOR alone, dustless - see draw_venue_exterior
 		var eri := ua.find("--extref")
 		_extref = int(ua[eri + 1]) if eri + 1 < ua.size() else 0
@@ -7724,7 +7743,8 @@ func inner_pos(h: int) -> Vector2:
 	# ~(outer - inner) apart), so shrinking both by the same amount narrows the whole
 	# stance without pulling the crossing weave into an overlap.
 	var c := stage_center()
-	return Vector2(c.x - HAND_IN_DX, c.y) if h == LEFT else Vector2(c.x + HAND_IN_DX, c.y)
+	var y := c.y - HAND_IN_LIFT      # ...and higher than the catch line - see HAND_IN_LIFT
+	return Vector2(c.x - HAND_IN_DX, y) if h == LEFT else Vector2(c.x + HAND_IN_DX, y)
 
 
 func slot_pos(h: int, slot: int) -> Vector2:
@@ -7882,9 +7902,56 @@ func fig_hand_pos(h: int) -> Vector2:
 	# past this distance the mechanic wins and the prop is drawn where it really is. Inside it -
 	# every cascade, and columns at ordinary counts - the palm wins and the prop sits in the
 	# hand. Each rule is right in its own regime and the swap happens where they agree.
-	if palm.distance_to(hpos[h]) > FIG_PALM_MAX:
-		return hpos[h]
-	return palm
+	if _handlog:
+		# the UNGUARDED distance, which is what says whether the bank has art for this reach
+		# at all - the guarded number cannot, because it reads zero both when the palm is
+		# exact and when it was rejected. Measured with it: cascade/shower/reverse cascade
+		# sit at a 4-8px median and reject 2-3% of frames; columns rejects 70%, all of it the
+		# central lanes. See fig_palm_far.
+		_palm_raw[h] = palm.distance_to(hpos[h])
+	return palm if palm.distance_to(hpos[h]) <= FIG_PALM_MAX else hpos[h]
+
+
+func draw_figure_palm(h: int, pos: Vector2) -> void:
+	# The performer's OWN hand, cut from the arm bank, placed where the simulation's hand
+	# really is. Not the traced juggler's mitt: that is drawn to a different character's
+	# proportions and beside this one it reads as a pale lump. See the palm patch in
+	# build_arm_bank.py for which frame it comes from and why.
+	var key := "char/palm_l" if h == LEFT else "char/palm_r"
+	if not art_bank.has(key):
+		return
+	var pm: Dictionary = fig_arms.get("palm", {})
+	if pm.is_empty():
+		return
+	art_hits[key] = true
+	var tex: Texture2D = (art_bank[key] as Dictionary)["tex"]
+	var w := float(pm.get("w", 12))
+	var ax := float(pm.get("ax", 6.0))
+	# the patch is written left-handed and mirrored for the right, so its anchor mirrors too
+	var anchor := Vector2(ax if h == LEFT else (w - 1.0 - ax), float(pm.get("ay", 6.0)))
+	var p := art_snap(pos - (anchor + Vector2(0.5, 0.5)) * ART_PIXEL)
+	var sz := Vector2(tex.get_size()) * ART_PIXEL
+	draw_colored_polygon(PackedVector2Array([
+		p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]),
+		venue_figure_tint(), art_uv, tex)
+
+
+func fig_palm_far(h: int) -> bool:
+	# TRUE when the painted arm cannot reach where this hand really is - i.e. when the guard in
+	# fig_hand_pos has just sent the prop back to the mechanic.
+	#
+	# ONE PATTERN NEEDS THIS AND IT IS COLUMNS. Measured over full runs: cascade, shower and
+	# half shower never ask for a reach below 26 art px, which the bank covers comfortably -
+	# but a columns hand stands under its own LANE, and the middle lane of an odd count is dead
+	# centre, so the hand goes to reach 0 for about a third of the run. No arm bank can serve
+	# that: an arm folded across the belly never leaves the body's silhouette, so the fitter
+	# cannot see it, and the generator will not paint it either (asked five ways; it stops at
+	# 25 and puts the hands side by side instead, because that is what a person does).
+	#
+	# So the prop stays on its lane, which is correct - it is where the ball actually is - and
+	# what has to follow it is a HAND. See draw_hand.
+	return fig_anim_live() and fig_hand_pos(h) == hpos[h] and fig_arm_pick(h,
+		get_viewport_rect().size.x * 0.5).size() > 0
 
 
 func draw_figure_design(cx: float, floor_y: float, tint: Color) -> void:
@@ -8175,7 +8242,19 @@ func hand_target(h: int) -> Vector2:
 	# prop in it is asked to THROW, never to catch - so the picture and the instruction
 	# finally agree. A hand can still catch into a held stack (that rescue is unchanged):
 	# catching is decided by timing, never by where the hand is drawn.
-	if not stack(h).is_empty():
+	#
+	# ...UNLESS THE HAND IS PARKED, and that exception is the whole of the 2026-08-07 fix
+	# (Louis: "the outward and inward timing ... doesn't fit when catching the last balls -
+	# it won't go outwards because there are balls in the hand"). Read the rule above for what
+	# it actually protects: a throw departing from a hand that has already wandered out to a
+	# catch slot. A PARKED hand has no throw left to protect - catching into a full hand is
+	# what parked it, and a parked hand may not throw for the rest of the run - so the reason
+	# for holding it inward is gone, and every reason to reach for the incoming prop remains.
+	#
+	# So the branch below is not "holding vs empty" any more, it is "still feeding the pattern
+	# vs bringing it down". A hand still in the weave holds its throw point; a hand collecting
+	# the set reaches for what is coming, exactly as an empty one does.
+	if not stack(h).is_empty() and hand_can_throw(h):
 		p = slot_pos(h, throw_slot(h))
 		# COLUMNS: STAND UNDER THE COLUMN YOU ARE ABOUT TO THROW (2026-07-27, Louis:
 		# "the columns pattern looks awful: the hands are wrongly placed, the objects do
@@ -8360,6 +8439,7 @@ func start_run(n: int) -> void:
 	# per-ACT state re-arms every run (the challenge roll is owned by
 	# begin_performance, so practice and a dev autoplay never carry one)
 	goals_hit = 0
+	hand_parked = [false, false]   # ...and both hands can throw again
 	set_collapsed = false
 	fail_reason = ""   # a fresh act has not failed yet
 	running = false
@@ -8468,6 +8548,30 @@ func start_run(n: int) -> void:
 # Nothing near = whiff (small poise wobble, no ball lost).
 # -----------------------------------------------------------------------------
 
+func catch_full_on() -> bool:
+	# MAY A HAND THAT IS ALREADY HOLDING RECEIVE ANOTHER? (2026-08-07, Louis.)
+	#
+	# It used to be an accessibility toggle only, default off, and that left the END of a run
+	# looking wrong: hand_target's oldest rule is HOLDING MEANS INWARD, so a hand with a prop
+	# in it never reaches, and the last catches of a set - exactly the ones the player is
+	# watching - landed out at the catch slot with the hand still tucked at the throw slot.
+	#
+	# Louis's rule turns that into a mechanic instead of a fix: once you have banked a GOAL you
+	# have earned the stop gesture, and from then on a hand may take a second prop - but a hand
+	# that does is finished throwing for the run (see hand_parked). That is what makes it safe
+	# to let a holding hand reach: a parked hand has no throw pending for the reach to spoil,
+	# which was the entire reason for the inward rule (2026-07-27) in the first place.
+	#
+	# The consequence is deliberate and Louis called it: catching into a full hand ENDS odd-prop
+	# juggling and limits even-prop juggling, because the hand that did it cannot feed the
+	# pattern any more. That is the point. It is a way to bring a set down, not a way to run one.
+	return set_catch_full or goals_hit >= 1
+
+
+func hand_can_throw(h: int) -> bool:
+	return not hand_parked[h]
+
+
 func on_catch(h: int) -> void:
 	# YOU CANNOT CATCH WHILE YOU TURN (2026-07-29, Louis: "make it impossible to catch or throw
 	# while spinning"). This is what replaced the cooldown, and it is a better limiter for a
@@ -8521,7 +8625,7 @@ func on_catch(h: int) -> void:
 	# to juggle around it once this lands, so the traffic-management reason for the rule
 	# (above) has nothing left to protect. `balls_airborne() <= 1` means THIS ball, since
 	# it is still STATE_FLIGHT at this point in the function.
-	if not sure and not set_catch_full and not stack(h).is_empty() and balls_airborne() > 1:
+	if not sure and not catch_full_on() and not stack(h).is_empty() and balls_airborne() > 1:
 		return
 	var best: Ball = null
 	var best_d := 1000000
@@ -8603,6 +8707,21 @@ func on_catch(h: int) -> void:
 	# a yes or a no: "For the Danger" wants danger, a Scared Audience will not have it, a
 	# Fancy Audience will not have eggs. Everything else about the catch happens regardless.
 	var scores := encore_scores_prop()
+	# A HAND THAT CATCHES WHILE ALREADY HOLDING IS DONE THROWING (2026-08-07, Louis). Stamped
+	# here, at the moment the second prop actually lands, rather than at the press: a refused
+	# or mistimed press must not cost the player a hand. Read BEFORE the append, so "was this
+	# hand already holding something" is still answerable.
+	# ...but ONLY when the full-hand rule is what allowed this catch. Two other paths can put a
+	# second prop in a hand and neither may park it: a guided TUTORIAL beat freezes the world to
+	# demand a press (`sure`), and would strand the lesson on its next throw step; and the
+	# last-ball-in-the-air rescue is the stop gesture itself, at which point there is nothing
+	# left to throw and parking would only be bookkeeping.
+	if not stack(h).is_empty() and catch_full_on() and not tut_active:
+		hand_parked[h] = true
+		charging[h] = false   # a held throw key must not leave a gauge growing on a dead hand
+		if _handlog:
+			print("t%4d  PARKED %s - caught with %d already in hand, that hand is done throwing"
+				% [tick, "L" if h == LEFT else "R", stack(h).size()])
 	best.state = STATE_HAND
 	stack(h).append(best)
 	catch_flash[h] = tick
@@ -8821,6 +8940,8 @@ func on_throw_press(h: int) -> void:
 		return   # ...and no throwing either, for the same reason - see on_catch
 	if collapsing or stack(h).is_empty():
 		return   # nothing you throw during a collapse counts; the set is already over
+	if not hand_can_throw(h):
+		return   # this hand caught with a prop already in it: it holds what it holds now
 	if tut_holding():
 		# a frozen beat throws on the PRESS, not the release: with the clock stopped
 		# there is no time to hold the key THROUGH, so hold-for-height cannot be read
@@ -8852,6 +8973,10 @@ func on_throw_release(h: int) -> void:
 
 func do_throw(h: int, hold: int) -> void:
 	if collapsing or stack(h).is_empty():
+		return
+	# ...and the same guard at the choke point, because the autoplayer and the tutorial both
+	# call do_throw directly rather than through the press handler.
+	if not hand_can_throw(h):
 		return
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
@@ -11602,9 +11727,11 @@ func update_hands() -> void:
 		# aim x jumping) is the tremor; a steady aim far from the ball's lane is the
 		# other hypothesis. dc is the centre-relative offset, so 24/58/104 read directly.
 		var c := stage_center().x
-		print("t%4d  L x=%6.1f aim=%6.1f dc=%5.1f hold=%d   R x=%6.1f aim=%6.1f dc=%5.1f hold=%d" % [
-			tick, hpos[LEFT].x, hand_target(LEFT).x, hand_target(LEFT).x - c, int(not stack(LEFT).is_empty()),
-			hpos[RIGHT].x, hand_target(RIGHT).x, hand_target(RIGHT).x - c, int(not stack(RIGHT).is_empty())])
+		print("t%4d  L x=%6.1f aim=%6.1f dc=%5.1f hold=%d park=%d   R x=%6.1f aim=%6.1f dc=%5.1f hold=%d park=%d   full=%d" % [
+			tick, hpos[LEFT].x, hand_target(LEFT).x, hand_target(LEFT).x - c,
+			int(not stack(LEFT).is_empty()), int(hand_parked[LEFT]),
+			hpos[RIGHT].x, hand_target(RIGHT).x, hand_target(RIGHT).x - c,
+			int(not stack(RIGHT).is_empty()), int(hand_parked[RIGHT]), int(catch_full_on())])
 		# THE RESIDUAL between the hand the simulation has and the hand that is PAINTED.
 		# This is the number "the objects must align with the hands" reduces to, and it is the
 		# only honest way to check it: a still frame cannot tell a hand that is simply LATE to
@@ -11614,8 +11741,8 @@ func update_hands() -> void:
 		if fig_anim_live():
 			var dl: Vector2 = fig_hand_pos(LEFT) - hpos[LEFT]
 			var dr: Vector2 = fig_hand_pos(RIGHT) - hpos[RIGHT]
-			print("      palm-vs-hand  L dx=%5.1f dy=%5.1f   R dx=%5.1f dy=%5.1f" % [
-				dl.x, dl.y, dr.x, dr.y])
+			print("      palm-vs-hand  L dx=%5.1f dy=%5.1f   R dx=%5.1f dy=%5.1f   raw %5.1f %5.1f" % [
+				dl.x, dl.y, dr.x, dr.y, _palm_raw[LEFT], _palm_raw[RIGHT]])
 
 
 func add_popup(pos: Vector2, text: String, col: Color) -> void:
@@ -11760,6 +11887,9 @@ const ART_PIXEL := 2.0                 # screen units per authored art pixel (12
 const ART_W := 640                     # the authoring canvas, and the eventual viewport
 const ART_H := 360
 const ART_MANIFEST := "res://Resources/art_manifest.json"
+var torch_flame: Dictionary = {}  # the torch sprite's flame geometry, from a manifest's
+                                  # _TORCH block. EMPTY means the sprite carries its own fire
+                                  # (or there is no sprite) and nothing is drawn over it.
 var fig_arms: Dictionary = {}     # the performer's ARM BANK, from a manifest's _ARMS block:
                                   # {"left": [...], "right": [...]} plus the atlas geometry.
                                   # Each entry is one arm at one reach, with the painted
@@ -11790,6 +11920,10 @@ var _charid := false               # --charid: paint costume regions as flat ID 
 var _bgref := false                # --bgref: draw only sky + dressing, the layers bg/* replaces
 var _menuref := false              # --menuref: draw only the title proscenium, dustless
 var _extref := -1                  # --extref <vi>: draw only that venue's exterior, dustless
+var _parkcheck := false            # --parkcheck: autoplay the stop gesture and audit the result
+var _park_seen := [false, false]   # ...which hands actually parked while it did
+var _park_reach := 0.0             # ...and how far one reached for an incoming prop
+var _palm_raw := [0.0, 0.0]        # --handlog: the UNGUARDED palm-to-hand distance
 var _chargear := false             # --chargear: wear every garment (reference render only)
 var _charback := false             # --charback: draw the figure facing away (the Spin view)
 var _charopen := false             # --charopen: hold the hand open (reference render only)
@@ -11804,6 +11938,7 @@ func art_boot() -> void:
 	art_bank.clear()          # re-entrant: an F9 variant change reboots the bank in place
 	fig_design.clear()        # ...and so does the active design's landmark geometry
 	fig_arms.clear()          # ...and its arm bank
+	torch_flame.clear()       # ...and the torch's live-fire geometry
 	art_read_manifest(art_manifest_path, true)
 	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
 	# no file, so a release build reads exactly one manifest and this loop does nothing.
@@ -11844,6 +11979,12 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 		# body - because those are drawn live, to hand positions that never move. See
 		# fig_design_on / draw_figure_design.
 		fig_design = (pd["_FIGURE"] as Dictionary).duplicate(true)
+	if pd.has("_TORCH") and typeof(pd["_TORCH"]) == TYPE_DICTIONARY:
+		# WHERE THE TORCH SPRITE'S FIRE USED TO BE, in art pixels of its own canvas. The
+		# sprite is the handle alone and the flame is drawn live over it (see
+		# art_blit_prop), so the game needs the painting's own idea of where the fire sits
+		# and how big it is - the card's proportions, not the vector drawing's.
+		torch_flame = (pd["_TORCH"] as Dictionary).duplicate(true)
 	if pd.has("_ARMS") and typeof(pd["_ARMS"]) == TYPE_DICTIONARY:
 		# THE ARM BANK: two lists of arms, "left" and "right", each entry an atlas slot plus
 		# the reach it was painted at and the position of its palm. Sorted by reach, which is
@@ -12060,7 +12201,55 @@ func art_blit_prop(kind: int, pos: Vector2, sc: float, ang: float, tint: Color) 
 	# icon is a clean 3x magnification - which is how pixel art shows an item close up.
 	var base := prop_scale(kind)
 	var zoom := maxi(1, int(roundf(sc / maxf(base, 0.001))))
-	return art_blit(art_key_prop(kind), pos, float(zoom), ang, tint)
+	var key := art_key_prop(kind)
+	if not art_blit(key, pos, float(zoom), ang, tint):
+		return false
+	# THE FIRE IS NOT PART OF THE OBJECT. The torch sprite is a handle; its flame is drawn
+	# live, on top, every frame - which is the only way it can move, and moving is what a
+	# fire does. See strip_torch_flame for why the bake stops at the wick.
+	if key == "prop/torch":
+		draw_sprite_torch_flame(pos, ang, sc, zoom)
+	return true
+
+
+func draw_sprite_torch_flame(pos: Vector2, ang: float, sc: float, zoom: int) -> void:
+	# The live flame, fitted to the SPRITE's fire rather than to the vector drawing's.
+	#
+	# The two are not the same size and that is not a defect: the stage torch is derived from
+	# the shop card, whose painter gave it a taller flame and a shorter handle than TOSSA's own
+	# drawing had. Placing the live fire from TORCH_WICK/TORCH_FLAME_H would have it start
+	# seven art pixels below where the painted one did, floating clear of the wick it belongs
+	# to. So the geometry comes from the picture, measured when the flame was stripped off it.
+	if torch_flame.is_empty() or not art_bank.has("prop/torch"):
+		return
+	var e: Dictionary = art_bank["prop/torch"]
+	var tex: Texture2D = e["tex"]
+	var pv: Vector2 = e["pivot"]
+	var hpx := float(tex.get_size().y)
+	# art px -> the prop's own LOCAL units, so the flame turns with the tumble like everything
+	# else the transform below carries. One art px is ART_PIXEL screen px at zoom 1.
+	var u := ART_PIXEL * float(zoom) / maxf(sc, 0.001)
+	var base_y := (float(torch_flame.get("base_row", 0)) - pv.y * hpx) * u
+	var fh := float(torch_flame.get("height", 0)) * u
+	var hw := float(torch_flame.get("half_width", 1.0)) * u
+	if fh <= 0.0:
+		return
+	var t := fire_clock()
+	var fl := 1.0 + 0.16 * sin(t * 0.5) + 0.07 * sin(t * 1.31)     # the same two-rate flicker
+	var sway := (2.2 * sin(t * 0.29) + 0.9 * sin(t * 0.71)) * (hw / TORCH_FLAME_W)
+	var b := Vector2(0.0, base_y)
+	var fw := hw / 0.62                 # flame_shape's profile peaks at 0.62 of `w`
+	# ON THE ART GRID. Drawn as plain polygons the fire stepped at ONE SCREEN PIXEL while the
+	# coat and the handle beside it stepped at two - a vector flame pasted onto pixel art, and
+	# the most obvious remaining seam in the game once the props themselves were sprites.
+	fill_flame_pix(pos, ang, sc, b, fh * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
+	fill_flame_pix(pos, ang, sc, b, fh * 0.68 * fl, fw * 0.68, sway * 0.7, Color(1.0, 0.72, 0.20, 0.95))
+	fill_flame_pix(pos, ang, sc, b + Vector2(0.0, -u * 0.5), fh * 0.39 * fl, fw * 0.42,
+		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95))
+	var dk := stage_darkness()
+	if dk > 0.02:
+		draw_glow(pos + Vector2(0.0, base_y - fh * 0.5).rotated(ang) * sc, 42.0 * sc,
+			Color(1.0, 0.60, 0.22, 0.34 * dk))
 
 
 func art_key_prop(kind: int) -> String:
@@ -14291,6 +14480,59 @@ func draw_spoke_pix(c: Vector2, ang: float, r0: float, r1: float, w: float, col:
 			draw_rect(Rect2(art_snap(at + perp * off), Vector2(ap, ap)), col)
 
 
+func fill_poly_pix(pts: PackedVector2Array, col: Color) -> void:
+	"""Any polygon, filled on the art grid: one draw_rect per art row, even-odd rule.
+
+	THE POINTS ARE IN SCREEN SPACE, and that is the whole reason this exists rather than a
+	`_cap_px` unit-space fill like the card art uses. A flame rides a TUMBLING prop, so its
+	local frame is rotated - and a grid snapped in a rotated frame is not the art grid, it is
+	a rotated lattice that crawls as the prop turns. The art grid is a property of the screen.
+	So the caller transforms its shape itself and this fills the result where the pixels are."""
+	if pts.size() < 3:
+		return
+	var ap := float(ART_PIXEL)
+	var ymin := INF
+	var ymax := -INF
+	for p: Vector2 in pts:
+		ymin = minf(ymin, p.y)
+		ymax = maxf(ymax, p.y)
+	if not (ymax > ymin):
+		return
+	var y0 := snappedf(ymin, ap)
+	var n := pts.size()
+	for i in int(ceil((ymax - ymin) / ap)) + 2:
+		var y := y0 + float(i) * ap
+		var yc := y + ap * 0.5          # sample each row at its CENTRE, as every pix helper does
+		var xs: Array[float] = []
+		for k in n:
+			var a: Vector2 = pts[k]
+			var b: Vector2 = pts[(k + 1) % n]
+			if (a.y <= yc) == (b.y <= yc):
+				continue                # this edge does not cross this row
+			xs.append(a.x + (yc - a.y) / (b.y - a.y) * (b.x - a.x))
+		if xs.size() < 2:
+			continue
+		xs.sort()
+		var j := 0
+		while j + 1 < xs.size():
+			var xa := snappedf(xs[j], ap)
+			var xb := snappedf(xs[j + 1], ap)
+			if xb - xa >= ap:
+				draw_rect(Rect2(xa, y, xb - xa, ap), col)
+			j += 2
+
+
+func fill_flame_pix(pos: Vector2, ang: float, sc: float, base: Vector2, h: float, w: float,
+		sway: float, col: Color) -> void:
+	# one layer of a flame, mapped out of the prop's local frame and filled on the art grid
+	var local := flame_shape(base, h, w, sway)
+	var out := PackedVector2Array()
+	out.resize(local.size())
+	for i in local.size():
+		out[i] = pos + local[i].rotated(ang) * sc
+	fill_poly_pix(out, col)
+
+
 func draw_ring_pix(c: Vector2, r: float, w: float, col: Color) -> void:
 	# a hollow circle on the art grid: the same row solve as fill_disc_pix run twice, so the
 	# ring's own inner edge is as hard as its outer one. draw_arc(..., TAU) antialiases both.
@@ -14996,7 +15238,18 @@ func draw_hand(h: int) -> void:
 	# and a mitt on top is a second hand growing out of the first. The catch glow above and
 	# the held props below still draw: those are gameplay feedback, not anatomy, and they
 	# have to keep reading identically whatever the figure is made of.
-	if not fig_anim_live():
+	# ...OR when the painted arm could not reach this far, which in practice means a columns
+	# hand standing under a central lane (see fig_palm_far). The prop is drawn on its lane
+	# because that is where it is; without this there is a catch ring and a ball hanging in
+	# open air with the performer's hands somewhere else entirely.
+	if fig_anim_live():
+		# ...OR the painted arm could not reach this far, which in practice means a columns
+		# hand standing under a central lane (see fig_palm_far). The prop is drawn on its lane
+		# because that is where it is; without a hand there, the catch ring and the ball hang
+		# in open air while the performer's hands are somewhere else entirely.
+		if fig_palm_far(h):
+			draw_figure_palm(h, pos)
+	else:
 		draw_mitt(pos, close, inward)
 
 	# held ball(s) rest in the palm - INCLUDING the Columns middle ball, which used to be
@@ -15556,8 +15809,13 @@ func draw_ring_prop(pos: Vector2, col: Color, sc: float) -> void:
 	# hole), so every band here is a FULL circle - dark tube, body, bright inner edge -
 	# and none of them has an end that could read as a cut, nor a direction that could
 	# be wrong under a different stage light. It is cross-section, not illumination.
-	var r := 12.0 * sc
-	var w := 5.0 * sc
+	# THINNED to match the sprite (2026-08-07, Louis: "the juggle rings are too thick"). The
+	# OUTER radius is unchanged at 14.5 - it is what the prop's extent means to the collision
+	# audit - and only the tube inside it narrows, exactly as make_round_props.py did to the
+	# analytic model the sprite comes from. The procedural fallback has to follow, or --procart
+	# stops being an honest A/B of the same object.
+	var r := 12.9 * sc
+	var w := 3.2 * sc
 	draw_arc(pos, r, 0.0, TAU, 32, Color(col.r * 0.46, col.g * 0.45, col.b * 0.50), w, true)
 	draw_arc(pos, r - w * 0.14, 0.0, TAU, 32, col, w * 0.60, true)
 	draw_arc(pos, r - w * 0.30, 0.0, TAU, 32, col.lightened(0.38), w * 0.22, true)
@@ -16109,14 +16367,16 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 	var sway := 2.2 * sin(t * 0.29) + 0.9 * sin(t * 0.71)          # the lean
 	var base := Vector2(0.0, TORCH_WICK)
 	var fw := TORCH_FLAME_W / 0.62      # flame_shape's profile peaks at 0.62 of `w`
-	draw_set_transform(pos, ang, Vector2.ONE * sc)
+	# ...on the art grid, the same as the sprite torch's live fire - see fill_poly_pix. The
+	# shop card and the Blackout stretch both come through here, and both are pixel art.
 	if rich:
-		draw_colored_polygon(flame_shape(base, TORCH_FLAME_H * 1.22 * fl, fw * 1.30, sway * 1.2), Color(1.0, 0.32, 0.06, 0.35))
-	draw_colored_polygon(flame_shape(base, TORCH_FLAME_H * fl, fw, sway), Color(1.0, 0.44, 0.10, 0.95))
-	draw_colored_polygon(flame_shape(base, TORCH_FLAME_H * 0.68 * fl, fw * 0.68, sway * 0.7), Color(1.0, 0.72, 0.20, 0.95))
-	draw_colored_polygon(flame_shape(base + Vector2(0.0, -1.0), TORCH_FLAME_H * 0.39 * fl, fw * 0.42, sway * 0.35),
-		Color(1.0, 0.96, 0.72, 0.95))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * 1.22 * fl, fw * 1.30, sway * 1.2,
+			Color(1.0, 0.32, 0.06, 0.35))
+	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
+	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * 0.68 * fl, fw * 0.68, sway * 0.7,
+		Color(1.0, 0.72, 0.20, 0.95))
+	fill_flame_pix(pos, ang, sc, base + Vector2(0.0, -1.0), TORCH_FLAME_H * 0.39 * fl, fw * 0.42,
+		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95))
 	if rich:
 		# embers climb off the tip - in WORLD space, not the prop's, since smoke rises
 		# whatever angle the torch is held at
@@ -26200,7 +26460,7 @@ func _demo_step() -> void:
 	# stranded a hand's leftover ball forever, since nothing else would ever
 	# ask it to catch, or to throw, again).
 	for h in [LEFT, RIGHT]:
-		if _late_catch_n < 0 and not stack(h).is_empty():
+		if _late_catch_n < 0 and not stack(h).is_empty() and not parkcheck_collecting():
 			continue
 		for b in balls:
 			if b.state != STATE_FLIGHT or (b.to_hand != h and b != col_mid_ball):
@@ -26243,7 +26503,7 @@ func _demo_step() -> void:
 	# --latecatch, whose own catch-then-immediately-rethrow above is the only
 	# throw trigger that mode wants - the beat would otherwise fire independently
 	# and blur the very timing this mode exists to isolate.
-	if _late_catch_n < 0 and tick >= 24 and tick % DEMO_BEAT == 0:
+	if _late_catch_n < 0 and tick >= 24 and tick % DEMO_BEAT == 0 and not parkcheck_collecting():
 		var h := _demo_next
 		if stack(h).is_empty():
 			h = other(h)
@@ -26261,6 +26521,76 @@ func _demo_step() -> void:
 					trick_primed = true
 			do_throw(h, _demo_hold)
 			_demo_next = other(h)
+	parkcheck_step()
+
+
+func parkcheck_collecting() -> bool:
+	# --parkcheck: THE STOP GESTURE, autoplayed, because a player is the only thing that can
+	# normally perform it and a headless run has no player.
+	#
+	# The full-hand rule (see catch_full_on) is unreachable by the ordinary autoplayer BY
+	# DESIGN - it skips any hand that already holds, which is exactly right for demonstrating a
+	# pattern and exactly wrong for testing the one mechanic that depends on not doing that. So
+	# under this flag, the moment a goal is banked the autoplayer stops throwing and catches
+	# everything that arrives, full hand or not: catch the set, hold it, done.
+	return _parkcheck and goals_hit >= 1
+
+
+func parkcheck_step() -> void:
+	# ...and the audit. Called once a tick while the gesture is running; quits with a verdict
+	# as soon as every prop is in a hand, which is the state the gesture exists to reach.
+	if not parkcheck_collecting():
+		return
+	var c0 := stage_center().x
+	for h in [LEFT, RIGHT]:
+		if hand_parked[h]:
+			_park_seen[h] = true
+		# THE REACH, MEASURED IN FLIGHT, which is the only moment it means anything: with
+		# nothing in the air every hand rests inward and the test would pass on a bug. What
+		# is being checked is that a hand which is HOLDING and has a prop ON ITS WAY aims at
+		# the prop - the exact case that was wrong before (Louis: "it won't go outwards
+		# because there are balls in the hand").
+		if hand_parked[h] and not stack(h).is_empty():
+			for b in balls:
+				if b.state == STATE_FLIGHT and b.to_hand == h:
+					_park_reach = maxf(_park_reach, absf(hand_target(h).x - c0))
+					break
+	if balls_airborne() > 0:
+		return
+	var held := stack(LEFT).size() + stack(RIGHT).size()
+	var parked := int(_park_seen[LEFT]) + int(_park_seen[RIGHT])
+	print("parkcheck: %d/%d props held, %d hand(s) parked" % [held, balls.size(), parked])
+	# THE THROW LOCKOUT, tested by trying it rather than by reading the flag. A parked hand
+	# that can still be made to throw is the whole failure this harness exists to catch.
+	var refused := 0
+	for h in [LEFT, RIGHT]:
+		if not hand_parked[h] or stack(h).is_empty():
+			continue
+		var before := stack(h).size()
+		do_throw(h, 0)
+		if stack(h).size() == before:
+			refused += 1
+		else:
+			print("parkcheck FAIL: parked %s threw anyway" % ["L" if h == LEFT else "R"])
+	# and the REACH, the visible half of the rule (see the in-flight measurement above).
+	if _park_reach > HAND_IN_DX + 1.0:
+		print("parkcheck OK: a parked hand reached %.0fpx from centre for an incoming prop "
+			% _park_reach + "(the throw slot it can no longer use is %.0f)" % HAND_IN_DX)
+	elif _park_reach <= 0.0:
+		# NOT A FAILURE, AND SAYING SO MATTERS. At three or four props the hand parks on the
+		# very LAST catch of the set, so by the time it is parked there is nothing left in the
+		# air to reach for and the case simply does not arise. It needs five, where the
+		# collecting hand still has props coming after it has taken its second.
+		print("parkcheck: reach not exercised at %d props - a hand parks on the last catch "
+			% balls.size() + "here, so nothing is ever incoming afterwards. Try --balls 5.")
+	else:
+		print("parkcheck FAIL: a parked hand reached only %.0fpx, no further than its dead "
+			% _park_reach + "throw slot (%.0f)" % HAND_IN_DX)
+	if parked == 0:
+		print("parkcheck FAIL: the gesture never parked a hand")
+	elif refused == parked:
+		print("parkcheck OK: every parked hand refused to throw")
+	get_tree().quit()
 
 
 func _capture_and_quit() -> void:

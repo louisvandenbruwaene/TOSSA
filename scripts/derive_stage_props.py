@@ -113,6 +113,105 @@ def reduce_to(card: Image.Image, w: int, h: int, pal: np.ndarray) -> np.ndarray:
 	return np.dstack([rgb, np.where(keep, 255, 0)]).astype(np.uint8)
 
 
+# How often a tooth is struck along the chainsaw's bar, in art pixels. 2 (every other row)
+# beat 3 on a light field: at 3 the teeth are chunkier but too far apart to read as a saw,
+# and 25 rows of bar only fit eight of them.
+TOOTH_PERIOD = 2
+
+
+def serrate_chainsaw(a: np.ndarray) -> np.ndarray:
+	"""Cut teeth back into the chainsaw's bar (2026-08-07, Louis: they were not visible).
+
+	THE BOX FILTER EATS THEM, and that is not a bug in the filter - it is what averaging
+	means. The card paints the bar's teeth as one-pixel notches on a 72px picture; reduced to
+	a 17px stage sprite each notch is a fraction of a pixel of coverage, so it averages into
+	the bar's own grey and what survives is a smooth grey stick. Nothing about the reduction
+	can preserve a feature finer than its output pixel; the feature has to be re-struck at the
+	output's own scale, which is what a pixel artist would do by hand.
+
+	The teeth are struck OUTWARD, one art pixel past the silhouette on alternate rows, in the
+	bar's own darkest colour (its outline). That makes the SILHOUETTE serrated rather than
+	painting a pattern inside a smooth shape - a prop is read by its outline at this size,
+	especially while it is tumbling, so the outline is where the information has to be.
+
+	THE BAR IS FOUND BY WIDTH, not by colour or by a hard-coded row. The motor body is wide
+	and the bar is narrow, so the run of rows from the tip down to the first wide row is the
+	bar - which stays true if the card art is ever repainted, where a row number would not."""
+	out = a.copy()
+	h, w = out.shape[:2]
+	widths = [int(np.count_nonzero(out[y, :, 3] > 0)) for y in range(h)]
+	if not any(widths):
+		return out
+	limit = max(widths) * 0.6
+	rows: list[int] = []
+	for y in range(h):
+		if widths[y] == 0:
+			continue
+		if widths[y] > limit:
+			break        # the motor body starts here; everything above it was the bar
+		rows.append(y)
+	if len(rows) < 4:
+		return out
+	sel = out[rows][..., 3] > 0
+	cols = np.unique(out[rows][..., :3][sel], axis=0)
+	lum = cols @ np.array([0.299, 0.587, 0.114])
+	tooth = cols[int(np.argmin(lum))]
+	for y in rows:
+		if y % TOOTH_PERIOD:
+			continue
+		xs = np.where(out[y, :, 3] > 0)[0]
+		if xs.size == 0:
+			continue
+		for x in (int(xs.min()) - 1, int(xs.max()) + 1):
+			if 0 <= x < w:
+				out[y, x] = [tooth[0], tooth[1], tooth[2], 255]
+	return out
+
+
+def strip_torch_flame(a: np.ndarray) -> tuple[np.ndarray, dict]:
+	"""Take the FIRE off the torch sprite, and measure the hole it leaves.
+
+	THE FLAME IS LIGHT, AND THIS PROJECT NEVER BAKES LIGHT (2026-08-07, Louis: "i'd like the
+	fire of the torches to actually move"). It already moved - draw_torch_flame has run on a
+	two-rate flicker and a lean since 2026-07-27 - and then the prop seam quietly killed it:
+	registering prop/torch made the sprite the whole object, so art_blit_prop returned true and
+	the drawing that owned the animation never ran at all. The torch became a photograph of a
+	fire. That is the same mistake a baked spotlight cone would be, and the fix is the split
+	every other bake here already makes: the OBJECT is a sprite, the LIGHT is drawn live.
+
+	THE CANVAS SIZE IS DELIBERATELY UNCHANGED. Every prop sprite's pivot is a FRACTION of its
+	own texture (measured, not chosen - see the manifest's own note), so cropping the flame
+	away would silently invalidate the torch's pivot and set it orbiting a point instead of
+	spinning about one. The flame pixels are cleared and the 8x39 canvas is kept.
+
+	The measurements handed back are in ART PIXELS of that same canvas, so the game can place
+	a live flame exactly where the painted one was - the card's proportions, not the vector
+	drawing's, which is the whole point of deriving from the card in the first place."""
+	out = a.copy()
+	h = out.shape[0]
+	# warm = distinctly red-of-blue and bright. The handle below is grey, brown and near-black,
+	# none of which can pass this; the flame's own dark red root can.
+	warm = (out[..., 3] > 0) & (out[..., 0] > 120) & (out[..., 0] > out[..., 2] + 30)
+	rows: list[int] = []
+	for y in range(h):
+		op = int(np.count_nonzero(out[y, :, 3] > 0))
+		if op and int(np.count_nonzero(warm[y])) * 2 >= op:
+			rows.append(y)
+		elif rows:
+			break        # the first row that is mostly NOT fire is the top of the handle
+	if not rows:
+		return out, {}
+	xs = np.where(warm[rows[0]:rows[-1] + 1].any(axis=0))[0]
+	meta = {
+		# the row the fire sits ON - i.e. the first row of handle, which is where its base goes
+		"base_row": int(rows[-1] + 1),
+		"height": int(len(rows)),
+		"half_width": round(float(xs.max() - xs.min() + 1) / 2.0, 2),
+	}
+	out[rows[0]:rows[-1] + 1] = 0
+	return out, meta
+
+
 def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool) -> str:
 	stage = Image.open(PROPS / f"{name}.png").convert("RGBA")
 	card = Image.open(PROPS / f"big_{name}.png").convert("RGBA")
@@ -126,11 +225,19 @@ def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool) -> str
 	h = stage.size[1]                                   # LENGTH IS FIXED - see the docstring
 	w = max(2, int(round(card.size[0] * h / card.size[1])))
 	out = reduce_to(card, w, h, pal)
+	if name == "chainsaw":
+		out = serrate_chainsaw(out)
+	flame = {}
+	if name == "torch":
+		out, flame = strip_torch_flame(out)
 	msg = f"{name:9} {stage.size[0]:2}x{stage.size[1]:<3} -> {w:2}x{h:<3}  (card {card.size[0]}x{card.size[1]})"
 	if not write:
 		return msg + "   (report only)"
 	p = PROPS / f"{name}.png"
 	status = artguard.save_guarded(p, lambda q: Image.fromarray(out, "RGBA").save(q), force)
+	if flame:
+		(PROPS / "torch_flame.json").write_text(json.dumps(flame, indent=2) + "\n")
+		msg += f"  flame base row {flame['base_row']}, {flame['height']}px tall (drawn live)"
 	return msg + f"  [{status}]"
 
 
