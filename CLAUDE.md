@@ -88,20 +88,70 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   arm from its own hand. Sixteen source frames stop being sixteen poses and become sixteen
   squared, and the banks POOL ACROSS GENERATIONS, so the reach table is dense (27 entries over
   30..61 art px) rather than seven frames bunched at one reach.
-  - **An arm layer is the frame's whole half of the arm band, deliberately.** The obvious layer
-    is "the pixels that moved" and it SEVERS the arms: at close reach the sleeve lies flat on
-    the coat, so most of the limb is opaque in every frame. Taking the half-band cannot sever
-    anything and costs nothing, because the half a torso that comes with it lands on a body
-    made from the median of the same pixels.
+  - **An arm layer is the LIMB THE HAND IS ON, and nothing else** (2026-08-08). Two earlier
+    rules are both wrong and both are recorded because each looks right. "The whole half of the
+    arm band" puts half a TORSO in every layer, and since the two arms are chosen
+    independently the man wears one frame's lapel on the left and another's on the right.
+    "Only the pixels that DIFFER from the body" is right in principle and was implemented with
+    a BYTEWISE test - and the body is a median, so a coat pixel one palette step off counted as
+    arm: 61% of every layer was still torso, and the shirt, bow tie and frogging changed as his
+    hands moved. That is what Louis saw as "the left and right side don't match". The test is
+    perceptual now (`DIFF_MIN`, Oklab), the layer is grown from the HAND, thinned by a 2x2
+    erosion so the coat's piping cannot ride along at the shoulder, and dropped entirely if it
+    does not reach the shoulder (`SHOULDER_SLACK`) - a forearm floating in open air is worse
+    than no arm.
+  - **A PALM IS A HAND, NOT AN EXTREMITY** (2026-08-08, and this one poisoned three other
+    numbers). `armlib.palms` called a palm "the moving pixel furthest from the centreline",
+    which is the hand only while the arm is straight; fold the elbow and it is the ELBOW.
+    Measured over 624 candidates: a median of 25 art px - FIFTY screen px - from the real hand.
+    `armlib.hands` finds the outermost blob of his own SKIN instead, which cannot be an elbow.
+    Everything hangs off this: held props, the catch glow, the charge gauge, the tutorial keys.
+    - **It is why `HAND_IN_LIFT` was 42 and is now 0.** That lift was added to raise the game's
+      inner hand slot to a palm the fitter believed sat 63.5% up the figure. Measured from the
+      hands: 47.8% at inner reach, 48-53% across the whole 0..44 range. There was no lift in
+      the painting to meet, and every held object was drawn 42px above the hand holding it.
+    - **`skin_colours` is the face MINUS the costume.** Every colour above the neck is 22
+      entries covering hair, outline, collar and lapels; a mask built from that lights up
+      3,210 px of torso as one blob and no hand can be found inside it. Subtracting everything
+      painted below the arm band leaves the skin ramp, filtered by `SKIN_MIN_SHARE`.
+  - **The bank's hand line is FLAT, because the GAME's is.** `outer_pos` sits at
+    `stage_center().y` at every reach. Letting the far buckets follow the art (a ramp to +0.20
+    by reach 66) describes the poses honestly and is still wrong: `fig_hand_pos`'s
+    `FIG_PALM_MAX` guard then refuses those palms, the prop snaps back to the simulated hand,
+    and the player sees a raised arm with its ball low and left - which reads as a severed
+    forearm. **An empty bucket is strictly better than a lying one.**
   - **The height of the palms is the check that matters, and reach cannot see it.** Every
     generation before 2026-08-07 painted them 55-77% up the figure where the game's hand line
     is 50.5%, so props were drawn up to 40px below the painted hands in every run. Ask for
     "hands kept LOW at hip height, never above the belt" and expect to re-roll. **The model
     will not paint tucked hands at hip height** - five attempts, every phrasing; it raises them
-    to the waist, because that is what a person does. So the bank is dense across the CATCHING
-    range and clamps at the resting end, where a held prop follows the painted palm anyway.
+    to the waist, because that is what a person does.
+  - **PALM ORIENTATION IS SCORED (`flat` = the hand blob's width/height), AND THE INNER SLOT
+    STILL HAS NONE.** A juggler's hand is turned up at both ends of its travel, to receive at
+    the catch and to release at the throw (Louis, 2026-08-08). `pick` now prefers the flattest
+    hand that passes the height gate, and the OUTER slot is served: reach 45-49 comes back at
+    flat 1.14-1.50. The inner slot is not, and it is not a tuning problem - **measured, 0 of 47
+    candidates at reach 24-31 exceed flat 1.00**, across all 19 generations. Widening the
+    height gate cannot help because none of them are palm-up at any height. It needs a NEW
+    generation aimed at an upturned, cupped hand at hip height, and note that `animate_image`
+    takes the still as inline base64 (~14.6k chars at 176x176), which the MCP docs warn is the
+    size clients truncate at - so budget a retry for transport, not just for the pose.
   - **`fig_hand_pos` is where a prop is drawn; `hpos` is where the catch is decided.** Held
     props, the catch glow, the charge gauge and the tutorial keys all follow the painted palm.
+    `--handlog` prints the residual every tick and is the only honest check: it was 27-65
+    screen px (the guard rejecting every frame) before 2026-08-08 and is 0.2-5 px now.
+  - **THE BANK'S INDEX LIVES IN THE MANIFEST, NOT BESIDE THE ATLAS.** `Game.gd` reads
+    `art_manifest.json`'s `_ARMS` block; the `juggle_arms.json` written next to the PNG is a
+    build artefact nothing loads. `build_arm_bank.py --write` writes BOTH, and it must - the
+    atlas was once rebuilt to a 57px cell while `_ARMS` still described 64px and 28 entries,
+    so every UV sub-rect cut the new atlas at old coordinates. That draws a sleeve with no
+    shoulder floating beside the performer, and it looks like a bug in the art.
+  - **The body's FACE comes from one frame, not from the median.** The median is right inside
+    the arm band and a demolition above it: averaging a twenty-pixel head that the generator
+    jitters by a pixel smears the hair over the brow and deletes both eyes. `body_of` takes
+    the rows above the band whole from the frame whose head best matches the voted silhouette.
+    `head_box` publishes his face's rectangle so `draw_fig_head` can cut a portrait from it -
+    the tutorial's speaker is the man on stage, not the traced juggler.
   - **A painted performer owns the hand line.** He is a fixed-size sprite and the stage is laid
     out in fractions of the viewport, and the project stretches with aspect "expand" - so at any
     window that is not 16:9 the boards move and he does not. `stage_center` reads the bank's
