@@ -6330,12 +6330,19 @@ func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
 		Vector2(bx + 80.0, by + bh + 13.0)]), Color(0.10, 0.07, 0.09, 0.95))
 	# the speaker: a lit disc with the game's own head in it, so the voice has a face and it
 	# is a face the player already knows
-	var hc := Vector2(bx + 52.0, by + bh * 0.5)
+	var hc := art_snap(Vector2(bx + 52.0, by + bh * 0.5))
 	draw_glow(hc, 34.0, Color(1.0, 0.78, 0.42, 0.14))
-	draw_circle(hc, 26.0, Color(0.16, 0.11, 0.12, 0.95))
-	draw_arc(hc, 26.0, 0.0, TAU, 28, Color(1.0, 0.86, 0.55, 0.45), 1.4)
-	# the same skin and hair draw_juggler uses, so the voice looks like the man on stage
-	draw_head(hc + Vector2(0.0, 3.0), 15.0, Color(0.28, 0.16, 0.11), Color(0.87, 0.64, 0.45), false)
+	fill_disc_pix(hc, 26.0, Color(0.16, 0.11, 0.12, 0.95))
+	draw_ring_pix(hc, 26.0, 2.0, Color(1.0, 0.86, 0.55, 0.45))
+	# ...AND IT IS THE PERFORMER'S OWN FACE, cut from the body sprite (2026-08-08). This drew
+	# draw_head - the TRACED juggler - with a comment claiming the voice looks like the man
+	# on stage. That stopped being true the day the showman replaced him: a smooth vector
+	# head in a smooth vector disc was talking to the player about the painted man standing
+	# right behind the box, in a different style and with a different face. The bank
+	# publishes his head's rectangle (see head_box), so this is a sub-rect blit of art the
+	# game already has loaded, and it cannot drift from him.
+	if not draw_fig_head(hc, 24.0):
+		draw_head(hc + Vector2(0.0, 3.0), 15.0, Color(0.28, 0.16, 0.11), Color(0.87, 0.64, 0.45), false)
 	# THE LINE, revealed a letter at a time. A line that appears whole is a sign; a line
 	# that arrives is a person talking, and it is what the blip sound is timed against.
 	var shown := tut_speech_chars()
@@ -7947,6 +7954,42 @@ func fig_hand_pos(h: int) -> Vector2:
 		# central lanes. See fig_palm_far.
 		_palm_raw[h] = palm.distance_to(hpos[h])
 	return palm if palm.distance_to(hpos[h]) <= FIG_PALM_MAX else hpos[h]
+
+
+func draw_fig_head(c: Vector2, want_r: float) -> bool:
+	# THE PERFORMER'S FACE ON ITS OWN, for anywhere that needs a portrait of him - the
+	# tutorial's speaker today, and any other voice later. FALSE if the painted design is not
+	# loaded, so every caller keeps whatever it drew before.
+	#
+	# A WHOLE-PIXEL SCALE OR NOTHING, the same rule the preview figure follows: his head is
+	# twenty art pixels tall, and fitting that to an arbitrary radius would resample it into
+	# mush at the one size where a player is looking straight at his face. So the scale is
+	# floored to a whole multiple and the disc simply carries more margin at sizes between.
+	if not art_bank.has("char/juggle_body"):
+		return false
+	var hb: Dictionary = fig_arms.get("head", {})
+	if hb.is_empty():
+		return false
+	var tex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
+	var ts := Vector2(tex.get_size())
+	var hw := float(hb.get("w", 0))
+	var hh := float(hb.get("h", 0))
+	if hw <= 0.0 or hh <= 0.0 or ts.x <= 0.0 or ts.y <= 0.0:
+		return false
+	var k := maxf(1.0, floorf(minf(want_r * 2.0 / hw, want_r * 2.0 / hh)))
+	art_hits["char/juggle_body"] = true
+	var sz := Vector2(hw, hh) * k
+	var p := art_snap(c - sz * 0.5)
+	var u0 := float(hb.get("x", 0)) / ts.x
+	var v0 := float(hb.get("y", 0)) / ts.y
+	var u1 := u0 + hw / ts.x
+	var v1 := v0 + hh / ts.y
+	draw_colored_polygon(
+		PackedVector2Array([p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]),
+		Color.WHITE,
+		PackedVector2Array([Vector2(u0, v0), Vector2(u1, v0), Vector2(u1, v1), Vector2(u0, v1)]),
+		tex)
+	return true
 
 
 func draw_figure_palm(h: int, pos: Vector2) -> void:
@@ -12729,9 +12772,14 @@ func draw_backdrop(s: Vector2) -> void:
 	# painting behind him, which is the thing the whole veil exists to do.
 	var veil := float(v.get("veil", 0.42))
 	var veil_c := Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5, 1.0)
+	# ...and the bottom of the ramp is the venue's OWN veil, never less. Grading it down
+	# there as well (0.55x was tried) redistributes the wash honestly and still gets it
+	# wrong, because the performer stands at the bottom: it makes the set immediately behind
+	# him BRIGHTER than it was, which is the one place the veil was earning its keep. The
+	# ramp only ever adds darkness, going up.
 	draw_gradient_v(Rect2(0, 0, s.x, fy),
 		Color(veil_c.r, veil_c.g, veil_c.b, minf(1.0, veil * 1.55)),
-		Color(veil_c.r, veil_c.g, veil_c.b, veil * 0.55), 24)
+		Color(veil_c.r, veil_c.g, veil_c.b, veil), 24)
 	draw_stage_grade(s, fy, glow)
 
 	# spotlight cone from above centre: it narrows and warms a touch as a streak

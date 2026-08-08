@@ -107,6 +107,31 @@ def body_of(frames: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarra
 	med = np.median(np.stack([f[..., :3] for f in frames]), axis=0).astype(int)
 	body = np.zeros((h, w, 4), dtype=np.uint8)
 	body[shape] = np.dstack([med, np.full((h, w), 255)])[shape].astype(np.uint8)
+	# HIS FACE COMES FROM ONE FRAME, NOT FROM THE MEDIAN OF SEVENTEEN.
+	#
+	# The median exists to stop a sleeve that passes over the torso from staining it, and
+	# above the arm band there are no sleeves - the band starts below the chin. What the
+	# median does up there is average a head that the generator jitters by a pixel between
+	# frames, and averaging a twenty-pixel face is not a softening, it is a demolition:
+	# measured at 10x, the hair smears across the brow and both eyes disappear. That face is
+	# on stage in every frame of the game and, since 2026-08-08, close up in the tutorial's
+	# speech box.
+	#
+	# So the rows above the band are taken whole from the single frame whose head best
+	# matches the voted silhouette - not frame 0, which may itself be the jittered one.
+	y_top = y0
+	if y_top > 0:
+		head_shape = shape[:y_top]
+		best_i, best_iou = 0, -1.0
+		for i, m in enumerate(masks):
+			hm = m[:y_top]
+			union = np.count_nonzero(hm | head_shape)
+			iou = np.count_nonzero(hm & head_shape) / float(union) if union else 0.0
+			if iou > best_iou:
+				best_iou, best_i = iou, i
+		src = frames[best_i][:y_top, :, :3]
+		body[:y_top][head_shape] = np.dstack(
+			[src, np.full(src.shape[:2], 255)])[head_shape].astype(np.uint8)
 	return body, strict, med
 
 
