@@ -135,6 +135,25 @@ PALM_BOX = (12, 12)      # the cut-out hand, in art px
 PALM_SHIFT = 4           # ...offset toward the body, because the palm point is the extremity
 
 
+def head_box(body: np.ndarray) -> dict:
+	"""His head's own rectangle in the body cell: crown to neck, and its ink width.
+
+	armlib.head_rows finds the neck as the narrowest row between the crown and the
+	shoulders, which is the same landmark fit_char_design.py uses - a collar and lapels sit
+	above the shoulder line and are wider than a skull, so anything that stops at the arm
+	band calls a head twice its real size. Two rows of collar are kept below the neck so the
+	cut does not slice his jaw off."""
+	mask = body[..., 3] > 0
+	top, neck = armlib.head_rows(mask)
+	y1 = min(body.shape[0] - 1, neck + 2)
+	rows = mask[top:y1 + 1]
+	xs = np.where(rows.any(axis=0))[0]
+	if xs.size == 0:
+		return {}
+	return {"x": int(xs.min()), "y": int(top),
+			"w": int(xs.max() - xs.min() + 1), "h": int(y1 - top + 1)}
+
+
 def lift_at(reach: float) -> float:
 	"""How far above the base hand line a palm belongs at this reach, 0..LIFT_UP."""
 	if reach <= LIFT_FLAT[1]:
@@ -488,6 +507,11 @@ def main() -> int:
 			# at 1280x803 the gap was 11px and growing with the window. Anchoring the hand
 			# line to the painting closes it at every size at once.
 			"hand_py": 0.0,
+			# WHERE HIS FACE IS IN THE BODY CELL, so any screen that needs a portrait can cut
+			# one from the performer himself instead of drawing a second man. The tutorial's
+			# speaker was the TRACED juggler's head - a different character, drawn with
+			# draw_circle, talking to you about the painted one standing behind the box.
+			"head": head_box(body),
 			"left": [], "right": []}
 	for n, c in enumerate(entries):
 		r, k = divmod(n, cols)
