@@ -12083,6 +12083,23 @@ func art_snap(v: Vector2) -> Vector2:
 	return (v / ART_PIXEL).round() * ART_PIXEL
 
 
+func art_native_size(key: String) -> Vector2:
+	# A SPRITE'S OWN SIZE IN SCREEN UNITS - its art pixels at exactly ART_PIXEL each.
+	#
+	# For the callers that must draw a picture at 1:1 and place it by its CORNER, which
+	# art_blit_fit (centres in a box) and art_blit_rect (stretches to a box) both refuse to
+	# do. The wordmark is the case it was written for: its box was four measured constants,
+	# the bake was re-run when the ring art changed, and the two silently disagreed by 12
+	# screen px - so the logo, the first thing a player sees, was being stretched 1.5% and
+	# every one of its pixels resampled. A box read off the texture cannot drift from it.
+	#
+	# Vector2.ZERO if the key is procedural, which is the same "sprite or not" contract the
+	# rest of the seam uses.
+	if not art_on or not art_bank.has(key):
+		return Vector2.ZERO
+	return Vector2((art_bank[key] as Dictionary)["tex"].get_size()) * ART_PIXEL
+
+
 func art_blit(key: String, pos: Vector2, sc: float = 1.0, ang: float = 0.0,
 		tint: Color = Color.WHITE) -> bool:
 	# The one substitution point. TRUE = a sprite was drawn and the caller must return
@@ -23424,6 +23441,13 @@ func cap_letter_width(ch: String, gsz: float) -> float:
 # deal taller than the lettering it is standing in for.
 const MARK_RISE := 1.06   # above the baseline, in units of letter height
 const MARK_DROP := 0.17   # ...and below it
+# WHERE THE BAKED SPRITE'S TOP-LEFT CORNER GOES, in units of the letter height, measured
+# from the reference render by scripts/pixelise_mark.py and reported by it on every bake.
+# Only the ORIGIN lives here: the sprite's own texture supplies its extent (see
+# capsule_mark), because a size copied into code is a size that can silently disagree with
+# the art it is describing.
+const MARK_BOX_X := 2.33333   # ...left of screen centre
+const MARK_BOX_Y := 1.10357   # ...above the props' baseline
 const MARK_PREFIX := 0.46   # ...and the PIXEL prefix's band ABOVE all of that
 const MARK_PREFIX_CAP := 0.34   # the prefix's own letter height, in the same units
 # THE PREFIX IS PART OF THE PICTURE, so it lives in these constants rather than being
@@ -23557,6 +23581,23 @@ func mark_cy_centred(sy: float, size: float, at: float = CAP_Y) -> float:
 	return sy * at + size * ((MARK_PREFIX + MARK_RISE - MARK_DROP) * 0.5 - 0.5)
 
 
+func mark_glow(widths: Array[float], gap: float, x0: float, base0: float, size: float) -> void:
+	# The soft blue bloom behind the mark's ring, placed off the SAME advance the letters
+	# walk rather than off a fraction of the finished picture. That is the whole reason it
+	# takes the measured widths as an argument: the O's centre is wherever the layout puts
+	# it, and a bloom pinned to "38% across the logo" would come unstuck the first time a
+	# letter was renudged - which is the drift the "a game has one logo" note warns about.
+	var x := x0
+	for i in MARK_WORD.length():
+		var n := cap_nudge(i)
+		if MARK_WORD[i] == "O":
+			var ring_r := size * n.z * 0.50
+			draw_glow(Vector2(x + n.x * size + ring_r, base0 + size * n.y - size * n.z * 0.46),
+				ring_r * 1.30, ca(Color(0.45, 0.78, 1.0, 0.20)))
+			return
+		x += widths[i] + gap
+
+
 func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> void:
 	# THE WHOLE NAME IN PROPS, and no lettering at all (2026-07-28, Louis): the T is two
 	# knives with the vertical one lying over the horizontal, the O is a ring, each S is a
@@ -23594,13 +23635,6 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	# bake simply falls through to the drawing. The BOX is size-independent: those four
 	# numbers are in units of the letter height, measured from the render by
 	# scripts/pixelise_mark.py, so one set covers every size.
-	if not _markref:
-		var base_y := cy + size * 0.5
-		var box := Rect2(s.x * 0.5 - size * 2.38095, base_y - size * 1.11548,
-			size * 4.71429, size * 1.26190)
-		if art_blit_rect("ui/wordmark_%d" % int(roundf(size)), box, Color(1, 1, 1, _cap_a)):
-			_cap_a = 1.0
-			return
 	var gap := size * CAP_GAP
 	var widths: Array[float] = []
 	var total := 0.0
@@ -23611,6 +23645,30 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	total -= gap
 	var x := s.x * 0.5 - total * 0.5
 	var base0 := cy + size * 0.5                 # the mark's baseline
+	# THE RING'S BLOOM IS LIVE, AND DELIBERATELY NOT IN THE BAKE. It used to be drawn inside
+	# the "O" branch, which put it in the reference render - and the reducer's alpha is hard
+	# (a pixel is ink or it is nothing), so a soft glow over the render's near-black
+	# background baked as an OPAQUE navy disc. On screen that is not a bloom, it is a plug:
+	# the ring stopped being a ring and became a lens with the curtain sealed off behind it.
+	# Drawn here it sits under both the sprite and the drawing, and the hole stays a hole.
+	if not _markref:
+		mark_glow(widths, gap, x, base0, size)
+	# THE EXTENT COMES FROM THE SPRITE, ONLY THE ORIGIN IS MEASURED. All four numbers
+	# used to be constants copied out of pixelise_mark.py's report, and that is a trap
+	# with a delay fuse: re-bake the mark after changing a prop and the sprite's size
+	# changes with it, while the box does not. It happened - the ring became a real
+	# annulus, the bake went from 4.71 to 4.64 letter-heights wide, and art_blit_rect
+	# dutifully stretched 780 px of art across 792 px of box. A 1.5% stretch is every
+	# pixel of the logo resampled, on the first screen of the game.
+	if not _markref:
+		var key := "ui/wordmark_%d" % int(roundf(size))
+		var wsz := art_native_size(key)
+		if wsz.x > 0.0:
+			var box := Rect2(s.x * 0.5 - size * MARK_BOX_X, base0 - size * MARK_BOX_Y,
+				wsz.x, wsz.y)
+			if art_blit_rect(key, box, Color(1, 1, 1, _cap_a)):
+				_cap_a = 1.0
+				return
 	for i in MARK_WORD.length():
 		var ch := MARK_WORD[i]
 		var n := cap_nudge(i)
@@ -23649,7 +23707,7 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 					cap_knife(stem_at, 0.0, ssc)
 			"O":
 				var rc := Vector2(x + ring_r, base - size_l * 0.46)
-				draw_glow(rc, ring_r * 1.30, ca(Color(0.45, 0.78, 1.0, 0.20)))
+				# (its bloom is drawn before the letters - see mark_glow)
 				# THE O IS THE SHOP'S RING, not a second drawing of one - see mark_prop.
 				# The round props are centre-pivoted and radially symmetric, so swapping the
 				# art in cannot shift a letterform the way it could for the T's knives.
