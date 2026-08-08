@@ -345,11 +345,19 @@ def gather(dirs: list[Path]) -> tuple[np.ndarray, list[dict]]:
 				inner = lx if side == "R" else lx + layer.shape[1]
 				if (inner - ref_cx if side == "R" else ref_cx - inner) > SHOULDER_SLACK:
 					continue
+				# HOW HORIZONTAL THE LIMB ITSELF IS (2026-08-08, Louis: "the inwards bending
+				# arms should be more horizontal, almost horizontal even"). A forearm folded
+				# up in front of the body is a WIDE patch of ink; one hanging from the
+				# shoulder is a tall narrow one. So the layer's own aspect ratio is the
+				# measurement, and it needs no joint-finding to get it - the same trick the
+				# palm's `flat` uses one scale down.
+				lay_flat = layer.shape[1] / max(1.0, float(layer.shape[0]))
 				cands.append({
 					"src": d.name, "frame": i, "side": side,
 					"reach": float(p[side + "reach"]),
 					"up": float(p[side + "up"]),
 					"flat": float(p[side + "flat"]),
+					"arm_flat": float(lay_flat),
 					"layer": layer,
 					# everything below is in the REFERENCE body's coordinates - which the
 					# frame was already placed into, so no further offset is applied here
@@ -419,8 +427,18 @@ def pick(cands: list[dict], side: str, axis: float, target_py: float) -> list[di
 			py_err = abs(c["py"] - want_py)
 			if py_err > UP_TOL * (c["cell"][1] - 1):
 				continue
-			# flattest first, then nearest the line, then nearest the wanted reach
-			key = (-c.get("flat", 0.0), py_err, abs(c["reach"] - want))
+			# THE SCORE, in the order the eye notices these things: an upturned palm, then a
+			# forearm carried horizontally rather than hanging, then height, then reach.
+			#
+			# Both shape terms are QUANTISED before they are compared. Raw ratios are all
+			# slightly different, so an unrounded score is a total order and the two terms
+			# below it never get a say - which in practice means reach stops being honoured
+			# and neighbouring buckets grab poses from all over the sweep. Rounding to a
+			# quarter makes "as good as each other" a real state, and then the pose nearest
+			# the wanted reach wins it.
+			key = (-round(c.get("flat", 0.0) * 4.0),
+				   -round(c.get("arm_flat", 0.0) * 4.0),
+				   py_err, abs(c["reach"] - want))
 			if best_key is None or key < best_key:
 				best, best_key = c, key
 		if best is not None and not any(o["_id"] == id(best) for o in out):

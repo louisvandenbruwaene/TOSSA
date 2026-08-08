@@ -13,9 +13,10 @@ is a knife lying across another. Rebuilding that from the display sprites would 
 reproducing capsule_mark's layout a second time and letting the two drift - which is
 exactly the failure the "a game has one logo" note in Game.gd was written about.
 
-THE PIXEL PREFIX IS NOT IN THE BAKE. It is type, it is already crisp in the pixel font at
-a quantised size, and reducing it by two would destroy it. --markref suppresses it, and
-the word draws live over the sprite.
+THERE IS NO PIXEL PREFIX ANY MORE (2026-08-08). It used to be set in type above the props
+and deliberately left out of the bake, since reducing crisp type by two destroys it. Louis
+cut the word from the lockup, so the mark is the props alone and --markref now suppresses
+only the ring's bloom (see mark_glow).
 
 ONE TEXTURE PER SIZE. A bake is only correct at the letter height it was made at, since
 any other needs a fractional scale and scaling pixel art DOWN cannot be undone. The seam
@@ -49,7 +50,11 @@ CLEAR = np.array([15, 8, 13])
 BG_TOL = 10
 ALPHA_CUT = 0.42
 ART_PIXEL = 2
-MARK_PREFIX, MARK_RISE, MARK_DROP = 0.46, 1.06, 0.17
+# The PIXEL prefix band was removed from the lockup on 2026-08-08, so the letter box's
+# centre no longer sits below a band of type. Keep these in step with Game.gd's own
+# constants: they are what turns the reference render's crop back into the box the seam
+# places the sprite with.
+MARK_RISE, MARK_DROP = 1.06, 0.17
 VIEW = (1280.0, 720.0)
 
 
@@ -111,7 +116,7 @@ def main() -> None:
 
     # The placement the seam needs, measured rather than assumed: where the drawn mark sits
     # relative to (screen centre, the props' baseline), in units of the letter height.
-    cy = VIEW[1] * 0.5 + size * ((MARK_PREFIX + MARK_RISE - MARK_DROP) * 0.5 - 0.5)
+    cy = VIEW[1] * 0.5 + size * ((MARK_RISE - MARK_DROP) * 0.5 - 0.5)
     base = cy + size * 0.5
     print(f"{st}: {tw}x{th}")
     print("  capsule_mark's box, in units of `size`:")
