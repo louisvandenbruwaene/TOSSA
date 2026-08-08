@@ -5618,6 +5618,25 @@ func tut_hold_update() -> void:
 		return
 	if collapsing or results_open or tut_advance_at >= 0:
 		return
+	# NOBODY IS ASKED TO ACT ON A SENTENCE THEY HAVE NOT READ YET (2026-08-08, Louis: the
+	# tutorial should be smooth and logical "qua pauses and help").
+	#
+	# The two clocks were never introduced to each other. A line arrives at TUT_SPEECH_CPS,
+	# 46 characters a second, so an ordinary instruction takes over two seconds to finish
+	# typing - while the earliest a beat could stop the world was TUT_STEP_READ + TUT_HOLD_GAP
+	# after the step opened, which is 38 ticks, a THIRD of a second. So the world froze and
+	# demanded a specific key while the sentence naming that key was still appearing, which
+	# is the worst possible moment to freeze: the player is reading, and the game has stopped
+	# and is waiting for them.
+	#
+	# The breath that matters is not a fixed number of ticks, it is "the instruction is on
+	# screen". TUT_STEP_READ stays as the floor underneath it.
+	#
+	# ...EXCEPT FOR A PROP THAT IS ALREADY COMING DOWN, which is the whole reason this test
+	# sits below `landing` rather than at the top of the function. A catch beat is about
+	# something the script already threw; postponing it until a sentence finishes typing
+	# does not give the player more time, it drops the ball. Those beats open on time and
+	# the line is snapped to its full length instead, so the freeze never lands mid-word.
 	if tick - tut_hold_end < TUT_HOLD_GAP:
 		return
 	var due := tut_due_actions()
@@ -5634,9 +5653,16 @@ func tut_hold_update() -> void:
 			break
 	if not landing and tick - tut_hold_end < tut_open_gap():
 		return
+	if not landing and not tut_speech_done():
+		return
 	due.sort_custom(func(a, b): return int(a["rank"]) < int(b["rank"]))
 	tut_hold = due
 	tut_hold_at = tick
+	# a beat that had to open early (a prop was already falling) takes the rest of its line
+	# with it: if the game is stopping to ask for a key, the sentence naming that key is
+	# finished being coy about it
+	if not tut_speech_done():
+		tut_speech_tick = -100000.0
 	play_sfx("ui", -20.0)
 
 
@@ -6371,6 +6397,14 @@ func _tut_line_len(lines: Array) -> int:
 	for l in lines:
 		n += String(l).length()
 	return n
+
+
+func tut_speech_done() -> bool:
+	# has the whole of this step's line arrived on screen? Measured against the RAW text
+	# rather than the wrapped lines, because wrapping is a draw-time concern and needs a
+	# font - the two differ by the handful of spaces eaten at the line breaks, which errs on
+	# the side of a few more frames of reading time and never the other way.
+	return tut_speech_chars() >= String(tut_step_data().get("text", "")).length()
 
 
 func tut_speech_chars() -> int:
@@ -13373,8 +13407,7 @@ func draw_wall_clock(c: Vector2, r: float, col: Color) -> void:
 	# the house clock at The Midnight Show, reading exactly midnight. Dim by design:
 	# this is the venue built to make the Glow-in-the-Dark Kit matter.
 	draw_circle(c, r * 1.5, Color(col.r, col.g, col.b, 0.025))
-	draw_circle(c, r, Color(0.05, 0.07, 0.06, 0.9))
-	draw_arc(c, r, 0.0, TAU, 30, Color(col.r, col.g, col.b, 0.30), 2.0, true)
+	icon_disc(c, r, Color(0.05, 0.07, 0.06, 0.9), Color(col.r, col.g, col.b, 0.30), 2.0)
 	for i in 12:
 		var a := TAU * float(i) / 12.0
 		var d := Vector2(sin(a), -cos(a))
@@ -14193,8 +14226,7 @@ func draw_worn_glasses(head: Vector2, r: float, accent: Color) -> void:
 	var w := maxf(1.1, r * 0.075)
 	for sgn in [-1.0, 1.0]:
 		var lc := head + Vector2(sgn * r * 0.40, -r * 0.04)
-		draw_circle(lc, lr, Color(accent.r, accent.g, accent.b, 0.22))
-		draw_arc(lc, lr, 0.0, TAU, 14, frame, w, true)
+		icon_disc(lc, lr, Color(accent.r, accent.g, accent.b, 0.22), frame, w)
 		draw_line(lc + Vector2(-lr * 0.35, -lr * 0.30), lc + Vector2(lr * 0.10, lr * 0.15),
 			Color(1.0, 1.0, 1.0, 0.30), maxf(0.8, r * 0.05))
 		draw_line(lc + Vector2(sgn * lr, -r * 0.05), head + Vector2(sgn * r * 0.85, -r * 0.10), frame, w)
@@ -14672,6 +14704,22 @@ func fill_disc_pix(c: Vector2, r: float, col: Color) -> void:
 		var w := snappedf(half * 2.0, ap)
 		if w >= ap:
 			draw_rect(Rect2(x0, y, w, ap), col)
+
+
+func icon_disc(c: Vector2, r: float, fill: Color, ring: Color, ring_w: float = 2.0) -> void:
+	# THE ROUND BADGE every menu row wears, on the art grid.
+	#
+	# It was a draw_circle with a draw_arc laid over it, and both antialias their rim - so
+	# the last soft curves left in the UI were sitting on the most-repeated piece of chrome
+	# in the game: the day hub's four actions, the pause menu, settings, the shop's rows, the
+	# skills list. Measured with scripts/check_pixel_grid.py, these discs and the text were
+	# the only things still off-grid on a day-hub frame; the panels behind them had already
+	# been converted and were clean.
+	#
+	# One point, ten call sites - the same leverage soft_card has, and the reason this is a
+	# named helper rather than two lines repeated at each of them.
+	fill_disc_pix(c, r, fill)
+	draw_ring_pix(c, r, ring_w, ring)
 
 
 func draw_arc_pix(c: Vector2, r: float, thick: float, b0: float, b1: float, col: Color) -> void:
@@ -18079,8 +18127,8 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 		soft_card(Rect2(cx, cy, cw, ch), fillc, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.3), 2.0 if sel else 1.0, 11.0, 10.0)
 		# an icon disc on the left says what the option DOES at a glance
 		var ic := Vector2(cx + 34.0, cy + ch * 0.5)
-		draw_circle(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22))
-		draw_arc(ic, 16.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.55), 1.5, true)
+		icon_disc(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22),
+			Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.55), 2.0)
 		match String(o["icon"]):
 			"play":
 				draw_colored_polygon(PackedVector2Array([ic + Vector2(-5, -7), ic + Vector2(-5, 7), ic + Vector2(8, 0)]), ac)
@@ -19762,8 +19810,8 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 			if reached:
 				draw_circle(ppos, 5.0, Color(1.0, 1.0, 0.96, 0.95))
 			else:
-				draw_circle(ppos, 4.5, Color(0.09, 0.08, 0.10, 1.0))
-				draw_arc(ppos, 4.5, 0.0, TAU, 14, Color(bcol.r, bcol.g, bcol.b, 0.95 if isnext else 0.45), 1.5, true)
+				icon_disc(ppos, 4.5, Color(0.09, 0.08, 0.10, 1.0),
+					Color(bcol.r, bcol.g, bcol.b, 0.95 if isnext else 0.45), 2.0)
 				if isnext and active and points > 0:
 					var pp := 0.5 + 0.5 * sin(float(tick) * 0.15)
 					draw_arc(ppos, 7.0 + 3.0 * pp, 0.0, TAU, 18, Color(bcol.r, bcol.g, bcol.b, 0.55 * (1.0 - pp)), 2.0, true)
@@ -19916,8 +19964,7 @@ func draw_gear_icon(id: String, c: Vector2, cc: Color, _sel: bool = false) -> vo
 		"glasses":   # GLASSES: two glazed lenses in a real frame, with temples going back
 			for sgn in [-1.0, 1.0]:
 				var lc := c + Vector2(sgn * 15.0, 0.0)
-				draw_circle(lc, 13.0, Color(cc.r, cc.g, cc.b, 0.20))
-				draw_arc(lc, 13.0, 0.0, TAU, 26, cc, 2.6, true)
+				icon_disc(lc, 13.0, Color(cc.r, cc.g, cc.b, 0.20), cc, 2.0)
 				draw_line(lc + Vector2(-6.0, 4.0), lc + Vector2(-1.0, -3.0), Color(1.0, 1.0, 1.0, 0.22), 2.2)
 				draw_line(lc + Vector2(sgn * 13.0, -2.0), lc + Vector2(sgn * 21.0, -8.0), cc, 2.4)
 			draw_line(c + Vector2(-3.0, -2.0), c + Vector2(3.0, -2.0), cc, 3.0)
@@ -21713,8 +21760,8 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 	var fill := Color(ac.r * 0.16, ac.g * 0.16, ac.b * 0.16, 0.94) if sel else Color(0.07, 0.045, 0.06, 0.82)
 	soft_card(box, fill, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.26), 2.0 if sel else 1.0, 11.0, 12.0)
 	var ic := Vector2(box.position.x + 32.0, box.position.y + 23.0)
-	draw_circle(ic, 15.0, Color(ac.r, ac.g, ac.b, 0.20))
-	draw_arc(ic, 15.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.45), 1.5, true)
+	icon_disc(ic, 15.0, Color(ac.r, ac.g, ac.b, 0.20),
+		Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.45), 2.0)
 	day_icon(String(r.get("icon", "")), ic, ac)
 	var tx := box.position.x + 58.0
 	var title_c := Color(1.0, 0.95, 0.86) if sel else Color(0.84, 0.79, 0.72)
@@ -22658,8 +22705,8 @@ func menu_rows(font: Font, s: Vector2, oy: float) -> void:
 			Color(ac.r * 0.19, ac.g * 0.19, ac.b * 0.19, 0.94) if sel else Color(0.085, 0.055, 0.065, 0.80),
 			Color(ac.r, ac.g, ac.b, 0.92 if sel else 0.28), 2.0 if sel else 1.0, 11.0, 12.0)
 		var ic := Vector2(cx0 + 36.0, cy + ch * 0.5)
-		draw_circle(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22))
-		draw_arc(ic, 16.0, 0.0, TAU, 24, Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.5), 1.5, true)
+		icon_disc(ic, 16.0, Color(ac.r, ac.g, ac.b, 0.22),
+			Color(ac.r, ac.g, ac.b, 0.9 if sel else 0.5), 2.0)
 		match String(d["icon"]):
 			"play":
 				draw_colored_polygon(PackedVector2Array([
