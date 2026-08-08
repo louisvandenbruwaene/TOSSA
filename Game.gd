@@ -431,11 +431,11 @@ const MARK_WORD := "TOSSA"
 # mis-scaled TOSSA - not a layout problem, a missing-glyph one. P, I, X, E and L would
 # each need designing out of props first, and P and E have no honest prop shape.
 #
-# So the lockup is: "PIXEL" set in the pixel font as a prefix, above the untouched
-# five-prop TOSSA mark. The mark keeps its tuning table, its measured widths and its
-# MARK_RISE/MARK_DROP arithmetic exactly as they were.
-# The PIXEL prefix is drawn by draw_mark_prefix, inside capsule_mark, so every place the
-# logo appears gets it - title screen, key art, credits and all five store capsules.
+# The lockup WAS "PIXEL" set in the pixel font above the five-prop TOSSA mark. It is not
+# any more (2026-08-08, Louis: "the titlescreen should not have PIXEL above tossa") - the
+# logo is the props alone, everywhere it appears: title screen, key art, credits and all
+# five store capsules. The mark keeps its tuning table, its measured widths and its
+# MARK_RISE/MARK_DROP arithmetic exactly as they always were.
 #
 # TITLE_MARK keeps its documented meaning (the name without its final round letter, the
 # ball standing in for that letter). It has no call sites today; it is kept in step with
@@ -7770,12 +7770,24 @@ func stage_center() -> Vector2:
 	# hands, and the gap grows with the window. Reading the line off the painting closes it
 	# at every size at once, and at the reference 1280x720 it lands within 1.4px of 0.57 -
 	# the canon was never wrong, it just could not follow him.
+	# ...AND IT LANDS ON THE ART GRID, which is not a nicety - it is the difference between a
+	# sharp game and a blurry one, and it is subtle enough to ship twice.
+	#
+	# hand_py is a MEDIAN over the bank's entries, so it is a fraction: 80.2 gives a hand line
+	# at y = 409.4. Everything on the stage is placed relative to this one point - both hands,
+	# every prop's flight, the catch rings, the held objects, the performer himself - so a
+	# fractional origin puts every art pixel in the picture across a screen-pixel boundary and
+	# the whole stage is resampled. Louis: "many parts of the game are suddenly blurry".
+	#
+	# The old constant 0.57 happened to give an integer (411) and was still ODD, i.e. off a
+	# 2px grid by one - half-wrong in a way nobody had measured. Snapping is the honest fix
+	# and costs at most one art pixel of hand height.
 	if fig_anim_live():
 		var cell := float(fig_arms.get("cell_h", 0))
 		var hpy := float(fig_arms.get("hand_py", 0.0))
 		if cell > 0.0:
-			return Vector2(s.x * 0.5, s.y * 0.80 - (cell - hpy - 0.5) * ART_PIXEL)
-	return Vector2(s.x * 0.5, s.y * 0.57)
+			return art_snap(Vector2(s.x * 0.5, s.y * 0.80 - (cell - hpy - 0.5) * ART_PIXEL))
+	return art_snap(Vector2(s.x * 0.5, s.y * 0.57))
 
 
 func outer_pos(h: int) -> Vector2:
@@ -23657,9 +23669,13 @@ const MARK_DROP := 0.17   # ...and below it
 # capsule_mark), because a size copied into code is a size that can silently disagree with
 # the art it is describing.
 const MARK_BOX_X := 2.33333   # ...left of screen centre
-const MARK_BOX_Y := 1.10357   # ...above the props' baseline
-const MARK_PREFIX := 0.46   # ...and the PIXEL prefix's band ABOVE all of that
-const MARK_PREFIX_CAP := 0.34   # the prefix's own letter height, in the same units
+const MARK_BOX_Y := 1.09976   # ...above the props' baseline
+# THE WORD "PIXEL" IS GONE FROM THE LOCKUP (2026-08-08, Louis: "the titlescreen should not
+# have PIXEL above tossa"). It was a band of type above the props, letter-spaced to their
+# width, and with it go MARK_PREFIX / MARK_PREFIX_CAP and draw_mark_prefix - the mark is now
+# exactly what capsule_mark's own comment always said it was, the whole name in props and no
+# lettering at all. Every layout expression that added the prefix band has lost that term
+# rather than gained a zero, so nothing is left describing a thing that is not drawn.
 # THE PREFIX IS PART OF THE PICTURE, so it lives in these constants rather than being
 # drawn by one caller. The mark spells MARK_WORD ("TOSSA") in props and cannot spell the
 # game's actual name: capsule_mark builds glyphs out of juggling objects and knows exactly
@@ -23702,53 +23718,6 @@ const MENU_MARK := 168    # the title screen's letter height. The prop mark is f
 						   # runs about two thirds of the screen width, which is what a title
 						   # wants; much past that and the T's knife tip reaches the gold frame.
 
-func draw_mark_prefix(s: Vector2, cy: float, size: float) -> void:
-	# THE WORD PIXEL, set in type, above the five props that spell TOSSA.
-	#
-	# It is LETTER-SPACED TO THE MARK'S OWN WIDTH rather than simply centred, which is what
-	# makes the two halves read as one lockup instead of a caption sitting on a picture.
-	# The props below are a wide, airy word; a tight five-letter word under it would look
-	# like a different design. mark_width() is the same measurement capsule_mark lays the
-	# props out with, so the two can never disagree.
-	#
-	# The baseline sits MARK_PREFIX above the letters' cap line, and the cap line is
-	# `size` above the props' baseline (cy is the middle of the letter box, so the props'
-	# cap line is cy - size * 0.5).
-	var word := "PIXEL"
-	var cap := size * MARK_PREFIX_CAP
-	var fs := ps(int(roundf(cap)))
-	if fs <= 0:
-		return
-	var font := title_font()
-	var total := mark_width(size)
-	# the glyphs' own advances, so the SPACING absorbs the difference rather than the
-	# letters being stretched - type does not stretch, it tracks
-	var adv: Array[float] = []
-	var sum := 0.0
-	for i in word.length():
-		var w := font.get_string_size(word[i], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x
-		adv.append(w)
-		sum += w
-	# TRACKING IS CAPPED, and the first version was not. Spreading five letters across the
-	# full width of a five-PROP word puts most of a ball's width between each one, and
-	# "P I X E L" stops reading as a word at all - it reads as five letters that happen to
-	# be in a row. Type tracks; it does not stretch to fit. So the letters take whatever
-	# tracking looks like letter-spacing and the WORD is centred in the mark's width,
-	# rather than being pulled out to its edges.
-	var track := minf((total - sum) / float(maxi(1, word.length() - 1)), cap * 0.55)
-	var span := sum + track * float(maxi(0, word.length() - 1))
-	var x := s.x * 0.5 - span * 0.5
-	var base := cy - size * 0.5 - size * (MARK_PREFIX - MARK_PREFIX_CAP)
-	var col := Color(1.0, 0.90, 0.62, _cap_a)
-	for i in word.length():
-		# the same drop shadow the title text uses, so the prefix sits on the backdrop
-		# rather than floating over it
-		draw_string(font, Vector2(x + 2.0, base + 2.0), word[i], HORIZONTAL_ALIGNMENT_LEFT,
-			-1, ps(fs), Color(0, 0, 0, 0.55 * _cap_a))
-		draw_string(font, Vector2(x, base), word[i], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs), col)
-		x += adv[i] + track
-
-
 func mark_width(size: float) -> float:
 	# THE WHOLE WORD'S WIDTH at a given letter height, out of the same loop capsule_mark lays it
 	# out with (see there). Factored out 2026-07-30 because a caller has to be able to ASK: the
@@ -23774,7 +23743,7 @@ func mark_fit_size(s: Vector2, want: float, frac := 0.88) -> float:
 
 func mark_height(size: float) -> float:
 	# the whole picture's height, prefix cap to handle butts
-	return size * (MARK_PREFIX + MARK_RISE + MARK_DROP)
+	return size * (MARK_RISE + MARK_DROP)
 
 
 func mark_cy_centred(sy: float, size: float, at: float = CAP_Y) -> float:
@@ -23785,10 +23754,7 @@ func mark_cy_centred(sy: float, size: float, at: float = CAP_Y) -> float:
 	# MARK_RISE above the baseline against only MARK_DROP below it, so it is wildly
 	# top-heavy. This converts "put the picture's own middle at `at`" into that letter-box
 	# centre, off the same two constants the drawing uses.
-	# MARK_PREFIX joins MARK_RISE here because the prefix band sits ABOVE the letters, so
-	# it makes the picture more top-heavy still. Leaving it out would centre the props and
-	# push the word PIXEL off the top of whatever frame this is placed in.
-	return sy * at + size * ((MARK_PREFIX + MARK_RISE - MARK_DROP) * 0.5 - 0.5)
+	return sy * at + size * ((MARK_RISE - MARK_DROP) * 0.5 - 0.5)
 
 
 func mark_glow(widths: Array[float], gap: float, x0: float, base0: float, size: float) -> void:
@@ -23820,8 +23786,6 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	# font metric. A prop's local origin is its GRIP with the business end at negative y,
 	# which is what places every piece below.
 	_cap_a = clampf(alpha, 0.0, 1.0)
-	if not _markref:   # the bake is the props only - see _draw's --markref branch
-		draw_mark_prefix(s, cy, size)
 	# SEAM: the mark BAKED to a sprite. The logo is the first thing a player sees and it was
 	# the last smooth thing in the game - the props here are cap_ball/cap_ring/cap_knife/
 	# cap_club drawn directly, bypassing the prop seam entirely, so every other object had
@@ -25235,7 +25199,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				# minus the rise. It used to be a hand-picked 78, which happened to equal
 				# 52 * the MARK_RISE of the day and stopped being true the moment the A
 				# was rebuilt.
-				draw_wordmark(ry - 52.0 * (MARK_PREFIX + MARK_RISE), 52, Color(gold.r, gold.g, gold.b, a), s)
+				draw_wordmark(ry - 52.0 * MARK_RISE, 52, Color(gold.r, gold.g, gold.b, a), s)
 			"sub":
 				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(24), Color(0.9, 0.8, 0.68, a))
 			"orn":
@@ -25259,7 +25223,7 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.42
-		draw_wordmark(fy - 58.0 * (MARK_PREFIX + MARK_RISE), 58, Color(1.0, 0.9, 0.55, fa), s)
+		draw_wordmark(fy - 58.0 * MARK_RISE, 58, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.72, 0.6, 0.65 * fa))
 
@@ -25289,11 +25253,26 @@ func draw_gradient_v(r: Rect2, top: Color, bot: Color, steps: int = 22) -> void:
 	var n := maxi(1, steps)
 	if _extref >= 0 or _menuref or _bgref:
 		n = maxi(n, int(r.size.y / ART_PIXEL))
+	# EVERY SEAM ON THE ART GRID, and this is a sharpness bug that only shows at some window
+	# sizes - which is exactly why it survived so long. The strips were cut at fractions of
+	# the rect's height: at 1280x720 the stage veil's 24 bands over 576px land on whole even
+	# numbers and everything is crisp, but the project stretches with aspect "expand", so at
+	# any other height the boundaries fall on fractional y and draw_rect softens each one.
+	# That is two dozen blurred horizontal seams across the whole backdrop, on a window that
+	# is not exactly 16:9 - Louis: "many parts of the game are suddenly blurry".
+	#
+	# Each boundary is computed ONCE per index and reused as the next strip's top, so the
+	# strips still tile exactly rather than overlapping - an overlap doubles the alpha of a
+	# semi-transparent gradient at every seam, which is the dark-lines bug noted above.
+	var edge := func(i: int) -> float:
+		return snappedf(r.position.y + r.size.y * float(i) / float(n), ART_PIXEL)
+	var y0: float = edge.call(0)
 	for i in n:
-		var f := float(i) / float(n)
-		var y0 := r.position.y + r.size.y * float(i) / float(n)
-		var y1 := r.position.y + r.size.y * float(i + 1) / float(n)
-		draw_rect(Rect2(r.position.x, y0, r.size.x, y1 - y0), top.lerp(bot, f))
+		var y1: float = edge.call(i + 1)
+		if y1 > y0:
+			draw_rect(Rect2(r.position.x, y0, r.size.x, y1 - y0),
+				top.lerp(bot, float(i) / float(n)))
+			y0 = y1
 
 
 func draw_gradient_h(r: Rect2, left: Color, right: Color, steps: int = 22) -> void:
@@ -25363,11 +25342,8 @@ func draw_title_glow(font: Font, y: float, text: String, size: int, col: Color, 
 # whatever sits underneath off that number rather than off a guess.
 func draw_wordmark(y: float, size: int, col: Color, s: Vector2) -> void:
 	# `y` is the top of the picture, the same convention the text mark used, so the
-	# baseline sits MARK_RISE letter-heights down from it - plus MARK_PREFIX, because the
-	# picture now opens with the PIXEL band and the props start below it. Leaving that out
-	# drew the word off the top of the frame and clipped the T's knife with it.
-	capsule_mark(s, y + float(size) * (MARK_PREFIX + MARK_RISE) - float(size) * 0.5,
-		float(size), col.a)
+	# baseline sits MARK_RISE letter-heights down from it.
+	capsule_mark(s, y + float(size) * MARK_RISE - float(size) * 0.5, float(size), col.a)
 
 
 func draw_dust(s: Vector2, n: int, glow: Color) -> void:

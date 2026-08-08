@@ -117,26 +117,40 @@ def body_of(frames: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarra
 	# on stage in every frame of the game and, since 2026-08-08, close up in the tutorial's
 	# speech box.
 	#
-	# So the rows above the band are taken whole from the single frame whose head best
-	# matches the voted silhouette - not frame 0, which may itself be the jittered one.
+	# So the rows above the band are taken whole from FRAME 0 - and frame 0 is special for a
+	# reason that has nothing to do with luck: animate_image returns your INPUT unchanged as
+	# frame 0 and the generated ones after it. Frame 0 is therefore the hand-made still the
+	# whole animation was grown from, not a model's redraw of a twenty-pixel face. Verified:
+	# it differs from artifacts/chargen/showman.png by 19 pixels out of twenty-five thousand,
+	# which is a re-encode, not a repaint.
+	#
+	# THIS IS ALSO WHAT SHUTS HIS MOUTH (2026-08-08, Louis). A generated juggling animation
+	# has him open-mouthed through the middle of the sweep - measured on the reference
+	# generation, the mouth band runs from 5 dark pixels to 41 - and on a face this small an
+	# open mouth is the first thing you see, in the tutorial's portrait most of all. He is
+	# concentrating, not shouting. A scoring function was tried first and is worth warning
+	# about: counting dark pixels in a mouth band ranks the ORIGINAL still WORST, because a
+	# nose shadow reads the same as a mouth at this size. Twenty pixels of face is below the
+	# resolution any metric can judge, so the rule is provenance, not measurement.
+	#
+	# The frame's OWN opaque pixels are used, not the voted silhouette filled with its
+	# colours: masking the paste by the vote clips any head that sits a pixel off it. Above
+	# the arm band there is nothing but head and collar in any frame, so this is honest.
 	y_top = y0
-	if y_top > 0:
-		head_shape = shape[:y_top]
-		best_i, best_iou = 0, -1.0
-		for i, m in enumerate(masks):
-			hm = m[:y_top]
-			union = np.count_nonzero(hm | head_shape)
-			iou = np.count_nonzero(hm & head_shape) / float(union) if union else 0.0
-			if iou > best_iou:
-				best_iou, best_i = iou, i
-		src = frames[best_i][:y_top, :, :3]
-		body[:y_top][head_shape] = np.dstack(
-			[src, np.full(src.shape[:2], 255)])[head_shape].astype(np.uint8)
+	if y_top > 0 and frames:
+		hm = masks[0][:y_top]
+		src = frames[0][:y_top, :, :3]
+		body[:y_top] = 0
+		body[:y_top][hm] = np.dstack(
+			[src, np.full(src.shape[:2], 255)])[hm].astype(np.uint8)
 	return body, strict, med
 
 
 def band_rows(h: int) -> tuple[int, int]:
 	return int(h * BAND[0]), int(h * BAND[1])
+
+
+
 
 
 def head_rows(mask: np.ndarray) -> tuple[int, int]:
