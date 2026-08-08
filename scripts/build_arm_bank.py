@@ -95,33 +95,41 @@ REACH_STEP = 1.0        # one bank entry per art pixel of reach: finer than the 
 # resting end. Generating the tight end properly was tried five times and the model will not
 # do it: asked for hands tucked at hip height it raises them to the waist every time, in
 # every phrasing, because that is what a person actually does.
-UP_TOL = 0.024
+UP_TOL = 0.035
 
-# THE HAND LINE IS NOT FLAT, and pretending it was is what made the inner poses bad.
+# THE HAND LINE IS FLAT WHERE THE GAME PLAYS, AND RISES ONLY WHERE THE GAME NEVER GOES.
 #
-# The first version of this file demanded one height at every reach and then loosened the
-# tolerance close in, because the model would not paint a tucked hand at hip height however
-# the prompt was phrased. It raises the palm as the arm folds - and it is right to, that is
-# what a forearm does. Measured across all nineteen generations: 58-65% of the figure's height
-# at reach 24-30, 49-51% at 45-54, and rising again past 57.
+# Every earlier version of this curve was fitted to armlib.palms, which measured a palm as the
+# arm's outermost moving pixel - the ELBOW whenever the forearm was folded. That produced a
+# U-shape (high close in, flat in the middle, high again far out) and Game.gd grew a matching
+# HAND_IN_LIFT to chase it. Both were describing an elbow.
 #
-# The game now has the same curve (see HAND_IN_LIFT in Game.gd), so the fitter can ask for the
-# pose it actually wants instead of tolerating the one it gets. The U-shape is not a curve fit
-# either - it is the two hand SLOTS. The inner slot is lifted and the outer is not, so reach
-# tracks height on the way out; and a COLUMNS hand stands under its own lane while still on
-# the inner slot, which is why the far reaches are lifted too.
-# HOW MUCH HIGHER THE INNER SLOT SITS, as a fraction of the figure's height.
+# Re-measured from the hands themselves (armlib.hands), across 436 candidates, the picture is
+# much simpler and much better news:
 #
-# THIS NUMBER IS THE ELBOW BEND, and that is not obvious until you look at the poses sorted by
-# palm height (which is how it was picked, at 5x, arm band only). Measured on the candidates at
-# reach 23-30: at 60-62% up the arm hangs STRAIGHT down with the hand at the hip; the forearm
-# only starts to fold at about 64%, and by 66-70% it is a clean bent elbow with the palm up at
-# the waistcoat. 0.067 put the target at 57% and therefore selected the straight ones - which is
-# exactly what Louis saw and said. 0.13 puts it at 63.5% and selects the bend.
-LIFT_UP = 0.13
-LIFT_IN = (24.0, 30.0)   # ...fully lifted out to here
-LIFT_FLAT = (46.0, 56.0) # ...flat across the catching range
-LIFT_OUT = 64.0          # ...and lifted again where columns' outer lanes live
+#     reach  0-44   palm sits 48-53% up, i.e. ON the game's 50.5% hand line, 287 candidates
+#     reach 45-69   palm climbs 55% -> 72% as the arm extends and lifts, 145 candidates
+#
+# SO THE CURVE IS FLAT, FULL STOP - AND A RAMP OUT THERE IS A TRAP I WALKED INTO ONCE.
+# Letting the far buckets follow the art (a ramp to +0.20 by reach 66) "describes the poses
+# honestly" and is still wrong, because the thing the bank has to agree with is not the
+# painting, it is the GAME's hand line - and outer_pos is at stage_center().y at every reach.
+# Admitting a pose whose palm is 33 art px high fills the bucket with an arm the mechanic will
+# then refuse: fig_hand_pos's FIG_PALM_MAX guard drops the palm, the prop snaps back to the
+# simulated hand, and the player sees an arm raised up and to the right with its ball sitting
+# low and left - which reads exactly like a severed forearm floating in the air. Measured in
+# --handlog: raw palm-to-hand 65.6 px on the right hand, every tick.
+#
+# An EMPTY bucket is strictly better than a mismatched one. The game already has a documented
+# answer for a reach the bank cannot serve (fig_palm_far draws his own cut-out palm on the
+# lane), and it has none for an arm that lies about where his hand is.
+LIFT_UP = 0.0            # ...so lift_at is 0 everywhere; kept as one number to turn
+LIFT_FLAT = (0.0, 64.0)  # the whole range, all of it on the game's flat hand line
+LIFT_OUT = 66.0
+
+# How far past the body's centreline an arm layer's INNER edge may start and still be
+# joined to the shoulder. Measured: a healthy layer starts within 1.5 px of it.
+SHOULDER_SLACK = 4.0
 
 PALM_BOX = (12, 12)      # the cut-out hand, in art px
 PALM_SHIFT = 4           # ...offset toward the body, because the palm point is the extremity
@@ -129,10 +137,6 @@ PALM_SHIFT = 4           # ...offset toward the body, because the palm point is 
 
 def lift_at(reach: float) -> float:
 	"""How far above the base hand line a palm belongs at this reach, 0..LIFT_UP."""
-	if reach <= LIFT_IN[1]:
-		return LIFT_UP
-	if reach < LIFT_FLAT[0]:
-		return LIFT_UP * (LIFT_FLAT[0] - reach) / (LIFT_FLAT[0] - LIFT_IN[1])
 	if reach <= LIFT_FLAT[1]:
 		return 0.0
 	return LIFT_UP * min(1.0, (reach - LIFT_FLAT[1]) / (LIFT_OUT - LIFT_FLAT[1]))
@@ -279,6 +283,13 @@ def gather(dirs: list[Path]) -> tuple[np.ndarray, list[dict]]:
 	pal = np.asarray(Image.open(PALETTE).convert("RGB")).reshape(-1, 3).astype(int)
 	ref_body = snap(ref_body, pal)
 	ref_pal = np.unique(ref_body[ref_body[..., 3] > 0][:, :3], axis=0)
+	# HIS OWN FACE'S COLOURS, NEEDED BEFORE ANY CANDIDATE IS BUILT. The hand is what locates
+	# a palm and what tells an arm from a repainted lapel, so the skin set can no longer be
+	# worked out after selection the way palm_is_skin used to - it is an input to the split.
+	skin_set = {tuple(int(v) for v in c)
+				for c in _snap_rgb(armlib.skin_colours(ref_body).astype(float), ref_pal)}
+	rbys, rbxs = np.where(ref_body[..., 3] > 0)
+	ref_cx = (int(rbxs.min()) + int(rbxs.max())) * 0.5
 	cands: list[dict] = []
 	for d, frames, body, static in loaded:
 		if static is ref_static:
@@ -290,29 +301,41 @@ def gather(dirs: list[Path]) -> tuple[np.ndarray, list[dict]]:
 					  f"a different coat, dropped")
 				continue
 			print(f"  {d.name}: fit {fit * 100:.0f}%, offset ({dx:+d},{dy:+d})")
-		h, w = static.shape
-		cx = (w - 1) * 0.5
 		for i, f in enumerate(frames):
-			p = armlib.palms(f, static)
+			# INTO THE REFERENCE BODY'S FRAME AND PALETTE FIRST, then measure, then split.
+			# All three are preconditions for each other: a layer compared against a body it
+			# is not aligned with, or not painted in the same colours as, differs
+			# everywhere - and the hand cannot be found by colour before the snap either.
+			fr = snap(armlib.place_into(f, dx, dy, ref_body.shape), pal)
+			p = armlib.hands(fr, skin_set, ref_pal)
 			if not p:
 				continue
-			# INTO THE REFERENCE BODY'S FRAME AND PALETTE FIRST, then split. Both are
-			# preconditions for the diff: a layer compared against a body it is not aligned
-			# with, or not painted in the same colours as, differs everywhere.
-			fr = snap(armlib.place_into(f, dx, dy, ref_body.shape), pal)
 			for side in ("L", "R"):
-				layer, lx, ly = armlib.split_layer(fr, side, ref_body, ref_pal)
+				px, py = p[side]
+				layer, lx, ly = armlib.split_layer(fr, side, ref_body, ref_pal, (px, py),
+												   p[side + "mask"])
 				if layer.size == 0:
 					continue
-				px, py = p[side]
+				# AN ARM HAS TO REACH THE SHOULDER, or it is a forearm hanging in the air.
+				# Most layers start within a pixel and a half of the centreline; a few start
+				# eight or nine px out, because in that frame the upper arm lay flat against
+				# a coat of its own colour and the split - correctly - kept none of it. The
+				# body cannot cover the gap, since the coat is narrower than where the
+				# forearm begins, so the performer juggles with a floating sleeve. Measured:
+				# 4 of 49 entries per side, and the game drew one of them.
+				inner = lx if side == "R" else lx + layer.shape[1]
+				if (inner - ref_cx if side == "R" else ref_cx - inner) > SHOULDER_SLACK:
+					continue
 				cands.append({
 					"src": d.name, "frame": i, "side": side,
 					"reach": float(p[side + "reach"]),
 					"up": float(p[side + "up"]),
+					"flat": float(p[side + "flat"]),
 					"layer": layer,
-					# everything below is in the REFERENCE body's coordinates
+					# everything below is in the REFERENCE body's coordinates - which the
+					# frame was already placed into, so no further offset is applied here
 					"ox": lx, "oy": ly,
-					"px": px + dx, "py": py + dy,
+					"px": px, "py": py,
 					"cell": ref_body.shape[:2][::-1], "cx": (ref_body.shape[1] - 1) * 0.5,
 				})
 	return ref_body, cands
@@ -333,13 +356,25 @@ def palm_is_skin(c: dict, body_pal: np.ndarray, skin_set: set) -> bool:
 
 
 def pick(cands: list[dict], side: str, axis: float, target_py: float) -> list[dict]:
-	"""One arm per reach bucket - the one whose palm is nearest the game's hand line.
+	"""One arm per reach bucket - the flattest-palmed one that is near the hand line.
 
 	Mirrors of the other side count as candidates. The showman's coat is symmetric about the
 	centreline inside the arm band (the face and the boots, which are not, are outside it),
 	so a left arm flipped is a perfectly good right arm - and it doubles what every
-	generation is worth. Height still decides, because height is the thing generations get
-	wrong."""
+	generation is worth. Height still gates, because height is the thing generations get
+	wrong.
+
+	THE PALM'S ORIENTATION IS PART OF THE SCORE (2026-08-08, Louis: "the inward hand
+	position should have the palm upwards as well as the outward position"). A juggler's
+	hand is turned up at both ends of its travel - up to receive at the catch, up to release
+	at the throw - and nothing in this fitter used to know that, so it picked hands that hung
+	knuckles-out because they happened to sit a pixel closer to the hand line. Height is
+	kept as a hard GATE rather than a score so that orientation can decide among the poses
+	that are already in the right place, which is the ordering that matters: a hand two art
+	px high is invisible, a hand facing the wrong way is not.
+
+	Measured over the pool, only 32 of 624 candidates are wider than tall, so this is a real
+	preference over a scarce resource rather than a tie-break."""
 	pool = []
 	for c in cands:
 		if c["side"] == side:
@@ -356,16 +391,17 @@ def pick(cands: list[dict], side: str, axis: float, target_py: float) -> list[di
 		for c in pool:
 			if abs(c["reach"] - want) > REACH_STEP * 0.75:
 				continue
-			# SCORED ON THE PALM'S FINAL ROW, not on the height measured before alignment.
+			# GATED ON THE PALM'S FINAL ROW, not on the height measured before alignment.
 			# Two generations can agree about where a palm sits within their own crop and
 			# still disagree by a pixel or two once one is slid onto the other's body, and
 			# that pixel is a whole art pixel here. This is also the number the game will
-			# live with, so it is the one worth minimising.
+			# live with, so it is the one worth holding to.
 			want_py = target_py - lift_at(want) * (c["cell"][1] - 1)
 			py_err = abs(c["py"] - want_py)
 			if py_err > UP_TOL * (c["cell"][1] - 1):
 				continue
-			key = (py_err, abs(c["reach"] - want))
+			# flattest first, then nearest the line, then nearest the wanted reach
+			key = (-c.get("flat", 0.0), py_err, abs(c["reach"] - want))
 			if best_key is None or key < best_key:
 				best, best_key = c, key
 		if best is not None and not any(o["_id"] == id(best) for o in out):
@@ -402,16 +438,16 @@ def main() -> int:
 	# stands on stage centre - see body_cx below and fig_body_origin in Game.gd.
 	bys, bxs = np.where(body[..., 3] > 0)
 	axis = (int(bxs.min()) + int(bxs.max())) * 0.5
-	# HANDS THAT ARE NOT THE RIGHT COLOUR ARE NOT HANDS - see armlib.skin_colours. Done
-	# before selection rather than after, so a rejected pose leaves no gap in the table.
 	pal = np.asarray(Image.open(PALETTE).convert("RGB")).reshape(-1, 3).astype(int)
 	body_pal = np.unique(body[body[..., 3] > 0][:, :3], axis=0)
-	skin = _snap_rgb(armlib.skin_colours(body).astype(float), body_pal)
-	skin_set = {tuple(int(v) for v in c) for c in skin}
-	kept = [c for c in cands if palm_is_skin(c, body_pal, skin_set)]
-	print(f"{len(kept)}/{len(cands)} candidates have a palm painted in his own skin "
-		  f"({len(skin_set)} face colours)")
-	cands = kept
+	# NO SEPARATE "IS THE PALM SKIN?" PASS ANY MORE. It used to run here, after selection,
+	# because a palm was an extremity and might land on a boot or a lapel. A hand is now
+	# FOUND as a blob of his own skin (armlib.hands), so the question cannot be asked any
+	# later than it already has been - a candidate with no hand never became a candidate.
+	flats = sorted(c["flat"] for c in cands)
+	if flats:
+		print(f"palm flatness across candidates: {flats[0]:.2f} .. {flats[-1]:.2f} "
+			  f"(median {flats[len(flats) // 2]:.2f}; >1 is a hand turned up)")
 	# THE ROW A PALM OUGHT TO BE ON, in the reference body's own cell: the eight-head canon's
 	# hand line, which is where the game puts its hands and where every prop will be.
 	target_py = (1.0 - armlib.GAME_HAND_UP) * (ch - 1)
@@ -459,7 +495,8 @@ def main() -> int:
 		atlas[r * ah:r * ah + lay.shape[0], k * aw:k * aw + lay.shape[1]] = lay
 		rec = {"slot": n, "reach": round(c["reach"], 2),
 			   "ox": int(c["ox"]), "oy": int(c["oy"]),
-			   "px": round(float(c["px"]), 1), "py": round(float(c["py"]), 1)}
+			   "px": round(float(c["px"]), 1), "py": round(float(c["py"]), 1),
+			   "flat": round(float(c.get("flat", 0.0)), 2)}
 		meta["left" if c["side"] == "L" else "right"].append(rec)
 	meta["left"].sort(key=lambda r: r["reach"])
 	meta["right"].sort(key=lambda r: r["reach"])
@@ -471,14 +508,16 @@ def main() -> int:
 			if LIFT_FLAT[0] <= r["reach"] <= LIFT_FLAT[1]]
 	pys = [r["py"] for r in meta["left"] + meta["right"]]
 	meta["hand_py"] = round(float(np.median(flat)), 1) if flat else round(target_py, 1)
-	lifted = [r for r in meta["left"] if r["reach"] <= LIFT_IN[1]]
+	lifted = [r for r in meta["left"] if r["reach"] > LIFT_FLAT[1]]
 	print(f"hand line at row {meta['hand_py']} of {ch} (canon says {target_py:.1f}); "
-		  f"{len(flat)} entries in the flat catching range, "
-		  f"{len(lifted)} lifted inner pose(s) per side")
+		  f"{len(flat)} entries on the flat line, "
+		  f"{len(lifted)} lifted far-reach pose(s) per side")
 	if lifted:
 		hi = min(r["py"] for r in lifted)
-		print(f"innermost palm sits {meta['hand_py'] - hi:.0f} art px "
+		print(f"outermost palm sits {meta['hand_py'] - hi:.0f} art px "
 			  f"({(meta['hand_py'] - hi) * 2:.0f} screen px) above the catch line")
+	flats = [r for r in meta["left"] if r.get("flat", 0.0) > 1.0]
+	print(f"{len(flats)}/{len(meta['left'])} entries per side have a hand turned UP")
 
 	# THE ARMS ARE SNAPPED TO THE BODY'S OWN COLOURS, not to the full 48.
 	#
@@ -543,18 +582,35 @@ def main() -> int:
 	s2 = artguard.save_guarded(OUT / "juggle_arms.png",
 		lambda q: Image.fromarray(atlas, "RGBA").save(q), force)
 	(OUT / "juggle_arms.json").write_text(json.dumps(meta, indent=2) + "\n")
+	# ...AND INTO THE MANIFEST, WHICH IS THE COPY THE GAME ACTUALLY READS.
+	#
+	# Game.gd takes the bank from art_manifest.json's _ARMS block (see fig_arms); the JSON
+	# written beside the atlas is a build artefact that nothing loads. Writing only that one
+	# is how the two came apart: the atlas PNG was rebuilt with a 57 px cell while _ARMS
+	# still described a 64 px cell and 28 entries, so every UV sub-rect the game computed cut
+	# the NEW atlas at OLD coordinates. On screen that is a sleeve with no shoulder floating
+	# beside the performer - it reads as a bug in the art and it is a bug in the pipeline.
+	# The index and the picture are one artefact, so they are written together.
+	man = ROOT / "Resources" / "art_manifest.json"
+	doc = json.loads(man.read_text())
+	doc["_ARMS"] = meta
+	man.write_text(json.dumps(doc, indent=2) + "\n")
 	print(f"wrote body {cw}x{ch} [{s1}] and {len(entries)} arms in a "
-		  f"{cols * aw}x{rows * ah} atlas [{s2}]")
+		  f"{cols * aw}x{rows * ah} atlas [{s2}], and _ARMS into {man.name}")
 	return 0
 
 
 def _write_sheet(path: Path, body: np.ndarray, entries: list[dict], cw: int, ch: int) -> None:
 	"""The bank as the game will assemble it: body + left arm + right arm, swept together.
 
-	Both hands at the SAME reach here, which is the one thing the game will never do - but it
-	is what makes a mismatched pair obvious to a human eye."""
+	THE TWO HANDS ARE IN ANTIPHASE HERE, which is the whole point and was the previous
+	sheet's blind spot. It composited both arms at the SAME reach - and said so in its own
+	docstring, calling that "the one thing the game will never do" - so a pair that only
+	disagrees when the hands are at DIFFERENT reaches came out looking perfect. That is
+	exactly the pair a cascade draws every frame: one hand out catching while the other is
+	in throwing. Sweeping left up while right sweeps down is what a player sees."""
 	ls = sorted([c for c in entries if c["side"] == "L"], key=lambda c: c["reach"])
-	rs = sorted([c for c in entries if c["side"] == "R"], key=lambda c: c["reach"])
+	rs = sorted([c for c in entries if c["side"] == "R"], key=lambda c: -c["reach"])
 	n = min(len(ls), len(rs))
 	# PADDED, because an arm layer may start left of the body's own cell - the widest pose in
 	# some generation reaches further out than the reference sweep ever did, so its offset is
