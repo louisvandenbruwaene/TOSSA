@@ -12714,8 +12714,24 @@ func draw_backdrop(s: Vector2) -> void:
 	# a faint smudge: the Midnight Show's clock, moon window and candles were all being
 	# drawn and then wiped off. Each venue now says how much push-back its own set can
 	# take (`veil`), so a dark house keeps its detail without any venue losing its depth.
-	draw_rect(Rect2(0, 0, s.x, fy), Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5,
-		float(v.get("veil", 0.42))))
+	# ...AND IT IS TOP-WEIGHTED, NOT FLAT (2026-08-08, Louis: "make it logical that the
+	# juggler has his back to the background of the stage, people there won't see that
+	# much"). Five of the seven backdrops paint tiered SEATING behind the performer, and a
+	# flat wash lit all of it evenly - so the far side of the house read as a second
+	# audience, watching an act that has its back to them, as brightly as the one in front.
+	# Nothing on a stage is lit that way: the lamps point down at the performer, the back
+	# wall is the darkest thing in the building, and the people up there are the ones who
+	# paid least and see least.
+	#
+	# So the veil now deepens toward the top - the same average push-back each venue was
+	# tuned for, redistributed. It costs nothing but a stacked gradient, it makes those seats
+	# read as a dim gallery rather than a front row, and it separates the performer from the
+	# painting behind him, which is the thing the whole veil exists to do.
+	var veil := float(v.get("veil", 0.42))
+	var veil_c := Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5, 1.0)
+	draw_gradient_v(Rect2(0, 0, s.x, fy),
+		Color(veil_c.r, veil_c.g, veil_c.b, minf(1.0, veil * 1.55)),
+		Color(veil_c.r, veil_c.g, veil_c.b, veil * 0.55), 24)
 	draw_stage_grade(s, fy, glow)
 
 	# spotlight cone from above centre: it narrows and warms a touch as a streak
@@ -12778,28 +12794,83 @@ func draw_backdrop(s: Vector2) -> void:
 
 
 func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
-	# the crowd is a suggestion that LIVES: heads with shoulders that bob with the
-	# applause, brightening as they warm, an extra row at grander venues, and the
-	# occasional pair of hands thrown up when the room is truly won over
+	# THE HOUSE, FROM BEHIND ITS OWN BACK ROW - and the two things that were wrong with it
+	# are worth naming, because they are the difference between "a crowd" and "some dots".
+	#
+	# 1. IT WAS LIT INSTEAD OF SILHOUETTED. Every head was drawn IN the venue's glow colour
+	#    at a low alpha, i.e. slightly BRIGHTER than the room behind it. But these people sit
+	#    between the player and the only light in the building, so they cannot be brighter
+	#    than it - they are backlit, and a backlit head is nearly black with a warm rim along
+	#    its crown. Getting that one relationship the right way round is most of the fix.
+	# 2. IT WAS DRAWN WITH draw_circle, which antialiases its rim - smooth grey blobs in a
+	#    game whose whole premise is that nothing is smooth. fill_disc_pix rasterises on the
+	#    art grid instead, one draw_rect per art row.
+	#
+	# They are also PEOPLE now rather than discs: heads sit on real shoulders, one in three
+	# wears a hat (a topper, a bonnet, or a flat cap), and the near row is bigger and darker
+	# than the far one so the house has depth instead of being two identical stripes.
+	#
+	# PERFORMANCE (the 2026-07-27 note this replaces): the old version cost ~600us at the
+	# Championship with 38 heads at two draws each, and the fix then was to cap the count and
+	# make the shoulders one band. Both are kept. A disc of r=9 is nine draw_rects against
+	# draw_circle's tessellated polygon, so the per-head cost is comparable and the row band
+	# is still a single rect - measured after, this sits inside the same budget.
+	var ap := float(ART_PIXEL)
 	var performing := mode == MODE_PERFORM and game_state == ST_PLAY
-	var lit := 0.07
+	# HOW HOT THE RIM IS, and it has to be genuinely hot rather than a tint. A silhouette
+	# only exists against something lighter, and there is nothing lighter down here: the
+	# stage floor is drawn all the way to the bottom of the screen and has fallen off into
+	# near-black by the time it reaches the house. A dark crowd on a dark floor is a black
+	# bar. What separates them is the footlights catching every skull and hat brim from the
+	# front, so the rim carries the whole read and is drawn near full strength.
+	var lit := 0.45
 	if performing:
-		lit = 0.08 + 0.14 * applause
+		lit = 0.55 + 0.35 * applause
 	var bob_amp := (0.4 + 2.2 * applause) if performing else 0.6
 	var rows := 2 if vi >= 2 else 1
+	# THE SILHOUETTE IS THE ROOM'S OWN DARK, not black: a flat black bar across the bottom of
+	# a warm theatre reads as a letterbox bar, not as an audience. Tinting it toward the
+	# venue's glow at very low value keeps it sitting in the same room as everything else.
+	var dark := Color(glow.r * 0.10, glow.g * 0.08, glow.b * 0.09, 0.96)
+	var rim := Color(glow.r, glow.g * 0.92, glow.b * 0.80, lit)
+	# THE HAZE THE BACK ROW STANDS AGAINST. One soft warm wash spilling off the stage lip
+	# into the first few rows - the light that is actually in a theatre between a lit stage
+	# and a dark house. Without it the far row has no ground of its own and the two rows
+	# merge into a single mass however well each one is drawn.
+	draw_gradient_v(Rect2(0.0, fy, s.x, 62.0),
+		Color(glow.r, glow.g * 0.82, glow.b * 0.62, 0.16 + 0.10 * (applause if performing else 0.0)),
+		Color(glow.r, glow.g, glow.b, 0.0), 31)
 	for r in rows:
-		# PERFORMANCE (2026-07-27, measured): this was the most expensive thing on the
-		# screen after the HUD - 600us a frame at the Championship, because the head
-		# count grew with the venue (38 across the front row) and every single person
-		# cost two draws. Two changes, no visible loss: the row's SHOULDERS are now one
-		# continuous band (a crowd's shoulders read as a mass anyway, and it is one draw
-		# instead of thirty-eight), and the count is capped so a grand venue reads as
-		# grand through its extra ROW and its stands, not through ever-smaller heads.
-		var heads := mini(10 + vi * 4, 22) - r * 3
-		var base_y := fy + 14.0 + float(r) * 21.0
-		var row_lit := lit * (1.0 - 0.35 * float(r))
-		var band_h := 13.0 + float(r) * 2.0
-		draw_rect(Rect2(0.0, base_y + 9.0, s.x, band_h), Color(glow.r, glow.g, glow.b, row_lit * 0.7))
+		# BACK ROW FIRST, so the near one paints over it - each row's shoulder mass runs all
+		# the way to the bottom of the screen, so drawing them the other way round buries the
+		# whole house under the furthest row's band and leaves a plain dark bar.
+		# The near row is the higher index: lower on screen, bigger heads, darker, and fewer
+		# of them across the same width, which is what moving a row toward the camera does.
+		var near := float(r)
+		# SIZED TO BE READ, not to be counted. The old row put 22 heads of radius 6-9 across
+		# 1280px, which at this density is a row of bumps - the eye resolves a texture rather
+		# than a person. Half as many at twice the size is the same mass of crowd and reads
+		# as an audience, and it is also cheaper. Louis's bar for this game is Balatro:
+		# chunky and legible, never fine.
+		#
+		# AND WHAT IS ACTUALLY BEING DRAWN IS A SKYLINE. Only the row nearest the stage is
+		# seen against light; every row behind the viewer's eye is below it and silhouettes
+		# against the row in front, i.e. against black. So the top row carries the whole
+		# read and gets the size and the variety, the next one only breaks its edge, and
+		# everything under them is one dark mass - which is what a house looks like from the
+		# back of it, and leaves the bottom strip as the quiet ground the HUD panels sit on.
+		var heads := mini(7 + vi * 2, 13) - int(near) * 2
+		var base_y := fy + 30.0 + near * 30.0
+		var hscale := 1.0 + near * 0.28
+		var row_dark := Color(dark.r, dark.g, dark.b, dark.a * (0.9 + 0.1 * near))
+		# the row's SHOULDERS, still one rect - a crowd's shoulders read as a mass anyway.
+		# It sits a head-radius down, so every skull stands clear of it instead of being
+		# swallowed by the band the moment the row moves.
+		var band_y := snappedf(base_y + 15.0 * hscale, ap)
+		draw_rect(Rect2(0.0, band_y, s.x, s.y - band_y), row_dark)
+		# ...and a single warm line along the top of that mass, so the row is separated from
+		# the one behind it by light rather than by a change of grey
+		draw_rect(Rect2(0.0, band_y, s.x, ap), Color(rim.r, rim.g, rim.b, rim.a * 0.5))
 		for i in heads:
 			# a BAD night empties seats too, not just a good one lighting up (Still open:
 			# "the crowd reacting to a BAD night") - each seat has its own stable leave
@@ -12810,16 +12881,53 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var leave_t := fposmod(float(i) * 0.371 + float(r) * 0.193, 1.0)
 				if applause <= leave_t * CROWD_LEAVE_BAND:
 					continue
-			var hx := s.x * (float(i) + 0.5) / float(heads) + float(r) * 7.0
+			# one stable variate per seat: no randf anywhere, so nobody flickers or swaps hat
+			var k := fposmod(float(i) * 2.399 + float(r) * 1.117, 1.0)
+			# ...half a seat over on the row behind, so its heads break the gaps in the
+			# skyline in front instead of hiding directly under them
+			var hx := s.x * (float(i) + 0.5 + 0.5 * near) / float(heads)
 			var bob := sin(atick() * 0.045 + float(i) * 1.31 + float(r) * 2.2) * bob_amp
-			var hy := base_y + fmod(float(i) * 1.7, 5.0) + bob
-			var hr := 6.0 + fmod(float(i) * 2.3, 3.0) + float(r)
-			# ONE draw per person: the row's band below is their shoulders
-			draw_circle(Vector2(hx, hy), hr, Color(glow.r, glow.g, glow.b, row_lit))
+			var hr := snappedf((13.0 + floorf(k * 3.0) * 2.0) * hscale * 0.5, ap)
+			var hy := snappedf(base_y + fmod(float(i) * 1.7, 4.0) + bob, ap)
+			var head := Vector2(snappedf(hx, ap), hy)
+			crowd_person(head, hr, k, row_dark, rim, ap)
 			if performing and applause > 0.82 and (i + r * 3) % 4 == 0:
-				var up := absf(sin(atick() * 0.09 + float(i)))                     # hands up!
-				draw_circle(Vector2(hx - hr, hy - hr - 4.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
-				draw_circle(Vector2(hx + hr, hy - hr - 5.0 * up), 2.2, Color(glow.r, glow.g, glow.b, row_lit * 1.6))
+				# hands up! - two dark arms against the stage, not two bright dots
+				var up := absf(sin(atick() * 0.09 + float(i)))
+				var lift := (6.0 + 7.0 * up) * hscale
+				for sgn in [-1.0, 1.0]:
+					var hand := head + Vector2(sgn * (hr + ap), -hr - lift)
+					draw_capsule_pix(head + Vector2(sgn * hr, hr * 0.4), hand,
+						ap * 1.5, ap * 1.5, row_dark)
+					fill_disc_pix(hand, ap * 1.4, row_dark)
+					draw_rect(Rect2(hand.x - ap, hand.y - hr * 0.5 - ap, ap * 2.0, ap), rim)
+
+
+func crowd_person(head: Vector2, hr: float, k: float, dark: Color, rim: Color,
+		ap: float) -> void:
+	# ONE SPECTATOR, seen from behind and lit only along the top of the head.
+	#
+	# The hat is what makes a row read as a period audience rather than as a line of eggs,
+	# and it is the cheapest variety available: three silhouettes, chosen by the seat's own
+	# stable variate, none of them more than three rects. A third of the house is bare-headed
+	# so the hats stay an accent.
+	fill_disc_pix(head, hr, dark)
+	# the SHOULDERS this head is standing on, so a head is never a floating ball above the
+	# band - a short trapezoid, one rect, widening to meet the row's mass
+	draw_rect(Rect2(head.x - hr * 1.25, head.y + hr * 0.55, hr * 2.5, hr * 1.4), dark)
+	if k < 0.34:
+		# BARE-HEADED: the warm rim over the crown, two art px of it
+		draw_rect(Rect2(head.x - hr * 0.55, head.y - hr - ap * 0.5, hr * 1.1, ap), rim)
+	elif k < 0.67:
+		# A TOPPER: crown then brim, the brim a touch wider than the head
+		var ch := hr * 1.5
+		draw_rect(Rect2(head.x - hr * 0.62, head.y - hr - ch, hr * 1.24, ch), dark)
+		draw_rect(Rect2(head.x - hr * 1.15, head.y - hr - ap, hr * 2.3, ap * 1.5), dark)
+		draw_rect(Rect2(head.x - hr * 0.62, head.y - hr - ch, hr * 1.24, ap), rim)
+	else:
+		# A BONNET or a flat cap: a low dome sitting proud of the skull
+		fill_disc_pix(head + Vector2(0.0, -ap), hr * 1.15, dark)
+		draw_rect(Rect2(head.x - hr * 0.7, head.y - hr * 1.15 - ap * 1.5, hr * 1.4, ap), rim)
 
 
 func draw_stage_grade(s: Vector2, fy: float, glow: Color) -> void:
