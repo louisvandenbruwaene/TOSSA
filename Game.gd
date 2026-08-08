@@ -535,14 +535,21 @@ const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher 
 # than wanted. Lifting the slot to meet the drawing makes the mechanic and the picture agree,
 # and the elbow bend comes free because it is painted into the frames that now qualify.
 #
-# THE NUMBER IS THE ELBOW BEND. Sorting the inner-reach poses by palm height and looking at
-# them (arm band only, 5x) says it plainly: at 60-62% of the way up the arm hangs STRAIGHT with
-# the hand at the hip, the forearm starts to fold at about 64%, and by 66-70% it is a clean bent
-# elbow with the palm up at the waistcoat. A first pass used 22px, which targets 57% and
-# therefore picked the straight poses - Louis looked at it and said the elbows still do not
-# bend, and he was right. 42px is 13% of the figure, targeting 63.5%, which is where the fold
-# starts. Keep it in step with LIFT_UP in build_arm_bank.py.
-const HAND_IN_LIFT := 42.0
+# ...AND IT IS ZERO AGAIN, BECAUSE THE MEASUREMENT IT WAS FITTED TO WAS MEASURING THE ELBOW
+# (2026-08-08). The 42px above was chosen to lift the game's inner slot up to where the
+# painting was believed to put its palm at close reach - 63.5% of the way up the figure. That
+# belief came from armlib.palms, which called a palm "the moving pixel furthest from the
+# centreline", and when a forearm folds the furthest moving pixel is the ELBOW. Measured
+# properly - by finding the blob of his own skin, which is a hand and cannot be an elbow - the
+# palm at inner reach sits at 47.8% and the whole 0..44 range sits between 48% and 53%. There
+# is no lift in the painting to meet.
+#
+# WHAT IT COST WHILE IT WAS WRONG is worth naming, because it did not look like a geometry
+# bug: inner_pos is where a prop is HELD and thrown from, so every held object was drawn 42
+# screen px above the hand holding it - up at the waistcoat, which is exactly Louis's "the
+# objects don't match the hand placement". Keep it in step with LIFT_FLAT in
+# build_arm_bank.py: the two describe the same hand line from the two ends of the seam.
+const HAND_IN_LIFT := 0.0
 const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
 const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
 const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line

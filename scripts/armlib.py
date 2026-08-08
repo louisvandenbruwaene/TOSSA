@@ -40,6 +40,9 @@ BAND = (0.17, 0.66)
 # around his lapels while the catch rings sat empty at his hips.
 GAME_HAND_UP = 0.505
 
+# The smallest share of the face a colour must cover to count as one of his skin tones.
+SKIN_MIN_SHARE = 0.01
+
 
 def load_frames(src) -> list[np.ndarray]:
 	"""Every PNG in a directory, or every frame of a multi-frame image."""
@@ -141,22 +144,139 @@ def skin_colours(body: np.ndarray) -> np.ndarray:
 	from skin in Oklab and a perfectly good shadowed palm sits 0.045 the other way. Set
 	membership does, because the arm layers are already snapped to the body's own colours: a
 	skin entry can only have come from the face, and a gold one can only have come from the
-	coat."""
-	top, neck = head_rows(body[..., 3] > 0)
+	coat.
+
+	IT IS THE FACE MINUS THE COSTUME, NOT THE FACE. Taking every colour above the neck reads
+	as "skin" the hair, the black outline, the collar and the lapels that rise past the
+	chin - 22 entries covering most of the costume - and a mask built from that lights up
+	3,210 pixels of torso as one blob, so a hand can never be found inside it. Subtracting
+	everything painted BELOW the arm band leaves only what is unique to his face: the coat,
+	its gold frogging, the trousers and the boots all appear down there, and the one thing
+	that does not is skin. Hands are inside the band, so they are never subtracted."""
+	mask = body[..., 3] > 0
+	top, neck = head_rows(mask)
 	head = body[top:neck + 1]
 	sel = head[..., 3] > 0
-	return np.unique(head[sel][:, :3], axis=0) if sel.any() else np.zeros((0, 3), np.uint8)
+	if not sel.any():
+		return np.zeros((0, 3), np.uint8)
+	face, cnt = np.unique(head[sel][:, :3], axis=0, return_counts=True)
+	_, y1 = band_rows(body.shape[0])
+	below = body[y1:]
+	bsel = below[..., 3] > 0
+	if not bsel.any():
+		return face
+	worn = {tuple(int(v) for v in c) for c in np.unique(below[bsel][:, :3], axis=0)}
+	# ...AND IT HAS TO BE A REAL PART OF THE FACE. Measured on the showman: the face-only
+	# set is his two skin tones at 10.2% and 2.8% of the head, then a 1px eye and a 1px lip.
+	# A one-pixel entry cannot be told from a stray dither pixel, and admitting it lights up
+	# scattered singles all over the coat - the mask has to describe a hand, not a freckle.
+	tot = float(cnt.sum())
+	skin = np.array([c for c, k in zip(face, cnt)
+					 if tuple(int(v) for v in c) not in worn and k / tot >= SKIN_MIN_SHARE],
+					dtype=face.dtype)
+	return skin if skin.size else face
+
+
+def snap_to(rgb: np.ndarray, pal: np.ndarray) -> np.ndarray:
+	"""Nearest palette entry per pixel, in Oklab. Shape-preserving."""
+	flat = rgb.reshape(-1, 3).astype(float)
+	d = np.linalg.norm(_oklab(flat)[:, None, :] - _oklab(pal.astype(float))[None, :, :], axis=2)
+	return pal[np.argmin(d, axis=1)].reshape(rgb.shape)
+
+
+def skin_mask(rgb: np.ndarray, skin_set: set, body_pal: np.ndarray) -> np.ndarray:
+	"""Which pixels are painted in one of the performer's own face colours.
+
+	Set membership, not a distance threshold, for the reason skin_colours records: the
+	locked palette carries a skin tone and the coat's gold frogging close enough together
+	in Oklab that no threshold separates them.
+
+	SNAPPED TO THE BODY'S OWN PALETTE FIRST, and skipping that turned 624 candidates into
+	70. The frames arrive snapped to the LOCKED 48, while the skin set can only be drawn
+	from the ~38 the body is actually painted in - so a skin pixel that landed on one of the
+	ten colours the body does not use matched nothing at all, and the hand vanished. Both
+	sides of an equality test have to be quantised the same way."""
+	snapped = snap_to(rgb, body_pal)
+	out = np.zeros(rgb.shape[:2], bool)
+	for col in skin_set:
+		out |= np.all(snapped == np.asarray(col, dtype=snapped.dtype), axis=-1)
+	return out
+
+
+# The smallest blob of skin that can be a hand, in pixels. Below this it is a knuckle
+# showing past a cuff, a stray trim pixel that snapped onto a skin entry, or noise.
+HAND_MIN = 10
+
+
+def hands(frame: np.ndarray, skin_set: set, body_pal: np.ndarray) -> dict:
+	"""This frame's two HANDS - the actual blobs of skin, not the arm's outermost pixel.
+
+	THIS REPLACES MEASURING A PALM AS AN EXTREMITY, and the difference is not a refinement,
+	it is the bug Louis reported as "the objects don't match the hand placement". The old
+	rule took the moving pixel furthest from the centreline, which is only the hand when the
+	arm is straight and pointing out. Fold the elbow - which is most of a juggling sweep -
+	and the outermost moving pixel is a SLEEVE edge, with the hand hanging somewhere else
+	entirely. Measured across all 624 candidates in the pool: the extremity sat a median of
+	25 art px from the real hand, which at this density is FIFTY screen pixels. Every held
+	prop, every catch glow and every tutorial key hangs off this point.
+
+	A hand is found instead as the outermost sufficiently large blob of the performer's own
+	skin inside the arm band. The band already excludes his face (see BAND), so the only
+	skin below it is a hand; taking the outermost blob rather than the nearest-to-anything
+	means this needs no prior guess to refine.
+
+	Returns {"L": {...}, "R": {...}} with, per side, the palm centre in cell coordinates,
+	the blob's extent, and how flat it is - or {} if either hand could not be found.
+	`frame` must already be snapped to the body's palette."""
+	h, w = frame.shape[:2]
+	cx = (w - 1) * 0.5
+	y0, y1 = band_rows(h)
+	sk = skin_mask(frame[..., :3], skin_set, body_pal) & (frame[..., 3] > 127)
+	sk[:y0] = False
+	sk[y1:] = False
+	lab, n = ndimage.label(sk, np.ones((3, 3)))
+	out = {}
+	for side in ("L", "R"):
+		best, bx = None, -1.0
+		for l in range(1, n + 1):
+			ys, xs = np.where(lab == l)
+			if len(ys) < HAND_MIN:
+				continue
+			mx = float(xs.mean())
+			if (mx > cx) if side == "L" else (mx < cx):
+				continue
+			far = (cx - mx) if side == "L" else (mx - cx)
+			if far > bx:
+				bx, best = far, (xs, ys)
+		if best is None:
+			return {}
+		xs, ys = best
+		px, py = float(xs.mean()), float(ys.mean())
+		bw = float(xs.max() - xs.min() + 1)
+		bh = float(ys.max() - ys.min() + 1)
+		out[side] = (px, py)
+		# the blob itself, so split_layer can protect the fingers from its own thinning
+		hm = np.zeros((h, w), bool)
+		hm[ys, xs] = True
+		out[side + "mask"] = hm
+		out[side + "reach"] = abs(px - cx)
+		out[side + "up"] = (h - 1 - py) / float(h - 1)
+		# HOW FLAT THE HAND IS, which is how a palm-up hand is told from a hanging one
+		# without asking a model what it painted. A hand held out to catch is a broad mass
+		# with the fingers spread across it; a hand hanging palm-down from a wrist is a
+		# narrow vertical one. Measured over the pool: median 0.52, and only 32 of 624
+		# candidates come out wider than tall - which is the same finding as "no generation
+		# ever painted an upturned palm", arrived at by measurement rather than by eye.
+		out[side + "flat"] = bw / max(bh, 1.0)
+		out[side + "px"] = len(xs)
+	return out
 
 
 def palms(frame: np.ndarray, static: np.ndarray) -> dict:
-	"""This frame's two palms, found from what MOVED.
+	"""This frame's two arm EXTREMITIES, found from what moved.
 
-	Returns {"L": (x, y), "R": (x, y), "lr": reach_left, "rr": reach_right, "up": ...} in the
-	cell's own pixel coordinates, or {} if either side had nothing to measure.
-
-	A palm is the moving pixel furthest from the centreline on its own side. The frame's arm
-	may well continue inward under the coat - that part is invisible to this measurement and
-	does not matter, because what has to line up with a thrown prop is the HAND."""
+	Kept for the reach-only callers and for diagnostics. This is NOT where a hand is - see
+	hands() for that, and for the fifty screen pixels of difference between the two."""
 	mask = frame[..., 3] > 127
 	h, w = mask.shape
 	cx = (w - 1) * 0.5
@@ -186,7 +306,28 @@ def palms(frame: np.ndarray, static: np.ndarray) -> dict:
 	return out
 
 
-def split_layer(frame: np.ndarray, side: str, body: np.ndarray, ref_pal) -> tuple:
+def _oklab(rgb: np.ndarray) -> np.ndarray:
+	c = rgb / 255.0
+	lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+	r, g, b = lin[..., 0], lin[..., 1], lin[..., 2]
+	l = np.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+	m = np.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+	s = np.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+	return np.stack([
+		0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+		1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+		0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+	], axis=-1)
+
+
+# How far from the body's own colour a pixel must be before it counts as something drawn IN
+# FRONT of the body rather than the body repainted. In Oklab, where 0.10 is a clearly
+# different colour and 0.02 is two neighbouring palette entries.
+DIFF_MIN = 0.10
+
+
+def split_layer(frame: np.ndarray, side: str, body: np.ndarray, ref_pal,
+		hand: tuple = None, hand_mask: np.ndarray = None) -> tuple:
 	"""One side's ARM: only the pixels that differ from the body underneath.
 
 	THE FIRST VERSION TOOK THE WHOLE HALF-BAND, torso and all, and that shipped a performer
@@ -207,23 +348,84 @@ def split_layer(frame: np.ndarray, side: str, body: np.ndarray, ref_pal) -> tupl
 	generation colour drift snaps onto the same entry and reads as "no difference" instead of
 	as a torso-shaped arm.
 
+	AN ARM IS THE LIMB THE HAND IS ON, AND NOTHING ELSE. Selecting "every blob that leaves
+	the silhouette" was tried and looks reasonable right up until you draw one: the tailcoat
+	swings a few pixels between frames, so its front piping and the shirt behind it leave the
+	median body's silhouette in almost every frame, and each layer came out as a good arm
+	with a loose gold stripe and a scrap of bow tie floating beside it. On stage that is a
+	dark streak in mid-air next to the performer. The hand is the one part of an arm that is
+	certainly an arm, so the limb is grown FROM it: close the mask by a pixel to bridge a
+	cuff, then keep the connected component the hand sits in.
+
+	AND "DIFFERS" IS A PERCEPTUAL TEST, NOT A BYTEWISE ONE - which is the whole of the
+	2026-08-08 fix. `frame != body` fires on a single palette step, and the body is a MEDIAN
+	across frames, so a coat pixel that landed one entry away in this particular frame read
+	as "arm". Measured over the pool that admitted 61% of every layer as torso: the two arms
+	are picked independently, so the man wore one frame's lapel on his left and another
+	frame's on his right, and the shirt, bowtie and frogging changed as his hands moved.
+	That is exactly what Louis saw as "the left and right side don't match when he's
+	juggling", and it survived the previous fix because that fix changed WHICH pixels were
+	compared without changing HOW.
+
+	A COMPONENT ALSO HAS TO BE PART OF THE ARM. Even at a perceptual threshold, a repainted
+	waistcoat button is a legitimate difference - it is just not a limb. So the surviving
+	blobs are filtered to those that either reach OUTSIDE the body's silhouette (a real
+	extension into open air) or contain the HAND, which is the one part of an arm that is
+	certainly an arm even when it is entirely in front of the coat. A chest that has been
+	repainted a shade darker touches neither and is dropped, and the body draws it anyway.
+
 	`frame` and `body` must already be in the SAME coordinates - see gather()."""
 	h, w = body.shape[:2]
 	cx = (w - 1) * 0.5
 	y0, y1 = band_rows(h)
 	fa = frame[..., 3] > 127
 	ba = body[..., 3] > 0
-	differs = np.any(frame[..., :3] != body[..., :3], axis=-1)
+	differs = np.linalg.norm(_oklab(frame[..., :3].astype(float))
+							 - _oklab(body[..., :3].astype(float)), axis=-1) > DIFF_MIN
 	arm = fa & (~ba | differs)
 	arm[:y0] = False
 	arm[y1:] = False
 	xs = np.arange(w)
 	arm &= ((xs <= cx) if side == "L" else (xs > cx))[None, :]
+	if hand is None:
+		return np.zeros((0, 0, 4), np.uint8), 0, 0
+	hx, hy = int(round(hand[0])), int(round(hand[1]))
+	if not (0 <= hy < h and 0 <= hx < w):
+		return np.zeros((0, 0, 4), np.uint8), 0, 0
+	# NOT CLOSED FIRST, and that was worth one wrong turn: a 3x3 closing bridges the sleeve
+	# to the coat front it is lying against, so the "limb" came back as the arm plus the
+	# whole waistcoat, frogging and shirt in one component - more torso than the rule it
+	# replaced. Eight-connectivity on the raw mask already keeps a sleeve whole.
+	#
+	# OPENED, THOUGH, BECAUSE A LIMB IS THICK AND THE COAT'S PIPING IS NOT. The sleeve meets
+	# the lapel at the shoulder, so they are legitimately one component - and the gold
+	# stripe down the coat front came along with every arm, trailing off the hand as a thin
+	# dark streak in mid-air. A 2x2 erosion deletes anything one pixel wide and leaves a
+	# forearm untouched, so the limb is grown from the eroded CORE and the thin stuff never
+	# joins. The hand is unioned back in unconditionally: fingers are one pixel wide too,
+	# and they are the one thin thing that has to survive.
+	lab, _ = ndimage.label(arm, np.ones((3, 3)))
+	limb = lab[hy, hx]
+	if not limb:
+		ys, xs = np.where(lab > 0)
+		if xs.size == 0:
+			return np.zeros((0, 0, 4), np.uint8), 0, 0
+		i = int(np.argmin((xs - hx) ** 2 + (ys - hy) ** 2))
+		limb = lab[ys[i], xs[i]]
+	whole = lab == limb
+	# THE THINNING IS APPLIED INSIDE THE LIMB, AND KEEPS EVERY THICK PART OF IT - not only
+	# the part the hand happens to sit in. Taking the single eroded core under the hand
+	# looked equivalent and was not: an erosion also severs the narrow bridge at the
+	# SHOULDER, so the upper arm became its own core, was discarded, and the performer
+	# juggled with two forearms floating in the air beside a coat. Everything an erosion
+	# leaves is a limb; everything it deletes is piping.
+	core = ndimage.binary_erosion(whole, np.ones((2, 2)))
+	arm = ndimage.binary_dilation(core, np.ones((3, 3))) & whole
+	if hand_mask is not None:
+		arm |= hand_mask & whole
 	# a limb survives being eroded; a one-pixel rim of dither noise along an edge does not
-	core = ndimage.binary_erosion(arm, np.ones((2, 2)))
-	lab, n = ndimage.label(arm, np.ones((3, 3)))
-	keep = [l for l in np.unique(lab[core]) if l and int((lab == l).sum()) >= 25]
-	arm = np.isin(lab, keep)
+	if int(arm.sum()) < 25:
+		return np.zeros((0, 0, 4), np.uint8), 0, 0
 	ys, xx = np.where(arm)
 	if xx.size == 0:
 		return np.zeros((0, 0, 4), np.uint8), 0, 0
