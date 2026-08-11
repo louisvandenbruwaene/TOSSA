@@ -15068,6 +15068,14 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 	draw_capsule_pix(shoulder, elbow, 19.0, 14.0, sleeve)  # upper arm, tapering to the elbow
 	draw_capsule_pix(elbow, wrist, 13.0, 10.0, sleeve)     # forearm, same cloth, to the wrist
 	draw_capsule_pix(elbow, elbow, 14.0, 14.0, sleeve)     # elbow joint (a capsule of zero length)
+	# A LIT EDGE AND A SEAM (2026-08-11), the same fold every other cloth surface on this
+	# figure already gets - see draw_performer_polish's satin/seam pair, same ratios. Without
+	# it the sleeve is one flat tube of colour next to a painted torso with real folds and
+	# highlights, and reads as a rectangle rather than a cuff of cloth.
+	var arm_lit := sleeve.lightened(0.16)
+	var arm_shade := sleeve.darkened(0.20)
+	_arm_shade_stripe(shoulder, elbow, 19.0, 14.0, bend, arm_lit, arm_shade)
+	_arm_shade_stripe(elbow, wrist, 13.0, 10.0, bend, arm_lit, arm_shade)
 	if cuff.a > 0.0:
 		# WARDROBE pass only (performer_polish): the jacket sleeve runs on down the
 		# forearm and finishes in a shirt cuff, leaving bare wrist and hand for the
@@ -15077,6 +15085,17 @@ func draw_arm(shoulder: Vector2, hand: Vector2, h: int, skin: Color, sleeve: Col
 		var ce := elbow.lerp(wrist, 0.76)
 		draw_capsule_pix(elbow, cs, 13.5, 11.5, sleeve)
 		draw_capsule_pix(cs, ce, 12.0, 11.5, cuff)
+
+
+func _arm_shade_stripe(a: Vector2, b: Vector2, wa: float, wb: float, bend: float,
+		lit: Color, shade: Color) -> void:
+	# Offset perpendicular to the bone itself, on the same side the elbow already bows to
+	# (the outer face), so the fold sits where the cloth would actually catch the light and
+	# lose it as the arm bends - not an arbitrary stripe, the same edge `bend` already picks.
+	var dir := (b - a).normalized() if a.distance_to(b) > 0.001 else Vector2.DOWN
+	var perp := Vector2(-dir.y, dir.x) * bend
+	draw_capsule_pix(a + perp * wa * 0.32, b + perp * wb * 0.32, wa * 0.34, wb * 0.34, lit)
+	draw_capsule_pix(a - perp * wa * 0.30, b - perp * wb * 0.30, wa * 0.30, wb * 0.30, shade)
 
 
 # two-bone IK: places the elbow so it sits exactly l1 from shoulder a and l2 from
@@ -15579,6 +15598,13 @@ func draw_hand(h: int) -> void:
 		# in open air while the performer's hands are somewhere else entirely.
 		if fig_palm_far(h):
 			draw_figure_palm(h, pos)
+	elif fig_design_on() and art_bank.has("char/palm_l") and art_bank.has("char/palm_r"):
+		# A DESIGN'S OWN PAINTED HAND (2026-08-11), not the traced juggler's vector mitt -
+		# that shape belongs to a different character and next to a painted coat it reads as
+		# a pale plastic lump. Safe to draw unconditionally, unlike the fig_palm_far guard
+		# above: with the arm bank retired, fig_hand_pos(h) IS hpos[h] always, so there is no
+		# "reach the painting doesn't cover" case left to guard against.
+		draw_figure_palm(h, pos)
 	else:
 		draw_mitt(pos, close, inward)
 
