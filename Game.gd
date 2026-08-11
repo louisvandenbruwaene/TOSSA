@@ -7851,16 +7851,15 @@ func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
 
 
 func fig_anim_live() -> bool:
-	# RETIRED, 2026-08-11 (Louis). The painted arm bank could only ever cover a finite table
-	# of reaches (build_arm_bank.py's own reach table topped out at 27 entries, still missing
-	# a clean inner-slot pose after 19 generations - see CLAUDE.md), because the hand sweeps
-	# through every point between inner_pos and outer_pos on every throw, not just the two
-	# ends. `fig_design_on()`'s procedural arm has no such table: draw_arm is driven straight
-	# off the live hpos every tick, in the sleeve/cuff colours _FIGURE already sampled off the
-	# showman's own painting, so it is correct at any reach with nothing to pool or re-roll.
-	# Left false rather than deleted so the bank data and this switch stay available if a
-	# future design ships without sampled sleeve/cuff colours to fall back on.
-	return false
+	# PAINTED ARMS are loaded and usable. Distinct from fig_design_on: a design can ship a
+	# still figure before it has been animated, and the still still needs procedural arms.
+	#
+	# Both banks and both textures, or none of it. A half-loaded bank would draw a man with
+	# one painted arm and one solved one, which is worse than either on its own.
+	return (not fig_arms.is_empty()
+		and art_bank.has("char/juggle_arms") and art_bank.has("char/juggle_body")
+		and not (fig_arms.get("left", []) as Array).is_empty()
+		and not (fig_arms.get("right", []) as Array).is_empty())
 
 
 func fig_design_on() -> bool:
