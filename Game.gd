@@ -7829,7 +7829,7 @@ func shoulder_pos(h: int) -> Vector2:
 	return fig_shoulder(s.x * 0.5, s.y * 0.80, fig_stage_H(s), h)
 
 
-func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
+func fig_shoulder(cx: float, floor_y: float, H: float, h: int, px: float = ART_PIXEL) -> Vector2:
 	# ...the same point on ANY figure, at any size. The preview used to place its own arm
 	# roots at 6.58 head units where the stage placed them at 6.38, so the little figure's
 	# arms hung a fifth of a head unit lower than the real one's - small enough never to be
@@ -7841,7 +7841,7 @@ func fig_shoulder(cx: float, floor_y: float, H: float, h: int) -> Vector2:
 	# length can change, and a broad-shouldered design gets shorter, more natural arms for
 	# free. See fit_char_design.py for how the joint is measured off the painting.
 	if fig_design_on():
-		var fh := fig_design_height()
+		var fh := fig_design_height(px)
 		var dx := float(fig_design.get("shoulder_dx", 0.13)) * fh
 		var y := floor_y - (1.0 - float(fig_design.get("shoulder_y", 0.20))) * fh
 		return Vector2(cx - dx, y) if h == LEFT else Vector2(cx + dx, y)
@@ -7869,13 +7869,16 @@ func fig_design_on() -> bool:
 	return not fig_design.is_empty() and art_bank.has("char/figure")
 
 
-func fig_design_height() -> float:
-	# the design's own height in SCREEN pixels: its art, at exactly ART_PIXEL screen pixels
-	# per art pixel. Read off the texture rather than trusted from the manifest, so the two
-	# can never disagree about the one number every landmark is a fraction of.
+func fig_design_height(px: float = ART_PIXEL) -> float:
+	# the design's own height in SCREEN pixels, at the caller's OWN px: a preview draws the
+	# figure at half the stage's screen-pixels-per-art-pixel (see draw_figure_design), and a
+	# hardcoded ART_PIXEL here once put the hat, helmet and glasses at stage height on a body
+	# drawn half that tall - the top hat floated a head-and-a-half above the mirror's mannequin
+	# instead of sitting on it. Read off the texture rather than trusted from the manifest, so
+	# the two can never disagree about the one number every landmark is a fraction of.
 	if not art_bank.has("char/figure"):
 		return 0.0
-	return float((art_bank["char/figure"] as Dictionary)["tex"].get_size().y) * ART_PIXEL
+	return float((art_bank["char/figure"] as Dictionary)["tex"].get_size().y) * px
 
 
 # how far the painted palm may sit from the simulation's hand and still be drawn to. 14 screen
@@ -13857,7 +13860,7 @@ func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
 		# a mirror that shows nothing when you buy a top hat is not a style limitation, it
 		# is a broken screen. The crown is drawn in the design's own accent so it belongs to
 		# the outfit rather than to the venue.
-		var fh := fig_design_height()
+		var fh := fig_design_height(px)
 		var head_c := Vector2(cx, floor_y - (1.0 - float(fig_design.get("head_cy", 0.06))) * fh)
 		var head_rr := float(fig_design.get("head_r", 0.055)) * fh
 		var acc := fig_design_col("cuff", cols["accent"])
@@ -21202,8 +21205,8 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	if not fig_anim_live():
 		var pv_sleeve := fig_design_col("sleeve", suit) if fig_design_on() else suit
 		var pv_cuff := fig_design_col("cuff", collar) if fig_design_on() else collar
-		draw_arm(fig_shoulder(o.x, floor_y, H, LEFT), hl, LEFT, skin, pv_sleeve, pv_cuff)
-		draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT), hr, RIGHT, skin, pv_sleeve, pv_cuff)
+		draw_arm(fig_shoulder(o.x, floor_y, H, LEFT, px), hl, LEFT, skin, pv_sleeve, pv_cuff)
+		draw_arm(fig_shoulder(o.x, floor_y, H, RIGHT, px), hr, RIGHT, skin, pv_sleeve, pv_cuff)
 		draw_mitt(hl, 0.0, 1.0)
 		draw_mitt(hr, 0.0, -1.0)
 	if turn > 0.0:
