@@ -88,6 +88,45 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   arm from its own hand. Sixteen source frames stop being sixteen poses and become sixteen
   squared, and the banks POOL ACROSS GENERATIONS, so the reach table is dense (27 entries over
   30..61 art px) rather than seven frames bunched at one reach.
+  - **THE LIVE GENERATOR IS `scripts/build_arm_rig.py`, NOT `build_arm_bank.py`** (rewritten
+    2026-08-12). The pooled-generations pipeline below is history: the bank now comes from ONE
+    source frame (`showman/source.png`), cut along the arm's own measured medial line into two
+    rigid bones that are rotated per pose by a two-bone IK solve. Same output schema, so
+    `fig_arm_pick` never knew. The three rules that keep it honest, each one paid for by a
+    version that shipped broken:
+    - **THE CORRIDOR THAT CLAIMS THE ARM MUST MATCH THE LIMB'S MEASURED THICKNESS** (12 art px
+      here, so `ARM_HALF_W` is 6-7.5 along the bone). The version this replaced had grown its
+      radius 6 -> 13 -> 16 chasing a "residual coat wedge" at the shoulder, and at 16 it was
+      cutting out a wedge of CHEST: rotating that shredded the shoulders and left a measured
+      23 art px hole of background between torso and sleeve. The leftover it was chasing is the
+      coat's puffed epaulette, which is torso, is supposed to stay behind, and is load-bearing -
+      it caps the joint at every angle, which is why `SHOULDER_INSET` pins the shoulder UNDER
+      it rather than on the silhouette edge. **Widening the corridor to swallow a leftover runs
+      the fix backwards.**
+    - **BOTH BONES ROTATE.** Freezing the upper arm at a rest angle leaves the hand on a circle
+      about a fixed elbow - reach 22..52 art px, where `inner_pos`/`outer_pos` alone want 27..50
+      and the columns lanes want wider. Louis's "keep the shoulder fixed" is about the JOINT not
+      sliding around the body, which a two-bone solve honours: the shoulder POSITION is pinned,
+      only the angles move. Sweep is now 20..55 art px.
+    - **THE END EFFECTOR IS THE HAND BLOB, AND THE TARGET ROW IS A CONSTANT.** Solve to the
+      fitted axis's end instead and the real hand swings around it as the forearm turns - 11.1
+      art px of spread in the published `py`, against a `FIG_PALM_MAX` guard of 7. Driving the
+      IK from the skin blob makes the flat hand line exact by construction (spread 3.0, all of
+      it the deliberate `PROP_ANCHOR_SHIFT`).
+    - **`--sheet` IS NOT THE CHECK; `check_connected` IS.** Six commits of "fix the arms" all
+      looked at pictures. The invariant that catches a severed arm is walking the
+      shoulder->elbow->wrist polyline of a composited pose and counting samples that land on a
+      transparent pixel: 0.0% at every reach, or it is broken. `sweep_orphans` is its twin -
+      anything left on the body that does not touch the torso blob is arm debris (79 px of
+      splayed fingertips, here) and gets swept back into the arm, which is what stops the
+      corridor width from being a tuning knob.
+    - The hand line sits `HAND_DROP_FRAC` (0.45) of an arm's length below the shoulder, NOT
+      where the source paints it. The generator draws this pose with the arms straight out
+      sideways, so its hands are at armpit height, and juggling there forces every inward pose
+      to put the hand almost under its own shoulder - which a two-bone chain can only do by
+      throwing the elbow out into a shrug. It cannot drop much further either: the whole arm is
+      40 art px and the shoulder sits 40 px above the game's canon hand line, so hip height is
+      a line this painting could only reach dead straight.
   - **An arm layer is the LIMB THE HAND IS ON, and nothing else** (2026-08-08). Two earlier
     rules are both wrong and both are recorded because each looks right. "The whole half of the
     arm band" puts half a TORSO in every layer, and since the two arms are chosen
