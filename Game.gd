@@ -561,7 +561,7 @@ const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher 
 # from the two ends of the seam, in screen px here and art px there, so this is exactly twice
 # that number. Out of step, `fig_hand_pos`'s FIG_PALM_MAX guard starts refusing painted palms and
 # props snap back to the simulated hand mid-run.
-const HAND_IN_DIP := 40.0
+const HAND_IN_DIP := 26.0
 const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
 const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
 const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line
