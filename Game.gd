@@ -549,7 +549,19 @@ const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher 
 # screen px above the hand holding it - up at the waistcoat, which is exactly Louis's "the
 # objects don't match the hand placement". Keep it in step with LIFT_FLAT in
 # build_arm_bank.py: the two describe the same hand line from the two ends of the seam.
-const HAND_IN_LIFT := 0.0
+# ...AND IT IS A DIP NOW, NOT A LIFT (2026-08-12, Louis's call). Both slots sat on one dead-level
+# line, so a hand slid in and out horizontally like a telescope and the painted arm - which has no
+# choice but to follow it - had to swing its shoulder 69 degrees to cover the travel, because the
+# joint is only 18 art px above that line and reaching inward along it folds the chain almost in
+# half. A real cascade does not do that: the hand carries DOWN and inward from the catch and comes
+# back up to throw. Dipping the inner slot matches the picture to the pattern and more than halves
+# the shoulder swing (69 -> 32 deg, elbow travel 22 -> 11 art px, both measured).
+#
+# Keep it in step with HAND_CARRY_DIP in build_arm_rig.py - the two describe the same hand line
+# from the two ends of the seam, in screen px here and art px there, so this is exactly twice
+# that number. Out of step, `fig_hand_pos`'s FIG_PALM_MAX guard starts refusing painted palms and
+# props snap back to the simulated hand mid-run.
+const HAND_IN_DIP := 40.0
 const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
 const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
 const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line
@@ -7858,7 +7870,7 @@ func inner_pos(h: int) -> Vector2:
 	# ~(outer - inner) apart), so shrinking both by the same amount narrows the whole
 	# stance without pulling the crossing weave into an overlap.
 	var c := stage_center()
-	var y := c.y - HAND_IN_LIFT      # ...and higher than the catch line - see HAND_IN_LIFT
+	var y := c.y + HAND_IN_DIP       # ...and BELOW the catch line - see HAND_IN_DIP
 	return Vector2(c.x - HAND_IN_DX, y) if h == LEFT else Vector2(c.x + HAND_IN_DX, y)
 
 

@@ -108,25 +108,39 @@ screen pixels tall and some three. Callers that place hands themselves must snap
       and the columns lanes want wider. Louis's "keep the shoulder fixed" is about the JOINT not
       sliding around the body, which a two-bone solve honours: the shoulder POSITION is pinned,
       only the angles move. Sweep is now 20..55 art px.
-    - **THE END EFFECTOR IS THE HAND BLOB, AND THE TARGET ROW IS A CONSTANT.** Solve to the
-      fitted axis's end instead and the real hand swings around it as the forearm turns - 11.1
-      art px of spread in the published `py`, against a `FIG_PALM_MAX` guard of 7. Driving the
-      IK from the skin blob makes the flat hand line exact by construction (spread 3.0, all of
-      it the deliberate `PROP_ANCHOR_SHIFT`).
-    - **`--sheet` IS NOT THE CHECK; `check_connected` IS.** Six commits of "fix the arms" all
-      looked at pictures. The invariant that catches a severed arm is walking the
-      shoulder->elbow->wrist polyline of a composited pose and counting samples that land on a
-      transparent pixel: 0.0% at every reach, or it is broken. `sweep_orphans` is its twin -
-      anything left on the body that does not touch the torso blob is arm debris (79 px of
-      splayed fingertips, here) and gets swept back into the arm, which is what stops the
-      corridor width from being a tuning knob.
-    - The hand line sits `HAND_DROP_FRAC` (0.45) of an arm's length below the shoulder, NOT
-      where the source paints it. The generator draws this pose with the arms straight out
-      sideways, so its hands are at armpit height, and juggling there forces every inward pose
-      to put the hand almost under its own shoulder - which a two-bone chain can only do by
-      throwing the elbow out into a shrug. It cannot drop much further either: the whole arm is
-      40 art px and the shoulder sits 40 px above the game's canon hand line, so hip height is
-      a line this painting could only reach dead straight.
+    - **THE END EFFECTOR IS THE HAND BLOB.** Solve to the fitted axis's end instead and the real
+      hand swings around it as the forearm turns - 11.1 art px of spread in the published `py`,
+      against a `FIG_PALM_MAX` guard of 7. Drive the IK from the skin blob.
+    - **A FRAME-AT-A-TIME CHECK CANNOT SEE A BAD ANIMATION, AND THIS IS THE LESSON OF THE WHOLE
+      SAGA.** The bank is a table the game steps along as the hand moves, so ADJACENT ENTRIES ARE
+      ANIMATION FRAMES. The first two-bone version chose its elbow branch with a world-space
+      score, and the winner of that score FLIPPED at reach 38 - dead in the middle of the range
+      the game uses - so the elbow teleported 30 art px and the upper arm swung 246 degrees
+      between two neighbouring entries. Every entry passed `check_connected`, every entry looked
+      right on its own, and Louis's verdict on the result was "the motion is completely
+      unnatural". `check_smooth` measures the worst STEP (a pop) and the total TRAVEL (a
+      windmill) along the sweep; both have shipped broken. **The branch must be a fixed property
+      of the side (`sign * (-uy, ux)`), never a comparison that something can win.**
+    - **THE HAND CARRY DIPS; IT DOES NOT LIFT** (and this is worth stating because Louis once
+      asked for the opposite in as many words - "make sure that the hands come back above the
+      path they took to go inwards"). The shoulder joint sits only 18 art px above the hand line,
+      so LIFTING the inward hand brings it closer to its own shoulder, folds the chain tighter
+      and swings the upper arm HARDER. Measured: lift 4 = 81 deg of swing, flat = 77, dip 20 =
+      32. A cascade's hands really do carry down and in from the catch and rise to throw.
+    - **`HAND_IN_DIP` (Game.gd) AND `HAND_CARRY_DIP` (build_arm_rig.py) ARE ONE NUMBER SEEN FROM
+      TWO SIDES** - screen px there, art px here, so the first is exactly twice the second. Both
+      slots used to sit on one dead-level line, and that flat line is what forced the shoulder to
+      swing 69 degrees to cover reach 27..50: with the joint pinned and a 40 art px arm, reaching
+      inward along a level line takes the hand from 87% of full extension to 48%, and the two
+      elbow positions that satisfy those ends are 22 art px apart. **That was geometry, not
+      tuning - no solver or art change could shrink it, only moving the hand off the level line.**
+      Dipping the inner slot 40 screen px more than halves the swing (69 -> 32 deg, elbow travel
+      22 -> 11 art px) and collcheck is unchanged (17.8 px, same as before). Out of step with each
+      other, `fig_hand_pos` starts refusing painted palms and props snap back mid-run.
+    - **`hand_py` IS THE CATCH LINE, NOT A MEDIAN OVER THE SWEEP.** `stage_center` places the
+      whole figure so that row lands on the game's hand line, and that line is `outer_pos` - the
+      level one. Now that the carry dips 20 art px, a median would sit half a dip low, drawing
+      the man 10 art px down at exactly the moment a catch is judged.
   - **An arm layer is the LIMB THE HAND IS ON, and nothing else** (2026-08-08). Two earlier
     rules are both wrong and both are recorded because each looks right. "The whole half of the
     arm band" puts half a TORSO in every layer, and since the two arms are chosen
@@ -153,7 +167,9 @@ screen pixels tall and some three. Callers that place hands themselves must snap
       entries covering hair, outline, collar and lapels; a mask built from that lights up
       3,210 px of torso as one blob and no hand can be found inside it. Subtracting everything
       painted below the arm band leaves the skin ramp, filtered by `SKIN_MIN_SHARE`.
-  - **The bank's hand line is FLAT, because the GAME's is.** `outer_pos` sits at
+  - **(SUPERSEDED 2026-08-12 - the hand line DIPS now, see `HAND_IN_DIP` above. The reasoning
+    below is still why a bank may not invent a hand height the game does not share.)**
+    **The bank's hand line is FLAT, because the GAME's is.** `outer_pos` sits at
     `stage_center().y` at every reach. Letting the far buckets follow the art (a ramp to +0.20
     by reach 66) describes the poses honestly and is still wrong: `fig_hand_pos`'s
     `FIG_PALM_MAX` guard then refuses those palms, the prop snaps back to the simulated hand,
