@@ -123,20 +123,39 @@ screen pixels tall and some three. Callers that place hands themselves must snap
       of the side (`sign * (-uy, ux)`), never a comparison that something can win.**
     - **THE HAND CARRY DIPS; IT DOES NOT LIFT** (and this is worth stating because Louis once
       asked for the opposite in as many words - "make sure that the hands come back above the
-      path they took to go inwards"). The shoulder joint sits only 18 art px above the hand line,
-      so LIFTING the inward hand brings it closer to its own shoulder, folds the chain tighter
-      and swings the upper arm HARDER. Measured: lift 4 = 81 deg of swing, flat = 77, dip 20 =
-      32. A cascade's hands really do carry down and in from the catch and rise to throw.
-    - **`HAND_IN_DIP` (Game.gd) AND `HAND_CARRY_DIP` (build_arm_rig.py) ARE ONE NUMBER SEEN FROM
-      TWO SIDES** - screen px there, art px here, so the first is exactly twice the second. Both
-      slots used to sit on one dead-level line, and that flat line is what forced the shoulder to
-      swing 69 degrees to cover reach 27..50: with the joint pinned and a 40 art px arm, reaching
-      inward along a level line takes the hand from 87% of full extension to 48%, and the two
-      elbow positions that satisfy those ends are 22 art px apart. **That was geometry, not
-      tuning - no solver or art change could shrink it, only moving the hand off the level line.**
-      Dipping the inner slot 40 screen px more than halves the swing (69 -> 32 deg, elbow travel
-      22 -> 11 art px) and collcheck is unchanged (17.8 px, same as before). Out of step with each
-      other, `fig_hand_pos` starts refusing painted palms and props snap back mid-run.
+      path they took to go inwards"). Lifting the inward hand brings it CLOSER to its own
+      shoulder, folds the chain tighter and swings the upper arm HARDER: lift 4 = 81 deg of
+      swing, flat = 77, dip = far less. A cascade's hands really do carry down and in.
+    - **THE DIP AND THE HAND-LINE DROP ARE ONE SETTING IN TWO PARTS** (`HAND_CARRY_DIP` +
+      `HAND_DROP_FRAC`, mirrored in Game.gd by `HAND_IN_DIP`). Both push the hand away from the
+      joint and the arm is a fixed 40 art px, so tuning either alone overshoots: drop 0.62 with
+      dip 20 puts the inner hand 45 px out, the solve clamps, and half the sweep comes back a
+      DEAD STRAIGHT STICK - a worse read than the right angle it was fixing. **What the pair is
+      really for is holding the hand a NEAR-CONSTANT distance from its own shoulder across the
+      carry**; do that and the arm swings as one nearly rigid unit, which gives the slight even
+      bend and the smallest elbow travel at the same time. Measured at drop 0.62: dip 10 = bend
+      wandering 123..159 deg / elbow 9.8 px; **dip 13 = bend a steady 142..147 / elbow 13.9 px /
+      shoulder 39.8 deg (chosen)**; dip 16 clamps straight over the inner third. For scale, the
+      version Louis rejected ran elbow travel 43 px and shoulder swing 137 deg.
+    - **THE ELBOW POINTS OUTBOARD** (`sign * (uy, -ux)`), away from the ribs. The other branch
+      tucks it in behind the forearm and reads as an angular chicken wing at this size. A/B'd on
+      the figure, not reasoned about.
+    - **RAISING THE JOINT OFF THE MEDIAL AXIS DOES NOT STRAIGHTEN THE ARM**, though it looks like
+      it must. Both bones are cut BETWEEN the joint and the hand, so moving the joint lengthens
+      the arm by as much as it adds distance, and Pythagoras means the length wins: rise 0 -> 119
+      deg, rise 10 -> 114, while connectivity collapsed 3.7% -> 45% as the corridor started
+      eating coat above the real arm.
+    - **THE SOURCE POSE HAS A HOLE IN EACH ARMPIT AND IT MUST BE PAINTED** (`seal_sockets`,
+      ~40 px). The generator drew the arms straight out sideways, which leaves a genuine V of
+      BACKGROUND under each arm - measured, transparent source pixels at x 54..57, y 44..47. The
+      horizontal arm hid it; swing the arm down to juggle and it opens between coat and sleeve,
+      which is Louis's "the shoulders aren't connected to the arms". Every cut-out rig has to
+      paint what its source pose hid: a local morphological CLOSE around the joint, coloured from
+      the nearest existing body pixel so the fabric is the coat's own, windowed so it can never
+      reshape the silhouette anywhere else.
+    - **A PROBE THAT STARTS INSIDE THE TORSO PROVES NOTHING.** check_connected originally walked
+      from the joint, which is pinned INSIDE the coat, so it crossed opaque fabric the whole way
+      and reported 0.0% while the armpit gaped. It starts at the socket rim now.
     - **`hand_py` IS THE CATCH LINE, NOT A MEDIAN OVER THE SWEEP.** `stage_center` places the
       whole figure so that row lands on the game's hand line, and that line is `outer_pos` - the
       level one. Now that the carry dips 20 art px, a median would sit half a dip low, drawing

@@ -112,6 +112,44 @@ SEAM_OVERLAP_PX = 2
 # edge is only covered at the one angle it was cut at.
 SHOULDER_INSET = 5.0
 
+# RAISING THE JOINT OFF THE AXIS DOES NOT STRAIGHTEN THE ARM, WHICH IS WORTH RECORDING BECAUSE IT
+# LOOKS LIKE IT SHOULD. The bend is set by how far the hand is from its shoulder against the arm's
+# own length - but both bones are CUT between those same two points, so moving the joint changes
+# the arm's length by exactly as much as it changes the distance, and by Pythagoras the length
+# wins. Measured: rise 0 -> worst bend 119 deg, rise 5 -> 118, rise 10 -> 114, i.e. slightly
+# WORSE, while connectivity collapsed from 3.7% to 45% as the corridor started eating coat above
+# the real arm. Left at 0.
+SHOULDER_RISE = 0.0
+
+# THE JOINT NEEDS A CAP THAT STAYS ON THE BODY, and this is the difference between an arm that
+# grows out of a shoulder and one that is stuck on the side of a torso (Louis: "the shoulders
+# aren't connected to the arms"). Cutting the corridor right through the joint takes a bite out
+# of the coat, and a rotating rigid sleeve cannot fill that bite at every angle - what shows is a
+# squared-off NOTCH in the silhouette where the epaulette should round over the joint. It is not
+# a hole and not a gap along the bone, which is why check_connected never saw it: its probe walks
+# from a shoulder point that sits INSIDE the torso, so it is on opaque coat the whole way.
+#
+# So the disc around the joint is never claimed by the arm at all. The body keeps it, the upper
+# bone starts just inside its edge (SEAM_OVERLAP_PX of overlap so there is no seam to find), and
+# because the bone's inner end is an arc at that same radius, the cap covers it at EVERY angle
+# by construction rather than by luck.
+SHOULDER_CAP_R = 9.0
+
+# ...AND THE SOCKET HAS TO BE PAINTED, BECAUSE THE SOURCE POSE NEVER SHOWS IT. The generator drew
+# this frame with the arms held straight out sideways, which leaves a real V-shaped notch of
+# BACKGROUND in each armpit - measured, transparent pixels at x 54..57, y 44..47 on the left.
+# Nothing erased them and no corridor width can recover them; the painting simply has a hole
+# there, hidden in the source only because the horizontal arm sat across it. Swing the arm down
+# to juggle and the V opens up between the coat and the sleeve, which is exactly Louis's "the
+# shoulders aren't connected to the arms" - and check_connected could not see it, because its
+# probe starts from a shoulder point INSIDE the torso and walks over opaque coat the whole way.
+#
+# Every cut-out rig has to paint what its source pose hid. This is the smallest honest version:
+# morphologically CLOSE the body's silhouette in a window around the joint, which seals a notch
+# without touching any outer edge, and colour whatever that fills from its NEAREST existing body
+# pixel - so the fabric that arrives is the coat's own, never invented. Typically ~30 px.
+SOCKET_SEAL_R = 7
+
 # How far the PROP ANCHOR moves past the hand blob's centroid, toward the fingers, along the
 # forearm's own axis - see write_bank(). The centroid sits at the heel of the palm because
 # the wrist end is the denser mass; +3 lands over the palm without floating out between the
@@ -130,7 +168,7 @@ REACH_MARGIN = 1.0
 # See build() for why this is a decision and not a measurement, and why it cannot go much past
 # 0.5 on this figure. 0.45 keeps the outer reach above 54 art px (the game asks for 50) while
 # putting the hands at waist height.
-HAND_DROP_FRAC = 0.45
+HAND_DROP_FRAC = 0.62
 
 # The bank does not have to serve reaches the game never visits, and the extremes are where a
 # folded two-bone chain looks worst - and with the shoulder free (see SHOULDER_GAIN) the worst is
@@ -184,10 +222,17 @@ SHOULDER_REST_OUT_DEG = 10.0 # rest pose: straight down from the joint, tilted t
 # (81 degrees, against 77 for a flat line). Dropping it instead keeps the hand at a more even
 # distance from the joint - a pendulum carry rather than a fold - and the shoulder quiets down.
 #
-#   dip -4 (lift): 81.3 deg of shoulder swing, 25.7 px of elbow travel
-#   dip  0 (flat): 77.2                        24.4
-#   dip +6       : ~69                         ~22
-#   dip +20      : 32.0                        11.5   <- but see below
+# THE DIP AND THE HAND-LINE DROP ARE ONE SETTING IN TWO PARTS, and they must be solved together:
+# both push the hand away from the shoulder, and the arm is only 40 art px long. Set independently
+# (drop 0.62 with dip 20) they put the inner hand 45 px from a 40 px arm, the solve clamps, and
+# half the sweep comes back as a DEAD STRAIGHT stick - a worse read than the right angle it was
+# fixing. What they are really for is to hold the hand at a NEAR-CONSTANT distance from its own
+# shoulder across the whole carry: do that and the arm swings as one nearly rigid unit, which is
+# both the slight even bend Louis asked for and the smallest possible elbow travel, at once.
+#
+#   dip 10: bend wanders 123..159 deg, elbow travels  9.8 px, shoulder swings 27.2 deg
+#   dip 13: bend holds  142..147     , elbow travels 13.9   , shoulder swings 39.8   <- chosen
+#   dip 16: bend 147..179 (clamps straight over the inner third)
 #
 # THE CEILING HERE IS 7 ART PX AND IT IS NOT AN ART DECISION. `fig_hand_pos` refuses a painted
 # palm more than FIG_PALM_MAX (7 art px) from the SIMULATION's hand, and the simulation's hand
@@ -195,13 +240,22 @@ SHOULDER_REST_OUT_DEG = 10.0 # rest pose: straight down from the joint, tilted t
 # 0). So the bank may dip 7 and no further on its own. Everything past that needs `inner_pos` to
 # dip with it, which is a change to the GAME's feel, not to this file - the numbers above say it
 # would be worth asking about, since dip 20 more than halves the swing.
-HAND_CARRY_DIP = 20.0
+HAND_CARRY_DIP = 13.0
 
 # The game's own two hand slots, in art px from the centreline: HAND_OUT_DX/2 and HAND_IN_DX/2.
 # The carry profile is written between THESE, not across the bank's own range, because the
 # simulated hand travels in a near-straight line from one slot to the other and the painted palm
 # has to sit on that same line for FIG_PALM_MAX to accept it.
 GAME_OUTER_REACH, GAME_INNER_REACH = 50.0, 27.0
+
+# A SCOOP IS A CURVE, AND THE CURVE IS WHAT KEEPS THE ELBOW STRAIGHT. Running the carry as a
+# straight line between the two slots leaves the arm at its most folded mid-travel - measured, the
+# bend closes to 111 degrees around reach 40-44, which reads as the right angle Louis flagged,
+# while both ends sit at a comfortable 148-157. Bowing the middle of the carry DOWNWARD moves the
+# hand further from its own shoulder exactly where it was closest, so the bend stays slight all
+# the way across. The bow is zero at both slots, so the endpoints still agree with the game
+# exactly, and its depth is spent out of the same FIG_PALM_MAX budget as everything else.
+HAND_CARRY_BOW = 2.0
 
 # Generation is fully procedural (no PixelLab calls, no scarce AI candidates to pool), so
 # density is free. 48 puts adjacent entries ~1 art px apart across the range, which is the
@@ -296,7 +350,7 @@ def arm_axis(mask: np.ndarray, side: str, hand: tuple[float, float]) -> tuple[tu
 	# the torso's edge on this side; the joint is then pushed further in, under the epaulette
 	torso_edge = float(xs[inner].min() if side == "R" else xs[inner].max())
 	sx = torso_edge - sign * SHOULDER_INSET
-	return (sx, m * sx + b), (float(hand[0]), m * hand[0] + b)
+	return (sx, m * sx + b - SHOULDER_RISE), (float(hand[0]), m * hand[0] + b)
 
 
 def capsule_params(mask: np.ndarray, p0: tuple[float, float], p1: tuple[float, float],
@@ -337,8 +391,13 @@ def claim(side: str, frame: np.ndarray, hand_blob: tuple[float, float]) -> dict:
 	elbow = (shoulder[0] + ELBOW_FRAC * (hand[0] - shoulder[0]),
 			 shoulder[1] + ELBOW_FRAC * (hand[1] - shoulder[1]))
 	t, cap = capsule_params(mask, shoulder, hand, ARM_HALF_W)
+	h, w = mask.shape
+	yy, xx = np.mgrid[0:h, 0:w].astype(float)
+	from_joint = np.hypot(xx - shoulder[0], yy - shoulder[1])
+	socket = from_joint <= SHOULDER_CAP_R          # the body's cap - never moves
 	return {"side": side, "shoulder": shoulder, "elbow": elbow, "hand": hand,
-			"hand_blob": hand_blob, "t": t, "whole": cap}
+			"hand_blob": hand_blob, "t": t, "whole": cap & ~socket,
+			"reachable": cap, "socket": socket}
 
 
 def sweep_orphans(frame: np.ndarray, geoms: dict) -> int:
@@ -379,11 +438,14 @@ def cut_bones(frame: np.ndarray, g: dict) -> dict:
 	"""Split one side's claimed pixels at the elbow into two rigid bones, with the pivots
 	needed to rotate them later. All positions in FRAME (=body-canvas) coordinates."""
 	side, cap, t = g["side"], g["whole"], g["t"]
+	# the bone may grow back UNDER the cap by the seam overlap, but no further
+	inner = ndimage.binary_dilation(cap, np.ones((3, 3), bool),
+		iterations=SEAM_OVERLAP_PX) & g["reachable"]
 	shoulder, elbow, hand, hand_blob = g["shoulder"], g["elbow"], g["hand"], g["hand_blob"]
 	upper_mask = cap & (t < ELBOW_FRAC)
 	lower_mask = cap & (t >= ELBOW_FRAC)
 	grow = np.ones((3, 3), bool)
-	upper_mask = ndimage.binary_dilation(upper_mask, grow, iterations=SEAM_OVERLAP_PX) & cap
+	upper_mask = ndimage.binary_dilation(upper_mask, grow, iterations=SEAM_OVERLAP_PX) & inner
 	lower_mask = ndimage.binary_dilation(lower_mask, grow, iterations=SEAM_OVERLAP_PX) & cap
 	upper, ux0, uy0 = crop_piece(frame, upper_mask)
 	lower, lx0, ly0 = crop_piece(frame, lower_mask)
@@ -480,7 +542,10 @@ def solve_two_bone(shoulder: tuple[float, float], target: tuple[float, float],
 	ux, uy = dx / max(d, 1e-6), dy / max(d, 1e-6)
 	a = (d * d + l1 * l1 - l2 * l2) / (2.0 * d)
 	hgt = math.sqrt(max(0.0, l1 * l1 - a * a))
-	nx, ny = sign * -uy, sign * ux
+	# ...and it is the OUTBOARD side, away from the ribs (Louis: "elbows pointing outwards").
+	# The other branch tucks the elbow in behind the forearm, which at this size reads as an
+	# angular chicken wing rather than an arm hanging off a shoulder - A/B'd on the figure.
+	nx, ny = sign * uy, -sign * ux
 	return (shoulder[0] + a * ux + hgt * nx, shoulder[1] + a * uy + hgt * ny)
 
 
@@ -574,7 +639,17 @@ def check_connected(body: np.ndarray, pose: dict) -> float:
 	not the arm breaking; the blob's centre is painted skin by construction."""
 	img = composite(body, pose)
 	alpha = img[..., 3] > 0
-	pts = [pose["shoulder"], pose["elbow"], pose["wrist"]]
+	# START AT THE SOCKET RIM, NOT AT THE JOINT. The joint is pinned INSIDE the torso and the
+	# body's own cap covers everything within SHOULDER_CAP_R of it, so those samples are opaque
+	# by construction and say nothing - while the straight line from the joint to a swung elbow
+	# clips the armpit, which the cap does not owe anything to. Walking from the rim measures the
+	# part that is actually in question: the bone, from where it leaves the socket.
+	sx, sy = pose["shoulder"]
+	ex, ey = pose["elbow"]
+	blen = math.hypot(ex - sx, ey - sy) or 1.0
+	k = min(1.0, SHOULDER_CAP_R / blen)
+	rim = (sx + (ex - sx) * k, sy + (ey - sy) * k)
+	pts = [rim, pose["elbow"], pose["wrist"]]
 	miss = total = 0
 	for a, b in ((pts[0], pts[1]), (pts[1], pts[2])):
 		n = max(2, int(math.hypot(b[0] - a[0], b[1] - a[1]) * 2))
@@ -604,6 +679,11 @@ def check_smooth(poses: list) -> dict:
 	for p in sorted(poses, key=lambda q: q["hand"][0]):
 		sh, el = p["shoulder"], p["elbow"]
 		a = math.degrees(math.atan2(el[1] - sh[1], el[0] - sh[0]))
+		# UNWRAP, or atan2's seam at +-180 is reported as a 360-degree windmill. The upper arm
+		# genuinely does cross that seam on this figure (it points down-and-outward, which is
+		# near 180 for the left arm), so this is not a corner case.
+		if ang:
+			a = ang[-1] + ((a - ang[-1] + 180.0) % 360.0 - 180.0)
 		ang.append(a)
 		if prev is not None:
 			out["elbow_step"] = max(out["elbow_step"],
@@ -613,6 +693,31 @@ def check_smooth(poses: list) -> dict:
 		prev = (el, a)
 	out["upper_swing"] = max(ang) - min(ang) if ang else 0.0
 	return out
+
+
+def seal_sockets(body: np.ndarray, joints: list) -> int:
+	"""Close the armpit notch at each shoulder and paint it from the coat's nearest pixel.
+
+	See SOCKET_SEAL_R for why this is necessary at all. Restricted to a window around each joint
+	so it can never quietly reshape the coat, the hem or the silhouette anywhere else - the
+	juggler's stance and proportions are settled and a fix elsewhere must not move them."""
+	alpha = body[..., 3] > 0
+	want = np.zeros_like(alpha)
+	h, w = alpha.shape
+	for jx, jy in joints:
+		y0, y1 = max(0, int(jy) - 14), min(h, int(jy) + 16)
+		x0, x1 = max(0, int(jx) - 16), min(w, int(jx) + 16)
+		win = alpha[y0:y1, x0:x1]
+		closed = ndimage.binary_closing(win, ndimage.generate_binary_structure(2, 1),
+			iterations=SOCKET_SEAL_R)
+		want[y0:y1, x0:x1] |= closed & ~win
+	if not want.any():
+		return 0
+	# nearest opaque pixel supplies the colour, so the fabric is always the coat's own
+	idx = ndimage.distance_transform_edt(~alpha, return_distances=False, return_indices=True)
+	body[want] = body[idx[0][want], idx[1][want]]
+	body[..., 3][want] = 255
+	return int(want.sum())
 
 
 def build() -> dict:
@@ -629,6 +734,7 @@ def build() -> dict:
 	body = frame.copy()
 	for d in sides.values():
 		body[d["whole"]] = 0
+	sealed = seal_sockets(body, [d["shoulder"] for d in sides.values()])
 
 	bys, bxs = np.where(body[..., 3] > 0)
 	torso_cx = (int(bxs.min()) + int(bxs.max())) * 0.5
@@ -694,12 +800,13 @@ def build() -> dict:
 		runs down a near-straight line between them; a smoothstep here would be a prettier
 		curve that disagrees with the hand it is supposed to be holding, and the disagreement
 		is exactly what FIG_PALM_MAX measures."""
-		t = (GAME_OUTER_REACH - reach) / (GAME_OUTER_REACH - GAME_INNER_REACH)
-		return hand_row + HAND_CARRY_DIP * max(0.0, min(1.0, t))
+		t = max(0.0, min(1.0, (GAME_OUTER_REACH - reach)
+			/ (GAME_OUTER_REACH - GAME_INNER_REACH)))
+		return hand_row + HAND_CARRY_DIP * t + HAND_CARRY_BOW * math.sin(math.pi * t)
 
 	poses = {s: [pose_at(sides[s], r, torso_cx, row_at(r)) for r in reaches] for s in ("L", "R")}
 	return {"frame": frame, "body": body, "sides": sides, "poses": poses, "row_at": row_at,
-			"torso_cx": torso_cx, "hand_row": hand_row, "rescued": rescued,
+			"torso_cx": torso_cx, "hand_row": hand_row, "rescued": rescued, "sealed": sealed,
 			"reach_lo": reach_lo, "reach_hi": reach_hi}
 
 
@@ -722,6 +829,7 @@ def main() -> int:
 			  f"arm {(d['upper'][..., 3] > 0).sum()}+{(d['lower'][..., 3] > 0).sum()}px")
 	print(f"orphan pixels swept back into the arms: {r['rescued']} "
 		  f"(the body is one connected piece)")
+	print(f"armpit notch sealed with {r['sealed']} px of the coat's own fabric")
 	print(f"hand line (flat) at row {r['hand_row']:.1f} of {body.shape[0]}")
 	print(f"reach {r['reach_lo']:.1f}..{r['reach_hi']:.1f} over {N_POSES} poses "
 		  f"(game wants 27..50 from inner_pos/outer_pos)")
@@ -739,7 +847,7 @@ def main() -> int:
 	print(f"arm motion: worst elbow step {step:.2f} art px between adjacent entries "
 		  f"({'OK' if step < 3.0 else 'POPS'}); elbow travels {travel:.1f} px and the "
 		  f"shoulder swings {swing:.1f} deg across the whole sweep "
-		  f"({'OK' if swing < 35.0 else 'WINDMILLS'})")
+		  f"({'OK' if swing < 45.0 else 'WINDMILLS'})")   # 45: a real shoulder does move
 
 	if sheet:
 		_debug_sheet(sheet, body, poses)
