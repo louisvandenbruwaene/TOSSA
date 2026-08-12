@@ -11,14 +11,17 @@ entire project is clutter").
 THE FIX. Take the single best source frame (Assets/Characters/showman/source.png - arms
 held outward, per armlib's own comment "the hand-made still the whole animation was grown
 from"). Cut each arm at the elbow into two rigid pieces: the upper arm and the forearm+hand.
-The source pose holds both arms up in a "ta-da" presentation gesture, well above where a
-juggler's catching hand actually sits - so BOTH joints are re-angled per pose from a shared
-rest position (see joint_angles), but the upper arm's own sweep is a fraction of the
-forearm's (55deg vs 125deg across the whole reach range - see UPPER_ANGLE_*/FOREARM_ANGLE_*)
-so in the common case it reads as "slight movement if any", while the forearm supplies the
-"circular movement" Louis asked for. Every pose is the same source pixels moved by a rigid
-rotation, so nothing is ever redrawn or reinterpreted frame to frame - the geometry, not a
-statistical vote across noisy generations, is what keeps the man from twitching.
+The upper arm is rotated to ONE rest angle and baked into the body PERMANENTLY (Louis: "the
+shoulder... i want that to remain fixed") - it is not a per-pose piece at all any more, it is
+part of juggle_body.png. Only the forearm+hand pivots, around that now-fixed elbow, sweeping
+the whole reach range. The sweep is shaped to pass through the TOP of its circle rather than
+the bottom (Louis: "make sure the hands come back above the path they took to go inwards") -
+reach and height both come from ONE forearm angle, so the inward and outward legs are
+necessarily the same arc read backwards, but shaping that arc to bow upward through its
+middle keeps the whole sweep elevated instead of drooping through the low point of the circle
+on the way in. Every pose is the same source pixels moved by a rigid rotation, so nothing is
+ever redrawn or reinterpreted frame to frame - the geometry, not a statistical vote across
+noisy generations, is what keeps the man from twitching.
 
 Output is written in the EXACT schema build_arm_bank.py already produces (juggle_body.png,
 juggle_arms.png/.json, the _ARMS block in art_manifest.json) - Game.gd's fig_arm_pick does
@@ -224,81 +227,109 @@ def paste(dst: np.ndarray, piece: np.ndarray, top_left: tuple[int, int]) -> None
 	dst[dy0:dy0 + h, dx0:dx0 + w][m] = src[m]
 
 
-# Both joint angles are authored curves over the sweep parameter s in [0,1], not a solved
-# IK target - simpler, and it gives direct control over how much each joint moves. Degrees
-# below horizontal, tilted outward (0 = arm straight out sideways, 90 = straight down).
+# THE SHOULDER IS FIXED (Louis: "right now you are pivoting around the shoulder, i want that
+# to remain fixed. instead i want you to pivot around the elbow"). One rest angle, applied
+# ONCE to bake the upper piece into the body - it is never a per-pose piece again, and the
+# elbow position that falls out of it is therefore fixed too, for every pose on this side.
+# Degrees below horizontal, tilted outward (0 = arm straight out sideways, 90 = straight down).
+# 68 (rather than a more relaxed 45-55) keeps the elbow close enough to the torso centreline
+# that outer_pos()'s own idle reach (50 art px - hpos starts every act there) lands only ~13
+# degrees off the circle's own most-extended point: see REACH_HI below and its own comment.
+UPPER_REST_ANGLE = 68.0
+
+# THE FOREARM RISES AS IT COMES IN, NOT DROOPS (Louis: "make sure that the hands come back
+# above the path they took to go inwards"). A single reach-keyed lookup can only ever hold
+# ONE angle per reach - going in and coming back out are mechanically the same arc read in
+# opposite order, so this is read as: as reach falls, height must not fall with it.
 #
-# UPPER_ANGLE moves gently (80 deg at rest -> 40 deg at full reach): most of the sweep never
-# needs it much extended, so in the common case it reads as "slight movement if any". It
-# only opens toward horizontal for the rare wide reaches columns needs at 6-7 objects.
-# FOREARM_ANGLE does the real work, swinging from tucked-under to nearly straight out - the
-# "circular movement in the lower arm" Louis asked for.
-# The inner end was 85/110 (reach 17.6) - short of FIG_PALM_MAX's ~7 art px, so a columns
-# hand standing under a central lane always fell back to draw_figure_palm's separate cut-out
-# hand while the sleeve stayed visibly stuck out at 17.6, reading as two disconnected pieces.
-# Pushed further in: 95/150 reaches 3.0, past the fallback boundary, so the sleeve itself now
-# carries the hand most of the way to centre and the fallback (still needed for the true
-# dead-centre case - no static rig reaches an arm folded across the belly) has far less gap
-# left to cover.
-UPPER_ANGLE_LO, UPPER_ANGLE_HI = 95.0, 30.0
-FOREARM_ANGLE_LO, FOREARM_ANGLE_HI = 150.0, -15.0
+# SAMPLED BY REACH, NOT BY ANGLE - the earlier angle-linear sweeps (first 0/-175, then
+# 0/-130) put the geometry in charge of how reach maps to s, and on a circle that mapping is
+# very uneven: reach barely changes near the circle's most-extended point (where d(reach)/
+# d(angle) ~ sin(angle) ~ 0) while height changes fast there, so EVERY angle-linear attempt
+# put ordinary, common reaches (not just the fully-tucked extreme) up near shoulder/collar
+# height - measured in game, a normal idle hold with nothing extended had the ball at his
+# chin. Solving the angle FROM a chosen reach (`solve_forearm_angle`) instead means reach
+# coverage is exactly what REACH_LO/REACH_HI say, no more no less, and height is whatever the
+# circle honestly gives at that reach - still rising as reach falls, just not compressed into
+# the geometry's own uneven pacing.
+#
+# REACH_HI = 52.0 is UPPER_REST_ANGLE's own max reach (elbow_offset + fore_len) - the
+# circle's single most-extended point, angle 0, dead level with the elbow: not a arbitrary
+# cap, it is the largest reach this fixed elbow can serve at all. outer_pos()'s idle reach of
+# 50 sits within 2 art px of it, so the pose the player sees before ever moving a hand is
+# already close to level, not elevated - that was the actual bug, not "elevation exists".
+# REACH_LO = 22.0 stops just past where height peaks (~30, measured) and starts gently
+# reversing - a small, accepted softening rather than the sharp far-end reversals earlier
+# sweeps had. Below this, draw_figure_palm's pre-existing fallback carries the columns
+# dead-centre lane, same as it always has.
+REACH_HI, REACH_LO = 52.0, 22.0
 
 
-def joint_angles(s: float) -> tuple[float, float]:
-	return (UPPER_ANGLE_LO + (UPPER_ANGLE_HI - UPPER_ANGLE_LO) * s,
-			FOREARM_ANGLE_LO + (FOREARM_ANGLE_HI - FOREARM_ANGLE_LO) * s)
+def solve_forearm_angle(elbow_offset: float, fore_len: float, reach: float) -> float:
+	"""The (upper-branch, i.e. elevated-as-it-comes-in) forearm angle that puts the hand at
+	this reach from a fixed elbow sitting elbow_offset art px out from centre. Undefined
+	(clamped) past the circle's own extent - REACH_HI is chosen to never need that."""
+	x = max(-1.0, min(1.0, (reach - elbow_offset) / fore_len))
+	return -math.degrees(math.acos(x))
 
 
-def pose_at(d: dict, s: float) -> dict:
-	"""Rotate this side's upper+forearm pieces to the joint angles for sweep position s.
-	Returns world-space pivots/pieces ready to composite, plus the resulting (reach, py)."""
+def fixed_elbow(d: dict) -> tuple[float, float]:
+	"""The one elbow position this side ever has, from the one baked upper-arm angle."""
+	sign = -1.0 if d["side"] == "L" else 1.0
+	up_dir = (sign * math.cos(math.radians(UPPER_REST_ANGLE)), math.sin(math.radians(UPPER_REST_ANGLE)))
+	return (d["shoulder"][0] + d["upper_len"] * up_dir[0],
+			d["shoulder"][1] + d["upper_len"] * up_dir[1])
+
+
+def bake_upper(d: dict, elbow: tuple[float, float]) -> np.ndarray:
+	"""Rotate the upper piece so its far end lands exactly on the fixed elbow point, in a
+	canvas the same size as the piece's own padded rotation - see rotate_about. Derives the
+	rotation from the actual target DIRECTION (atan2), the same way pose_at does for the
+	forearm, rather than mapping UPPER_REST_ANGLE's own sign convention by hand - that was
+	tried first and got the L/R mirroring wrong."""
+	src_up_deg = math.degrees(math.atan2(d["elbow"][1] - d["shoulder"][1],
+										  d["elbow"][0] - d["shoulder"][0]))
+	tgt_up_deg = math.degrees(math.atan2(elbow[1] - d["shoulder"][1], elbow[0] - d["shoulder"][0]))
+	return rotate_about(d["upper"], d["upper_pivot_local"], -(tgt_up_deg - src_up_deg))
+
+
+def pose_at(d: dict, reach: float, elbow: tuple[float, float], elbow_offset: float) -> dict:
+	"""Rotate this side's forearm to reach this target reach, about the FIXED elbow.
+	Returns world-space pivot/piece ready to composite, plus the resulting (reach, py)."""
 	side = d["side"]
 	sign = -1.0 if side == "L" else 1.0   # L points toward -x (outward, away from torso)
-	up_deg, fore_deg = joint_angles(s)
-	up_dir = (sign * math.cos(math.radians(up_deg)), math.sin(math.radians(up_deg)))
-	elbow = (d["shoulder"][0] + d["upper_len"] * up_dir[0],
-			 d["shoulder"][1] + d["upper_len"] * up_dir[1])
+	fore_deg = solve_forearm_angle(elbow_offset, d["fore_len"], reach)
 	fore_dir = (sign * math.cos(math.radians(fore_deg)), math.sin(math.radians(fore_deg)))
 	hand = (elbow[0] + d["fore_len"] * fore_dir[0], elbow[1] + d["fore_len"] * fore_dir[1])
 
 	# PIL rotate() turns CCW for +angle in an x-right/y-down frame, i.e. visually CW; sign
-	# empirically checked against the debug sheet (s=0 must reproduce ~ the baked rest pose).
-	src_up_deg = math.degrees(math.atan2(d["elbow"][1] - d["shoulder"][1],
-										  d["elbow"][0] - d["shoulder"][0]))
-	tgt_up_deg = math.degrees(math.atan2(elbow[1] - d["shoulder"][1], elbow[0] - d["shoulder"][0]))
-	up_rot = rotate_about(d["upper"], d["upper_pivot_local"], -(tgt_up_deg - src_up_deg))
-
+	# empirically checked against the debug sheet.
 	src_fo_deg = math.degrees(math.atan2(d["hand"][1] - d["elbow"][1], d["hand"][0] - d["elbow"][0]))
 	tgt_fo_deg = math.degrees(math.atan2(hand[1] - elbow[1], hand[0] - elbow[0]))
 	fo_rot = rotate_about(d["lower"], d["lower_pivot_local"], -(tgt_fo_deg - src_fo_deg))
 
-	return {"side": side, "s": s, "elbow": elbow, "hand": hand,
-			"upper_rot": up_rot, "forearm_rot": fo_rot}
+	return {"side": side, "elbow": elbow, "hand": hand, "forearm_rot": fo_rot}
 
 
-def pose_layer(d: dict, pose: dict, pad: int = 40, margin: int = 40) -> tuple[np.ndarray, int, int]:
-	"""This pose's upper+forearm pieces composited together and tight-cropped to one small
-	RGBA layer, with its (ox, oy) offset back into BODY-canvas coordinates - matching the
-	{layer, ox, oy} shape build_arm_bank.py's atlas entries already use. ox/oy may come out
-	negative (a wide-reach pose extends further than the body cell itself, same as the old
-	pipeline's own documented case) - a big enough margin keeps that from clipping."""
+def pose_layer(pose: dict, pad: int = 40, margin: int = 40) -> tuple[np.ndarray, int, int]:
+	"""This pose's forearm piece, tight-cropped to one small RGBA layer, with its (ox, oy)
+	offset back into BODY-canvas coordinates - matching the {layer, ox, oy} shape
+	build_arm_bank.py's atlas entries already use. The upper arm is baked into the body now,
+	not part of this at all. ox/oy may come out negative (a wide-reach pose extends further
+	than the body cell itself, same as the old pipeline's own documented case) - a big enough
+	margin keeps that from clipping."""
 	work = np.zeros((999, 999, 4), np.uint8)  # oversized scratch, cropped immediately after
-	sx, sy = d["shoulder"]
-	paste(work, pose["upper_rot"], (int(round(sx)) - pad + margin, int(round(sy)) - pad + margin))
 	ex, ey = pose["elbow"]
 	paste(work, pose["forearm_rot"], (int(round(ex)) - pad + margin, int(round(ey)) - pad + margin))
 	layer, lx0, ly0 = crop_piece(work, work[..., 3] > 0)
 	return layer, lx0 - margin, ly0 - margin
 
 
-def composite(body: np.ndarray, d: dict, pose: dict, pad: int = 40) -> np.ndarray:
-	"""Paste this pose's rotated upper+forearm pieces onto a copy of the (armless) body.
-	Each rotated piece has its own pivot fixed at local (pad,pad) by rotate_about, so it is
-	placed at world_pivot - pad in both axes: the shoulder for the upper piece (constant,
-	from d), the elbow for the forearm piece (this pose's own, from pose)."""
+def composite(body: np.ndarray, pose: dict, pad: int = 40) -> np.ndarray:
+	"""Paste this pose's rotated forearm piece onto a copy of the body (upper arm already
+	baked in). The piece's own pivot is fixed at local (pad,pad) by rotate_about, so it is
+	placed at world_elbow - pad in both axes."""
 	out = body.copy()
-	sx, sy = d["shoulder"]
-	paste(out, pose["upper_rot"], (int(round(sx)) - pad, int(round(sy)) - pad))
 	ex, ey = pose["elbow"]
 	paste(out, pose["forearm_rot"], (int(round(ex)) - pad, int(round(ey)) - pad))
 	return out
@@ -317,12 +348,10 @@ def main() -> int:
 
 	sides = {s: extract(s, frame) for s in ("L", "R")}
 
-	# THE STATIC BODY: the frame with BOTH the upper-arm and forearm+hand pieces erased.
-	# Neither is baked at its source angle - the source is a raised "ta-da" gesture, well
-	# above where the game actually wants a catching hand, so BOTH joints are re-angled per
-	# pose from a shared rest position (see joint_angles). The upper arm's own sweep is far
-	# smaller than the forearm's (55deg vs 125deg across the whole reach range) - "slight
-	# movement" relative to the forearm's "circular movement", not literally zero.
+	# THE STATIC BODY: the frame with both the original upper-arm and forearm+hand pieces
+	# erased, then the upper arm baked back in ONCE at UPPER_REST_ANGLE and never touched
+	# again - the shoulder is fixed (Louis), so there is nothing left for a per-pose loop to
+	# do to it. Only the forearm ever moves from here on.
 	body = frame.copy()
 	for d in sides.values():
 		for piece, origin in ((d["upper"], d["upper_origin"]), (d["lower"], d["lower_origin"])):
@@ -331,28 +360,41 @@ def main() -> int:
 			m = piece[..., 3] > 0
 			body[y0:y0 + h, x0:x0 + w][m] = 0
 
+	elbows = {}
+	for s, d in sides.items():
+		elbows[s] = fixed_elbow(d)
+		up_rot = bake_upper(d, elbows[s])
+		sx, sy = d["shoulder"]
+		paste(body, up_rot, (int(round(sx)) - 40, int(round(sy)) - 40))
+
 	bys, bxs = np.where(body[..., 3] > 0)
 	torso_cx = (int(bxs.min()) + int(bxs.max())) * 0.5
 
 	for s, d in sides.items():
-		print(f"{s}: shoulder ({d['shoulder'][0]:.1f},{d['shoulder'][1]:.1f}), "
-			  f"upper_len {d['upper_len']:.1f}px, fore_len {d['fore_len']:.1f}px")
+		ex, ey = elbows[s]
+		print(f"{s}: shoulder ({d['shoulder'][0]:.1f},{d['shoulder'][1]:.1f}) -> "
+			  f"FIXED elbow ({ex:.1f},{ey:.1f}), fore_len {d['fore_len']:.1f}px")
 
-	poses = {s: [pose_at(sides[s], i / (N_POSES - 1)) for i in range(N_POSES)] for s in ("L", "R")}
+	reach_targets = [REACH_HI - (REACH_HI - REACH_LO) * i / (N_POSES - 1) for i in range(N_POSES)]
+	poses = {}
+	for s in ("L", "R"):
+		ex, _ = elbows[s]
+		elbow_offset = (torso_cx - ex) if s == "L" else (ex - torso_cx)
+		poses[s] = [pose_at(sides[s], r, elbows[s], elbow_offset) for r in reach_targets]
 	for s, plist in poses.items():
 		reaches = [torso_cx - p["hand"][0] if s == "L" else p["hand"][0] - torso_cx for p in plist]
 		print(f"{s}: reach {min(reaches):.1f}..{max(reaches):.1f} over {N_POSES} poses")
 
 	if sheet:
-		_debug_sheet(sheet, body, sides, poses)
+		_debug_sheet(sheet, body, poses)
 		print(f"debug sheet -> {sheet}")
 
 	if "--write" in argv:
-		write_bank(body, sides, poses, torso_cx, force="--force" in argv)
+		write_bank(body, poses, torso_cx, force="--force" in argv)
 	return 0
 
 
-def write_bank(body: np.ndarray, sides: dict, poses: dict, torso_cx: float,
+def write_bank(body: np.ndarray, poses: dict, torso_cx: float,
 		force: bool = False) -> None:
 	"""Assemble the exact schema build_arm_bank.py writes (juggle_body.png, juggle_arms.png
 	/.json, the _ARMS block in art_manifest.json) so Game.gd's fig_arm_pick needs no change."""
@@ -363,7 +405,7 @@ def write_bank(body: np.ndarray, sides: dict, poses: dict, torso_cx: float,
 	entries = []  # each: side, reach, layer(snapped), ox, oy, px(hand x), py(hand y), flat
 	for s in ("L", "R"):
 		for p in poses[s]:
-			layer, ox, oy = pose_layer(sides[s], p)
+			layer, ox, oy = pose_layer(p)
 			if layer.size == 0:
 				continue
 			layer = bank.snap(layer, body_pal)
@@ -438,7 +480,7 @@ def write_bank(body: np.ndarray, sides: dict, poses: dict, torso_cx: float,
 		  f"{cols * aw}x{rows * ah} atlas [{s2}], and _ARMS into {man.name}")
 
 
-def _debug_sheet(path: Path, body: np.ndarray, sides: dict, poses: dict) -> None:
+def _debug_sheet(path: Path, body: np.ndarray, poses: dict) -> None:
 	"""A grid, one cell per pose index, both sides at the SAME sweep position (symmetric) -
 	this is a geometry check, not a play-accurate frame; antiphase pairing is judged later
 	from the game itself. Native 4x: a downscaled strip has read as a torn figure before on
@@ -451,7 +493,7 @@ def _debug_sheet(path: Path, body: np.ndarray, sides: dict, poses: dict) -> None
 	for i in range(N_POSES):
 		frame_img = body.copy()
 		for s in ("L", "R"):
-			frame_img = composite(frame_img, sides[s], poses[s][i])
+			frame_img = composite(frame_img, poses[s][i])
 		im = Image.fromarray(frame_img.astype(np.uint8), "RGBA").resize((cw * Z, ch * Z), Image.NEAREST)
 		out.paste(im, ((i % cols) * cw * Z, (i // cols) * ch * Z), im)
 	out.save(path)
