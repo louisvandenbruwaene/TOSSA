@@ -38,6 +38,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 import armlib
 import artguard
@@ -54,9 +55,14 @@ REACH_LO, REACH_HI = 0.0, 64.0
 N_POSES = 12
 
 # How far along the shoulder->hand axis the elbow sits. Not measured per-limb; a fixed
-# fraction is enough for one reference pose, and PixelLab's touch-up pass is what smooths
-# the seam this approximation leaves.
+# fraction is enough for one reference pose.
 ELBOW_FRAC = 0.45
+
+# How many pixels each piece is dilated back into the other's territory at the cut (see
+# extract()) - covers the wedge-tip seam a bare t-threshold leaves. 3 gave a visibly cleaner
+# join than 2 without softening the silhouette elsewhere; push higher only if a seam still
+# shows in the contact sheet.
+SEAM_OVERLAP_PX = 3
 
 # Max degrees the SHOULDER may rotate from its rest pose, only ever engaged when the
 # forearm alone (fixed elbow) cannot reach a target - "slight movement if any".
@@ -75,9 +81,14 @@ SHOULDER_MAX_DEG = 12.0
 # is topologically separable from the coat. This matches how the source art itself is
 # built - a tapered capsule - and it is the same shape the game's own draw_capsule_pix
 # already assumes for a live-rasterised limb.
-ARM_RADIUS = (6.0, 15.0)     # corridor half-width at the shoulder, then at the hand (wide
-                              # enough to cover the fully spread fingers, measured to fall
-                              # short at 9 and leave stray fingertip pixels behind in body)
+ARM_RADIUS = (13.0, 15.0)    # corridor half-width at the shoulder, then at the hand. The
+                              # shoulder end was 6 and left a real coat wedge behind (a real
+                              # puffed shoulder is wider than a plain diagonal capsule at that
+                              # end) - it showed up as a static, unmoving pointed "wing" on
+                              # the body no matter what the arm was doing, since it was never
+                              # captured into either piece to move with them. The hand end is
+                              # wide enough to cover the fully spread fingers (was 9, too
+                              # tight, left fingertips behind the same way).
 HAND_BOX = {"L": (0, 28, 30, 46), "R": (124, 152, 30, 46)}
 SHOULDER_ROW = 29            # last row where the coat's own silhouette still grows smoothly
 
@@ -140,6 +151,17 @@ def extract(side: str, frame: np.ndarray) -> dict:
 	t, cap = capsule_params(mask, shoulder, hand, *ARM_RADIUS)
 	upper_mask = cap & (t < ELBOW_FRAC)
 	lower_mask = cap & (t >= ELBOW_FRAC)
+	# A HARD CUT AT ONE t VALUE LEAVES BOTH PIECES POINTED, NOT FLAT - measured on the actual
+	# output (artifacts/forearm_L.png, upperarm_L.png): the fabric's own diagonal grain does
+	# not sit perpendicular to the capsule axis, so slicing by t alone tapers each piece to a
+	# wedge tip rather than a blunt cross-section. Two independently rotated wedge tips meeting
+	# at DIFFERENT angles is exactly the "spiky, disconnected" seam Louis flagged. Fix: dilate
+	# each piece a few pixels back INTO the other's territory (clipped to real painted pixels,
+	# so it can never invent fabric over background) - the two now overlap at the join, and
+	# whichever is drawn on top (the forearm, always last) simply covers the other's edge
+	# instead of exposing a gap between two points.
+	upper_mask = ndimage.binary_dilation(upper_mask, np.ones((3, 3), bool), iterations=SEAM_OVERLAP_PX) & mask
+	lower_mask = ndimage.binary_dilation(lower_mask, np.ones((3, 3), bool), iterations=SEAM_OVERLAP_PX) & mask
 	upper, ux0, uy0 = crop_piece(frame, upper_mask)
 	lower, lx0, ly0 = crop_piece(frame, lower_mask)
 	return {
@@ -193,8 +215,15 @@ def paste(dst: np.ndarray, piece: np.ndarray, top_left: tuple[int, int]) -> None
 # only opens toward horizontal for the rare wide reaches columns needs at 6-7 objects.
 # FOREARM_ANGLE does the real work, swinging from tucked-under to nearly straight out - the
 # "circular movement in the lower arm" Louis asked for.
-UPPER_ANGLE_LO, UPPER_ANGLE_HI = 85.0, 30.0
-FOREARM_ANGLE_LO, FOREARM_ANGLE_HI = 110.0, -15.0
+# The inner end was 85/110 (reach 17.6) - short of FIG_PALM_MAX's ~7 art px, so a columns
+# hand standing under a central lane always fell back to draw_figure_palm's separate cut-out
+# hand while the sleeve stayed visibly stuck out at 17.6, reading as two disconnected pieces.
+# Pushed further in: 95/150 reaches 3.0, past the fallback boundary, so the sleeve itself now
+# carries the hand most of the way to centre and the fallback (still needed for the true
+# dead-centre case - no static rig reaches an arm folded across the belly) has far less gap
+# left to cover.
+UPPER_ANGLE_LO, UPPER_ANGLE_HI = 95.0, 30.0
+FOREARM_ANGLE_LO, FOREARM_ANGLE_HI = 150.0, -15.0
 
 
 def joint_angles(s: float) -> tuple[float, float]:
