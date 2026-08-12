@@ -52,7 +52,13 @@ PALETTE = ROOT / "Resources" / "palette" / "palette.png"
 # Same coverage the shipped bank targets - see build_arm_bank.py's own header for why these
 # two numbers are what they are (columns' outer lanes need 64; the game's hand line is flat).
 REACH_LO, REACH_HI = 0.0, 64.0
-N_POSES = 12
+# 12 left visible gaps of 5-6 reach units between adjacent bank entries - during actual
+# smooth simulated hand motion the arm visibly SNAPS between fairly different angles rather
+# than sweeping, which reads as awkward positioning even where any single frame looks fine.
+# Generation is fully procedural now (no PixelLab calls, no scarce AI candidates to pool), so
+# density is free - 48 narrows that gap to ~1.2 reach units, close to the old (noisy) bank's
+# own one-entry-per-art-pixel density.
+N_POSES = 48
 
 # How far along the shoulder->hand axis the elbow sits. Not measured per-limb; a fixed
 # fraction is enough for one reference pose.
@@ -62,7 +68,15 @@ ELBOW_FRAC = 0.45
 # extract()) - covers the wedge-tip seam a bare t-threshold leaves. 3 gave a visibly cleaner
 # join than 2 without softening the silhouette elsewhere; push higher only if a seam still
 # shows in the contact sheet.
-SEAM_OVERLAP_PX = 3
+SEAM_OVERLAP_PX = 2
+
+# How far the PROP ANCHOR moves past hand_point()'s centroid, toward the fingers, along the
+# forearm's own axis - see write_bank(). Measured by marking candidate offsets on the actual
+# rotated hand and looking (artifacts/handmark2_*.png): 0 sits at the wrist/heel of the palm,
+# +6 overshoots into the fingertips. +3 lands over the palm mass without floating in the gaps
+# between splayed fingers - the pose has no cupped hollow to aim for, so this is a judgment
+# call, not a measurement, and may want Louis's own eye on it.
+PROP_ANCHOR_SHIFT = 3.0
 
 # Max degrees the SHOULDER may rotate from its rest pose, only ever engaged when the
 # forearm alone (fixed elbow) cannot reach a target - "slight movement if any".
@@ -81,14 +95,18 @@ SHOULDER_MAX_DEG = 12.0
 # is topologically separable from the coat. This matches how the source art itself is
 # built - a tapered capsule - and it is the same shape the game's own draw_capsule_pix
 # already assumes for a live-rasterised limb.
-ARM_RADIUS = (13.0, 15.0)    # corridor half-width at the shoulder, then at the hand. The
+ARM_RADIUS = (16.0, 15.0)    # corridor half-width at the shoulder, then at the hand. The
                               # shoulder end was 6 and left a real coat wedge behind (a real
                               # puffed shoulder is wider than a plain diagonal capsule at that
                               # end) - it showed up as a static, unmoving pointed "wing" on
                               # the body no matter what the arm was doing, since it was never
-                              # captured into either piece to move with them. The hand end is
-                              # wide enough to cover the fully spread fingers (was 9, too
-                              # tight, left fingertips behind the same way).
+                              # captured into either piece to move with them. 13 still left a
+                              # measurable (if small) residual; 16 is where the residual plateaus
+                              # to a fixed few px that no further widening removes (must be
+                              # outside the capsule's LENGTH, not its radius - not chased
+                              # further, invisible at this size). The hand end is wide enough to
+                              # cover the fully spread fingers (was 9, too tight, left fingertips
+                              # behind the same way).
 HAND_BOX = {"L": (0, 28, 30, 46), "R": (124, 152, 30, 46)}
 SHOULDER_ROW = 29            # last row where the coat's own silhouette still grows smoothly
 
@@ -350,8 +368,21 @@ def write_bank(body: np.ndarray, sides: dict, poses: dict, torso_cx: float,
 				continue
 			layer = bank.snap(layer, body_pal)
 			reach = torso_cx - p["hand"][0] if s == "L" else p["hand"][0] - torso_cx
+			# THE PROP ANCHOR IS NOT THE HAND CENTROID. hand_point() averages the whole
+			# splayed hand box - fingers AND wrist - which pulls the centroid back toward
+			# the denser wrist/heel-of-palm mass, well short of where a held prop actually
+			# sits against the fingers (measured: a ball drawn there reads as floating above
+			# the hand, Louis). Nudge the ANCHOR ONLY (never `reach`, which must stay the
+			# true kinematic position the reach-lookup matches against) further out along
+			# the forearm's own elbow->hand axis, toward the fingers.
+			hx, hy = p["hand"]
+			ex, ey = p["elbow"]
+			dx, dy = hx - ex, hy - ey
+			dlen = math.hypot(dx, dy) or 1.0
+			ax = hx + dx / dlen * PROP_ANCHOR_SHIFT
+			ay = hy + dy / dlen * PROP_ANCHOR_SHIFT
 			entries.append({"side": s, "reach": float(reach), "layer": layer,
-				"ox": ox, "oy": oy, "px": float(p["hand"][0]), "py": float(p["hand"][1])})
+				"ox": ox, "oy": oy, "px": float(ax), "py": float(ay)})
 
 	aw = max(e["layer"].shape[1] for e in entries)
 	ah = max(e["layer"].shape[0] for e in entries)
