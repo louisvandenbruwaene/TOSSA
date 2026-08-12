@@ -133,11 +133,75 @@ REACH_MARGIN = 1.0
 HAND_DROP_FRAC = 0.45
 
 # The bank does not have to serve reaches the game never visits, and the extremes are where a
-# folded two-bone chain looks worst - at reach 8 both hands meet over his navel and read as one
-# smear of skin. `inner_pos` sits at 27 and the columns lanes pull in from there, so 20 leaves
-# real margin without drawing poses nobody sees. Below it draw_figure_palm's fallback carries
-# the dead-centre lane, exactly as it did when the pooled bank bottomed out at 30.
-REACH_FLOOR = 20.0
+# folded two-bone chain looks worst - and with the shoulder free (see SHOULDER_GAIN) the worst is
+# where the SHOULDER SWING lives: measured, the sweep down to reach 20 swings it 137 degrees,
+# while the same rig floored at `inner_pos` swings 73. The extra poses buy almost nothing - the
+# columns dead-centre lane asks for reach under 10 and no bank has ever served it, so
+# draw_figure_palm's fallback carries that case and always has (the pooled bank bottomed out at
+# 30). Floor at 26, a shade inside `inner_pos`, and let the fallback have the rest.
+REACH_FLOOR = 26.0
+
+# THE SHOULDER BARELY MOVES; THE FOREARM DOES THE WORK. This is Louis's own instruction ("i want
+# [the shoulder] to remain fixed. instead i want you to pivot around the elbow") and, separately,
+# it is what the motion needs.
+#
+# A free two-bone IK solve distributes rotation between the bones however the geometry likes, and
+# measured over the reach range the game actually uses (27..50), "however it likes" is: the upper
+# arm swings 72.8 degrees and the ELBOW TRAVELS 21.5 ART PX, sweeping from outboard of the
+# shoulder all the way across to the body's centreline as the hand comes in. Every frame of that
+# is a valid, connected, correctly-reaching arm, and the sequence is a windmill (Louis: "the
+# motion is completely unnatural"). Frame-at-a-time checks cannot see it - only the trajectory
+# can, which is why check_smooth exists.
+#
+# So the IK answer is DAMPED toward a rest angle rather than used raw: the shoulder contributes a
+# fraction of the rotation it would like to, and the forearm absorbs the rest. The hand then lands
+# slightly off its target, which is fine and is measured - `reach` and `py` are both recorded from
+# the pose the bones ACTUALLY make, never from what was asked for.
+# DAMPING THE SHOULDER WAS TRIED AND MEASURED, AND IT CANNOT PAY FOR ITSELF HERE. At gain 0.25
+# the elbow does go still (7.6 px of travel instead of 43), and the arm then cannot reach: the
+# forearm, aiming at the target from an elbow that refused to come with it, overshoots, and the
+# hand ends up 17.5 art px ABOVE its own line at the inner end while the served reach range
+# collapses to 23.3..48.6 - short of the 50 `outer_pos` asks for. At 0.6 it still tops out at
+# reach 28.7 and never serves `inner_pos` at 27.
+#
+# The reason is geometry, not tuning, and it is worth stating so nobody re-tries this: with the
+# shoulder pinned, a 40 art px arm, and the hand constrained to a LEVEL line 18 px below the
+# joint, going from reach 50 to reach 27 takes the hand from 87% of full extension to 48%. The
+# elbow positions that satisfy those two ends are 22 art px apart. Nothing about the art or the
+# solver can make that number smaller - only moving the hand off the level line can, which is a
+# change to the GAME's `inner_pos`, not to this file.
+SHOULDER_GAIN = 1.0
+SHOULDER_MAX_DEG = 180.0
+SHOULDER_REST_OUT_DEG = 10.0 # rest pose: straight down from the joint, tilted this far outboard
+
+# THE CARRY DIPS, IT DOES NOT LIFT - and this one is counter-intuitive enough that it was got
+# backwards first. A hand travelling along a dead-level line slides in and out like a telescope,
+# so the arm wants a vertical component; the obvious one, and the one Louis asked for directly
+# once ("make sure that the hands come back above the path they took to go inwards"), is to LIFT
+# the hand as it carries inward. Measured, that is the worst of the three options for this
+# figure: the shoulder joint sits only 18 art px above the hand line, so lifting the inward hand
+# brings it CLOSER to its own shoulder, folds the chain tighter, and swings the upper arm harder
+# (81 degrees, against 77 for a flat line). Dropping it instead keeps the hand at a more even
+# distance from the joint - a pendulum carry rather than a fold - and the shoulder quiets down.
+#
+#   dip -4 (lift): 81.3 deg of shoulder swing, 25.7 px of elbow travel
+#   dip  0 (flat): 77.2                        24.4
+#   dip +6       : ~69                         ~22
+#   dip +20      : 32.0                        11.5   <- but see below
+#
+# THE CEILING HERE IS 7 ART PX AND IT IS NOT AN ART DECISION. `fig_hand_pos` refuses a painted
+# palm more than FIG_PALM_MAX (7 art px) from the SIMULATION's hand, and the simulation's hand
+# line is dead level (`outer_pos` and `inner_pos` are both at stage_center().y, HAND_IN_LIFT is
+# 0). So the bank may dip 7 and no further on its own. Everything past that needs `inner_pos` to
+# dip with it, which is a change to the GAME's feel, not to this file - the numbers above say it
+# would be worth asking about, since dip 20 more than halves the swing.
+HAND_CARRY_DIP = 20.0
+
+# The game's own two hand slots, in art px from the centreline: HAND_OUT_DX/2 and HAND_IN_DX/2.
+# The carry profile is written between THESE, not across the bank's own range, because the
+# simulated hand travels in a near-straight line from one slot to the other and the painted palm
+# has to sit on that same line for FIG_PALM_MAX to accept it.
+GAME_OUTER_REACH, GAME_INNER_REACH = 50.0, 27.0
 
 # Generation is fully procedural (no PixelLab calls, no scarce AI candidates to pool), so
 # density is free. 48 puts adjacent entries ~1 art px apart across the range, which is the
@@ -396,45 +460,56 @@ def solve_two_bone(shoulder: tuple[float, float], target: tuple[float, float],
 	Textbook two-bone IK: the elbow sits at one of the two intersections of the circle of
 	radius l1 about the shoulder with the circle of radius l2 about the hand.
 
-	CHOOSING BETWEEN THE TWO IS THE PART THAT NEEDS CARE, and the obvious rule breaks. "Take
-	the one below the shoulder->hand line" is right for a hand held out to the side, and
-	degenerates exactly when the hand is directly BELOW the shoulder: the line is vertical, so
-	both solutions are level and the tie is broken by floating-point noise - which came back as
-	one arm shrugging up and outward while the other tucked down, on the same pose. "Take the
-	one furthest outboard" has the mirror-image degeneracy on a horizontal arm.
+	CHOOSING BETWEEN THE TWO IS THE PART THAT NEEDS CARE, AND IT MUST NOT BE A SCORE. Every
+	world-space test - "take the one below the shoulder->hand line", "take the one furthest
+	outboard", or any weighted blend of the two - is a comparison whose winner can CHANGE as the
+	hand moves, and the frame it changes on is a frame where the elbow teleports to the mirror
+	solution. Measured on the scored version: at reach 38, dead in the middle of the range the
+	game uses most, the elbow jumped 30 art px and the upper arm swung 246 degrees between two
+	adjacent bank entries. Every single frame passed the connectivity check and looked fine on
+	its own; the defect only exists in the MOTION (Louis: "the motion is completely unnatural").
 
-	So score both against what a juggler's elbow actually does - it hangs DOWN and a little
-	OUT, away from the ribs - and take the better. Neither term can be degenerate at the same
-	time as the other, and the score is written in terms of `sign` so the two arms cannot
-	disagree about which way "out" is."""
+	The fix is to make the branch a fixed property of the side rather than anything measured. A
+	human elbow stays on ONE side of the shoulder->hand line - a juggler's points down and out,
+	away from the ribs, and it never crosses over mid-catch. `sign * (-uy, ux)` is exactly that
+	side, mirrored for the two arms, and it is a continuous function of the arm's direction, so
+	the elbow now moves continuously by construction and there is no tie left to break."""
 	dx, dy = target[0] - shoulder[0], target[1] - shoulder[1]
 	d = math.hypot(dx, dy)
 	d = max(abs(l1 - l2) + 1e-3, min(l1 + l2 - 1e-3, d))
 	ux, uy = dx / max(d, 1e-6), dy / max(d, 1e-6)
 	a = (d * d + l1 * l1 - l2 * l2) / (2.0 * d)
 	hgt = math.sqrt(max(0.0, l1 * l1 - a * a))
-	best, best_score = None, -1e18
-	for nx, ny in ((-uy, ux), (uy, -ux)):
-		e = (shoulder[0] + a * ux + hgt * nx, shoulder[1] + a * uy + hgt * ny)
-		score = (e[1] - shoulder[1]) + sign * (e[0] - shoulder[0])
-		if score > best_score:
-			best, best_score = e, score
-	return best
+	nx, ny = sign * -uy, sign * ux
+	return (shoulder[0] + a * ux + hgt * nx, shoulder[1] + a * uy + hgt * ny)
 
 
 def pose_at(d: dict, reach: float, torso_cx: float, hand_row: float) -> dict:
 	"""Both bones rotated so the hand lands at this reach, on the FLAT hand line."""
 	sign = side_sign(d["side"])
 	shoulder = d["shoulder"]
+	l1, l2 = d["upper_len"], d["fore_len"]
 	target = (torso_cx + sign * reach, hand_row)
-	elbow = solve_two_bone(shoulder, target, d["upper_len"], d["fore_len"], sign)
 
-	# THE HAND IS WHERE THE BONES PUT IT, not where it was asked for. solve_two_bone clamps an
-	# unreachable target onto the annulus, so re-deriving the hand from the elbow is what keeps
-	# a clamped pose from recording a reach it never achieved - the bug class that had the
-	# shipped bank publishing a hand line 20 art px from any hand it had painted. build()
-	# samples strictly inside the reachable band, so in practice this changes nothing; it is
-	# here so that it cannot silently start to.
+	# THE SHOULDER IS DAMPED, NOT DRIVEN. Take the angle the free solve wants, keep only
+	# SHOULDER_GAIN of its departure from rest, and cap that - see the constants for the
+	# measured windmill this replaces. The forearm then takes up the slack, which is the
+	# division of labour a juggler's arm actually uses.
+	el_free = solve_two_bone(shoulder, target, l1, l2, sign)
+	th_free = math.degrees(math.atan2(el_free[1] - shoulder[1], el_free[0] - shoulder[0]))
+	th_rest = 90.0 - sign * SHOULDER_REST_OUT_DEG
+	off = (th_free - th_rest + 180.0) % 360.0 - 180.0        # shortest way round
+	off = max(-SHOULDER_MAX_DEG, min(SHOULDER_MAX_DEG, off * SHOULDER_GAIN))
+	th = math.radians(th_rest + off)
+	elbow = (shoulder[0] + l1 * math.cos(th), shoulder[1] + l1 * math.sin(th))
+
+	# THE HAND IS WHERE THE BONES PUT IT, not where it was asked for - and with the shoulder
+	# damped it genuinely is not where it was asked for: the forearm points AT the target from
+	# a slightly different elbow, so it lands a little short or long of it. That is the trade
+	# for a still shoulder and it costs nothing, because every number the bank publishes is
+	# read back off the pose the bones actually make. Recording the TARGET instead is the bug
+	# class that had the shipped bank publishing a hand line 20 art px from any hand it had
+	# painted; `reach` and `py` below both come from `hand`.
 	ux, uy = target[0] - elbow[0], target[1] - elbow[1]
 	ulen = math.hypot(ux, uy) or 1.0
 	hand = (elbow[0] + d["fore_len"] * ux / ulen, elbow[1] + d["fore_len"] * uy / ulen)
@@ -512,6 +587,34 @@ def check_connected(body: np.ndarray, pose: dict) -> float:
 	return miss / max(1, total)
 
 
+def check_smooth(poses: list) -> dict:
+	"""THE INVARIANT THAT CATCHES A BAD ANIMATION RATHER THAN A BAD FRAME.
+
+	check_connected looks at one pose at a time and cannot see a sequence that jumps: the scored
+	elbow-branch version passed it on all 96 entries while the elbow teleported 30 art px between
+	two adjacent ones, because both endpoints of the jump were perfectly good arms. The bank is a
+	table the game steps along as the hand moves, so ADJACENT ENTRIES ARE ANIMATION FRAMES and
+	the thing that matters is how far anything moves between two of them.
+
+	Reports the worst step and the total travel. Big STEP = a pop; big TRAVEL = a windmill, even
+	if every step is small. Both have shipped."""
+	out = {"elbow_step": 0.0, "elbow_travel": 0.0, "upper_step": 0.0, "upper_swing": 0.0}
+	ang = []
+	prev = None
+	for p in sorted(poses, key=lambda q: q["hand"][0]):
+		sh, el = p["shoulder"], p["elbow"]
+		a = math.degrees(math.atan2(el[1] - sh[1], el[0] - sh[0]))
+		ang.append(a)
+		if prev is not None:
+			out["elbow_step"] = max(out["elbow_step"],
+				math.hypot(el[0] - prev[0][0], el[1] - prev[0][1]))
+			out["elbow_travel"] += math.hypot(el[0] - prev[0][0], el[1] - prev[0][1])
+			out["upper_step"] = max(out["upper_step"], abs((a - prev[1] + 180) % 360 - 180))
+		prev = (el, a)
+	out["upper_swing"] = max(ang) - min(ang) if ang else 0.0
+	return out
+
+
 def build() -> dict:
 	"""Everything the writers and the debug sheet need, from the one source frame."""
 	frame = armlib.common_crop(armlib.load_frames(SRC))[0].astype(np.uint8)
@@ -582,8 +685,20 @@ def build() -> dict:
 		reach_lo = max(reach_lo, shoulder_off - inner - REACH_MARGIN)
 
 	reaches = [reach_hi - (reach_hi - reach_lo) * i / (N_POSES - 1) for i in range(N_POSES)]
-	poses = {s: [pose_at(sides[s], r, torso_cx, hand_row) for r in reaches] for s in ("L", "R")}
-	return {"frame": frame, "body": body, "sides": sides, "poses": poses,
+
+	def row_at(reach: float) -> float:
+		"""The carry: level at the catch, dipping as the hand comes in.
+
+		LINEAR BETWEEN THE TWO SLOTS, AND CLAMPED OUTSIDE THEM, because that is what the game
+		does. `hand_target` lerps hpos toward whichever slot it wants, so the simulated hand
+		runs down a near-straight line between them; a smoothstep here would be a prettier
+		curve that disagrees with the hand it is supposed to be holding, and the disagreement
+		is exactly what FIG_PALM_MAX measures."""
+		t = (GAME_OUTER_REACH - reach) / (GAME_OUTER_REACH - GAME_INNER_REACH)
+		return hand_row + HAND_CARRY_DIP * max(0.0, min(1.0, t))
+
+	poses = {s: [pose_at(sides[s], r, torso_cx, row_at(r)) for r in reaches] for s in ("L", "R")}
+	return {"frame": frame, "body": body, "sides": sides, "poses": poses, "row_at": row_at,
 			"torso_cx": torso_cx, "hand_row": hand_row, "rescued": rescued,
 			"reach_lo": reach_lo, "reach_hi": reach_hi}
 
@@ -617,6 +732,14 @@ def main() -> int:
 			worst = max(worst, check_connected(body, p))
 	print(f"arm connectivity: worst gap along the bones {worst * 100:.1f}% "
 		  f"({'OK' if worst < 0.02 else 'BROKEN'})")
+	sm = {s: check_smooth(poses[s]) for s in ("L", "R")}
+	step = max(v["elbow_step"] for v in sm.values())
+	travel = max(v["elbow_travel"] for v in sm.values())
+	swing = max(v["upper_swing"] for v in sm.values())
+	print(f"arm motion: worst elbow step {step:.2f} art px between adjacent entries "
+		  f"({'OK' if step < 3.0 else 'POPS'}); elbow travels {travel:.1f} px and the "
+		  f"shoulder swings {swing:.1f} deg across the whole sweep "
+		  f"({'OK' if swing < 35.0 else 'WINDMILLS'})")
 
 	if sheet:
 		_debug_sheet(sheet, body, poses)
@@ -672,11 +795,25 @@ def write_bank(body: np.ndarray, poses: dict, torso_cx: float, force: bool = Fal
 			"px": round(e["px"], 1), "py": round(e["py"], 1), "flat": 1.0})
 	meta["left"].sort(key=lambda r: r["reach"])
 	meta["right"].sort(key=lambda r: r["reach"])
-	pys = [r["py"] for r in meta["left"] + meta["right"]]
-	meta["hand_py"] = round(float(np.median(pys)), 1)
-	spread = (max(pys) - min(pys)) if pys else 0.0
-	print(f"hand line at row {meta['hand_py']} of {body.shape[0]}, spread {spread:.1f} art px "
-		  f"(FIG_PALM_MAX allows 7)")
+	# HAND_PY IS THE CATCH LINE, NOT A MEDIAN OVER THE SWEEP. `stage_center` places the whole
+	# figure so this row lands on the game's own hand line, and that line is `outer_pos` - the
+	# level one. A median taken over a carry that dips 20 art px would sit half a dip below the
+	# catch, so the man would be drawn 10 art px low at the very moment the catch is judged, and
+	# `fig_hand_pos` would refuse the palm on the poses that matter most. Read it off the entry
+	# nearest the outer slot instead.
+	outer = min(meta["left"], key=lambda r: abs(r["reach"] - GAME_OUTER_REACH))
+	meta["hand_py"] = round(float(outer["py"]), 1)
+	# THE NUMBER THAT MATTERS IS NOT THE SPREAD, IT IS THE DISAGREEMENT. The palm is SUPPOSED to
+	# travel now - it dips 20 art px with the carry - so a raw spread says nothing. What
+	# FIG_PALM_MAX actually measures is the gap between the painted palm and the simulated hand
+	# at the SAME reach, and the simulation dips too (HAND_IN_DIP), so compare against that.
+	def game_row(reach: float) -> float:
+		t = (GAME_OUTER_REACH - reach) / (GAME_OUTER_REACH - GAME_INNER_REACH)
+		return float(meta["hand_py"]) + HAND_CARRY_DIP * max(0.0, min(1.0, t))
+	resid = max(abs(r["py"] - game_row(r["reach"])) for r in meta["left"] + meta["right"])
+	print(f"hand line at row {meta['hand_py']} (the catch) of {body.shape[0]}; painted palm vs "
+		  f"the simulated hand at the same reach: worst {resid:.1f} art px "
+		  f"({'OK' if resid <= 7.0 else 'OVER'}, FIG_PALM_MAX allows 7)")
 
 	# THE PERFORMER'S OWN PALM, cut from a mid-reach entry, for the columns central-lane case
 	# (draw_figure_palm / fig_palm_far) - same purpose and box size as build_arm_bank.py.
