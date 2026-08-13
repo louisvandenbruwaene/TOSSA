@@ -134,19 +134,37 @@ def shift(rgb: np.ndarray, dx: int) -> np.ndarray:
 	return np.concatenate([fill, rgb[:, :-pad]], axis=1)
 
 
-# VERTICAL LIFTS FOR BACKDROPS, which is the same trick on the other axis and is nearly free.
+# VERTICAL LIFTS FOR BACKDROPS, which is the same trick on the other axis.
 #
-# draw_backdrop covers the bottom 20% of a venue painting with the stage floor (art y >= 288),
-# so anything a painting puts down there is drawn and then buried. The Midnight Show's cabaret
-# tables - Louis: "i like the midnight show tables and stuff, bring it back somehow" - came
-# back sitting at y 270..330, i.e. two thirds under the floor, and in game only the tops of a
-# few heads showed above the boards.
+# WHAT IT IS FOR CHANGED ON 2026-08-14 and the numbers were re-measured for the new reason.
+# It began as a way to raise the Midnight Show's cabaret tables out from under the stage
+# floor, which covered the bottom fifth of every painting. Then the drawn podium was deleted
+# and the PAINTING became the floor - so the job now is to put each painting's own floor line
+# on the performer's standing line (art y 288), because he stands at a fixed height and every
+# generated room puts its floor somewhere different. Measured as the strongest horizontal edge
+# in art y 250..345, off-centre so the figure cannot bias it, then checked against a capture
+# with the standing line drawn on it. Unlifted, he stood on the Theatre's curtain and in the
+# Circus's audience.
 #
 # Lifting the picture is better than re-rolling it for the composition, because the exposed
 # strip lands BELOW y 288 where the floor covers it, so the fill is never seen at all. What is
 # lost is the same number of rows off the TOP, which on these venues is uniform curtain.
-# name -> art px to raise
-LIFTS = {"the_midnight_show": 48}
+# name -> art px to raise. MEASURED per venue as the strongest horizontal edge between art y
+# 250 and 345 (the painting's own floor line), off-centre so the performer cannot bias it,
+# then checked against a real capture with the standing line drawn on:
+#   small_theatre 296 -> its boards began 8px BELOW his feet, so he stood on the curtain
+#   the_circus    325 -> the ring floor began 37px below, so he stood in the audience
+#   world_arena   314 -> the pitch began 26px below
+#   the_midnight_show  a further 11 on top of the 48 that first brought its tables into view
+# Backyard (284), Street Corner and Championship (283) already land within a few px of 288
+# and are left alone.
+LIFTS = {"small_theatre": 20, "the_circus": 37, "world_arena": 26, "the_midnight_show": 59}
+
+# THIS SCRIPT MUTATES ITS OWN SOURCE, SO IT MUST NOT RUN TWICE. Both operations here are
+# relative moves - shift the picture by dx, raise it by dy - and applying either a second time
+# moves it again, silently and irreversibly. recolour_hat.py has exactly this hazard and
+# refuses itself; this keeps a ledger instead, because there are two axes and several names.
+LEDGER = SRC / ".shifted.json"
 
 
 def lift(rgb: np.ndarray, dy: int) -> np.ndarray:
@@ -158,28 +176,53 @@ def lift(rgb: np.ndarray, dy: int) -> np.ndarray:
 	"""
 	if dy <= 0:
 		return rgb
-	return np.concatenate([rgb[dy:], np.repeat(rgb[-1:], dy, axis=0)], axis=0)
+	# MIRRORED, NOT REPEATED. Repeating the last row was fine while the stage floor covered
+	# the bottom fifth and the fill was never drawn; with the drawn podium gone that strip is
+	# on screen, and a single row stretched 26-59px reads as vertical streaking across the
+	# floor. Mirroring the bottom band continues the floor's own texture instead. It is not
+	# perspective-correct - a receding floor does not really repeat - but at this size the eye
+	# wants texture, not geometry, and it has neither seam nor smear.
+	band = rgb[-dy:][::-1]
+	return np.concatenate([rgb[dy:], band], axis=0)
 
 
-def run_lifts(write: bool) -> None:
+def ledger() -> dict:
+	import json
+	return json.loads(LEDGER.read_text()) if LEDGER.exists() else {}
+
+
+def note_done(key: str) -> None:
+	import json
+	d = ledger()
+	d[key] = True
+	LEDGER.write_text(json.dumps(d, indent=1, sort_keys=True))
+
+
+def run_lifts(write: bool, force: bool) -> None:
+	done = ledger()
 	for name, dy in LIFTS.items():
 		p = SRC / f"{name}.png"
 		if not p.exists():
 			print(f"  {name}: no painting to lift")
 			continue
+		key = f"lift:{name}:{dy}"
+		if done.get(key) and not force:
+			print(f"  {name}: already lifted {dy}px - REFUSED (pass --force to repeat)")
+			continue
 		a = np.asarray(Image.open(p).convert("RGB"))
-		tag = f"  {name}: lifted {dy}px (bottom {dy} rows land under the stage floor)"
+		tag = f"  {name}: lifted {dy}px (its floor line moves onto the standing line)"
 		if not write:
 			print(tag + "  (pass --write to apply)")
 			continue
 		Image.fromarray(lift(a, dy)).save(p)
+		note_done(key)
 		print(tag + " [written]")
 
 
 def main() -> int:
 	write = "--write" in sys.argv
 	if "--lift" in sys.argv:
-		run_lifts(write)
+		run_lifts(write, "--force" in sys.argv)
 		return 0
 	only = [a for a in sys.argv[1:] if not a.startswith("--")]
 	for name in NAMES:

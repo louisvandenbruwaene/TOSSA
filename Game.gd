@@ -1223,10 +1223,10 @@ const APPL_GOOD := 0.007
 const APPL_LATE := -0.020
 const APPL_WHIFF := -0.040
 const APPL_SPIN := 0.010
-const CROWD_LEAVE_BAND := 0.55   # draw_crowd: only seats below this applause level ever
-								  # have anyone leaving them, so ordinary play (applause
-								  # starts at 0.7 and a healthy set holds near it) never
-								  # thins the crowd - only a real crater toward a collapse does
+# CROWD_LEAVE_BAND was deleted with draw_crowd (2026-08-14). It set the applause level below
+# which seats began to empty; the audience is painted into the backdrops now and nothing reads
+# it. Left as a comment rather than a dangling constant so the intent survives if the emptying
+# house is ever rebuilt as generated art - see the note where draw_crowd used to be.
 # The Encore deck: each is a single named twist on the third set, and each is a couple
 # of lines because it toggles a constant or a draw call that already exists. Several
 # were designed months ago as "cosmetic" or "optional" (the glow-in-the-dark prop is
@@ -13010,16 +13010,23 @@ func draw_backdrop(s: Vector2) -> void:
 	# is what appeared the moment the stack was thinned to pay for itself.
 	draw_glow(pc, 410.0 - 40.0 * hot, Color(glow.r, glow.g, glow.b, pool * 1.15))
 
-	# THE PODIUM: the boards he stands on, the lip they end at, and the front face of the
-	# stage below it (see draw_stage_apron). This used to be one flat run of boards from his
-	# feet to the bottom of the screen with a bright line across the top of it.
-	draw_stage_apron(s, fy, vi, floor_c, glow, spot)
+	# THE PAINTING IS THE FLOOR NOW - THERE IS NO DRAWN PODIUM (2026-08-14, Louis: "i wanted
+	# you to remove the podium: the player always stands on some vector drawn stage, which i
+	# don't like. Instead i want you to generate a floor for whatever stage he is in").
+	#
+	# The striking thing on going to look: EVERY BACKDROP ALREADY HAD A PAINTED FLOOR, and the
+	# apron had been drawn on top of it the whole time. The Small Theatre paints warm boards,
+	# the Circus its sawdust ring inside a red-and-cream ring wall, the Championship a polished
+	# marked floor, the World Arena the pitch, the Street Corner cobbles, the Backyard its porch
+	# steps and grass. So the fix is deletion, not construction: stop covering them.
+	#
+	# What stays is LIGHT, which is the same split the backdrop itself has always used: the lip
+	# wash where the pool meets the floor, and the footlights. Scenery is painted, light reacts.
+	draw_stage_light(s, fy, vi, glow, spot)
 
 	# the near field: the handful of things the act is standing AMONG, drawn past the
 	# veil so they read, unlike the set dressing behind it (see draw_venue_foreground)
 	draw_venue_foreground(s, vi, fy, glow)
-
-	draw_crowd(s, vi, fy, glow)
 
 	# a drop briefly cools the whole room, the visual half of the music duck
 	if game_state == ST_PLAY and tick - last_drop_tick < 26 and tick - last_drop_tick >= 0:
@@ -13039,204 +13046,20 @@ func draw_backdrop(s: Vector2) -> void:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.88))
 
 
-func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
-	# THE HOUSE, FROM BEHIND ITS OWN BACK ROW - and the two things that were wrong with it
-	# are worth naming, because they are the difference between "a crowd" and "some dots".
-	#
-	# 1. IT WAS LIT INSTEAD OF SILHOUETTED. Every head was drawn IN the venue's glow colour
-	#    at a low alpha, i.e. slightly BRIGHTER than the room behind it. But these people sit
-	#    between the player and the only light in the building, so they cannot be brighter
-	#    than it - they are backlit, and a backlit head is nearly black with a warm rim along
-	#    its crown. Getting that one relationship the right way round is most of the fix.
-	# 2. IT WAS DRAWN WITH draw_circle, which antialiases its rim - smooth grey blobs in a
-	#    game whose whole premise is that nothing is smooth. fill_disc_pix rasterises on the
-	#    art grid instead, one draw_rect per art row.
-	#
-	# They are also PEOPLE now rather than discs: heads sit on real shoulders, one in three
-	# wears a hat (a topper, a bonnet, or a flat cap), and the near row is bigger and darker
-	# than the far one so the house has depth instead of being two identical stripes.
-	#
-	# PERFORMANCE (the 2026-07-27 note this replaces): the old version cost ~600us at the
-	# Championship with 38 heads at two draws each, and the fix then was to cap the count and
-	# make the shoulders one band. Both are kept. A disc of r=9 is nine draw_rects against
-	# draw_circle's tessellated polygon, so the per-head cost is comparable and the row band
-	# is still a single rect - measured after, this sits inside the same budget.
-	var ap := float(ART_PIXEL)
-	var performing := mode == MODE_PERFORM and game_state == ST_PLAY
-	# HOW HOT THE RIM IS, and it has to be genuinely hot rather than a tint. A silhouette
-	# only exists against something lighter, and there is nothing lighter down here: the
-	# stage floor is drawn all the way to the bottom of the screen and has fallen off into
-	# near-black by the time it reaches the house. A dark crowd on a dark floor is a black
-	# bar. What separates them is the footlights catching every skull and hat brim from the
-	# front, so the rim carries the whole read and is drawn near full strength.
-	var lit := 0.45
-	if performing:
-		lit = 0.55 + 0.35 * applause
-	var bob_amp := (0.4 + 2.2 * applause) if performing else 0.6
-	var rows := 2 if vi >= 2 else 1
-	# THE SILHOUETTE IS THE ROOM'S OWN DARK, not black: a flat black bar across the bottom of
-	# a warm theatre reads as a letterbox bar, not as an audience. Tinting it toward the
-	# venue's glow at very low value keeps it sitting in the same room as everything else.
-	# ...AND THE TWO ROWS MUST NOT BE THE SAME DARK, which is the whole reason the bottom of
-	# this screen measured as one colour. Both rows drew at 0.86 and 0.96 of the same value -
-	# a 10% difference on a near-black - so the near row's heads were black on black and the
-	# only thing they could do was disappear. The far row is the one with light on it (it is
-	# nearer the stage), the near row is the back of the house and is very nearly black, and
-	# the near row's SILHOUETTE against the far row's mass is what carries the read down here.
-	# `far` and `near` below, chosen so the ratio between them is ~3x rather than ~1.1x.
-	var dark := Color(glow.r * 0.10, glow.g * 0.08, glow.b * 0.09, 0.96)
-	var dark_far := Color(glow.r * 0.20, glow.g * 0.17, glow.b * 0.17, 1.0)
-	var dark_near := Color(glow.r * 0.055, glow.g * 0.045, glow.b * 0.06, 1.0)
-	var rim := Color(glow.r, glow.g * 0.92, glow.b * 0.80, lit)
-	# THE HAZE THE BACK ROW STANDS AGAINST. One soft warm wash spilling off the stage lip
-	# into the first few rows - the light that is actually in a theatre between a lit stage
-	# and a dark house. Without it the far row has no ground of its own and the two rows
-	# merge into a single mass however well each one is drawn.
-	# It hangs off the STAGE FRONT, not off the performer's feet - the light spilling over the
-	# lip lands on the first few rows, which is 88px lower than where this used to start.
-	draw_gradient_v(Rect2(0.0, apron_base_y(fy, vi) - 6.0, s.x, 46.0),
-		Color(glow.r, glow.g * 0.82, glow.b * 0.62, 0.16 + 0.10 * (applause if performing else 0.0)),
-		Color(glow.r, glow.g, glow.b, 0.0), 23)
-	for r in rows:
-		# BACK ROW FIRST, so the near one paints over it - each row's shoulder mass runs all
-		# the way to the bottom of the screen, so drawing them the other way round buries the
-		# whole house under the furthest row's band and leaves a plain dark bar.
-		# The near row is the higher index: lower on screen, bigger heads, darker, and fewer
-		# of them across the same width, which is what moving a row toward the camera does.
-		var near := float(r)
-		# SIZED TO BE READ, not to be counted. The old row put 22 heads of radius 6-9 across
-		# 1280px, which at this density is a row of bumps - the eye resolves a texture rather
-		# than a person. Half as many at twice the size is the same mass of crowd and reads
-		# as an audience, and it is also cheaper. Louis's bar for this game is Balatro:
-		# chunky and legible, never fine.
-		#
-		# AND WHAT IS ACTUALLY BEING DRAWN IS A SKYLINE. Only the row nearest the stage is
-		# seen against light; every row behind the viewer's eye is below it and silhouettes
-		# against the row in front, i.e. against black. So the top row carries the whole
-		# read and gets the size and the variety, the next one only breaks its edge, and
-		# everything under them is one dark mass - which is what a house looks like from the
-		# back of it, and leaves the bottom strip as the quiet ground the HUD panels sit on.
-		#
-		# THE HOUSE STARTS BELOW THE STAGE FRONT NOW (2026-08-13). It used to start at fy+30,
-		# i.e. 30px under the performer's own feet, which put the whole audience ON the stage
-		# he is standing on - invisible while the podium had no front, and impossible the
-		# moment it got one. It begins at apron_base_y and the near row runs off the bottom of
-		# the frame, which is what the nearest row of an audience does.
-		#
-		# AND THE NEAR ROW IS MUCH BIGGER THAN IT WAS. 1.0 to 1.28 across two rows is not a
-		# depth cue, it is two nearly identical stripes; the near row is half again the size
-		# of the far one now, which is the difference between "a crowd" and "a crowd you are
-		# standing behind".
-		# HOW MANY PEOPLE, AND IT HAS TO GROW (2026-08-13, Louis: "make it clear what's going on
-		# with the public: where is the public, how many people"). The old count was
-		# `mini(7 + vi * 2, 13) - near * 2`, and that cap meant the Circus, the Championship, the
-		# World Arena and the Midnight Show ALL drew exactly 24 people. The whole game is an
-		# escalating ladder of houses and the house itself was the one thing that stopped
-		# escalating a third of the way up it.
-		#
-		# The FAR row carries the growth, because that is the row with room for it: it is the
-		# smaller of the two and adding to it reads as the house filling up. The near row grows
-		# slowly - those silhouettes are 40px wide and a dozen of them already span the frame.
-		# Backyard 8 (a handful of neighbours), World Arena 23 + 10 in front of a painted bowl
-		# of thousands.
-		var heads := (8 + vi * 3) if r == 0 else (5 + vi)
-		var base_y := apron_base_y(fy, vi) + 6.0 + near * 28.0
-		var hscale := 1.15 + near * 1.05
-		# ...and a ONE-ROW house keeps the old single tone. `dark_far` is the lit front row of a
-		# pair, and it is brighter than what this drew before; applied to the Backyard's and the
-		# Street Corner's single row it lightens their whole foreground for a depth cue that has
-		# no second row to be a cue against.
-		var row_dark := dark
-		if rows > 1:
-			row_dark = dark_near if r > 0 else dark_far
-		# and the near row keeps only a trace of rim: it is the row FURTHEST from the stage,
-		# so lighting its crowns as brightly as the front row would invert the one relationship
-		# this whole function is built on (see the backlit note above).
-		var row_rim := Color(rim.r, rim.g, rim.b, rim.a * (0.35 if r > 0 else 1.0))
-		# the row's SHOULDERS, still one rect - a crowd's shoulders read as a mass anyway.
-		# It sits a head-radius down, so every skull stands clear of it instead of being
-		# swallowed by the band the moment the row moves.
-		# THE BAND HAS TO LAND ON SCREEN, and clamping it there is not the same thing. The
-		# first attempt at the bigger near row put it at 726 on a 720px frame and clamped to
-		# 718, which drew a 2px mass instead of one filling the bottom - so between the near
-		# row's heads (11 of them across 1280px, 40px wide, i.e. two thirds gaps) the frame
-		# measured a flat 10.8 luminance again. The row's own geometry has to fit the space,
-		# and 13.0 rather than 15.0 is what puts the shoulders under the heads at this scale.
-		# THE OFFSET IS TIED TO THE HEAD RADIUS, not to a constant, because the two rows are
-		# now very different sizes. hr tops out at 8.5 * hscale, so 11.5 * hscale puts the
-		# shoulders just under the largest skull in the row at either scale; the old flat 15.0
-		# was right for the old flat 1.0-1.28 range and lands the near row off-screen at 2.2.
-		var band_y := snappedf(base_y + 11.5 * hscale, ap)
-		# A ONE-ROW HOUSE HAS NO MASS, AND THAT WAS THE OUTDOOR VENUES' WHOLE PROBLEM. This band
-		# fills the frame from the row down in one flat colour, which is right for a theatre -
-		# there really are hundreds of people under there - and wrong for the Backyard and the
-		# Street Corner, where the audience is a handful of neighbours on a lawn and a few
-		# passers-by. It painted over everything below it, so those two screens measured 98 of
-		# their bottom 120 rows with no structure whatever the ground beneath was doing. Without
-		# it, they are individual figures standing on ground you can see between and behind.
-		if rows > 1:
-			draw_rect(Rect2(0.0, band_y, s.x, s.y - band_y), row_dark)
-			# ...and a single warm line along the top of that mass, so the row is separated from
-			# the one behind it by light rather than by a change of grey
-			draw_rect(Rect2(0.0, band_y, s.x, ap),
-				Color(row_rim.r, row_rim.g, row_rim.b, row_rim.a * 0.5))
-		for i in heads:
-			# a BAD night empties seats too, not just a good one lighting up (Still open:
-			# "the crowd reacting to a BAD night") - each seat has its own stable leave
-			# threshold (no randf, so it never flickers frame to frame), and only gives up
-			# on the act once applause drops below CROWD_LEAVE_BAND, so a healthy set
-			# never sees anyone walk out - only a real crater toward a collapse does.
-			if performing:
-				var leave_t := fposmod(float(i) * 0.371 + float(r) * 0.193, 1.0)
-				if applause <= leave_t * CROWD_LEAVE_BAND:
-					continue
-			# one stable variate per seat: no randf anywhere, so nobody flickers or swaps hat
-			var k := fposmod(float(i) * 2.399 + float(r) * 1.117, 1.0)
-			# ...half a seat over on the row behind, so its heads break the gaps in the
-			# skyline in front instead of hiding directly under them
-			var hx := s.x * (float(i) + 0.5 + 0.5 * near) / float(heads)
-			var bob := sin(atick() * 0.045 + float(i) * 1.31 + float(r) * 2.2) * bob_amp
-			var hr := snappedf((13.0 + floorf(k * 3.0) * 2.0) * hscale * 0.5, ap)
-			var hy := snappedf(base_y + fmod(float(i) * 1.7, 4.0) + bob, ap)
-			var head := Vector2(snappedf(hx, ap), hy)
-			crowd_person(head, hr, k, row_dark, row_rim, ap)
-			if performing and applause > 0.82 and (i + r * 3) % 4 == 0:
-				# hands up! - two dark arms against the stage, not two bright dots
-				var up := absf(sin(atick() * 0.09 + float(i)))
-				var lift := (6.0 + 7.0 * up) * hscale
-				for sgn in [-1.0, 1.0]:
-					var hand := head + Vector2(sgn * (hr + ap), -hr - lift)
-					draw_capsule_pix(head + Vector2(sgn * hr, hr * 0.4), hand,
-						ap * 1.5, ap * 1.5, row_dark)
-					fill_disc_pix(hand, ap * 1.4, row_dark)
-					draw_rect(Rect2(hand.x - ap, hand.y - hr * 0.5 - ap, ap * 2.0, ap), row_rim)
+# draw_crowd AND crowd_person WERE DELETED HERE (2026-08-14). They drew the house as rows of
+# rasterised silhouettes below the stage - heads, shoulders, three kinds of hat, a warm rim on
+# every crown - and Louis's note on the whole lower frame was "whatever those moving parts are
+# in the front should also be generated". They were the last vector crowd in the game and they
+# had become redundant besides: the backdrops now paint their own audiences (the Circus's
+# bleachers, the World Arena's bowl, the Midnight Show's candlelit tables), so the drawn row
+# was a second, cruder audience sitting in front of a better one.
+#
+# WHAT WENT WITH THEM, and it is worth stating rather than discovering later: the crowd used to
+# EMPTY ITS SEATS on a bad night (each seat had a stable leave threshold tested against
+# `applause`, so a real crater visibly thinned the house). That feedback now lives only in the
+# HUD's crowd dial and in the flowers and tomatoes. If it should come back it wants to come
+# back as generated art, not as these.
 
-
-func crowd_person(head: Vector2, hr: float, k: float, dark: Color, rim: Color,
-		ap: float) -> void:
-	# ONE SPECTATOR, seen from behind and lit only along the top of the head.
-	#
-	# The hat is what makes a row read as a period audience rather than as a line of eggs,
-	# and it is the cheapest variety available: three silhouettes, chosen by the seat's own
-	# stable variate, none of them more than three rects. A third of the house is bare-headed
-	# so the hats stay an accent.
-	fill_disc_pix(head, hr, dark)
-	# the SHOULDERS this head is standing on, so a head is never a floating ball above the
-	# band - a short trapezoid, one rect, widening to meet the row's mass
-	draw_rect(Rect2(head.x - hr * 1.25, head.y + hr * 0.55, hr * 2.5, hr * 1.4), dark)
-	if k < 0.34:
-		# BARE-HEADED: the warm rim over the crown, two art px of it
-		draw_rect(Rect2(head.x - hr * 0.55, head.y - hr - ap * 0.5, hr * 1.1, ap), rim)
-	elif k < 0.67:
-		# A TOPPER: crown then brim, the brim a touch wider than the head
-		var ch := hr * 1.5
-		draw_rect(Rect2(head.x - hr * 0.62, head.y - hr - ch, hr * 1.24, ch), dark)
-		draw_rect(Rect2(head.x - hr * 1.15, head.y - hr - ap, hr * 2.3, ap * 1.5), dark)
-		draw_rect(Rect2(head.x - hr * 0.62, head.y - hr - ch, hr * 1.24, ap), rim)
-	else:
-		# A BONNET or a flat cap: a low dome sitting proud of the skull
-		fill_disc_pix(head + Vector2(0.0, -ap), hr * 1.15, dark)
-		draw_rect(Rect2(head.x - hr * 0.7, head.y - hr * 1.15 - ap * 1.5, hr * 1.4, ap), rim)
 
 
 func draw_stage_grade(s: Vector2, fy: float, glow: Color) -> void:
@@ -13382,282 +13205,34 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			draw_moon_window(Vector2(s.x * 0.30, s.y * 0.30), 84.0, 190.0, fy)
 
 
-# THE PODIUM'S THREE SURFACES, in screen px below the performer's own standing line.
-# The 144px between his feet and the bottom of the frame used to be one flat run of boards
-# with the house painted over its lower half, which is why the bottom eighth of the screen
-# measured as a single colour (11,10,17) fading to (9,8,14) - a letterbox bar under a fully
-# painted room. Split three ways it is a stage seen from the back of the stalls: a shallow
-# band of surface, the edge it stops at, and the tall dark face below it.
-const APRON_DEEP := 38.0   # the boards in front of his feet - shallow, because of perspective
-const APRON_FACE := 40.0   # the vertical front of the stage, from the lip down
-
-
-func stage_has_apron(vi: int) -> bool:
-	# ONLY A ROOM WITH A STAGE IN IT GETS A STAGE FRONT. The first two venues are the Backyard
-	# and the Street Corner - a lawn and a pavement - and giving them a lip, a panelled fascia
-	# and a skirting rail put a proscenium apron under a busker standing on the kerb. Same test
-	# the footlights have always used (vi >= 2, "once the career reaches ticketed rooms"), and
-	# for the same reason; it should have been shared from the start.
-	return vi >= 2
-
-
-func apron_lip_y(fy: float) -> float:
-	return art_snap(Vector2(0.0, fy + APRON_DEEP)).y
-
-
-func apron_base_y(fy: float, vi: int) -> float:
-	# where the house begins. With no apron there is no stage front to begin below, so it is
-	# the 24px the crowd's own +30 always assumed - the outdoor venues keep exactly the layout
-	# they had before the podium existed.
-	if not stage_has_apron(vi):
-		return art_snap(Vector2(0.0, fy + 24.0)).y
-	return art_snap(Vector2(0.0, fy + APRON_DEEP + APRON_FACE)).y
-
-
-func draw_stage_apron(s: Vector2, fy: float, vi: int, floor_c: Color, glow: Color,
-		spot: float) -> void:
-	# THE STAGE IS A PLATFORM AND IT NEVER HAD A FRONT. Everything below the performer's feet
-	# was boards to the bottom of the screen, so the only thing separating the surface he
-	# stands on from the house was a single bright 3px line - the brightest row in the whole
-	# lower frame (measured at luminance 115 against 40-58 either side of it), carrying a
-	# structural read entirely on its own.
+func draw_stage_light(s: Vector2, fy: float, vi: int, glow: Color, spot: float) -> void:
+	# WHAT IS LEFT WHERE THE PODIUM WAS: light, and nothing that pretends to be scenery.
 	#
-	# A real stage front is the darkest large surface in the room: it faces the audience, and
-	# the lamps that light it are the footlights sitting in a trough on top of it, pointing
-	# the other way. So the face is lit ALONG ITS TOP EDGE and falls off downward, which is
-	# both what a footlight trough actually does and the thing that makes the lip read as an
-	# edge rather than as a stripe.
+	# The apron this replaces drew boards, a nosing, a panelled front face, panel joints and a
+	# skirting rail - about eighty lines of carpentry, all of it laid over a floor the backdrop
+	# painting had already painted. Louis, seeing it: "the player always stands on some vector
+	# drawn stage, which i don't like". He is right, and the honest fix is to stop drawing it
+	# rather than to draw it better. Going to look was the whole job: the Small Theatre paints
+	# warm boards, the Circus its sawdust ring, the Championship a marked floor, the World
+	# Arena the pitch, the Street Corner cobbles. They were under the apron all along.
+	#
+	# The two things kept are both LIGHT and both react to the run, which is exactly the rule
+	# draw_backdrop has always used for what may and may not be baked into a painting:
+	#   - the warm wash where the spotlight pool lands on the floor, which grows with `spot`;
+	#   - the footlights, once the career reaches a ticketed room, which flicker.
+	# Neither describes a surface, so neither can contradict whatever floor the painting shows.
 	var ap := float(ART_PIXEL)
-	if not stage_has_apron(vi):
-		draw_ground_near(s, vi, fy, floor_c, glow, spot)
-		return
-	var lip := apron_lip_y(fy)
-	var base := apron_base_y(fy, vi)
-
-	# 1. THE SURFACE, now bounded at the lip instead of running off the screen
-	draw_stage_boards(s, fy, lip, floor_c)
-	# the warm wash where the light pool lands on the boards, unchanged in intent but
-	# clamped to the boards it belongs to
-	draw_gradient_v(Rect2(0, fy, s.x, minf(34.0, lip - fy)),
-		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
-
-	# 2. THE NOSING: the lip's own moulding, two art px of it, warm on top and dark beneath.
-	# The dark line under the highlight is what turns a bright row into an EDGE - without it
-	# the eye reads a painted stripe on a continuous floor, which is exactly what was there.
-	draw_rect(Rect2(0, lip - ap, s.x, ap), Color(glow.r, glow.g, glow.b, 0.55))
-	draw_rect(Rect2(0, lip, s.x, ap), Color(0.0, 0.0, 0.0, 0.55))
-
-	# 3. THE FACE. Base tone is the venue's own floor pushed down and warmed a little, so a
-	# Blackout stage keeps a black front and the Circus keeps a warm one - the same rule
-	# draw_stage_boards follows, for the same reason (floor_c is per venue and reacts).
-	# 0.30, NOT 0.62. That ratio was set when floor_c was a hand-picked near-black (0.045..0.12
-	# per venue); now that it is sampled from the painting it can be a lit sawdust ring or a
-	# pale board, and 0.62 of that made the stage FRONT one of the brightest large surfaces on
-	# the screen. It is the surface facing away from every light in the room - it has to be the
-	# darkest thing down there or the podium stops reading as a solid object and the house
-	# behind it stops separating from it.
-	var face := Color(floor_c.r * 0.30, floor_c.g * 0.27, floor_c.b * 0.30)
-	draw_rect(Rect2(0, lip + ap, s.x, base - lip - ap), face)
-	# The footlight spill down it: bright at the trough, faint at the skirting. FOUR BANDS
-	# ACROSS THE WHOLE FACE, not four bands across the top of it - the first version stepped
-	# them by 0.13 of the height each and so covered the top 14px of a 40px face, leaving the
-	# lower 20px measuring a flat 9.4 luminance. That is the same dead band this function
-	# exists to remove, moved down 20px rather than filled.
-	var spill := 0.30 + 0.55 * spot
-	var fh := base - lip - ap
-	for b in 4:
-		var t := float(b) / 3.0
-		draw_rect(Rect2(0, lip + ap + t * fh * 0.75, s.x, fh * 0.25 + ap),
-			Color(glow.r, glow.g * 0.86, glow.b * 0.62, spill * (1.0 - t * 0.86) * 0.20))
-	# THE PANEL JOINTS, on the same 148px rhythm as the boards' butt joints so the podium
-	# reads as one built object rather than two surfaces that happen to meet. Half a period
-	# offset, so a panel joint never lands directly under a board joint.
-	#
-	# THEY ARE DRAWN AS LIGHT, NOT AS SHADOW, and that is not a style choice: the face's own
-	# tone is floor_c * 0.62 on a floor_c of 0.045..0.12, i.e. RGB 8-18. A black joint at 30%
-	# over RGB 10 moves it to 7 and is invisible by construction. On a near-black surface the
-	# only line that can be seen is a lit one.
-	var period := 148.0
-	var jx := period * 0.5
-	while jx < s.x:
-		var jxs := art_snap(Vector2(jx, 0.0)).x
-		draw_rect(Rect2(jxs, lip + ap, ap, fh), Color(glow.r, glow.g, glow.b, 0.13))
-		jx += period
-	# the skirting rail the face stands on - again light, for the same reason - and the black
-	# under it that the house rises out of
-	draw_rect(Rect2(0, base - ap * 2.0, s.x, ap), Color(glow.r, glow.g, glow.b, 0.16))
-	draw_rect(Rect2(0, base - ap, s.x, s.y - base + ap),
-		Color(floor_c.r * 0.14, floor_c.g * 0.13, floor_c.b * 0.17))
-
-	# 4. THE FOOTLIGHTS, in their trough on the lip. They used to be two soft discs sitting at
-	# fy - i.e. up at his feet, 88px behind where the front of the stage actually is - which
-	# is why they never read as a row of lamps in front of him.
+	draw_gradient_v(Rect2(0, fy - 10.0, s.x, 44.0),
+		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 10)
 	if vi >= 2:
 		for i in 12:
 			var lx := s.x * (float(i) + 0.5) / 12.0
 			var fl := 0.6 + 0.4 * sin(atick() * 0.05 + float(i) * 1.7)
-			# the hood, sitting ON the lip and breaking its line, which is most of what makes
-			# the row read as objects rather than as dots painted on the edge
-			draw_rect(Rect2(art_snap(Vector2(lx - 5.0, 0.0)).x, lip - ap * 3.0, ap * 5.0, ap * 3.0),
-				Color(floor_c.r * 0.5, floor_c.g * 0.45, floor_c.b * 0.5))
-			fill_disc_pix(Vector2(lx, lip - ap * 3.0), ap * 1.5, Color(1.0, 0.85, 0.55, 0.85 * fl))
-			draw_glow_pix(Vector2(lx, lip - ap * 3.0), 16.0, Color(glow.r, glow.g, glow.b, 0.20 * fl))
+			# a lamp is a glow and a hot core, not a housing: a drawn hood would be the
+			# vector stage coming back one prop at a time
+			draw_glow_pix(Vector2(lx, fy + ap), 18.0, Color(glow.r, glow.g, glow.b, 0.20 * fl))
+			fill_disc_pix(Vector2(lx, fy + ap), ap * 1.5, Color(1.0, 0.85, 0.55, 0.75 * fl))
 
-
-func draw_ground_near(s: Vector2, vi: int, fy: float, floor_c: Color, glow: Color,
-		spot: float) -> void:
-	# THE FIRST TWO VENUES ARE OUTDOORS AND GET A NEAR FIELD INSTEAD OF A PODIUM.
-	#
-	# Gating the stage front on vi >= 2 was right - a lawn has no apron - but reverting these
-	# two to the flat ground they had before left them with exactly the dead foreground the
-	# whole exercise was about: measured, 98 of the bottom 120 rows with no horizontal
-	# structure at all, against 4 at the venues that got the podium. And these are the FIRST
-	# TWO houses a player ever performs in, so it is the worst possible place to leave it.
-	#
-	# What they get instead is the ground nearest the camera, which is a real thing in both
-	# rooms and needs no stage: at the Backyard the lawn keeps going and its near blades stand
-	# up against the lit grass behind them; at the Street Corner the pavement ends at a kerb
-	# and the road starts. Same three-surface idea as the apron - a surface, an edge, and a
-	# darker plane below it - built out of what is actually there.
-	var ap := float(ART_PIXEL)
-	var edge := art_snap(Vector2(0.0, fy + 34.0)).y
-	draw_stage_boards(s, fy, edge, floor_c)
-	draw_gradient_v(Rect2(0, fy, s.x, 34.0),
-		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
-	draw_rect(Rect2(0, art_snap(Vector2(0.0, fy)).y, s.x, ap),
-		Color(glow.r, glow.g, glow.b, 0.55))
-	var near_c := Color(floor_c.r * 0.42, floor_c.g * 0.45, floor_c.b * 0.42)
-	# THREE BANDS, DARKENING TOWARD THE CAMERA, rather than one flat rect. The first version of
-	# this WAS one rect and measured exactly as dead as what it replaced - a surface with no
-	# tone change and no texture is a bar whatever it is a picture of.
-	for bi in 3:
-		var by0 := edge + (s.y - edge) * float(bi) / 3.0
-		var by1 := edge + (s.y - edge) * float(bi + 1) / 3.0
-		var dk := 1.0 - 0.18 * float(bi)
-		draw_rect(Rect2(0, art_snap(Vector2(0.0, by0)).y, s.x,
-			art_snap(Vector2(0.0, by1)).y - art_snap(Vector2(0.0, by0)).y),
-			Color(near_c.r * dk, near_c.g * dk, near_c.b * dk))
-	if vi == 0:
-		# THE NEAR LAWN. A tufted top edge, not a straight one: the blades closest to the eye
-		# are the only ones big enough to have a silhouette, and that silhouette against the
-		# lit grass behind them is the entire read. Stable per blade (no randf), so nothing
-		# shimmers frame to frame - the same rule the crowd's seats follow.
-		var bx := 0.0
-		while bx < s.x:
-			var k := fposmod(sin(bx * 0.137) * 371.0, 1.0)
-			var bh := (3.0 + floorf(k * 4.0)) * ap
-			var sway := sin(atick() * 0.006 + bx * 0.05) * ap * 0.5
-			draw_rect(Rect2(art_snap(Vector2(bx + sway, 0.0)).x, edge - bh, ap * 2.0, bh + ap), near_c)
-			bx += ap * 3.0
-		# ...and blades THROUGH the near field, not only along its edge. Drawn LIGHT, because
-		# the near lawn is floor_c * 0.55 of an already dark floor and a darker blade on it is
-		# invisible - the same mistake the stage face's panel joints made and the same fix.
-		var gy := edge + ap * 2.0
-		var gi := 0
-		while gy < s.y:
-			var gx := fposmod(float(gi) * 53.0, 37.0)
-			while gx < s.x:
-				var kk := fposmod(sin(gx * 0.21 + gy * 0.11) * 411.0, 1.0)
-				if kk > 0.35:
-					# 0.24, not 0.10: at a tenth over the Backyard's own very dark lawn the blades
-					# measured as no structure at all (72 of 120 rows still flat). A texture on a
-					# near-black ground has to be a real step in value or it is arithmetic nobody
-					# can see - the third time this same lesson has come up on this screen.
-					draw_rect(Rect2(art_snap(Vector2(gx, 0.0)).x, art_snap(Vector2(0.0, gy)).y,
-						ap, ap * (1.0 + floorf(kk * 2.0))),
-						Color(0.42, 0.62, 0.30, 0.24))
-				gx += 26.0
-			gy += ap * 3.0
-			gi += 1
-	else:
-		# THE KERB AND THE ROAD. A lit kerb edge, its own shadow under it, and the road below
-		# in long slabs - the seams run ACROSS the frame because a road recedes, and they are
-		# drawn as light on a dark surface for the same reason the stage face's joints are.
-		draw_rect(Rect2(0, edge - ap, s.x, ap), Color(glow.r, glow.g, glow.b, 0.30))
-		draw_rect(Rect2(0, edge, s.x, ap), Color(0.0, 0.0, 0.0, 0.45))
-		# The slab courses and the joints between them, ALL DRAWN AS LIGHT. The first version
-		# drew the joints at black 0.28 over a surface already at floor_c * 0.55 - which moves a
-		# near-black by nothing at all, exactly as the stage face's joints did before they were
-		# turned round. On a dark ground the only visible line is a lit one.
-		for i in 4:
-			var ry := art_snap(Vector2(0.0, edge + 18.0 + float(i) * 26.0)).y
-			if ry >= s.y:
-				break
-			draw_rect(Rect2(0, ry, s.x, ap), Color(glow.r, glow.g, glow.b, 0.13))
-			# staggered course to course, so the paving is a bond rather than a grid
-			var jx := 74.0 * float(i % 2)
-			while jx < s.x:
-				draw_rect(Rect2(art_snap(Vector2(jx, 0.0)).x, ry, ap, 26.0),
-					Color(glow.r, glow.g, glow.b, 0.09))
-				jx += 148.0
-
-
-func draw_stage_boards(s: Vector2, fy: float, y_bot: float, floor_c: Color) -> void:
-	# THE FLOOR WAS ONE FLAT draw_rect (2026-08-13), and once the seven backdrops became
-	# paintings it was the plainest surface left on the screen the game is actually played
-	# on - a fifth of the frame, in a single colour, under a fully painted room.
-	#
-	# It cannot be a sprite. Its colour is `floor_c`, which is per venue, and the lip light,
-	# the footlights and the light pool are all drawn into it and all react to the run - the
-	# same reason draw_backdrop keeps its lighting procedural. So it is boards, rasterised.
-	#
-	# BANDS GET TALLER TOWARD THE AUDIENCE, which is the whole of the perspective here: the
-	# near edge of a stage is closer to the eye, so its planks subtend more. Cumulative
-	# fractions are snapped to the art grid one boundary at a time rather than each band
-	# being rounded independently, so rounding cannot accumulate and leave a half-pixel
-	# sliver at the bottom edge.
-	#
-	# A FLOOR READS AS BOARDS FROM ITS SEAMS, NOT ITS TONE, and the first version got that
-	# backwards. Every venue's floor_c is very dark (0.045..0.12), so a plank tone walk of a
-	# few percent is one or two levels out of ~40 - measured on the Championship capture, the
-	# whole texture came out as a 3-level dip that nothing could see. The seams carry it: at
-	# 0.5x the base they are an unmistakable dark line, while the plank tone stays at a few
-	# percent so the floor is still a floor a performer stands on rather than a feature
-	# pulling the eye off the props.
-	# THE BOARDS STOP AT THE LIP NOW (`y_bot`), where they used to run to the bottom of the
-	# screen and be buried under the house. That was invisible while the whole strip was one
-	# tone; it matters now that the stage has a front face, because the face has to start
-	# where the surface ends or the podium has no edge to be seen from.
-	var y0 := art_snap(Vector2(0.0, fy)).y
-	var total := y_bot - y0
-	if total <= 0.0:
-		return
-	# THREE bands, each weighting the depth it subtends. It was five while the boards ran the
-	# whole 144px to the bottom of the screen; over the 22 art px the apron actually occupies,
-	# five bands put a seam every four pixels and the floor read as corduroy rather than as
-	# planks. The band count has to follow the depth, not the other way round.
-	var w := [1.0, 1.35, 1.85]
-	var wsum := 0.0
-	for v in w:
-		wsum += float(v)
-	var seam := Color(floor_c.r * 0.50, floor_c.g * 0.50, floor_c.b * 0.54)
-	var run := 0.0
-	var y := y0
-	for i in w.size():
-		run += float(w[i])
-		# the last boundary is the lip exactly, so no sliver can survive rounding
-		var y_end := y_bot if i == w.size() - 1 else art_snap(Vector2(0.0, y0 + total * run / wsum)).y
-		if y_end <= y:
-			continue
-		# alternate the plank tone, and lift the whole floor very slightly toward the front
-		var lift := 1.0 + 0.05 * float(i) / float(w.size() - 1)
-		var tone := lift * (1.06 if i % 2 == 0 else 0.95)
-		draw_rect(Rect2(0, y, s.x, y_end - y),
-			Color(floor_c.r * tone, floor_c.g * tone, floor_c.b * tone))
-		# BUTT JOINTS, STAGGERED PER BAND so the floor never reads as a grid. Offset by a
-		# half period on odd bands, which is what a bricklayer's bond looks like and what
-		# stops five aligned joints drawing one long vertical line down the stage.
-		var period := 148.0
-		var off := 0.0 if i % 2 == 0 else period * 0.5
-		var jx := off
-		while jx < s.x:
-			var jxs := art_snap(Vector2(jx, 0.0)).x
-			draw_rect(Rect2(jxs, y, ART_PIXEL, y_end - y), seam)
-			jx += period
-		# the seam between this band and the next
-		if i < w.size() - 1:
-			draw_rect(Rect2(0, y_end - ART_PIXEL, s.x, ART_PIXEL), seam)
-		y = y_end
 
 
 func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
@@ -25695,31 +25270,28 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	var fin := clampf(float(cine_tick) / 26.0, 0.0, 1.0)
 	if fin < 1.0:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02, 1.0 - fin))
-	draw_vignette(s, 0.6)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.55))
-
-	# THE MARQUEE SCRIM. The exterior is a full-bleed illustration and the marquee is bare
-	# text with an 8-way outline, so its legibility depends entirely on whatever the venue
-	# happens to draw underneath it - which the card cannot know. Measured 2026-08-05 across
-	# all seven exteriors: the Circus puts its centre pole and gold pennant straight through
-	# the blurb line, and the pennant is the SAME GOLD as the text's own fill, so "and" lost
-	# everything except its dark outline and read as a smudge; the Street Corner runs the
-	# blurb across a grid of lit windows. Those are one bug, not two, so the fix is a band
-	# behind the whole marquee rather than a nudge to one venue's tent.
+	# THE CARD IS THE PICTURE NOW (2026-08-14, Louis: "remove the darker area of all previews
+	# and the windows of info ... fade from light to dark top to bottom ... i want the image
+	# only", and "delete the brown lines around the preview images: some sort of camera design
+	# i don't like").
 	#
-	# Feathered at both ends and flat across the middle, so it reads as depth in the picture
-	# instead of a rectangle laid on top of it. The flat section has to cover the BLURB at
-	# 0.12*h + 96, not just the name: the name already carries draw_title_glow and was never
-	# the line that failed.
-	var scrim := Color(0.02, 0.01, 0.02)
-	var sc_a := 0.5
-	var sc_top := s.y * 0.05
-	var sc_in := s.y * 0.125
-	var sc_out := s.y * 0.275
-	var sc_end := s.y * 0.31
-	draw_gradient_v(Rect2(0, sc_top, s.x, sc_in - sc_top), Color(scrim.r, scrim.g, scrim.b, 0.0), Color(scrim.r, scrim.g, scrim.b, sc_a), 12)
-	draw_rect(Rect2(0, sc_in, s.x, sc_out - sc_in), Color(scrim.r, scrim.g, scrim.b, sc_a))
-	draw_gradient_v(Rect2(0, sc_out, s.x, sc_end - sc_out), Color(scrim.r, scrim.g, scrim.b, sc_a), Color(scrim.r, scrim.g, scrim.b, 0.0), 12)
+	# Four things went: the gold FRAME (draw_frame, the corner-bracket rule round the edge),
+	# the VIGNETTE, the MARQUEE SCRIM - a feathered band laid behind the title so the blurb
+	# would survive a busy exterior - and the BOTTOM SCRIM that was solved from the panel
+	# heights. Every one of them was a rectangle of darkness laid over an illustration, and
+	# together they were most of what the card actually showed.
+	#
+	# ONE GRADIENT REPLACES ALL OF THEM: the picture at full strength at the top, sinking to
+	# near-black at the bottom. That is a thing light does in a room rather than a panel laid
+	# on a picture, it gives the bottom text a dark ground for free, and it leaves the top
+	# third - where the venue's name and its hero sit - completely untouched.
+	#
+	# THE BLURB LOSES ITS BAND AND KEEPS ITS OUTLINE. The scrim existed because the Circus
+	# ran a gold pennant through that line in the same gold as the type. draw_text_shout
+	# still draws it with an 8-way outline, which is what has to carry it now - worth
+	# re-checking against the Circus specifically after any exterior re-roll.
+	draw_gradient_v(Rect2(0, s.y * 0.30, s.x, s.y * 0.70),
+		Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.88), 26)
 
 	var tagA := clampf(float(cine_tick - 10) / 20.0, 0.0, 1.0)
 	# ONLY the marquee stays over the portrait: STAGE n of 6, the name in lights, the
@@ -25735,22 +25307,10 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, s.y * 0.12 + 72.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_text_shout(font, Vector2(0, s.y * 0.12 + 96.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.86, 0.78, 0.66, 0.8 * tagA))
 
-	# THE BOTTOM SCRIM IS SOLVED FROM THE PANELS NOW, not from a fixed 100px (2026-08-13).
-	#
-	# It was a gradient over the bottom 100px, ramping 0 -> 0.9, and that was enough for as
-	# long as an exterior was a flat vector drawing with a near-black lower half. The seven
-	# exteriors are PAINTINGS now, and the Circus put red-and-cream tent stripes straight
-	# through both corner panels: the panel tops sit 164px up (more with encores), so most of
-	# each card had no scrim under it at all and hud_panel's fill is not opaque enough to
-	# cover a lit tent on its own.
-	#
-	# This is the same failure the MARQUEE scrim above already fixed - measured then across
-	# all seven, the Circus's gold pennant ran through the blurb - and it gets the same
-	# answer, including the same shape: feather in, then FLAT, because a ramp that only
-	# reaches full strength at the very bottom leaves the text at the top of a card sitting
-	# on nothing. The height cannot be a constant: the right-hand card grows 70px per encore,
-	# so a Purist night with four of them is 280px taller than a plain one. Take the top of
-	# whichever card is taller and feather from there.
+	# The two corner blocks are BARE TEXT now - no hud_panel behind them. They were rounded
+	# cards with a fill and a border, i.e. exactly the "windows of info" Louis asked to be rid
+	# of; the gradient above already gives them a dark ground to sit on, which is what the
+	# panel fill was really for. Their geometry survives only as text origins.
 	var rw := 330.0
 	var rh := 96.0 if purist else 76.0
 	var rx := 18.0
@@ -25760,13 +25320,8 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	var bh := (76.0 + 70.0 * float(encores.size())) if has_enc else 76.0
 	var bx := s.x - 18.0 - bw
 	var by2 := s.y - 88.0 - bh
-	var sc_hi := (minf(ry, by2) if booking_active else ry) - 30.0
-	var sc_fade := 34.0
-	draw_gradient_v(Rect2(0, sc_hi, s.x, sc_fade), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.82), 14)
-	draw_rect(Rect2(0, sc_hi + sc_fade, s.x, s.y - sc_hi - sc_fade), Color(0.02, 0.01, 0.02, 0.82))
 
 	# bottom-LEFT: the record chase at this venue (its own board on a purist night)
-	hud_panel(Rect2(rx, ry, rw, rh))
 	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
 		draw_fit_string(font, Vector2(rx + 16.0, ry + 54.0), score_text(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, rw - 32.0, 24, Color(0.96, 0.83, 0.52, tagA))
@@ -25779,9 +25334,6 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# challenge when one was rolled. Cash in from the first number on; each further
 	# goal is the gamble.
 	if booking_active:
-		# bw/bh/bx/by2/has_enc are hoisted above the scrim - it has to know how tall this
-		# card is before it can cover it
-		hud_panel(Rect2(bx, by2, bw, bh))
 		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
 		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
 			score_text(goal_for(establish_venue, 0)), score_text(goal_for(establish_venue, 1)), score_text(goal_for(establish_venue, 2))],
@@ -26420,8 +25972,8 @@ func throw_from_crowd(kind: String, tier: int, side: float = 0.0) -> void:
 		return
 	var lx := s.x * 0.5 + randf_range(-165.0, 165.0)
 	# HOW A THROWN FLOWER COMES TO REST (2026-07-27, Louis: "blossom facing the player
-	# and the stem facing the public"). The crowd is drawn BELOW the floor line
-	# (draw_crowd's `fy + 14 + r*21`), so the public is down-screen and the juggler is
+	# and the stem facing the public"). The public is BELOW the floor line - it was a drawn
+	# row there and is painted into the backdrop now - so the public is down-screen and the
 	# up-screen - and a thrown flower lands heavy end first, blossom leading, with the
 	# stem trailing back toward whoever threw it. In draw_flower the stem runs along
 	# `rot + PI/2`, so rot = 0 puts it at (0, +1): straight down-screen at the public,
