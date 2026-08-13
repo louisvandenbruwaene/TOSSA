@@ -246,7 +246,28 @@
       120,
       88
     ],
-    "head_cy": 0.0518,
+    "_head_note": [
+      "head_cy WAS 0.0518 AND PUT THE GLASSES ON HIS FOREHEAD (fixed 2026-08-13).",
+      "",
+      "This block is what the worn wardrobe aims at: draw_worn_glasses centres its lenses on",
+      "head + (0, -0.06r) and draw_top_hat hangs its brim at head - 0.38r, so a head centre",
+      "that is wrong moves every piece of gear by the same amount. Louis's backlog called the",
+      "tailor 'drawn for the traced figure' and this is the whole of it.",
+      "",
+      "MEASURED OFF juggle_body.png, which is the only honest source: the crown is row 0, the",
+      "chin is row 22, and the EYES are row 11 - visible as a dip in the skin-pixel count per",
+      "row (9, 9, then 5 at row 11, then 9, 11, 14) because the dark eyes displace skin. The",
+      "old 0.0518 put the head centre at row 8.5 and therefore the lenses at row 8.0, three art",
+      "pixels above the eyes, which at ART_PIXEL 2 is six screen pixels - the difference between",
+      "spectacles and a smear across the brow. 11/164 = 0.0671.",
+      "",
+      "head_r IS LEFT AT 0.0549 ON PURPOSE. It is doing a second job: the hat's brim is 1.5r to",
+      "each side and the lenses span 2.1r, so r is scaling WIDTHS, and 0.0549*164 = 9.0 is the",
+      "head's half-WIDTH (the skull measures 18 px across). The half-HEIGHT is 11, and using",
+      "that would have widened the brim from 27 to 33 px on an 18 px head. One number cannot be",
+      "both; the placement was the broken half."
+    ],
+    "head_cy": 0.0671,
     "head_r": 0.0549
   },
   "char/figure": {

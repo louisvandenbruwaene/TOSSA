@@ -12930,7 +12930,7 @@ func draw_backdrop(s: Vector2) -> void:
 	draw_glow(pc, 410.0 - 40.0 * hot, Color(glow.r, glow.g, glow.b, pool * 1.15))
 
 	# stage floor, with a soft warm lip of light where it meets the light pool
-	draw_rect(Rect2(0, fy, s.x, s.y - fy), floor_c)
+	draw_stage_boards(s, fy, floor_c)
 	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
 	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(glow.r, glow.g, glow.b, 0.55), 3.0)
 
@@ -13244,6 +13244,67 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			draw_wall_clock(Vector2(s.x * 0.5, s.y * 0.13), 30.0, Color(0.55, 0.95, 0.68))
 			# clear of the left HUD rail (which reaches x 318) and of the juggling window
 			draw_moon_window(Vector2(s.x * 0.30, s.y * 0.30), 84.0, 190.0, fy)
+
+
+func draw_stage_boards(s: Vector2, fy: float, floor_c: Color) -> void:
+	# THE FLOOR WAS ONE FLAT draw_rect (2026-08-13), and once the seven backdrops became
+	# paintings it was the plainest surface left on the screen the game is actually played
+	# on - a fifth of the frame, in a single colour, under a fully painted room.
+	#
+	# It cannot be a sprite. Its colour is `floor_c`, which is per venue, and the lip light,
+	# the footlights and the light pool are all drawn into it and all react to the run - the
+	# same reason draw_backdrop keeps its lighting procedural. So it is boards, rasterised.
+	#
+	# BANDS GET TALLER TOWARD THE AUDIENCE, which is the whole of the perspective here: the
+	# near edge of a stage is closer to the eye, so its planks subtend more. Cumulative
+	# fractions are snapped to the art grid one boundary at a time rather than each band
+	# being rounded independently, so rounding cannot accumulate and leave a half-pixel
+	# sliver at the bottom edge.
+	#
+	# A FLOOR READS AS BOARDS FROM ITS SEAMS, NOT ITS TONE, and the first version got that
+	# backwards. Every venue's floor_c is very dark (0.045..0.12), so a plank tone walk of a
+	# few percent is one or two levels out of ~40 - measured on the Championship capture, the
+	# whole texture came out as a 3-level dip that nothing could see. The seams carry it: at
+	# 0.5x the base they are an unmistakable dark line, while the plank tone stays at a few
+	# percent so the floor is still a floor a performer stands on rather than a feature
+	# pulling the eye off the props.
+	var y0 := art_snap(Vector2(0.0, fy)).y
+	var total := s.y - y0
+	if total <= 0.0:
+		return
+	# five bands, each weight the depth it subtends
+	var w := [1.0, 1.18, 1.42, 1.72, 2.10]
+	var wsum := 0.0
+	for v in w:
+		wsum += float(v)
+	var seam := Color(floor_c.r * 0.50, floor_c.g * 0.50, floor_c.b * 0.54)
+	var run := 0.0
+	var y := y0
+	for i in w.size():
+		run += float(w[i])
+		# the last boundary is the screen edge exactly, so no sliver can survive rounding
+		var y_end := s.y if i == w.size() - 1 else art_snap(Vector2(0.0, y0 + total * run / wsum)).y
+		if y_end <= y:
+			continue
+		# alternate the plank tone, and lift the whole floor very slightly toward the front
+		var lift := 1.0 + 0.05 * float(i) / float(w.size() - 1)
+		var tone := lift * (1.06 if i % 2 == 0 else 0.95)
+		draw_rect(Rect2(0, y, s.x, y_end - y),
+			Color(floor_c.r * tone, floor_c.g * tone, floor_c.b * tone))
+		# BUTT JOINTS, STAGGERED PER BAND so the floor never reads as a grid. Offset by a
+		# half period on odd bands, which is what a bricklayer's bond looks like and what
+		# stops five aligned joints drawing one long vertical line down the stage.
+		var period := 148.0
+		var off := 0.0 if i % 2 == 0 else period * 0.5
+		var jx := off
+		while jx < s.x:
+			var jxs := art_snap(Vector2(jx, 0.0)).x
+			draw_rect(Rect2(jxs, y, ART_PIXEL, y_end - y), seam)
+			jx += period
+		# the seam between this band and the next
+		if i < w.size() - 1:
+			draw_rect(Rect2(0, y_end - ART_PIXEL, s.x, ART_PIXEL), seam)
+		y = y_end
 
 
 func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
