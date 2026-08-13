@@ -17876,15 +17876,44 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# ...and the stack sits under the crowd card, whose own height is a variable
 			# (the dial is taller than the bar it replaced), so this follows it
 			var eay := ccard_y + ccard_h + 8.0
+			# THE COLUMN HAS A FLOOR AND THE STACK DID NOT KNOW ABOUT IT (2026-08-13).
+			#
+			# The note above is careful that each card grows to fit its OWN description, "so a
+			# longer challenge is never clipped by its own border" - and that part works. What
+			# nothing checked is the TOTAL: four cards at 66-81px each, under a 116px crowd card,
+			# run off the bottom of the screen. Measured on a four-stat Purist night at the
+			# Midnight Show, the fourth card lands underneath draw_routine_hud's own panel and the
+			# two sets of text print through each other. Now that Purist stats are PLAYER-PICKED
+			# rather than only house-rolled, four at once is something somebody chooses rather
+			# than a rare roll, so this is reachable in ordinary play.
+			#
+			# COMPACT IS NAME-ONLY, and the description is the right thing to drop - not a smaller
+			# font, which this density cannot afford, and not a shorter wrap, which truncates
+			# mid-sentence. The full text was already read once on the establishing card
+			# immediately before the act; what the live HUD owes the player mid-run is WHICH
+			# challenges are on, not what they mean again. One box per challenge survives either
+			# way, which was the whole point of splitting them up in the first place.
+			var e_floor := s.y - 78.0 - 8.0    # draw_routine_hud's panel top, less a gap
+			var e_hi: Array[float] = []
+			var e_tot := 0.0
+			for e in encores:
+				if e < 0 or e >= ENCORES.size():
+					continue
+				var eln := _wrap_lines(font, String(ENCORES[e]["desc"]), LW - 28, 11).size()
+				e_hi.append(36.0 + 15.0 * float(maxi(eln, 2)))
+				e_tot += e_hi[e_hi.size() - 1] + 6.0
+			var e_tight := eay + e_tot > e_floor
+			var ei := 0
 			for e in encores:
 				if e < 0 or e >= ENCORES.size():
 					continue
 				var edesc := String(ENCORES[e]["desc"])
-				var elines := _wrap_lines(font, edesc, LW - 28, 11)
-				var ehh := 36.0 + 15.0 * float(maxi(elines.size(), 2))
+				var ehh := 32.0 if e_tight else e_hi[ei]
+				ei += 1
 				hud_card(Rect2(LX, eay, LW, ehh), Color(ec.r, ec.g, ec.b, 0.5))
 				draw_fit_string(font, Vector2(LX + 14, eay + 22.0), String(ENCORES[e]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
-				_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+				if not e_tight:
+					_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
 				eay += ehh + 6.0
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
