@@ -12262,10 +12262,15 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 
 
 func art_rebank() -> void:
+	# THE SAMPLED FLOOR COLOURS GO WITH IT. bg_floor_colour caches one colour per backdrop
+	# because it is a texture read on a per-frame path, and a variant swap or a --procart
+	# toggle can put a different painting (or none) behind that same key - so a stale entry
+	# would paint the old room's ground under the new room.
 	# Re-read every manifest and redraw. This is what an F9 variant change calls, and the
 	# reason a look can be judged by flipping between them in front of the same frame
 	# rather than by launching twice and remembering. Cheap - a few dozen small textures,
 	# all already in Godot's resource cache after the first read.
+	_bg_floor.clear()
 	art_boot()
 	queue_redraw()
 
@@ -12848,6 +12853,58 @@ func _draw_screen() -> void:
 		draw_pause_screen(font, s)     # the pause menu sits over everything
 
 
+var _bg_floor: Dictionary = {}    # bg key -> the ground colour sampled from its painting
+
+
+func bg_floor_colour(bg_key: String, fallback: Color) -> Color:
+	# THE FLOOR HE STANDS ON, TAKEN FROM THE PAINTING BEHIND HIM (2026-08-13, Louis: "make
+	# sure that the podium or ground the player is standing on and the ground before him is
+	# matching the background").
+	#
+	# `venue_data`'s "floor" is a hand-picked colour per venue, and every one of them was
+	# chosen before these rooms were paintings - seven dark neutrals in the 0.045..0.12 range
+	# that agree with nothing in particular. So the Circus's sawdust ring stopped at the floor
+	# line and a cold grey-brown started, and the Arena's pitch did the same.
+	#
+	# The painting covers the whole frame and the floor is drawn OVER its bottom fifth, so the
+	# ground the picture itself shows is right there to be read: sample the rows just above
+	# the floor line (art y 276..286, the last ground the player can actually see) and carry
+	# that colour down. A regenerated backdrop re-matches itself with no numbers to update,
+	# which matters because these get re-rolled.
+	#
+	# Cached per key: get_image() is a texture read and this is called every frame.
+	if _bg_floor.has(bg_key):
+		return _bg_floor[bg_key]
+	if not art_on or not art_bank.has(bg_key):
+		return fallback     # no painting: the hand-picked colour is still the right answer
+	var tex: Texture2D = (art_bank[bg_key] as Dictionary)["tex"]
+	var img := tex.get_image()
+	if img == null:
+		return fallback
+	var w := img.get_width()
+	var h := img.get_height()
+	# in the painting's own pixels, whatever size it is: the band just above the floor line,
+	# which sits at 0.80 of the frame
+	var y0 := int(h * 0.767)
+	var y1 := maxi(y0 + 1, int(h * 0.797))
+	var acc := Vector3.ZERO
+	var n := 0
+	for y in range(y0, mini(y1, h)):
+		for x in range(0, w, 4):     # every fourth column is plenty for a mean
+			var c := img.get_pixel(x, y)
+			acc += Vector3(c.r, c.g, c.b)
+			n += 1
+	if n == 0:
+		return fallback
+	acc /= float(n)
+	# DARKENED A LITTLE ON PURPOSE. The sampled band is lit room; the apron is nearer the
+	# audience and out of the wash, and a floor at exactly the wall's value flattens the two
+	# into one surface. 0.72 keeps it recognisably the same material without matching it.
+	var out := Color(acc.x * 0.72, acc.y * 0.72, acc.z * 0.72)
+	_bg_floor[bg_key] = out
+	return out
+
+
 func draw_backdrop(s: Vector2) -> void:
 	var vi := cur_venue()
 	var v := venue_data(vi)
@@ -12875,6 +12932,9 @@ func draw_backdrop(s: Vector2) -> void:
 	# baked into it would freeze all of that, and the light is the half of this picture
 	# that is actually reacting to the player.
 	var bg_key := "bg/" + str(v["name"]).to_lower().replace(" ", "_")
+	# ...and the ground continues the painting rather than being its own hand-picked dark.
+	# Read AFTER bg_key exists and BEFORE anything draws with it.
+	floor_c = bg_floor_colour(bg_key, floor_c)
 	if _bgref:
 		# --bgref: draw ONLY the two layers the seam replaces - the sky gradient and the
 		# set dressing - and nothing after them. This is the backdrop equivalent of
@@ -13067,7 +13127,19 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 		# depth cue, it is two nearly identical stripes; the near row is half again the size
 		# of the far one now, which is the difference between "a crowd" and "a crowd you are
 		# standing behind".
-		var heads := mini(7 + vi * 2, 13) - int(near) * 2
+		# HOW MANY PEOPLE, AND IT HAS TO GROW (2026-08-13, Louis: "make it clear what's going on
+		# with the public: where is the public, how many people"). The old count was
+		# `mini(7 + vi * 2, 13) - near * 2`, and that cap meant the Circus, the Championship, the
+		# World Arena and the Midnight Show ALL drew exactly 24 people. The whole game is an
+		# escalating ladder of houses and the house itself was the one thing that stopped
+		# escalating a third of the way up it.
+		#
+		# The FAR row carries the growth, because that is the row with room for it: it is the
+		# smaller of the two and adding to it reads as the house filling up. The near row grows
+		# slowly - those silhouettes are 40px wide and a dozen of them already span the frame.
+		# Backyard 8 (a handful of neighbours), World Arena 23 + 10 in front of a painted bowl
+		# of thousands.
+		var heads := (8 + vi * 3) if r == 0 else (5 + vi)
 		var base_y := apron_base_y(fy, vi) + 6.0 + near * 28.0
 		var hscale := 1.15 + near * 1.05
 		# ...and a ONE-ROW house keeps the old single tone. `dark_far` is the lit front row of a
@@ -13378,7 +13450,13 @@ func draw_stage_apron(s: Vector2, fy: float, vi: int, floor_c: Color, glow: Colo
 	# 3. THE FACE. Base tone is the venue's own floor pushed down and warmed a little, so a
 	# Blackout stage keeps a black front and the Circus keeps a warm one - the same rule
 	# draw_stage_boards follows, for the same reason (floor_c is per venue and reacts).
-	var face := Color(floor_c.r * 0.62, floor_c.g * 0.56, floor_c.b * 0.58)
+	# 0.30, NOT 0.62. That ratio was set when floor_c was a hand-picked near-black (0.045..0.12
+	# per venue); now that it is sampled from the painting it can be a lit sawdust ring or a
+	# pale board, and 0.62 of that made the stage FRONT one of the brightest large surfaces on
+	# the screen. It is the surface facing away from every light in the room - it has to be the
+	# darkest thing down there or the podium stops reading as a solid object and the house
+	# behind it stops separating from it.
+	var face := Color(floor_c.r * 0.30, floor_c.g * 0.27, floor_c.b * 0.30)
 	draw_rect(Rect2(0, lip + ap, s.x, base - lip - ap), face)
 	# The footlight spill down it: bright at the trough, faint at the skirting. FOUR BANDS
 	# ACROSS THE WHOLE FACE, not four bands across the top of it - the first version stepped
@@ -13409,7 +13487,7 @@ func draw_stage_apron(s: Vector2, fy: float, vi: int, floor_c: Color, glow: Colo
 	# under it that the house rises out of
 	draw_rect(Rect2(0, base - ap * 2.0, s.x, ap), Color(glow.r, glow.g, glow.b, 0.16))
 	draw_rect(Rect2(0, base - ap, s.x, s.y - base + ap),
-		Color(floor_c.r * 0.30, floor_c.g * 0.28, floor_c.b * 0.34))
+		Color(floor_c.r * 0.14, floor_c.g * 0.13, floor_c.b * 0.17))
 
 	# 4. THE FOOTLIGHTS, in their trough on the lip. They used to be two soft discs sitting at
 	# fy - i.e. up at his feet, 88px behind where the front of the stage actually is - which
@@ -13448,7 +13526,7 @@ func draw_ground_near(s: Vector2, vi: int, fy: float, floor_c: Color, glow: Colo
 		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
 	draw_rect(Rect2(0, art_snap(Vector2(0.0, fy)).y, s.x, ap),
 		Color(glow.r, glow.g, glow.b, 0.55))
-	var near_c := Color(floor_c.r * 0.55, floor_c.g * 0.58, floor_c.b * 0.55)
+	var near_c := Color(floor_c.r * 0.42, floor_c.g * 0.45, floor_c.b * 0.42)
 	# THREE BANDS, DARKENING TOWARD THE CAMERA, rather than one flat rect. The first version of
 	# this WAS one rect and measured exactly as dead as what it replaced - a surface with no
 	# tone change and no texture is a bar whatever it is a picture of.

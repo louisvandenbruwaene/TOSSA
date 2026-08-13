@@ -140,22 +140,43 @@ UI_ONEOFFS = ["menu_backdrop", "victory", "end_gameover", "end_demo", "end_legen
 GAMUT_FAR = 0.05
 GAMUT_MAX = 0.10
 
+# SHADOW IS NOT DAMAGE, and ignoring that made this advisory cry wolf on a good painting
+# (2026-08-13). The new Street Corner - one lit lamp on a warm brick corner, which reduces
+# beautifully - scored 0.312, higher than the teal Backyard (0.269) that this whole check was
+# built to catch. Measured, its "out of gamut" pixels averaged RGB (8, 7, 4) with a channel
+# spread of 1: they are the night itself. Oklab distances stay meaningful down at the black
+# point while perception does not, so a large area of near-black reads as far from every
+# palette entry and then snaps to a dark that nobody can tell apart from it.
+#
+# Excluded from the NUMERATOR ONLY. Dropping dark pixels from the denominator too was the
+# first attempt and it is wrong in the other direction: it shrinks the population and
+# CONCENTRATES the surviving tail, which pushed the Championship from 0.055 to 0.087 for no
+# reason at all. Damaged lit pixels as a fraction of the whole frame is the honest reading.
+# Measured across the seven: street corner 0.312 -> 0.023, championship 0.055 -> 0.041,
+# every other venue unchanged to three places.
+#
+# It cannot hide either failure on record: the teal dusk sky and the over-bright title
+# curtain were both mid-luminance, well above this floor.
+GAMUT_DARK = 26.0   # mean RGB below this is night, and its snap is unobservable
+
 
 def gamut_fit(rgb: np.ndarray) -> float:
-	"""Fraction of pixels further than GAMUT_FAR from the nearest palette entry.
+	"""Fraction of ALL pixels that are both LIT and further than GAMUT_FAR from the palette.
 
 	Answers the one question a thumbnail cannot: will this painting SURVIVE the snap? A
 	picture inside the palette's gamut reduces to itself; one outside it reduces to
 	whatever is least wrong, and no amount of dithering rescues that.
 	"""
 	lab_p = srgb_to_oklab(load_palette().astype(float))
-	flat = srgb_to_oklab(rgb.reshape(-1, 3).astype(float))
+	pix = rgb.reshape(-1, 3).astype(float)
+	flat = srgb_to_oklab(pix)
+	lum = pix.mean(axis=1)
 	# chunked: 230k pixels against 48 entries at once is 33M floats
 	far = 0
 	for i in range(0, len(flat), 32768):
 		part = flat[i:i + 32768]
 		d = np.linalg.norm(part[:, None, :] - lab_p[None, :, :], axis=2).min(axis=1)
-		far += int((d > GAMUT_FAR).sum())
+		far += int(((d > GAMUT_FAR) & (lum[i:i + 32768] >= GAMUT_DARK)).sum())
 	return far / len(flat)
 
 
