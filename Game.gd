@@ -22776,10 +22776,24 @@ func menu_rows(font: Font, s: Vector2, oy: float) -> void:
 	# disc saying what the row does, the name, a line under it saying where it goes, and the lit
 	# one raised on its own colour. Nothing here touches the list - `menu_options()` is still the
 	# only place that decides what the rows ARE.
+	# THE THREE ACCENTS ARE THE THEATRE'S, NOT A TRAFFIC LIGHT'S (2026-08-13). They were a
+	# leaf green, a pale sky blue and a salmon - the generic go/neutral/stop triad, and the
+	# only cold colours anywhere on a screen that is otherwise crimson drape, gold fringe and
+	# warm footlight. On the one screen that makes the first impression, the menu read as a
+	# different game's UI pasted over this game's proscenium.
+	#
+	# The replacements are the game's OWN language rather than three new colours: Play takes
+	# CARD_TRICK_COL's warm gold, which is already what "the thing you came for" looks like
+	# everywhere else here - the lit shop card, the lit skill, the selected venue. Settings
+	# drops to a warm stone that reads as secondary without competing. Quit keeps a red,
+	# pulled off salmon and onto the drapes' own crimson.
+	#
+	# Nothing about the LAYOUT moves: same rows, same menu_sel, same soft_card. A menu row is
+	# still the shared card language; it is just printed in the house colours now.
 	var dress := {
-		"Play":     {"note": "take the stage", "col": Color(0.60, 0.90, 0.55), "icon": "play"},
-		"Settings": {"note": "sound, feel, controls", "col": Color(0.66, 0.80, 1.0), "icon": "dials"},
-		"Quit":     {"note": "leave the theatre", "col": Color(0.92, 0.46, 0.40), "icon": "quit"},
+		"Play":     {"note": "take the stage", "col": CARD_TRICK_COL, "icon": "play"},
+		"Settings": {"note": "sound, feel, controls", "col": Color(0.80, 0.73, 0.60), "icon": "dials"},
+		"Quit":     {"note": "leave the theatre", "col": Color(0.86, 0.38, 0.34), "icon": "quit"},
 	}
 	var opts := menu_options()
 	var cw := 340.0
@@ -25169,14 +25183,37 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_ornament(s.x * 0.5, s.y * 0.12 + 72.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_text_shout(font, Vector2(0, s.y * 0.12 + 96.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.86, 0.78, 0.66, 0.8 * tagA))
 
-	var py := s.y - 70.0
-	draw_gradient_v(Rect2(0, py - 30.0, s.x, s.y - py + 30.0), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.9), 16)
-
-	# bottom-LEFT: the record chase at this venue (its own board on a purist night)
+	# THE BOTTOM SCRIM IS SOLVED FROM THE PANELS NOW, not from a fixed 100px (2026-08-13).
+	#
+	# It was a gradient over the bottom 100px, ramping 0 -> 0.9, and that was enough for as
+	# long as an exterior was a flat vector drawing with a near-black lower half. The seven
+	# exteriors are PAINTINGS now, and the Circus put red-and-cream tent stripes straight
+	# through both corner panels: the panel tops sit 164px up (more with encores), so most of
+	# each card had no scrim under it at all and hud_panel's fill is not opaque enough to
+	# cover a lit tent on its own.
+	#
+	# This is the same failure the MARQUEE scrim above already fixed - measured then across
+	# all seven, the Circus's gold pennant ran through the blurb - and it gets the same
+	# answer, including the same shape: feather in, then FLAT, because a ramp that only
+	# reaches full strength at the very bottom leaves the text at the top of a card sitting
+	# on nothing. The height cannot be a constant: the right-hand card grows 70px per encore,
+	# so a Purist night with four of them is 280px taller than a plain one. Take the top of
+	# whichever card is taller and feather from there.
 	var rw := 330.0
 	var rh := 96.0 if purist else 76.0
 	var rx := 18.0
 	var ry := s.y - 88.0 - rh
+	var has_enc := booking_active and not encores.is_empty()
+	var bw := 400.0
+	var bh := (76.0 + 70.0 * float(encores.size())) if has_enc else 76.0
+	var bx := s.x - 18.0 - bw
+	var by2 := s.y - 88.0 - bh
+	var sc_hi := (minf(ry, by2) if booking_active else ry) - 30.0
+	var sc_fade := 34.0
+	draw_gradient_v(Rect2(0, sc_hi, s.x, sc_fade), Color(0.02, 0.01, 0.02, 0.0), Color(0.02, 0.01, 0.02, 0.82), 14)
+	draw_rect(Rect2(0, sc_hi + sc_fade, s.x, s.y - sc_hi - sc_fade), Color(0.02, 0.01, 0.02, 0.82))
+
+	# bottom-LEFT: the record chase at this venue (its own board on a purist night)
 	hud_panel(Rect2(rx, ry, rw, rh))
 	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
@@ -25190,11 +25227,8 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# challenge when one was rolled. Cash in from the first number on; each further
 	# goal is the gamble.
 	if booking_active:
-		var has_enc := not encores.is_empty()
-		var bw := 400.0
-		var bh := (76.0 + 70.0 * float(encores.size())) if has_enc else 76.0
-		var bx := s.x - 18.0 - bw
-		var by2 := s.y - 88.0 - bh
+		# bw/bh/bx/by2/has_enc are hoisted above the scrim - it has to know how tall this
+		# card is before it can cover it
 		hud_panel(Rect2(bx, by2, bw, bh))
 		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
 		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
