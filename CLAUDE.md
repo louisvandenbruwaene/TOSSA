@@ -65,6 +65,26 @@ screen pixels tall and some three. Callers that place hands themselves must snap
 - **PixelLab's floor is 1024 pixels of AREA.** At this density that rules it out for every stage
   prop (a ball is 11x11, the chainsaw 21x48 = 1008) and for hands and small icons. It is the right
   tool for backdrops and for large UI.
+- **A FULL-FRAME PICTURE IS ONE GENERATION NOW - THE MIRROR IS RETIRED** (2026-08-13). The old
+  recipe was "generate one 320x360 half and mirror it", because `create_image_pixflux` caps a side
+  at 400px. `create_image_pixen` takes **768 per side** within a 512x512 AREA budget, and
+  640x360 = 230400 fits. That retired three compromises at once: the visible bilateral seam down
+  the middle of five venues, the prompt contortion it forced ("the far LEFT SIDE only, nothing in
+  the centre"), and the rule that asymmetric outdoor venues could not be generated at all. All
+  seven backdrops and all seven exteriors are single paintings; `scripts/pixelise_paint.py`
+  reduces them and `scripts/fetch_paint.sh` downloads them.
+- **Pixen cannot force a palette, so the reducer does it** in Oklab with serpentine
+  Floyd-Steinberg. **Judge whether a painting will survive that by the TAIL, not the mean**: a
+  good picture and a badly broken one measured 0.028 against 0.034 mean distance, a 1.2x spread
+  for a difference that is glaring, because the damage is localised. The fraction of pixels
+  further than 0.05 separated them 2.9% to 26.9%. It is an ADVISORY that over-flags cold-lit
+  venues (dispersed floodlights diffuse fine; a contiguous out-of-gamut sky does not) - it means
+  "go and look at this one", and the fix is always the prompt, never the reducer. **The locked 48
+  is a WARM theatre palette**: it has no mid-luminance teal, so ask for deep indigo skies.
+- **Two framing rules a backdrop prompt must carry**, both measured off `draw_backdrop`: the
+  bottom 20% is covered by the stage floor, and the performer stands dead centre, so the centre
+  column wants to be empty. An EXTERIOR has its own: the establishing card puts its title across
+  the top centre and two panels in the bottom corners, so the hero fills the lower two thirds.
 - **Props are derived**: `--propref <name>` renders one prop isolated at x6 through the real
   drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
   alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a

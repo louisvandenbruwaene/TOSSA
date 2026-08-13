@@ -63,7 +63,11 @@ declare -a TARGETS=(
   # capture was silently the charged version.
   "stage_blackout_glow:700:play:--demo --booking --venue 5 --glow"
   "stage_blackout_dark:700:play:--demo --booking --venue 5 --nokit"
-  "stage_booed:700:play:--demo --booking --venue 2 --boo"
+  # 350, NOT 700 like its neighbours: --boo drives the crowd out and the act COLLAPSES on
+  # its own (measured, `collapsed=true ... ticks=398`), so by frame 700 there is no stage
+  # left to photograph and the capture never happens. That silently killed the twelve
+  # targets below it - see the `|| true` on the state grep for the other half of that bug.
+  "stage_booed:350:play:--demo --booking --venue 2 --boo"
   "stage_eggbreak:120:play:--demo --eggbreak"
   # --- cards, banners and one-off end screens -------------------------------
   "establish:60:establish:--establish 3 --booking"
@@ -141,7 +145,15 @@ for entry in "${TARGETS[@]}"; do
     # A success quits as soon as the shot is written, so the ceiling only costs
     # wall-clock on a screen that was going to fail anyway.
     run_windowed 45 "$log" $flags --shot "$out" --shotat "$tick" || true
-    got="$(grep -m1 '^shot state: ' "$log" | awk '{print $4}')"
+    # `|| true` IS LOAD-BEARING, AND ITS ABSENCE COST THIS SCRIPT TWELVE SCREENS.
+    # Under `set -e` plus `pipefail`, a command substitution whose pipeline fails aborts
+    # the whole run - so when a capture produced no `shot state:` line at all (grep exits
+    # 1), the sweep stopped dead at that target instead of logging a failure and moving on.
+    # It looked like a SUCCESS from outside, because callers pipe this script into `tail`
+    # and the pipeline reports tail's status. Two full sweeps came back "20/20 captured"
+    # with a third of the list never attempted. A missing state line is exactly the case
+    # the retry and the FAILED branch below already exist to handle.
+    got="$(grep -m1 '^shot state: ' "$log" | awk '{print $4}' || true)"
     if [[ -s "$out" ]] && frame_is_blank "$out"; then
       log_warn "$name -> captured a BLANK frame - retrying"
       rm -f "$out"
