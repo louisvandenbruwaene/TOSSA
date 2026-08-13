@@ -20583,12 +20583,19 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		# the function growing a parameter every caller would then have to pass. Safe here
 		# because none of these icons sets its own transform - the two that do, the props,
 		# are not on this screen.
-		# 0.42, NOT 0.62, and the number is set by the WIDEST icon rather than the average
-		# one. The glasses span ±28 units and the helmet ±40 (two cans and a cap), so at 0.62
-		# they reached 17 and 25px from centre and ran straight through the name beside them -
-		# "Energy Helme" with a can sitting on the t. Sized so the widest of them clears the
-		# label column, which is what an icon gutter is for.
-		draw_set_transform(Vector2(cx2 + 12.0, ry2 - 5.0), 0.0, Vector2.ONE * 0.42)
+		# 0.5 NOW, AND IT HAD TO BE (2026-08-13). The old 0.42 was set by the WIDEST vector
+		# icon rather than the average one - the glasses span ±28 units and the helmet ±40 (two
+		# cans and a cap), so at 0.62 they reached 17 and 25px from centre and ran straight
+		# through the name beside them, "Energy Helme" with a can sitting on the t.
+		#
+		# Seven of the eight are SPRITES now, and that changes the constraint completely: a
+		# sprite is a uniform 40x40 units whatever it depicts, so at 0.5 the widest icon reaches
+		# 10px into an 18px gutter and the helmet cannot overhang anything. What 0.42 could not
+		# do is be SHARP - it is 16.8 screen pixels of a 40 unit source, a fractional resample,
+		# and at this density that is the one thing pixel art does not survive. 0.5 is exactly
+		# half: one screen pixel per art pixel, lossless, and the only value between "full size"
+		# and "gone" that is a whole number of them. Same rule as fig_scale_H's halves.
+		draw_set_transform(Vector2(cx2 + 12.0, ry2 - 5.0), 0.0, Vector2.ONE * 0.5)
 		draw_gear_icon(String(pdef.get("gear", piece)), Vector2.ZERO, Color(nc3.r, nc3.g, nc3.b, 1.0), rowsel)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_fit_string(font, Vector2(cx2 + 30.0, ry2), String(pdef["name"]), HORIZONTAL_ALIGNMENT_LEFT, 116.0, 14, nc3)

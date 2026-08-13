@@ -209,6 +209,46 @@
     "a 170px band at every edge. So the picture has to be dark and quiet through the centre",
     "and cannot put its detail hard against the edge either."
   ],
+  "_GEAR_ICONS": [
+    "The wardrobe rack's eight pieces. AUTHORED WHITE/GREYSCALE ON PURPOSE - draw_gear_icon",
+    "blits these through a TINT, and the tint is carrying information at both call sites: the",
+    "gear room passes the piece's own e[\"col\"] (so the Helmet comes out orange and the Glow",
+    "Suit green), and the tailor passes a row STATE (cream selected, dimmer owned, dimmest",
+    "not). Painting colour in would fight both. They store a luminance RATIO normalised so the",
+    "brightest pixel is white - the same rule the hands and body regions follow, because a",
+    "tint can only ever darken. See scripts/install_gear_icons.py.",
+    "",
+    "A RENDERED GARMENT DOES NOT SURVIVE 20x20 AND A PICTOGRAM DOES. The coat, waistcoat and",
+    "gloves were generated first as shaded objects like the rest, and all three reduced to",
+    "unreadable mush while the hat, boots, glasses and helmet came through fine - a hat is a",
+    "silhouette, a tailcoat is detail. Re-asked as flat high-contrast SHOP PICTOGRAMS (thick",
+    "chunky shapes, no texture, no small detail) all three read immediately. Worth knowing",
+    "before generating anything else this small."
+  ],
+  "ui/gear_hat": {
+    "path": "res://Assets/UI/gear/hat.png"
+  },
+  "ui/gear_coat": {
+    "path": "res://Assets/UI/gear/coat.png"
+  },
+  "ui/gear_helmet": {
+    "path": "res://Assets/UI/gear/helmet.png"
+  },
+  "ui/gear_vest": {
+    "path": "res://Assets/UI/gear/vest.png"
+  },
+  "ui/gear_gloves": {
+    "path": "res://Assets/UI/gear/gloves.png"
+  },
+  "ui/gear_boots": {
+    "path": "res://Assets/UI/gear/boots.png"
+  },
+  "ui/gear_glasses": {
+    "path": "res://Assets/UI/gear/glasses.png"
+  },
+  "ui/gear_glow_suit": {
+    "path": "res://Assets/UI/gear/glow_suit.png"
+  },
   "ui/victory": {
     "path": "res://Assets/UI/victory.png"
   },
