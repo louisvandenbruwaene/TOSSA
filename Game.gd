@@ -13034,7 +13034,7 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 	# merge into a single mass however well each one is drawn.
 	# It hangs off the STAGE FRONT, not off the performer's feet - the light spilling over the
 	# lip lands on the first few rows, which is 88px lower than where this used to start.
-	draw_gradient_v(Rect2(0.0, apron_base_y(fy) - 6.0, s.x, 46.0),
+	draw_gradient_v(Rect2(0.0, apron_base_y(fy, vi) - 6.0, s.x, 46.0),
 		Color(glow.r, glow.g * 0.82, glow.b * 0.62, 0.16 + 0.10 * (applause if performing else 0.0)),
 		Color(glow.r, glow.g, glow.b, 0.0), 23)
 	for r in rows:
@@ -13068,9 +13068,15 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 		# of the far one now, which is the difference between "a crowd" and "a crowd you are
 		# standing behind".
 		var heads := mini(7 + vi * 2, 13) - int(near) * 2
-		var base_y := apron_base_y(fy) + 6.0 + near * 28.0
+		var base_y := apron_base_y(fy, vi) + 6.0 + near * 28.0
 		var hscale := 1.15 + near * 1.05
-		var row_dark := dark_near if r > 0 else dark_far
+		# ...and a ONE-ROW house keeps the old single tone. `dark_far` is the lit front row of a
+		# pair, and it is brighter than what this drew before; applied to the Backyard's and the
+		# Street Corner's single row it lightens their whole foreground for a depth cue that has
+		# no second row to be a cue against.
+		var row_dark := dark
+		if rows > 1:
+			row_dark = dark_near if r > 0 else dark_far
 		# and the near row keeps only a trace of rim: it is the row FURTHEST from the stage,
 		# so lighting its crowns as brightly as the front row would invert the one relationship
 		# this whole function is built on (see the backlit note above).
@@ -13089,10 +13095,19 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 		# shoulders just under the largest skull in the row at either scale; the old flat 15.0
 		# was right for the old flat 1.0-1.28 range and lands the near row off-screen at 2.2.
 		var band_y := snappedf(base_y + 11.5 * hscale, ap)
-		draw_rect(Rect2(0.0, band_y, s.x, s.y - band_y), row_dark)
-		# ...and a single warm line along the top of that mass, so the row is separated from
-		# the one behind it by light rather than by a change of grey
-		draw_rect(Rect2(0.0, band_y, s.x, ap), Color(row_rim.r, row_rim.g, row_rim.b, row_rim.a * 0.5))
+		# A ONE-ROW HOUSE HAS NO MASS, AND THAT WAS THE OUTDOOR VENUES' WHOLE PROBLEM. This band
+		# fills the frame from the row down in one flat colour, which is right for a theatre -
+		# there really are hundreds of people under there - and wrong for the Backyard and the
+		# Street Corner, where the audience is a handful of neighbours on a lawn and a few
+		# passers-by. It painted over everything below it, so those two screens measured 98 of
+		# their bottom 120 rows with no structure whatever the ground beneath was doing. Without
+		# it, they are individual figures standing on ground you can see between and behind.
+		if rows > 1:
+			draw_rect(Rect2(0.0, band_y, s.x, s.y - band_y), row_dark)
+			# ...and a single warm line along the top of that mass, so the row is separated from
+			# the one behind it by light rather than by a change of grey
+			draw_rect(Rect2(0.0, band_y, s.x, ap),
+				Color(row_rim.r, row_rim.g, row_rim.b, row_rim.a * 0.5))
 		for i in heads:
 			# a BAD night empties seats too, not just a good one lighting up (Still open:
 			# "the crowd reacting to a BAD night") - each seat has its own stable leave
@@ -13305,11 +13320,25 @@ const APRON_DEEP := 38.0   # the boards in front of his feet - shallow, because 
 const APRON_FACE := 40.0   # the vertical front of the stage, from the lip down
 
 
+func stage_has_apron(vi: int) -> bool:
+	# ONLY A ROOM WITH A STAGE IN IT GETS A STAGE FRONT. The first two venues are the Backyard
+	# and the Street Corner - a lawn and a pavement - and giving them a lip, a panelled fascia
+	# and a skirting rail put a proscenium apron under a busker standing on the kerb. Same test
+	# the footlights have always used (vi >= 2, "once the career reaches ticketed rooms"), and
+	# for the same reason; it should have been shared from the start.
+	return vi >= 2
+
+
 func apron_lip_y(fy: float) -> float:
 	return art_snap(Vector2(0.0, fy + APRON_DEEP)).y
 
 
-func apron_base_y(fy: float) -> float:
+func apron_base_y(fy: float, vi: int) -> float:
+	# where the house begins. With no apron there is no stage front to begin below, so it is
+	# the 24px the crowd's own +30 always assumed - the outdoor venues keep exactly the layout
+	# they had before the podium existed.
+	if not stage_has_apron(vi):
+		return art_snap(Vector2(0.0, fy + 24.0)).y
 	return art_snap(Vector2(0.0, fy + APRON_DEEP + APRON_FACE)).y
 
 
@@ -13327,8 +13356,11 @@ func draw_stage_apron(s: Vector2, fy: float, vi: int, floor_c: Color, glow: Colo
 	# both what a footlight trough actually does and the thing that makes the lip read as an
 	# edge rather than as a stripe.
 	var ap := float(ART_PIXEL)
+	if not stage_has_apron(vi):
+		draw_ground_near(s, vi, fy, floor_c, glow, spot)
+		return
 	var lip := apron_lip_y(fy)
-	var base := apron_base_y(fy)
+	var base := apron_base_y(fy, vi)
 
 	# 1. THE SURFACE, now bounded at the lip instead of running off the screen
 	draw_stage_boards(s, fy, lip, floor_c)
@@ -13392,6 +13424,94 @@ func draw_stage_apron(s: Vector2, fy: float, vi: int, floor_c: Color, glow: Colo
 				Color(floor_c.r * 0.5, floor_c.g * 0.45, floor_c.b * 0.5))
 			fill_disc_pix(Vector2(lx, lip - ap * 3.0), ap * 1.5, Color(1.0, 0.85, 0.55, 0.85 * fl))
 			draw_glow_pix(Vector2(lx, lip - ap * 3.0), 16.0, Color(glow.r, glow.g, glow.b, 0.20 * fl))
+
+
+func draw_ground_near(s: Vector2, vi: int, fy: float, floor_c: Color, glow: Color,
+		spot: float) -> void:
+	# THE FIRST TWO VENUES ARE OUTDOORS AND GET A NEAR FIELD INSTEAD OF A PODIUM.
+	#
+	# Gating the stage front on vi >= 2 was right - a lawn has no apron - but reverting these
+	# two to the flat ground they had before left them with exactly the dead foreground the
+	# whole exercise was about: measured, 98 of the bottom 120 rows with no horizontal
+	# structure at all, against 4 at the venues that got the podium. And these are the FIRST
+	# TWO houses a player ever performs in, so it is the worst possible place to leave it.
+	#
+	# What they get instead is the ground nearest the camera, which is a real thing in both
+	# rooms and needs no stage: at the Backyard the lawn keeps going and its near blades stand
+	# up against the lit grass behind them; at the Street Corner the pavement ends at a kerb
+	# and the road starts. Same three-surface idea as the apron - a surface, an edge, and a
+	# darker plane below it - built out of what is actually there.
+	var ap := float(ART_PIXEL)
+	var edge := art_snap(Vector2(0.0, fy + 34.0)).y
+	draw_stage_boards(s, fy, edge, floor_c)
+	draw_gradient_v(Rect2(0, fy, s.x, 34.0),
+		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
+	draw_rect(Rect2(0, art_snap(Vector2(0.0, fy)).y, s.x, ap),
+		Color(glow.r, glow.g, glow.b, 0.55))
+	var near_c := Color(floor_c.r * 0.55, floor_c.g * 0.58, floor_c.b * 0.55)
+	# THREE BANDS, DARKENING TOWARD THE CAMERA, rather than one flat rect. The first version of
+	# this WAS one rect and measured exactly as dead as what it replaced - a surface with no
+	# tone change and no texture is a bar whatever it is a picture of.
+	for bi in 3:
+		var by0 := edge + (s.y - edge) * float(bi) / 3.0
+		var by1 := edge + (s.y - edge) * float(bi + 1) / 3.0
+		var dk := 1.0 - 0.18 * float(bi)
+		draw_rect(Rect2(0, art_snap(Vector2(0.0, by0)).y, s.x,
+			art_snap(Vector2(0.0, by1)).y - art_snap(Vector2(0.0, by0)).y),
+			Color(near_c.r * dk, near_c.g * dk, near_c.b * dk))
+	if vi == 0:
+		# THE NEAR LAWN. A tufted top edge, not a straight one: the blades closest to the eye
+		# are the only ones big enough to have a silhouette, and that silhouette against the
+		# lit grass behind them is the entire read. Stable per blade (no randf), so nothing
+		# shimmers frame to frame - the same rule the crowd's seats follow.
+		var bx := 0.0
+		while bx < s.x:
+			var k := fposmod(sin(bx * 0.137) * 371.0, 1.0)
+			var bh := (3.0 + floorf(k * 4.0)) * ap
+			var sway := sin(atick() * 0.006 + bx * 0.05) * ap * 0.5
+			draw_rect(Rect2(art_snap(Vector2(bx + sway, 0.0)).x, edge - bh, ap * 2.0, bh + ap), near_c)
+			bx += ap * 3.0
+		# ...and blades THROUGH the near field, not only along its edge. Drawn LIGHT, because
+		# the near lawn is floor_c * 0.55 of an already dark floor and a darker blade on it is
+		# invisible - the same mistake the stage face's panel joints made and the same fix.
+		var gy := edge + ap * 2.0
+		var gi := 0
+		while gy < s.y:
+			var gx := fposmod(float(gi) * 53.0, 37.0)
+			while gx < s.x:
+				var kk := fposmod(sin(gx * 0.21 + gy * 0.11) * 411.0, 1.0)
+				if kk > 0.35:
+					# 0.24, not 0.10: at a tenth over the Backyard's own very dark lawn the blades
+					# measured as no structure at all (72 of 120 rows still flat). A texture on a
+					# near-black ground has to be a real step in value or it is arithmetic nobody
+					# can see - the third time this same lesson has come up on this screen.
+					draw_rect(Rect2(art_snap(Vector2(gx, 0.0)).x, art_snap(Vector2(0.0, gy)).y,
+						ap, ap * (1.0 + floorf(kk * 2.0))),
+						Color(0.42, 0.62, 0.30, 0.24))
+				gx += 26.0
+			gy += ap * 3.0
+			gi += 1
+	else:
+		# THE KERB AND THE ROAD. A lit kerb edge, its own shadow under it, and the road below
+		# in long slabs - the seams run ACROSS the frame because a road recedes, and they are
+		# drawn as light on a dark surface for the same reason the stage face's joints are.
+		draw_rect(Rect2(0, edge - ap, s.x, ap), Color(glow.r, glow.g, glow.b, 0.30))
+		draw_rect(Rect2(0, edge, s.x, ap), Color(0.0, 0.0, 0.0, 0.45))
+		# The slab courses and the joints between them, ALL DRAWN AS LIGHT. The first version
+		# drew the joints at black 0.28 over a surface already at floor_c * 0.55 - which moves a
+		# near-black by nothing at all, exactly as the stage face's joints did before they were
+		# turned round. On a dark ground the only visible line is a lit one.
+		for i in 4:
+			var ry := art_snap(Vector2(0.0, edge + 18.0 + float(i) * 26.0)).y
+			if ry >= s.y:
+				break
+			draw_rect(Rect2(0, ry, s.x, ap), Color(glow.r, glow.g, glow.b, 0.13))
+			# staggered course to course, so the paving is a bond rather than a grid
+			var jx := 74.0 * float(i % 2)
+			while jx < s.x:
+				draw_rect(Rect2(art_snap(Vector2(jx, 0.0)).x, ry, ap, 26.0),
+					Color(glow.r, glow.g, glow.b, 0.09))
+				jx += 148.0
 
 
 func draw_stage_boards(s: Vector2, fy: float, y_bot: float, floor_c: Color) -> void:
