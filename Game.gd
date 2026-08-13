@@ -7991,6 +7991,27 @@ func fig_arm_pick_at(h: int, want: float) -> Dictionary:
 	return best
 
 
+func fig_preview_palm(o: Vector2, h: int, want_art: float) -> Vector2:
+	# WHERE A PREVIEW'S PAINTED PALM ACTUALLY IS - fig_hand_pos's job, for a caller that runs
+	# its own little simulation instead of the stage's.
+	#
+	# It cannot reuse fig_hand_pos: that one reads the stage's hpos, the viewport centre and
+	# ART_PIXEL, none of which a panel on the Skills screen shares. The reasoning is identical
+	# though, and so is the guard - a prop is drawn IN a hand, so it follows the palm the arm
+	# bank actually painted, and past FIG_PALM_MAX (the reaches no painting covers, i.e.
+	# Columns' central lanes) the simulated position wins instead, because a ball drawn 50px
+	# off its own lane and snapping back on the throw is worse than a hand that is a pixel out.
+	#
+	# Returns the fallback unchanged when there is no bank, so a build without the painted
+	# performer behaves exactly as it did.
+	var px := fig_preview_px()
+	var pick := fig_arm_pick_at(h, want_art)
+	if pick.is_empty() or not art_bank.has("char/juggle_body"):
+		return Vector2.INF
+	var org := fig_body_origin(o.x, fig_preview_floor(o), px)
+	return org + Vector2(float(pick["px"]) + 0.5, float(pick["py"]) + 0.5) * px
+
+
 func fig_preview_px() -> float:
 	# screen pixels per art pixel for a PREVIEW of the painted performer. Exactly half the
 	# stage's ART_PIXEL, so every source pixel still lands on a whole screen pixel; anything
@@ -12929,22 +12950,14 @@ func draw_backdrop(s: Vector2) -> void:
 	# is what appeared the moment the stack was thinned to pay for itself.
 	draw_glow(pc, 410.0 - 40.0 * hot, Color(glow.r, glow.g, glow.b, pool * 1.15))
 
-	# stage floor, with a soft warm lip of light where it meets the light pool
-	draw_stage_boards(s, fy, floor_c)
-	draw_gradient_v(Rect2(0, fy, s.x, 34.0), Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
-	draw_line(Vector2(0, fy), Vector2(s.x, fy), Color(glow.r, glow.g, glow.b, 0.55), 3.0)
+	# THE PODIUM: the boards he stands on, the lip they end at, and the front face of the
+	# stage below it (see draw_stage_apron). This used to be one flat run of boards from his
+	# feet to the bottom of the screen with a bright line across the top of it.
+	draw_stage_apron(s, fy, vi, floor_c, glow, spot)
 
 	# the near field: the handful of things the act is standing AMONG, drawn past the
 	# veil so they read, unlike the set dressing behind it (see draw_venue_foreground)
 	draw_venue_foreground(s, vi, fy, glow)
-
-	# footlights along the stage lip once the career reaches ticketed rooms
-	if vi >= 2:
-		for i in 12:
-			var lx := s.x * (float(i) + 0.5) / 12.0
-			var fl := 0.6 + 0.4 * sin(atick() * 0.05 + float(i) * 1.7)
-			soft_disc(Vector2(lx, fy + 3.0), 10.0, Color(glow.r, glow.g, glow.b, 0.05 * fl), 8)
-			soft_disc(Vector2(lx, fy + 3.0), 3.0, Color(1.0, 0.85, 0.55, 0.4 * fl), 8)
 
 	draw_crowd(s, vi, fy, glow)
 
@@ -13004,15 +13017,26 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 	# THE SILHOUETTE IS THE ROOM'S OWN DARK, not black: a flat black bar across the bottom of
 	# a warm theatre reads as a letterbox bar, not as an audience. Tinting it toward the
 	# venue's glow at very low value keeps it sitting in the same room as everything else.
+	# ...AND THE TWO ROWS MUST NOT BE THE SAME DARK, which is the whole reason the bottom of
+	# this screen measured as one colour. Both rows drew at 0.86 and 0.96 of the same value -
+	# a 10% difference on a near-black - so the near row's heads were black on black and the
+	# only thing they could do was disappear. The far row is the one with light on it (it is
+	# nearer the stage), the near row is the back of the house and is very nearly black, and
+	# the near row's SILHOUETTE against the far row's mass is what carries the read down here.
+	# `far` and `near` below, chosen so the ratio between them is ~3x rather than ~1.1x.
 	var dark := Color(glow.r * 0.10, glow.g * 0.08, glow.b * 0.09, 0.96)
+	var dark_far := Color(glow.r * 0.20, glow.g * 0.17, glow.b * 0.17, 1.0)
+	var dark_near := Color(glow.r * 0.055, glow.g * 0.045, glow.b * 0.06, 1.0)
 	var rim := Color(glow.r, glow.g * 0.92, glow.b * 0.80, lit)
 	# THE HAZE THE BACK ROW STANDS AGAINST. One soft warm wash spilling off the stage lip
 	# into the first few rows - the light that is actually in a theatre between a lit stage
 	# and a dark house. Without it the far row has no ground of its own and the two rows
 	# merge into a single mass however well each one is drawn.
-	draw_gradient_v(Rect2(0.0, fy, s.x, 62.0),
+	# It hangs off the STAGE FRONT, not off the performer's feet - the light spilling over the
+	# lip lands on the first few rows, which is 88px lower than where this used to start.
+	draw_gradient_v(Rect2(0.0, apron_base_y(fy) - 6.0, s.x, 46.0),
 		Color(glow.r, glow.g * 0.82, glow.b * 0.62, 0.16 + 0.10 * (applause if performing else 0.0)),
-		Color(glow.r, glow.g, glow.b, 0.0), 31)
+		Color(glow.r, glow.g, glow.b, 0.0), 23)
 	for r in rows:
 		# BACK ROW FIRST, so the near one paints over it - each row's shoulder mass runs all
 		# the way to the bottom of the screen, so drawing them the other way round buries the
@@ -13032,18 +13056,43 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 		# read and gets the size and the variety, the next one only breaks its edge, and
 		# everything under them is one dark mass - which is what a house looks like from the
 		# back of it, and leaves the bottom strip as the quiet ground the HUD panels sit on.
+		#
+		# THE HOUSE STARTS BELOW THE STAGE FRONT NOW (2026-08-13). It used to start at fy+30,
+		# i.e. 30px under the performer's own feet, which put the whole audience ON the stage
+		# he is standing on - invisible while the podium had no front, and impossible the
+		# moment it got one. It begins at apron_base_y and the near row runs off the bottom of
+		# the frame, which is what the nearest row of an audience does.
+		#
+		# AND THE NEAR ROW IS MUCH BIGGER THAN IT WAS. 1.0 to 1.28 across two rows is not a
+		# depth cue, it is two nearly identical stripes; the near row is half again the size
+		# of the far one now, which is the difference between "a crowd" and "a crowd you are
+		# standing behind".
 		var heads := mini(7 + vi * 2, 13) - int(near) * 2
-		var base_y := fy + 30.0 + near * 30.0
-		var hscale := 1.0 + near * 0.28
-		var row_dark := Color(dark.r, dark.g, dark.b, dark.a * (0.9 + 0.1 * near))
+		var base_y := apron_base_y(fy) + 6.0 + near * 28.0
+		var hscale := 1.15 + near * 1.05
+		var row_dark := dark_near if r > 0 else dark_far
+		# and the near row keeps only a trace of rim: it is the row FURTHEST from the stage,
+		# so lighting its crowns as brightly as the front row would invert the one relationship
+		# this whole function is built on (see the backlit note above).
+		var row_rim := Color(rim.r, rim.g, rim.b, rim.a * (0.35 if r > 0 else 1.0))
 		# the row's SHOULDERS, still one rect - a crowd's shoulders read as a mass anyway.
 		# It sits a head-radius down, so every skull stands clear of it instead of being
 		# swallowed by the band the moment the row moves.
-		var band_y := snappedf(base_y + 15.0 * hscale, ap)
+		# THE BAND HAS TO LAND ON SCREEN, and clamping it there is not the same thing. The
+		# first attempt at the bigger near row put it at 726 on a 720px frame and clamped to
+		# 718, which drew a 2px mass instead of one filling the bottom - so between the near
+		# row's heads (11 of them across 1280px, 40px wide, i.e. two thirds gaps) the frame
+		# measured a flat 10.8 luminance again. The row's own geometry has to fit the space,
+		# and 13.0 rather than 15.0 is what puts the shoulders under the heads at this scale.
+		# THE OFFSET IS TIED TO THE HEAD RADIUS, not to a constant, because the two rows are
+		# now very different sizes. hr tops out at 8.5 * hscale, so 11.5 * hscale puts the
+		# shoulders just under the largest skull in the row at either scale; the old flat 15.0
+		# was right for the old flat 1.0-1.28 range and lands the near row off-screen at 2.2.
+		var band_y := snappedf(base_y + 11.5 * hscale, ap)
 		draw_rect(Rect2(0.0, band_y, s.x, s.y - band_y), row_dark)
 		# ...and a single warm line along the top of that mass, so the row is separated from
 		# the one behind it by light rather than by a change of grey
-		draw_rect(Rect2(0.0, band_y, s.x, ap), Color(rim.r, rim.g, rim.b, rim.a * 0.5))
+		draw_rect(Rect2(0.0, band_y, s.x, ap), Color(row_rim.r, row_rim.g, row_rim.b, row_rim.a * 0.5))
 		for i in heads:
 			# a BAD night empties seats too, not just a good one lighting up (Still open:
 			# "the crowd reacting to a BAD night") - each seat has its own stable leave
@@ -13063,7 +13112,7 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			var hr := snappedf((13.0 + floorf(k * 3.0) * 2.0) * hscale * 0.5, ap)
 			var hy := snappedf(base_y + fmod(float(i) * 1.7, 4.0) + bob, ap)
 			var head := Vector2(snappedf(hx, ap), hy)
-			crowd_person(head, hr, k, row_dark, rim, ap)
+			crowd_person(head, hr, k, row_dark, row_rim, ap)
 			if performing and applause > 0.82 and (i + r * 3) % 4 == 0:
 				# hands up! - two dark arms against the stage, not two bright dots
 				var up := absf(sin(atick() * 0.09 + float(i)))
@@ -13073,7 +13122,7 @@ func draw_crowd(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 					draw_capsule_pix(head + Vector2(sgn * hr, hr * 0.4), hand,
 						ap * 1.5, ap * 1.5, row_dark)
 					fill_disc_pix(hand, ap * 1.4, row_dark)
-					draw_rect(Rect2(hand.x - ap, hand.y - hr * 0.5 - ap, ap * 2.0, ap), rim)
+					draw_rect(Rect2(hand.x - ap, hand.y - hr * 0.5 - ap, ap * 2.0, ap), row_rim)
 
 
 func crowd_person(head: Vector2, hr: float, k: float, dark: Color, rim: Color,
@@ -13246,7 +13295,106 @@ func draw_venue_dressing(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 			draw_moon_window(Vector2(s.x * 0.30, s.y * 0.30), 84.0, 190.0, fy)
 
 
-func draw_stage_boards(s: Vector2, fy: float, floor_c: Color) -> void:
+# THE PODIUM'S THREE SURFACES, in screen px below the performer's own standing line.
+# The 144px between his feet and the bottom of the frame used to be one flat run of boards
+# with the house painted over its lower half, which is why the bottom eighth of the screen
+# measured as a single colour (11,10,17) fading to (9,8,14) - a letterbox bar under a fully
+# painted room. Split three ways it is a stage seen from the back of the stalls: a shallow
+# band of surface, the edge it stops at, and the tall dark face below it.
+const APRON_DEEP := 38.0   # the boards in front of his feet - shallow, because of perspective
+const APRON_FACE := 40.0   # the vertical front of the stage, from the lip down
+
+
+func apron_lip_y(fy: float) -> float:
+	return art_snap(Vector2(0.0, fy + APRON_DEEP)).y
+
+
+func apron_base_y(fy: float) -> float:
+	return art_snap(Vector2(0.0, fy + APRON_DEEP + APRON_FACE)).y
+
+
+func draw_stage_apron(s: Vector2, fy: float, vi: int, floor_c: Color, glow: Color,
+		spot: float) -> void:
+	# THE STAGE IS A PLATFORM AND IT NEVER HAD A FRONT. Everything below the performer's feet
+	# was boards to the bottom of the screen, so the only thing separating the surface he
+	# stands on from the house was a single bright 3px line - the brightest row in the whole
+	# lower frame (measured at luminance 115 against 40-58 either side of it), carrying a
+	# structural read entirely on its own.
+	#
+	# A real stage front is the darkest large surface in the room: it faces the audience, and
+	# the lamps that light it are the footlights sitting in a trough on top of it, pointing
+	# the other way. So the face is lit ALONG ITS TOP EDGE and falls off downward, which is
+	# both what a footlight trough actually does and the thing that makes the lip read as an
+	# edge rather than as a stripe.
+	var ap := float(ART_PIXEL)
+	var lip := apron_lip_y(fy)
+	var base := apron_base_y(fy)
+
+	# 1. THE SURFACE, now bounded at the lip instead of running off the screen
+	draw_stage_boards(s, fy, lip, floor_c)
+	# the warm wash where the light pool lands on the boards, unchanged in intent but
+	# clamped to the boards it belongs to
+	draw_gradient_v(Rect2(0, fy, s.x, minf(34.0, lip - fy)),
+		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 8)
+
+	# 2. THE NOSING: the lip's own moulding, two art px of it, warm on top and dark beneath.
+	# The dark line under the highlight is what turns a bright row into an EDGE - without it
+	# the eye reads a painted stripe on a continuous floor, which is exactly what was there.
+	draw_rect(Rect2(0, lip - ap, s.x, ap), Color(glow.r, glow.g, glow.b, 0.55))
+	draw_rect(Rect2(0, lip, s.x, ap), Color(0.0, 0.0, 0.0, 0.55))
+
+	# 3. THE FACE. Base tone is the venue's own floor pushed down and warmed a little, so a
+	# Blackout stage keeps a black front and the Circus keeps a warm one - the same rule
+	# draw_stage_boards follows, for the same reason (floor_c is per venue and reacts).
+	var face := Color(floor_c.r * 0.62, floor_c.g * 0.56, floor_c.b * 0.58)
+	draw_rect(Rect2(0, lip + ap, s.x, base - lip - ap), face)
+	# The footlight spill down it: bright at the trough, faint at the skirting. FOUR BANDS
+	# ACROSS THE WHOLE FACE, not four bands across the top of it - the first version stepped
+	# them by 0.13 of the height each and so covered the top 14px of a 40px face, leaving the
+	# lower 20px measuring a flat 9.4 luminance. That is the same dead band this function
+	# exists to remove, moved down 20px rather than filled.
+	var spill := 0.30 + 0.55 * spot
+	var fh := base - lip - ap
+	for b in 4:
+		var t := float(b) / 3.0
+		draw_rect(Rect2(0, lip + ap + t * fh * 0.75, s.x, fh * 0.25 + ap),
+			Color(glow.r, glow.g * 0.86, glow.b * 0.62, spill * (1.0 - t * 0.86) * 0.20))
+	# THE PANEL JOINTS, on the same 148px rhythm as the boards' butt joints so the podium
+	# reads as one built object rather than two surfaces that happen to meet. Half a period
+	# offset, so a panel joint never lands directly under a board joint.
+	#
+	# THEY ARE DRAWN AS LIGHT, NOT AS SHADOW, and that is not a style choice: the face's own
+	# tone is floor_c * 0.62 on a floor_c of 0.045..0.12, i.e. RGB 8-18. A black joint at 30%
+	# over RGB 10 moves it to 7 and is invisible by construction. On a near-black surface the
+	# only line that can be seen is a lit one.
+	var period := 148.0
+	var jx := period * 0.5
+	while jx < s.x:
+		var jxs := art_snap(Vector2(jx, 0.0)).x
+		draw_rect(Rect2(jxs, lip + ap, ap, fh), Color(glow.r, glow.g, glow.b, 0.13))
+		jx += period
+	# the skirting rail the face stands on - again light, for the same reason - and the black
+	# under it that the house rises out of
+	draw_rect(Rect2(0, base - ap * 2.0, s.x, ap), Color(glow.r, glow.g, glow.b, 0.16))
+	draw_rect(Rect2(0, base - ap, s.x, s.y - base + ap),
+		Color(floor_c.r * 0.30, floor_c.g * 0.28, floor_c.b * 0.34))
+
+	# 4. THE FOOTLIGHTS, in their trough on the lip. They used to be two soft discs sitting at
+	# fy - i.e. up at his feet, 88px behind where the front of the stage actually is - which
+	# is why they never read as a row of lamps in front of him.
+	if vi >= 2:
+		for i in 12:
+			var lx := s.x * (float(i) + 0.5) / 12.0
+			var fl := 0.6 + 0.4 * sin(atick() * 0.05 + float(i) * 1.7)
+			# the hood, sitting ON the lip and breaking its line, which is most of what makes
+			# the row read as objects rather than as dots painted on the edge
+			draw_rect(Rect2(art_snap(Vector2(lx - 5.0, 0.0)).x, lip - ap * 3.0, ap * 5.0, ap * 3.0),
+				Color(floor_c.r * 0.5, floor_c.g * 0.45, floor_c.b * 0.5))
+			fill_disc_pix(Vector2(lx, lip - ap * 3.0), ap * 1.5, Color(1.0, 0.85, 0.55, 0.85 * fl))
+			draw_glow_pix(Vector2(lx, lip - ap * 3.0), 16.0, Color(glow.r, glow.g, glow.b, 0.20 * fl))
+
+
+func draw_stage_boards(s: Vector2, fy: float, y_bot: float, floor_c: Color) -> void:
 	# THE FLOOR WAS ONE FLAT draw_rect (2026-08-13), and once the seven backdrops became
 	# paintings it was the plainest surface left on the screen the game is actually played
 	# on - a fifth of the frame, in a single colour, under a fully painted room.
@@ -13268,12 +13416,19 @@ func draw_stage_boards(s: Vector2, fy: float, floor_c: Color) -> void:
 	# 0.5x the base they are an unmistakable dark line, while the plank tone stays at a few
 	# percent so the floor is still a floor a performer stands on rather than a feature
 	# pulling the eye off the props.
+	# THE BOARDS STOP AT THE LIP NOW (`y_bot`), where they used to run to the bottom of the
+	# screen and be buried under the house. That was invisible while the whole strip was one
+	# tone; it matters now that the stage has a front face, because the face has to start
+	# where the surface ends or the podium has no edge to be seen from.
 	var y0 := art_snap(Vector2(0.0, fy)).y
-	var total := s.y - y0
+	var total := y_bot - y0
 	if total <= 0.0:
 		return
-	# five bands, each weight the depth it subtends
-	var w := [1.0, 1.18, 1.42, 1.72, 2.10]
+	# THREE bands, each weighting the depth it subtends. It was five while the boards ran the
+	# whole 144px to the bottom of the screen; over the 22 art px the apron actually occupies,
+	# five bands put a seam every four pixels and the floor read as corduroy rather than as
+	# planks. The band count has to follow the depth, not the other way round.
+	var w := [1.0, 1.35, 1.85]
 	var wsum := 0.0
 	for v in w:
 		wsum += float(v)
@@ -13282,8 +13437,8 @@ func draw_stage_boards(s: Vector2, fy: float, floor_c: Color) -> void:
 	var y := y0
 	for i in w.size():
 		run += float(w[i])
-		# the last boundary is the screen edge exactly, so no sliver can survive rounding
-		var y_end := s.y if i == w.size() - 1 else art_snap(Vector2(0.0, y0 + total * run / wsum)).y
+		# the last boundary is the lip exactly, so no sliver can survive rounding
+		var y_end := y_bot if i == w.size() - 1 else art_snap(Vector2(0.0, y0 + total * run / wsum)).y
 		if y_end <= y:
 			continue
 		# alternate the plank tone, and lift the whole floor very slightly toward the front
@@ -14808,7 +14963,7 @@ func draw_glow(c: Vector2, r: float, col: Color) -> void:
 
 const GLOW_PIX_STEPS := 4     # concentric bands; more reads as a smooth blur again
 
-func draw_glow_pix(c: Vector2, r: float, col: Color) -> void:
+func draw_glow_pix(c: Vector2, r: float, col: Color, grid: float = 0.0) -> void:
 	# THE SAME SOFT POOL, ON THE ART GRID (2026-08-05, Louis: "the glow around the balls
 	# looks strange"). draw_glow stretches a 128px radial gradient texture, which is
 	# exactly right for a big stage wash and exactly wrong at prop scale: around a 12px
@@ -14828,21 +14983,28 @@ func draw_glow_pix(c: Vector2, r: float, col: Color) -> void:
 	# is the thing being fixed.
 	if col.a <= 0.004 or r <= 0.0:
 		return
+	var gap := grid if grid > 0.0 else float(ART_PIXEL)
 	for i in GLOW_PIX_STEPS:
 		var t := float(i) / float(GLOW_PIX_STEPS)          # 0 outermost .. -> innermost
-		var br := snappedf(r * (1.0 - t * 0.72), float(ART_PIXEL))
-		if br < float(ART_PIXEL):
+		var br := snappedf(r * (1.0 - t * 0.72), gap)
+		if br < gap:
 			continue
 		# matches glow_texture's fall-off: a bright core dropping away fast, then a skirt
 		var a := col.a * (0.14 + 0.86 * pow(t, 1.7))
-		fill_disc_pix(c, br, Color(col.r, col.g, col.b, a))
+		fill_disc_pix(c, br, Color(col.r, col.g, col.b, a), gap)
 
 
-func fill_disc_pix(c: Vector2, r: float, col: Color) -> void:
+func fill_disc_pix(c: Vector2, r: float, col: Color, grid: float = 0.0) -> void:
 	# a filled circle rasterised onto the art grid, one draw_rect per art row - the same
 	# technique as draw_capsule_pix, and here for the same reason: draw_circle antialiases
 	# its rim, and a soft rim is what makes a 12px glow look like a smudge.
-	var ap := float(ART_PIXEL)
+	#
+	# `grid` IS FOR THE PREVIEWS, and it is not optional cleverness. The Skills panel draws the
+	# performer at fig_preview_px() - one screen pixel per art pixel, exactly HALF the stage's
+	# ART_PIXEL - so a prop snapped to 2 beside him is drawn at twice his own resolution, and
+	# a 6.5px ball comes out a visibly chunkier object than the man holding it. A rasteriser
+	# that hard-codes ART_PIXEL is only correct on screens drawn at ART_PIXEL.
+	var ap := grid if grid > 0.0 else float(ART_PIXEL)
 	var y0 := snappedf(c.y - r, ap)
 	var rows := int(ceil((r * 2.0) / ap))
 	for i in rows + 1:
@@ -15002,10 +15164,11 @@ func fill_flame_pix(pos: Vector2, ang: float, sc: float, base: Vector2, h: float
 	fill_poly_pix(out, col)
 
 
-func draw_ring_pix(c: Vector2, r: float, w: float, col: Color) -> void:
+func draw_ring_pix(c: Vector2, r: float, w: float, col: Color, grid: float = 0.0) -> void:
 	# a hollow circle on the art grid: the same row solve as fill_disc_pix run twice, so the
 	# ring's own inner edge is as hard as its outer one. draw_arc(..., TAU) antialiases both.
-	var ap := float(ART_PIXEL)
+	# `grid`: see fill_disc_pix - a preview draws at half the stage's art pixel.
+	var ap := grid if grid > 0.0 else float(ART_PIXEL)
 	var ro := r + w * 0.5
 	var ri := maxf(0.0, r - w * 0.5)
 	var y0 := snappedf(c.y - ro, ap)
@@ -21291,9 +21454,16 @@ func pv_state(legs: Array, tsec: float) -> Dictionary:
 		var dur := float(leg["d"])
 		if i == legs.size() - 1 or tloop < acc + dur:
 			var p := clampf((tloop - acc) / dur, 0.0, 1.0)
-			return {"pos": pv_leg_pos(leg, p), "behind": p < float(leg["bhd"])}
+			# `carry` IS THE WHOLE POINT OF REPORTING THE LEG. A carry leg is the stretch a
+			# prop spends IN A HAND, so it is the only thing that can tell the preview's
+			# figure which hand is holding what - and without it the hands were guessed from
+			# "is any prop within 34px of the hand line", which is true for none of them
+			# through most of a cascade.
+			return {"pos": pv_leg_pos(leg, p), "behind": p < float(leg["bhd"]),
+					"carry": bool(leg["carry"]), "from": Vector2(leg["a"]), "to": Vector2(leg["b"])}
 		acc += dur
-	return {"pos": Vector2.ZERO, "behind": false}
+	return {"pos": Vector2.ZERO, "behind": false, "carry": false,
+			"from": Vector2.ZERO, "to": Vector2.ZERO}
 
 
 func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: float = 1.0) -> void:
@@ -21424,17 +21594,22 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		clampf(ceil_y + peak + 7.0 + slack * 0.62, ceil_y, inner.position.y + inner.size.y - PV_FLOOR - 6.0))
 	var fy := o.y + PV_FLOOR
 
-	# the stage itself: a spotlight cone from the top of the box, a warm pool on the
-	# floor, and a lit floor lip - the same three moves draw_backdrop makes, in miniature
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(o.x, inner.position.y + 4.0),
-		Vector2(o.x - box.size.x * 0.30, fy), Vector2(o.x + box.size.x * 0.30, fy)]),
-		Color(glow.r, glow.g, glow.b, 0.05))
+	# the stage itself: a warm pool on the floor and a lit floor lip.
+	#
+	# THE CONE IS GONE (2026-08-13, and it is the same note Louis gave about the trick cards:
+	# "just the image not the light from above"). It was a draw_colored_polygon triangle from
+	# the top of the panel to the floor at alpha 0.05, which over a panel this dark does not
+	# read as light at all - it reads as a hard-edged grey wedge behind the performer, with two
+	# visible straight diagonals crossing the roads. The pool below him does the whole job of
+	# saying "he is lit" without drawing a shape.
 	draw_glow(Vector2(o.x, fy), box.size.x * 0.34, Color(glow.r, glow.g, glow.b, 0.16))
 	draw_rect(Rect2(inner.position.x, fy, inner.size.x, inner.position.y + inner.size.y - fy),
 		Color(0.09, 0.06, 0.07, 0.92))
+	# ...and the lip is WARM rather than the venue's glow. At a cold house (the Championship
+	# is a blue-white room) that line came out pale blue - the one cold element on a panel of
+	# crimson and gold, drawn straight across the middle of it.
 	draw_line(Vector2(inner.position.x, fy), Vector2(inner.position.x + inner.size.x, fy),
-		Color(glow.r, glow.g, glow.b, 0.45), 1.5)
+		Color(1.0, 0.78, 0.42, 0.40), 1.5)
 
 	# THE ROADS: every leg's own parabola, drawn faint and behind everything, so the
 	# pattern's SHAPE is legible in a still frame and not only in motion
@@ -21446,19 +21621,23 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		for leg in tracks_legs(tr):
 			if bool(leg["carry"]):
 				continue
-			var prev := Vector2.ZERO
-			var prev_ok := false
-			for k in 19:
-				var p := o + pv_leg_pos(leg, float(k) / 18.0)
-				var ok := road_box.has_point(p)
-				if ok and prev_ok:
-					# a road climbing out of the box FADES rather than stopping dead at
-					# the ceiling: four hard-cut tall arcs (a High Toss) read as strings
-					var a := clampf((minf(p.y, prev.y) - ceil_y) / 46.0, 0.0, 1.0)
-					if a > 0.02:
-						draw_line(prev, p, Color(road_c.r, road_c.g, road_c.b, road_c.a * a), 1.8, true)
-				prev = p
-				prev_ok = ok
+			# A ROAD IS A DOTTED TRAIL, NOT A LINE (2026-08-13). Drawn continuous it was a
+			# 1.8px stroke running from the hand line up over the head, and the props sit at
+			# the apexes of those strokes - so every ball read as the head of a lollipop and
+			# the whole panel looked like three balls on wires rather than three in the air.
+			# The same samples, drawn as separated dots, say "this is where it travels"
+			# without ever drawing something that could be mistaken for a physical object.
+			for k in 25:
+				var p := o + pv_leg_pos(leg, float(k) / 24.0)
+				if not road_box.has_point(p):
+					continue
+				# a road climbing out of the box FADES rather than stopping dead at
+				# the ceiling: four hard-cut tall arcs (a High Toss) read as strings
+				var a := clampf((p.y - ceil_y) / 46.0, 0.0, 1.0)
+				if a <= 0.02:
+					continue
+				fill_disc_pix(p, 1.0, Color(road_c.r, road_c.g, road_c.b, road_c.a * a * 1.5),
+					fig_preview_px())
 
 	# where every prop is this instant
 	var t := atick() / 120.0
@@ -21473,26 +21652,56 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		for i in n:
 			var st := pv_state(legs, t + total * (ph + float(i) / float(n)))
 			props.append({"pos": o + Vector2(st["pos"]), "col": ball_color(ci),
-						  "behind": bool(st["behind"]), "mark": marked})
+						  "behind": bool(st["behind"]), "mark": marked,
+						  "carry": bool(st.get("carry", false)),
+						  "from": Vector2(st.get("from", Vector2.ZERO))})
 			ci += 1
 
-	# the hands go where the props are: each hand takes the nearest prop crossing its
-	# own side of the hand line, so the figure visibly scoops and throws. A prop hidden
-	# BEHIND the body is skipped - the arm has no business chasing it round the back.
+	# THE HANDS ARE DRIVEN BY THE CARRY LEGS, not guessed from proximity (2026-08-13).
+	#
+	# What was here took "the nearest prop within 34px of the hand line, on this side, not
+	# behind the body" and put the hand on it - and for most of a cascade that set is EMPTY,
+	# because the props spend most of their loop in the air well above the hand line. So both
+	# hands fell through to their default outer slot and stayed there: a symmetric, level,
+	# palms-open T-pose, held while three balls sailed past it. Louis's "fix the players
+	# juggling for each trick" is exactly this - the figure was not juggling at all, it was
+	# standing still behind a pattern that happened to be animating.
+	#
+	# A CARRY LEG IS THE PROP IN THE HAND. It runs from the catch point to the throw point and
+	# is the pattern's own statement of when a hand is holding something, so a hand placed on
+	# its carried prop is right by construction, for every pattern and every trick, including
+	# the ones whose carry dips below the hand line (Behind the Back) or rides a lane at dead
+	# centre (Columns). Nothing here needs to know which pattern it is drawing.
 	var hp := [o + Vector2(-PV_OUTER, 0.0), o + Vector2(PV_OUTER, 0.0)]
-	var hbest := [999.0, 999.0]
+	var held := [false, false]
 	for pr in props:
-		if bool(pr["behind"]):
+		if not bool(pr.get("carry", false)):
 			continue
 		var p: Vector2 = pr["pos"]
-		var dy := absf(p.y - o.y)
-		if dy > 34.0 or absf(p.x - o.x) < 9.0:
+		# THE SIDE COMES FROM THE LEG'S OWN START, not from where the prop is this instant. A
+		# carry crosses toward the centre and a Behind-the-Back one crosses past it, so reading
+		# the live x hands the prop to the wrong arm halfway through every carry - which is a
+		# hand that jumps across the body and back once per prop per loop.
+		var h := LEFT if float(pr.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
+		if held[h]:
+			continue
+		held[h] = true
+		hp[h] = p
+	# a hand with nothing in it is on its way back out to meet the next catch, so it sits at
+	# the outer slot - which is where it always sat, but now that is a STATE rather than the
+	# only thing that ever happened.
+	for pr in props:
+		if bool(pr["behind"]) or bool(pr.get("carry", false)):
+			continue
+		var p2: Vector2 = pr["pos"]
+		var dy := absf(p2.y - o.y)
+		if dy > 22.0 or absf(p2.x - o.x) < 9.0:
 			continue   # ...and never Columns' MIDDLE lane: that prop rests at stage
 					   # centre, over the hip, and belongs to neither hand's reach
-		var h := LEFT if p.x < o.x else RIGHT
-		if dy < float(hbest[h]):
-			hbest[h] = dy
-			hp[h] = Vector2(p.x, o.y + clampf(p.y - o.y, -12.0, 9.0))
+		var h2 := LEFT if p2.x < o.x else RIGHT
+		if not held[h2]:
+			# a prop about to land: the hand rises to meet it rather than waiting flat
+			hp[h2] = Vector2(p2.x, o.y + clampf(p2.y - o.y, -10.0, 8.0))
 
 	var spin := bool(data.get("spin", false))
 	var turn := 0.0
@@ -21505,6 +21714,22 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		if bool(pr["behind"]):
 			pv_draw_prop(pr, inner)
 	draw_mini_juggler(o, hp[LEFT], hp[RIGHT], turn)
+	# A CARRIED PROP FOLLOWS THE PAINTED PALM, exactly as it does on stage (fig_hand_pos).
+	# The arm bank only holds the reaches it holds, so the arm drawn for a wanted reach puts
+	# its palm a pixel or two off the simulated hand - and at this size a ball floating two
+	# pixels outside the fingers is the difference between holding it and not. Done AFTER
+	# draw_mini_juggler because that is what chose the arm; asking before it would be asking
+	# about a pose that had not been picked yet.
+	if fig_anim_live() and not spin:
+		var ppx := fig_preview_px()
+		for pr in props:
+			if not bool(pr.get("carry", false)):
+				continue
+			var hh := LEFT if float(pr.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
+			var sim: Vector2 = hp[hh]
+			var palm := fig_preview_palm(o, hh, absf(sim.x - o.x) / ppx)
+			if palm.x < INF and palm.distance_to(sim) <= FIG_PALM_MAX * ppx:
+				pr["pos"] = palm
 	for pr in props:
 		if not bool(pr["behind"]):
 			pv_draw_prop(pr, inner)
@@ -21554,20 +21779,25 @@ func pv_draw_prop(pr: Dictionary, inner: Rect2) -> void:
 	if p.x < inner.position.x + r or p.x > inner.position.x + inner.size.x - r:
 		return
 	var fade := clampf((p.y - ceil_y) / 26.0, 0.0, 1.0)
+	# ON THE ART GRID, all of it. These were draw_circle and draw_arc - antialiased vector
+	# shapes, in the one panel on the Skills screen whose whole job is to show the player what
+	# the game looks like. Beside a figure made of hard 1px art they read as soft bubbles.
+	# ...at the PREVIEW's grid, not the stage's - see fill_disc_pix's `grid`.
+	var gp := fig_preview_px()
 	if bool(pr["mark"]):
 		# the same warm ring the sim puts on a trick throw
-		draw_arc(p, r + 3.5, 0.0, TAU, 20, Color(1.0, 0.86, 0.5, 0.45 * fade), 1.6, true)
-	draw_circle(p, r + 5.0, Color(col.r, col.g, col.b, 0.15 * fade))
+		draw_ring_pix(p, r + 3.5, 1.6, Color(1.0, 0.86, 0.5, 0.45 * fade), gp)
+	draw_glow_pix(p, r + 5.0, Color(col.r, col.g, col.b, 0.22 * fade), gp)
 	# A RIM, so the ball reads against ITSELF - not just against the backdrop (2026-07-31,
 	# found while checking Columns: its middle lane rides the dead centreline, which is
 	# exactly where the vest's own buttons sit, and a mid-tone ball that size in that spot
 	# was reading as a fourth button, not a third object). A stroke this size costs nothing
 	# on the two outer lanes, which never had the problem, and fixes the one that did
 	# without special-casing Columns at all.
-	draw_arc(p, r + 1.0, 0.0, TAU, 16, Color(0.05, 0.03, 0.03, 0.55 * fade), 2.0, true)
-	draw_circle(p, r, Color(col.r, col.g, col.b, fade))
+	draw_ring_pix(p, r + 1.0, 1.0, Color(0.05, 0.03, 0.03, 0.55 * fade), gp)
+	fill_disc_pix(p, r, Color(col.r, col.g, col.b, fade), gp)
 	var hi := col.lightened(0.4)
-	draw_circle(p + Vector2(-2.0, -2.0), 2.2, Color(hi.r, hi.g, hi.b, 0.9 * fade))
+	fill_disc_pix(p + Vector2(-2.0, -2.0), 2.0, Color(hi.r, hi.g, hi.b, 0.9 * fade), gp)
 
 
 func draw_skills(font: Font, s: Vector2) -> void:

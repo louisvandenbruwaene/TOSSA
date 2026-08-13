@@ -1,3 +1,11 @@
+> **SUPERSEDED — kept for history, do not follow.** This was the plan written before the
+> pixel pass started, for Louis to run by hand in the PixelLab web app. It contradicts three
+> of the four decisions that were later locked (it asks for a thick 1px black outline, for
+> "Stardew density" rather than the measured 640x360 / ART_PIXEL 2, and for style-reference
+> screenshots rather than the forced palette), and none of the shipped art came from it.
+>
+> **The prompts that actually made the art in this repo are in `docs/pixellab_prompts.md`.**
+
 # PixelLab Prompt Walkthrough — TOSSA Pixel Art Pass
 
 Work through this top to bottom. Every prompt is typed individually — PixelLab
