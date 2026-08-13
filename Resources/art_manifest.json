@@ -198,6 +198,29 @@
   "ui/menu_backdrop": {
     "path": "res://Assets/UI/menu_backdrop.png"
   },
+  "_ONEOFF_CARDS": [
+    "The four full-frame pictures behind the game's one-off moments. Each one replaced a",
+    "single draw_rect of near-black with centred text on it - see scripts/pixelise_paint.py's",
+    "UI_ONEOFFS note for why these four and not others. Delete a line and that screen goes",
+    "back to its flat fill, which is still the code's fallback path.",
+    "",
+    "They share one composition rule that a backdrop does not have: the type runs straight",
+    "down the MIDDLE, roughly y 14%..88%, and each screen finishes with draw_vignette(s, 0.7),",
+    "a 170px band at every edge. So the picture has to be dark and quiet through the centre",
+    "and cannot put its detail hard against the edge either."
+  ],
+  "ui/victory": {
+    "path": "res://Assets/UI/victory.png"
+  },
+  "ui/end_gameover": {
+    "path": "res://Assets/UI/end_gameover.png"
+  },
+  "ui/end_demo": {
+    "path": "res://Assets/UI/end_demo.png"
+  },
+  "ui/end_legend": {
+    "path": "res://Assets/UI/end_legend.png"
+  },
   "ui/wordmark_168": {
     "path": "res://Assets/UI/wordmark_168.png"
   },
