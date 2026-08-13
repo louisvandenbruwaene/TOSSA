@@ -84,7 +84,25 @@ NAMES = ["backyard", "street_corner", "small_theatre", "the_circus",
 FAMILIES = {
 	"bg": (ROOT / "Assets" / "Backgrounds", "{}.png"),
 	"ext": (ROOT / "Assets" / "UI", "ext_{}.png"),
+	"ui": (ROOT / "Assets" / "UI", "{}.png"),
 }
+
+# THE ONE-OFF FULL-FRAME PICTURES, which are not per-venue and so cannot ride NAMES.
+#
+# WHY THESE FIVE. Four of them were literally `draw_rect(whole screen, near-black)` with
+# centred text on top - measured, `gameover` scored 0.63% off-grid not because it was well
+# converted but because there was nothing in it. They are the game's biggest emotional
+# beats (the run dies, the game is won, the Purist trophy, the last thing a demo player
+# sees before deciding whether to buy) and they were the emptiest screens in it. The fifth,
+# the title proscenium, was already a sprite but a BAKE OF THE GAME'S OWN VECTOR DRAWING
+# rather than a painting, and it is the most-seen screen there is.
+#
+# THE TEXT RUNS DOWN THE MIDDLE OF ALL FOUR END CARDS, roughly y 14%..88%, and each one
+# finishes with draw_vignette(s, 0.7) - a 170px band at every edge. So the composition rule
+# here is narrower than a backdrop's: the middle must be quiet enough to read type over,
+# and the detail cannot sit right on the edge either or the vignette eats it. It wants to
+# live in the ring between.
+UI_ONEOFFS = ["menu_backdrop", "victory", "end_gameover", "end_demo", "end_legend"]
 
 
 # HOW MUCH OF A PAINTING MAY SIT OUTSIDE THE LOCKED 48 BEFORE IT IS NOT WORTH SHIPPING.
@@ -142,7 +160,7 @@ def gamut_fit(rgb: np.ndarray) -> float:
 
 
 def build(fam: str, name: str, write: bool, force: bool) -> str:
-	stem = name if fam == "bg" else f"ext_{name}"
+	stem = name if fam in ("bg", "ui") else f"ext_{name}"
 	src = SRC / f"{stem}.png"
 	if not src.exists():
 		return f"{stem}: no painting at artifacts/paint/{stem}.png"
@@ -157,6 +175,9 @@ def build(fam: str, name: str, write: bool, force: bool) -> str:
 	cols = len(np.unique(out.reshape(-1, 3), axis=0))
 	fit = gamut_fit(src_rgb)
 	tag = f"{stem}: {cols} colours, gamut {fit:.3f}"
+	if fam == "ui":
+		# pale type runs straight down the middle of an end card; report how bright its ground is
+		tag += f", mid-lum {mid_lum(out):.2f}"
 	if fam == "bg":
 		# only a backdrop has a performer standing in front of it
 		tag += f", spine {spine_busyness(out):.2f}"
@@ -167,6 +188,28 @@ def build(fam: str, name: str, write: bool, force: bool) -> str:
 	out_dir, pat = FAMILIES[fam]
 	return tag + " [" + artguard.save_guarded(
 		out_dir / pat.format(name), lambda q: Image.fromarray(rgba, "RGBA").save(q), force) + "]"
+
+
+def mid_lum(img: np.ndarray) -> float:
+	"""Mean brightness (0..1) of the band the end-card type is printed over.
+
+	Every end card centres pale type down the middle of the frame, roughly y 14%..88%, so
+	what ruins one is a BRIGHT picture behind the words - and that is invisible in a
+	thumbnail, because a thumbnail has no text on it.
+
+	Brightness, not busyness: the first version of this measured mean gradient in the band
+	relative to the whole frame and reported 1.00-1.07 for all five, which ranked them
+	roughly right and meant nothing in practice. A closed velvet curtain is wall-to-wall
+	vertical folds - high gradient everywhere, and perfectly calm to read over - while a
+	single lit window behind a sentence is low gradient and fatal. Pale text needs a DARK
+	ground, so measure the ground.
+
+	It is still only an advisory. The real test is a capture of the screen with its own
+	words on it, which is what these are checked against.
+	"""
+	g = img.astype(float).mean(axis=2) / 255.0
+	return float(g[int(0.14 * ART_H):int(0.88 * ART_H),
+				   int(0.20 * ART_W):int(0.80 * ART_W)].mean())
 
 
 def spine_busyness(img: np.ndarray) -> float:
@@ -190,11 +233,11 @@ def spine_busyness(img: np.ndarray) -> float:
 def main() -> int:
 	write = "--write" in sys.argv
 	force = "--force" in sys.argv
-	fams = [f for f in ("bg", "ext") if f"--{f}" in sys.argv] or list(FAMILIES)
+	fams = [f for f in FAMILIES if f"--{f}" in sys.argv] or list(FAMILIES)
 	only = [a for a in sys.argv[1:] if not a.startswith("--")]
 	for fam in fams:
 		FAMILIES[fam][0].mkdir(parents=True, exist_ok=True)
-		for name in NAMES:
+		for name in (UI_ONEOFFS if fam == "ui" else NAMES):
 			if only and name not in only:
 				continue
 			print("  " + build(fam, name, write, force))

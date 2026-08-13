@@ -24427,7 +24427,17 @@ func draw_pill_toggle(x: float, y: float, w: float, h: float, on: bool) -> void:
 func draw_gameover(font: Font, s: Vector2) -> void:
 	# the road's end: no strength to earn, no gold for a bed. The career closes
 	# with its numbers and the slot starts over.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02))
+	#
+	# SEAM (2026-08-13). This was one draw_rect of near-black with the numbers printed on
+	# it, which is why check_pixel_grid scored it the CLEANEST screen in the game at 0.63%
+	# off-grid - not converted, empty. The painting is the street the line of copy already
+	# describes ("too tired to work, too poor for a bed"): a wet road at night, shutters
+	# down, one guttering lamp, a bench nobody is sleeping on. The type still runs down the
+	# middle, so the picture's middle is empty road on purpose.
+	if not art_blit_rect("ui/end_gameover", Rect2(Vector2.ZERO, s)):
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.02, 0.01, 0.02))
+	else:
+		draw_read_column(s)
 	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.22, "THE ROAD ENDS HERE", 42, Color(0.9, 0.55, 0.4, fin), s)
 	draw_ornament(s.x * 0.5, s.y * 0.22 + 68.0, 220.0, Color(0.7, 0.45, 0.3, 0.8 * fin))
@@ -24456,7 +24466,15 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 	# whether to buy) - it leads with what they already did, same stat-recap shape
 	# as draw_gameover, and the door stays open: enter_day() afterward, no game_state
 	# that strands them anywhere but back in the career they were already playing.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.04))
+	# SEAM (2026-08-13): a curtain drawn shut. This is the LAST thing a demo player sees
+	# before deciding whether to buy, and it was a flat near-black rect - the weakest
+	# possible frame for the one screen with a commercial job to do. A closed curtain says
+	# "the show stopped here, there is more of it" without a word, and it is the same
+	# velvet the title screen and the Small Theatre are already made of.
+	if not art_blit_rect("ui/end_demo", Rect2(Vector2.ZERO, s)):
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.04))
+	else:
+		draw_read_column(s)
 	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.20, "THAT'S THE DEMO", 42, Color(1.0, 0.86, 0.5, fin), s)
 	draw_ornament(s.x * 0.5, s.y * 0.20 + 68.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
@@ -24489,7 +24507,16 @@ func draw_purist_legend(font: Font, s: Vector2) -> void:
 	# full on the Records screen) has no empty rows left. Same shape as
 	# draw_demo_wall: lead with what was actually done, list it, then straight back
 	# into the same career - a payoff, not a new ending.
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.05, 0.03, 0.05))
+	# SEAM (2026-08-13): an illuminated border rather than a scene. Every other card here
+	# gets a place, but this one is a BOARD - a list of seven venues and seven scores read
+	# straight down the middle - so a room behind it would only fight the numbers. A gold
+	# and violet certificate frame gives it the weight of a trophy and leaves its whole
+	# middle empty velvet, which is exactly what a table of figures wants. Violet because
+	# that is already the Purist accent this screen prints its own title in.
+	if not art_blit_rect("ui/end_legend", Rect2(Vector2.ZERO, s)):
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.05, 0.03, 0.05))
+	else:
+		draw_read_column(s)
 	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.14, "PURIST LEGEND", 42, Color(0.86, 0.78, 1.0, fin), s)
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 68.0, 220.0, Color(0.7, 0.6, 0.9, 0.85 * fin))
@@ -25283,8 +25310,23 @@ func draw_establish(font: Font, s: Vector2) -> void:
 
 func draw_credits(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
-	# the royal backdrop shared with the menu
-	draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.07), Color(0.02, 0.015, 0.025), 24)
+	# SEAM: the house AFTER the show (2026-08-13). This screen is the payoff for the whole
+	# game and it was a two-stop vertical gradient - the same "lit void" the title screen was
+	# called out for and fixed in July. The painting is the same room the player has been
+	# working towards all career, seen the moment it goes right: curtains swept open, the
+	# boards under a scatter of thrown bouquets, the front row on its feet. Same split as
+	# every other bake here - the SCENERY is the sprite, and the cone, the dust and the
+	# cascade stay live over it, so the light is still moving.
+	if not art_blit_rect("ui/victory", Rect2(Vector2.ZERO, s)):
+		# the royal backdrop shared with the menu
+		draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.07), Color(0.02, 0.015, 0.025), 24)
+	else:
+		# the roll SCROLLS up the middle of this screen for its whole length, so it needs the
+		# reading column more than the three static cards do, not less - measured on the first
+		# capture, "every stage, conquered" landed on lit boards and thrown bouquets and all
+		# but disappeared. Laid down before the cone on purpose: the cone is only 0.08 and
+		# putting the light back over the scrim is the point, not a conflict.
+		draw_read_column(s)
 	draw_spotlight_cone(s, cx, 0.08)
 	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
 	# the calm cascade keeps watch up high while the roll climbs beneath it
@@ -25428,6 +25470,37 @@ func draw_gradient_h(r: Rect2, left: Color, right: Color, steps: int = 22) -> vo
 		var x0 := r.position.x + r.size.x * float(i) / float(n)
 		var x1 := r.position.x + r.size.x * float(i + 1) / float(n)
 		draw_rect(Rect2(x0, r.position.y, x1 - x0, r.size.y), left.lerp(right, f))
+
+
+func draw_read_column(s: Vector2, a: float = 0.58) -> void:
+	# A DARK COLUMN DOWN THE MIDDLE FOR THE TYPE TO STAND ON.
+	#
+	# The one-off cards (game over, the demo wall, the Purist board, the victory roll) all
+	# centre their copy down the middle of the frame, and all four used to do it over a flat
+	# near-black fill, where mid-grey 15pt read perfectly well. They have paintings behind
+	# them now, and measured on the first capture the headline still read - it carries
+	# draw_title_glow - while the four career stat lines landed on a lit shutter and wet
+	# cobbles and became genuinely hard to read. Same failure as the establishing card's
+	# corner panels, one screen earlier: replacing a flat ground with a picture puts every
+	# contrast assumption on top of it back in play.
+	#
+	# WHY A COLUMN AND NOT A FULL-WIDTH BAND. These pictures are composed with their subject
+	# at the SIDES and their middle deliberately empty, precisely so type can sit there - so
+	# the middle is the one part that can be darkened without losing anything. A full-width
+	# band would flatten the whole picture, and the vignette is already taking the outer
+	# 170px. Feathered hard at both edges so it reads as depth in the scene rather than a
+	# grey slab laid across it, which is the same shape the marquee scrim uses.
+	var dk := Color(0.02, 0.012, 0.02, a)
+	var clear := Color(0.02, 0.012, 0.02, 0.0)
+	# the widest line on any of these four is the demo card's blurb, which runs to about
+	# 0.26..0.74 of the width; the flat core covers it and the feathers reach past it
+	var x0 := s.x * 0.10
+	var x1 := s.x * 0.25
+	var x2 := s.x * 0.75
+	var x3 := s.x * 0.90
+	draw_gradient_h(Rect2(x0, 0, x1 - x0, s.y), clear, dk, 16)
+	draw_rect(Rect2(x1, 0, x2 - x1, s.y), dk)
+	draw_gradient_h(Rect2(x2, 0, x3 - x2, s.y), dk, clear, 16)
 
 
 func draw_vignette(s: Vector2, strength: float = 0.55) -> void:
