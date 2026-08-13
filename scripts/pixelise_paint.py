@@ -40,9 +40,11 @@ TWO FRAMING RULES THE PROMPTS HAVE TO CARRY, both measured off draw_backdrop:
     to be empty - a tent pole or a doorway behind his spine reads as a mistake.
 
 USAGE
-  scripts/fetch_paint.sh <job-id> artifacts/paint/<name>.png     # download
-  .venv/bin/python scripts/pixelise_paint.py <name> [...]        # preview
-  .venv/bin/python scripts/pixelise_paint.py <name> --write
+  scripts/fetch_paint.sh <job-id> <name>            download a backdrop painting
+  scripts/fetch_paint.sh <job-id> ext_<name>        ...or an exterior
+  .venv/bin/python scripts/pixelise_paint.py                     preview everything
+  .venv/bin/python scripts/pixelise_paint.py --ext the_circus    one family, one venue
+  .venv/bin/python scripts/pixelise_paint.py --write
 """
 
 from __future__ import annotations
@@ -59,11 +61,30 @@ from pixelise_menu import ART_H, ART_W, load_palette, srgb_to_oklab
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "artifacts" / "paint"
-OUT = ROOT / "Assets" / "Backgrounds"
 
 # venue order matches Game.gd's venue_data(); the key is bg/<name>
 NAMES = ["backyard", "street_corner", "small_theatre", "the_circus",
 		 "championship", "world_arena", "the_midnight_show"]
+
+# THE TWO FAMILIES, and they are the same job at two camera positions. A BACKDROP is what
+# stands behind the performer during the act; an EXTERIOR is the establishing card shown
+# before it, the venue seen from outside. Both are full-frame 640x360 paintings reduced the
+# same way, so they share this file rather than growing a near-duplicate of it.
+#
+# THE EXTERIORS WERE PREVIOUSLY OFF-LIMITS TO A GENERATOR, on the recorded grounds that "an
+# exterior is a picture the game already composes correctly, with the venue's hero mid-frame
+# and the marquee text laid out against it - a model asked for 'a circus tent at night' would
+# give back a different composition and the card's own layout would no longer fit it." That
+# was right about the risk and wrong about the conclusion: the layout is knowable, so the
+# prompt can simply be written to it. Measured off a real --establish capture, the card puts
+# its title across the TOP CENTRE and two panels in the BOTTOM CORNERS, which is why every
+# exterior prompt here says the hero fills the lower two thirds and the upper third is empty
+# sky. The reason to bother is uniformity: once the seven backdrops are paintings, seven flat
+# vector exteriors are the only unpainted full-frame pictures left in the game.
+FAMILIES = {
+	"bg": (ROOT / "Assets" / "Backgrounds", "{}.png"),
+	"ext": (ROOT / "Assets" / "UI", "ext_{}.png"),
+}
 
 
 # HOW MUCH OF A PAINTING MAY SIT OUTSIDE THE LOCKED 48 BEFORE IT IS NOT WORTH SHIPPING.
@@ -85,7 +106,19 @@ NAMES = ["backyard", "street_corner", "small_theatre", "the_circus",
 #
 # The fix is always at the PROMPT, never here: steer a sky to deep indigo (the palette
 # holds 1f1a2e / 282848 / 585078) rather than teal, and keep foliage dark rather than
-# mid-green. 0.10 sits an order of magnitude clear of the good case.
+# mid-green.
+#
+# IT IS AN ADVISORY, NOT A GATE, AND IT OVER-FLAGS - say so rather than trust it. Across the
+# fourteen paintings so far it fired four times and only ONE was a real failure: the teal
+# backyard, whose out-of-gamut pixels were one large CONTIGUOUS wash across the sky. The
+# other three (the Championship hall and the World Arena, twice each as backdrop and
+# exterior) are cold-lit venues whose distant pixels are DISPERSED - floodlights, a crowd
+# speckle, blue window glass - and error diffusion handles scattered residual well, which
+# is the whole thing it is for. All three came through the snap looking right.
+#
+# So the number means "go and look at this one", which is why the tag says so. A contiguity
+# term would separate the two cases properly; it has not been worth writing, because looking
+# at the picture is the step it would be saving and that step is not optional anyway.
 GAMUT_FAR = 0.05
 GAMUT_MAX = 0.10
 
@@ -108,26 +141,32 @@ def gamut_fit(rgb: np.ndarray) -> float:
 	return far / len(flat)
 
 
-def build(name: str, write: bool, force: bool) -> str:
-	src = SRC / f"{name}.png"
+def build(fam: str, name: str, write: bool, force: bool) -> str:
+	stem = name if fam == "bg" else f"ext_{name}"
+	src = SRC / f"{stem}.png"
 	if not src.exists():
-		return f"{name}: no painting at artifacts/paint/{name}.png"
+		return f"{stem}: no painting at artifacts/paint/{stem}.png"
 	im = Image.open(src).convert("RGB")
 	if im.size != (ART_W, ART_H):
-		raise SystemExit(f"{name}: expected {ART_W}x{ART_H}, got {im.size}. A backdrop is "
+		raise SystemExit(f"{stem}: expected {ART_W}x{ART_H}, got {im.size}. These are "
 						 "authored at the art density and must never be resampled.")
 	src_rgb = np.asarray(im).astype(int)
 	out = snap_diffused(src_rgb, load_palette())
-	# opaque by construction: a backdrop covers the frame, and the seam blits it full-rect
+	# opaque by construction: both families cover the frame and are blitted full-rect
 	rgba = np.dstack([out, np.full(out.shape[:2], 255, np.uint8)])
 	cols = len(np.unique(out.reshape(-1, 3), axis=0))
-	spine = spine_busyness(out)
 	fit = gamut_fit(src_rgb)
-	tag = f"{name}: {cols} colours, spine {spine:.2f}, gamut {fit:.3f}{'  <-- REPROMPT' if fit > GAMUT_MAX else ''}"
+	tag = f"{stem}: {cols} colours, gamut {fit:.3f}"
+	if fam == "bg":
+		# only a backdrop has a performer standing in front of it
+		tag += f", spine {spine_busyness(out):.2f}"
+	if fit > GAMUT_MAX:
+		tag += "  <-- LOOK AT IT"
 	if not write:
 		return tag + "  (pass --write to apply)"
+	out_dir, pat = FAMILIES[fam]
 	return tag + " [" + artguard.save_guarded(
-		OUT / f"{name}.png", lambda q: Image.fromarray(rgba, "RGBA").save(q), force) + "]"
+		out_dir / pat.format(name), lambda q: Image.fromarray(rgba, "RGBA").save(q), force) + "]"
 
 
 def spine_busyness(img: np.ndarray) -> float:
@@ -151,12 +190,14 @@ def spine_busyness(img: np.ndarray) -> float:
 def main() -> int:
 	write = "--write" in sys.argv
 	force = "--force" in sys.argv
+	fams = [f for f in ("bg", "ext") if f"--{f}" in sys.argv] or list(FAMILIES)
 	only = [a for a in sys.argv[1:] if not a.startswith("--")]
-	OUT.mkdir(parents=True, exist_ok=True)
-	for name in NAMES:
-		if only and name not in only:
-			continue
-		print("  " + build(name, write, force))
+	for fam in fams:
+		FAMILIES[fam][0].mkdir(parents=True, exist_ok=True)
+		for name in NAMES:
+			if only and name not in only:
+				continue
+			print("  " + build(fam, name, write, force))
 	return 0
 
 
