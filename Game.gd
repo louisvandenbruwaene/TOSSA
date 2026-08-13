@@ -25509,10 +25509,21 @@ func draw_vignette(s: Vector2, strength: float = 0.55) -> void:
 	var band := 170.0
 	var dk := Color(0.02, 0.008, 0.02, strength)
 	var clear := Color(0.02, 0.008, 0.02, 0.0)
-	draw_gradient_v(Rect2(0, 0, s.x, band), dk, clear, 18)
-	draw_gradient_v(Rect2(0, s.y - band, s.x, band), clear, dk, 18)
-	draw_gradient_h(Rect2(0, 0, band, s.y), dk, clear, 18)
-	draw_gradient_h(Rect2(s.x - band, 0, band, s.y), clear, dk, 18)
+	# 17 STRIPS, NOT 18, SO EVERY STRIP EDGE LANDS ON THE ART GRID. 170 / 18 is 9.44px, so
+	# each strip boundary fell at a fractional x and draw_rect resolved it as a half-covered
+	# screen pixel - a one-pixel vertical seam every ten pixels, all the way down both bands.
+	# 170 / 17 is exactly 10px, i.e. 5 whole art pixels.
+	#
+	# It was invisible for as long as these screens were flat near-black underneath, because
+	# adjacent strips quantised to the same colour and the seam had nothing to show against.
+	# The one-off cards have PAINTINGS behind them now, and check_pixel_grid --map lit the
+	# whole vignette band up in magenta on the very first capture. Worth knowing generally:
+	# putting a picture under an existing overlay does not just test the overlay's contrast,
+	# it tests its rasterisation too.
+	draw_gradient_v(Rect2(0, 0, s.x, band), dk, clear, 17)
+	draw_gradient_v(Rect2(0, s.y - band, s.x, band), clear, dk, 17)
+	draw_gradient_h(Rect2(0, 0, band, s.y), dk, clear, 17)
+	draw_gradient_h(Rect2(s.x - band, 0, band, s.y), clear, dk, 17)
 
 
 func draw_frame(s: Vector2, inset: float, col: Color) -> void:
