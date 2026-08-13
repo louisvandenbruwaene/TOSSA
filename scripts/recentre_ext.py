@@ -134,8 +134,53 @@ def shift(rgb: np.ndarray, dx: int) -> np.ndarray:
 	return np.concatenate([fill, rgb[:, :-pad]], axis=1)
 
 
+# VERTICAL LIFTS FOR BACKDROPS, which is the same trick on the other axis and is nearly free.
+#
+# draw_backdrop covers the bottom 20% of a venue painting with the stage floor (art y >= 288),
+# so anything a painting puts down there is drawn and then buried. The Midnight Show's cabaret
+# tables - Louis: "i like the midnight show tables and stuff, bring it back somehow" - came
+# back sitting at y 270..330, i.e. two thirds under the floor, and in game only the tops of a
+# few heads showed above the boards.
+#
+# Lifting the picture is better than re-rolling it for the composition, because the exposed
+# strip lands BELOW y 288 where the floor covers it, so the fill is never seen at all. What is
+# lost is the same number of rows off the TOP, which on these venues is uniform curtain.
+# name -> art px to raise
+LIFTS = {"the_midnight_show": 48}
+
+
+def lift(rgb: np.ndarray, dy: int) -> np.ndarray:
+	"""Raise the picture by dy whole pixels.
+
+	Content moves up, so the dy rows exposed at the BOTTOM are filled by repeating the last
+	row - and those rows sit under the stage floor, so the fill is never drawn. The dy rows
+	lost off the top are uniform curtain on every venue this is applied to.
+	"""
+	if dy <= 0:
+		return rgb
+	return np.concatenate([rgb[dy:], np.repeat(rgb[-1:], dy, axis=0)], axis=0)
+
+
+def run_lifts(write: bool) -> None:
+	for name, dy in LIFTS.items():
+		p = SRC / f"{name}.png"
+		if not p.exists():
+			print(f"  {name}: no painting to lift")
+			continue
+		a = np.asarray(Image.open(p).convert("RGB"))
+		tag = f"  {name}: lifted {dy}px (bottom {dy} rows land under the stage floor)"
+		if not write:
+			print(tag + "  (pass --write to apply)")
+			continue
+		Image.fromarray(lift(a, dy)).save(p)
+		print(tag + " [written]")
+
+
 def main() -> int:
 	write = "--write" in sys.argv
+	if "--lift" in sys.argv:
+		run_lifts(write)
+		return 0
 	only = [a for a in sys.argv[1:] if not a.startswith("--")]
 	for name in NAMES:
 		if only and name not in only:
