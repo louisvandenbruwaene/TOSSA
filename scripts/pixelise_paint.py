@@ -29,15 +29,36 @@ pixflux halves landed in.
 
 WHAT THE PAINTING MUST NOT CONTAIN is light that reacts to the player. draw_backdrop
 replaces exactly two layers with this sprite - the sky gradient and the set dressing - and
-then draws the veil, the spotlight cone, the footlights and the floor OVER it, because the
-cone narrows and warms as a streak builds. A backdrop with its own spotlight baked in
-freezes the half of the picture that is answering the player.
+then draws the veil, the spotlight cone and the footlights OVER it, because the cone narrows
+and warms as a streak builds. A backdrop with its own spotlight baked in freezes the half of
+the picture that is answering the player. (The first Midnight Show re-roll came back with a
+warm elliptical pool painted onto its boards and was thrown away for exactly this.)
 
-TWO FRAMING RULES THE PROMPTS HAVE TO CARRY, both measured off draw_backdrop:
-  - the bottom 20% (art y >= 288) is covered by the stage floor, so nothing essential
-    may live there;
-  - the performer stands dead centre and is ~172 art px tall, so the centre column wants
-    to be empty - a tent pole or a doorway behind his spine reads as a mistake.
+THREE FRAMING RULES THE PROMPTS HAVE TO CARRY, all measured off draw_backdrop:
+
+  1. THE BOTTOM THIRD IS A FLOOR THE PERFORMER STANDS ON, and it has to be a real, continuous,
+     standable surface running edge to edge - boards, sawdust, turf, cobbles, a pitch. This
+     REPLACES the rule that used to sit here, which said the bottom 20% was "covered by the
+     stage floor, so nothing essential may live there". That was true while the game drew a
+     vector podium over it; the podium was deleted on 2026-08-14 and the painting became the
+     floor, at which point the old rule was actively harmful - it is what produced a Backyard
+     that was a close-up of a house wall with no ground under the centre at all, and a
+     Midnight Show that was drapes and tables above pure black. Louis, on the result: "he's
+     often floating or not standing on the right place or there is no floor at all."
+  2. THE FLOOR IS A BAND, AND HE STANDS INSIDE IT. It runs in perspective from its back edge
+     to the bottom of the frame, and Game.gd's per-venue `stand` (venue_data) puts his feet
+     partway down it - roughly art y 300-315 - with floor visible BEHIND his heels and more
+     in front. So the floor's back edge wants to be up around art y 260-290, not at 310. A
+     painting whose floor only starts in the last twenty rows cannot be stood on.
+  3. THE CENTRE COLUMN IS EMPTY. The performer stands dead centre and is ~172 art px tall, so
+     a tent pole, a doorway or a tree trunk behind his spine reads as a mistake.
+     spine_busyness() below measures this; around 1.0 is clear.
+
+AND WATCH THE GROUND FOR FAKE HANDWRITING. Asked for texture on a large plain surface the
+model reliably paints illegible cursive scribbles - measured on two Backyard rolls, scattered
+right across the lawn where the player looks. It is not visible in a 640x360 thumbnail and it
+is unmistakable at 2x on screen. Say "no writing, no letters, no markings" and go and zoom in
+on the floor band before shipping.
 
 USAGE
   scripts/fetch_paint.sh <job-id> <name>            download a backdrop painting
@@ -65,6 +86,16 @@ SRC = ROOT / "artifacts" / "paint"
 # venue order matches Game.gd's venue_data(); the key is bg/<name>
 NAMES = ["backyard", "street_corner", "small_theatre", "the_circus",
 		 "championship", "world_arena", "the_midnight_show"]
+
+# WHERE THE PERFORMER'S FEET ARE IN EACH ROOM, as a fraction of the frame height. This MIRRORS
+# Game.gd's venue_data()["stand"] and has to be kept in step with it by hand - there is no
+# machine-readable link, and the reason to duplicate it anyway is that spine_busyness measures
+# the rows he actually occupies, which end at his feet. A stale number here does not break a
+# build, it just measures the wrong band and reassures you about a composition fault.
+STAND = {"backyard": 0.87, "street_corner": 0.88, "small_theatre": 0.85, "the_circus": 0.87,
+		 "championship": 0.85, "world_arena": 0.86, "the_midnight_show": 0.83}
+
+FIGURE_H = 172      # the performer, crown of the hat to boot sole, in art pixels
 
 # THE TWO FAMILIES, and they are the same job at two camera positions. A BACKDROP is what
 # stands behind the performer during the act; an EXTERIOR is the establishing card shown
@@ -201,7 +232,7 @@ def build(fam: str, name: str, write: bool, force: bool) -> str:
 		tag += f", mid-lum {mid_lum(out):.2f}"
 	if fam == "bg":
 		# only a backdrop has a performer standing in front of it
-		tag += f", spine {spine_busyness(out):.2f}"
+		tag += f", spine {spine_busyness(out, STAND[name]):.2f}"
 	if fit > GAMUT_MAX:
 		tag += "  <-- LOOK AT IT"
 	if not write:
@@ -233,7 +264,7 @@ def mid_lum(img: np.ndarray) -> float:
 				   int(0.20 * ART_W):int(0.80 * ART_W)].mean())
 
 
-def spine_busyness(img: np.ndarray) -> float:
+def spine_busyness(img: np.ndarray, stand: float) -> float:
 	"""Mean horizontal detail in the performer's column, relative to the whole row.
 
 	Not a gate - a backdrop is judged by eye - but a vertical feature standing behind the
@@ -242,9 +273,13 @@ def spine_busyness(img: np.ndarray) -> float:
 	tall, so this compares mean absolute horizontal gradient down the middle 60 px, over
 	the rows he actually occupies, against the same measure across the whole row. Around
 	1.0 is "as busy as anywhere else"; well above it means something is standing there.
+
+	`stand` is the venue's own standing line (STAND above): the rows he occupies end at his
+	FEET, and since 2026-08-14 those are in a different place in every room.
 	"""
 	g = img.astype(float).mean(axis=2)
-	rows = slice(116, 288)                     # crown to floor at the figure's real height
+	floor = int(ART_H * stand)
+	rows = slice(max(0, floor - FIGURE_H), floor)     # crown to feet, at his real height
 	d = np.abs(np.diff(g[rows], axis=1))
 	mid = d[:, 290:350].mean()
 	allr = d.mean()

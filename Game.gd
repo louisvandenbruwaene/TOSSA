@@ -7848,7 +7848,7 @@ func stage_center() -> Vector2:
 		var cell := float(fig_arms.get("cell_h", 0))
 		var hpy := float(fig_arms.get("hand_py", 0.0))
 		if cell > 0.0:
-			return art_snap(Vector2(s.x * 0.5, s.y * 0.80 - (cell - hpy - 0.5) * ART_PIXEL))
+			return art_snap(Vector2(s.x * 0.5, stage_floor_y() - (cell - hpy - 0.5) * ART_PIXEL))
 	return art_snap(Vector2(s.x * 0.5, s.y * 0.57))
 
 
@@ -7888,7 +7888,7 @@ func shoulder_pos(h: int) -> Vector2:
 	# so an attach point ON the line let half the deltoid peak above the silhouette
 	# (Louis: shoulders belong at shoulder height, not over it).
 	var s := get_viewport_rect().size
-	return fig_shoulder(s.x * 0.5, s.y * 0.80, fig_stage_H(s), h)
+	return fig_shoulder(s.x * 0.5, stage_floor_y(), fig_stage_H(s), h)
 
 
 func fig_shoulder(cx: float, floor_y: float, H: float, h: int, px: float = ART_PIXEL) -> Vector2:
@@ -8030,6 +8030,27 @@ func fig_preview_floor(o: Vector2) -> float:
 	return o.y + (float(tex.get_size().y) - float(fig_arms.get("hand_py", 81.0))) * px
 
 
+func fig_preview_drop(k: float = 1.0) -> float:
+	# HOW FAR THE FEET ARE BELOW THE HAND LINE, which is the ONE number a panel needs to draw
+	# a floor the performer is actually standing on (2026-08-14, Louis: "he's often floating").
+	#
+	# fig_preview_floor answers this on the way IN - a caller hands it a hand line and gets the
+	# feet. Every caller here has the opposite problem: it knows where it wants the floor,
+	# because the floor is part of a panel it is laying out, and needs the hand line that puts
+	# him on it. Both the tailor's mirror and the skills preview solved it with PV_FLOOR * k
+	# instead, and PV_FLOOR is the TRACED juggler's proportion - the showman is a different man
+	# at a fixed sprite size, and k does not scale him at all (fig_preview_px is always one
+	# screen pixel per art pixel). Measured: the mirror drew its boards 86px below his boots and
+	# the skills panel drew its floor line 5px above them.
+	#
+	# So both the floor's position and the figure's now come from the same measurement, and a
+	# new arm bank with a different hand row moves them together.
+	if not art_bank.has("char/juggle_body") or fig_arms.is_empty():
+		return PV_FLOOR * k
+	var tex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
+	return (float(tex.get_size().y) - float(fig_arms.get("hand_py", 81.0))) * fig_preview_px()
+
+
 func fig_body_origin(cx: float, floor_y: float, px: float = ART_PIXEL) -> Vector2:
 	# The top-left of the performer's own cell, on the art grid. Everything painted - the
 	# body, both arms, and the palms the props rest in - is placed as an offset from here, so
@@ -8061,7 +8082,7 @@ func fig_hand_pos(h: int) -> Vector2:
 	var pick := fig_arm_pick(h, s.x * 0.5)
 	if pick.is_empty():
 		return hpos[h]
-	var org := fig_body_origin(s.x * 0.5, s.y * 0.80)
+	var org := fig_body_origin(s.x * 0.5, stage_floor_y())
 	var palm := org + Vector2(float(pick["px"]) + 0.5, float(pick["py"]) + 0.5) * ART_PIXEL
 	# ...BUT ONLY WHILE THE PAINTING IS ACTUALLY NEAR THE HAND, and this guard is what makes
 	# the whole idea safe at the edges.
@@ -11058,28 +11079,53 @@ func cur_venue() -> int:
 	return view_venue if view_venue >= 0 else play_venue()
 
 
+const STAND_DEFAULT := 0.86   # see `stand` below, and stage_floor_y
+
+
 func venue_data(i: int) -> Dictionary:
 	# per-venue palette: backdrop glow / floor / spotlight strength, and the
 	# juggler's costume, so each rung of the career looks distinct while sharing
 	# the warm theatrical base (ART_AND_MUSIC.md).
+	#
+	# `stand` IS WHERE HIS FEET GO, as a fraction of the viewport height, and it is a
+	# measured property of that venue's PAINTING - see stage_floor_y for why it can no
+	# longer be one number for all seven rooms. Read off the backdrop with a labelled
+	# ruler (art y / 360) and then checked against a real capture, because the floor a
+	# painting shows is a band in perspective and the number has to land INSIDE it:
+	#
+	#   venue           floor band (art y)   stand   what he is standing on
+	#   Backyard              255..360        0.87   the lawn, out in front of the house
+	#   Street Corner         285..360        0.88   the cobbles, out in front of the lamp
+	#   Small Theatre         289..360        0.85   the boards, a third of the way out
+	#   The Circus            292..340        0.87   the sawdust, inside the ring wall
+	#   Championship          272..360        0.85   the marked floor
+	#   World Arena           292..360        0.86   the pitch
+	#   The Midnight Show     265..313        0.83   the cabaret boards, among the tables
+	#
+	# The Midnight Show is the one with a hard LOWER edge rather than a band running off the
+	# bottom of the frame: its little stage has a front lip at art y 313 and a dark drop below
+	# it, so 0.87 would have stood him on the very edge of it.
+	#
+	# The lower bound on all of these is the HUD, not the picture: the bottom strips start
+	# at 0.90 of the height, so a standing line past ~0.89 puts his boots in the readout.
 	match i:
 		0:
-			return {"name": "Backyard", "glow": Color(0.55, 0.62, 0.45), "floor": Color(0.09, 0.10, 0.07), "spot": 0.03,
+			return {"name": "Backyard", "glow": Color(0.55, 0.62, 0.45), "floor": Color(0.09, 0.10, 0.07), "spot": 0.03, "stand": 0.87,
 				"suit": Color(0.42, 0.36, 0.28), "suit_dk": Color(0.30, 0.25, 0.19), "vest": Color(0.66, 0.58, 0.40), "collar": Color(0.85, 0.82, 0.72)}
 		1:
-			return {"name": "Street Corner", "glow": Color(0.95, 0.66, 0.34), "floor": Color(0.07, 0.07, 0.10), "spot": 0.05,
+			return {"name": "Street Corner", "glow": Color(0.95, 0.66, 0.34), "floor": Color(0.07, 0.07, 0.10), "spot": 0.05, "stand": 0.88,
 				"suit": Color(0.34, 0.36, 0.46), "suit_dk": Color(0.22, 0.24, 0.33), "vest": Color(0.70, 0.62, 0.42), "collar": Color(0.88, 0.86, 0.78)}
 		2:
-			return {"name": "Small Theatre", "glow": Color(0.95, 0.55, 0.28), "floor": Color(0.10, 0.05, 0.06), "spot": 0.05,
+			return {"name": "Small Theatre", "glow": Color(0.95, 0.55, 0.28), "floor": Color(0.10, 0.05, 0.06), "spot": 0.05, "stand": 0.85,
 				"suit": Color(0.62, 0.16, 0.20), "suit_dk": Color(0.44, 0.10, 0.15), "vest": Color(0.90, 0.73, 0.42), "collar": Color(0.96, 0.90, 0.80)}
 		3:
-			return {"name": "The Circus", "glow": Color(0.98, 0.48, 0.35), "floor": Color(0.12, 0.06, 0.05), "spot": 0.06,
+			return {"name": "The Circus", "glow": Color(0.98, 0.48, 0.35), "floor": Color(0.12, 0.06, 0.05), "spot": 0.06, "stand": 0.87,
 				"suit": Color(0.80, 0.22, 0.24), "suit_dk": Color(0.55, 0.14, 0.16), "vest": Color(0.96, 0.80, 0.40), "collar": Color(0.98, 0.93, 0.82)}
 		4:
-			return {"name": "Championship", "glow": Color(0.55, 0.68, 0.95), "floor": Color(0.06, 0.07, 0.11), "spot": 0.07,
+			return {"name": "Championship", "glow": Color(0.55, 0.68, 0.95), "floor": Color(0.06, 0.07, 0.11), "spot": 0.07, "stand": 0.85,
 				"suit": Color(0.20, 0.28, 0.52), "suit_dk": Color(0.13, 0.19, 0.38), "vest": Color(0.80, 0.84, 0.92), "collar": Color(0.90, 0.93, 0.98)}
 		5:
-			return {"name": "World Arena", "glow": Color(0.78, 0.52, 0.96), "floor": Color(0.09, 0.06, 0.12), "spot": 0.08,
+			return {"name": "World Arena", "glow": Color(0.78, 0.52, 0.96), "floor": Color(0.09, 0.06, 0.12), "spot": 0.08, "stand": 0.86,
 				"suit": Color(0.42, 0.20, 0.55), "suit_dk": Color(0.28, 0.12, 0.40), "vest": Color(0.96, 0.82, 0.45), "collar": Color(0.98, 0.94, 0.86)}
 		_:
 			# The Midnight Show (2026-07-18): the bonus, post-game 7th stage - a
@@ -11094,7 +11140,7 @@ func venue_data(i: int) -> Dictionary:
 			# same reason - a dark room is not an unlit one, and the boards have to read
 			# as boards for a landed prop to read as landed.
 			return {"name": "The Midnight Show", "glow": Color(0.40, 0.92, 0.62), "floor": Color(0.045, 0.075, 0.06), "spot": 0.015,
-				"veil": 0.10,
+				"veil": 0.10, "stand": 0.83,
 				"suit": Color(0.08, 0.10, 0.09), "suit_dk": Color(0.04, 0.05, 0.045), "vest": Color(0.55, 0.95, 0.65), "collar": Color(0.75, 0.92, 0.8)}
 
 
@@ -12885,8 +12931,12 @@ func bg_floor_colour(bg_key: String, fallback: Color) -> Color:
 	var h := img.get_height()
 	# in the painting's own pixels, whatever size it is: the band just above the floor line,
 	# which sits at 0.80 of the frame
-	var y0 := int(h * 0.767)
-	var y1 := maxi(y0 + 1, int(h * 0.797))
+	# ...AND THE BAND FOLLOWS THE VENUE'S OWN STANDING LINE, which is no longer 0.80 in every
+	# room (see stage_floor_y). Sampling a fixed band would now read the Circus's ring wall
+	# rather than its sawdust in exactly the rooms whose floor sits lowest.
+	var stand := float(venue_data(cur_venue()).get("stand", STAND_DEFAULT))
+	var y0 := int(h * (stand - 0.033))
+	var y1 := maxi(y0 + 1, int(h * (stand - 0.003)))
 	var acc := Vector3.ZERO
 	var n := 0
 	for y in range(y0, mini(y1, h)):
@@ -12903,6 +12953,56 @@ func bg_floor_colour(bg_key: String, fallback: Color) -> Color:
 	var out := Color(acc.x * 0.72, acc.y * 0.72, acc.z * 0.72)
 	_bg_floor[bg_key] = out
 	return out
+
+
+func venue_ground() -> Color:
+	# THE COLOUR OF THE GROUND IN TONIGHT'S ROOM, for the screens that have to build a floor
+	# instead of standing on a painted one - the tailor's mirror and the skills preview. Both
+	# are panels a few hundred pixels wide, so they cannot blit a backdrop into themselves (a
+	# painting scaled to a box is the one thing pixel art cannot survive), but they can be the
+	# same MATERIAL as the house the player is booked into, which is most of what sells it.
+	var v := venue_data(cur_venue())
+	return bg_floor_colour("bg/" + str(v["name"]).to_lower().replace(" ", "_"), v["floor"])
+
+
+func draw_preview_floor(area: Rect2, fy: float, glow: Color) -> void:
+	# A FLOOR A PREVIEW FIGURE CAN STAND ON (2026-08-14, Louis: "there is no floor at all").
+	#
+	# Both panels used to draw the same two marks: one flat near-black rectangle below the
+	# figure and a single 1.5px line across the top of it. That is a HORIZON, not a floor -
+	# the man reads as standing on a wire in front of a dark wall, which is what he was.
+	# Three cheap things fix it, and they are the three the stage itself has: a ground that
+	# recedes (bright where the light lands at his boots, dark at the front edge), the seams
+	# of the boards opening up as they come forward, and a warm lip on the line his feet are
+	# on. Nothing here is scenery - it is the same light-not-scenery rule draw_stage_light
+	# follows - so it costs one gradient and four rects and cannot fight a costume.
+	var ap := float(ART_PIXEL)
+	var top := art_snap(Vector2(0.0, fy)).y
+	var bot := area.position.y + area.size.y
+	if bot - top < ap * 2.0:
+		return
+	# ...KEPT DARK. The first version lit the near edge at 1.9x the sampled ground and the two
+	# panels came back with a pale grey slab across them - a concrete step, not a floor, and
+	# the brightest thing on either screen when the figure is meant to be. A floor in a dark
+	# room is dark: a little lift where the light lands, and away to near-black at the front.
+	var g := venue_ground()
+	var near := Color(minf(g.r * 1.30 + 0.020, 1.0), minf(g.g * 1.26 + 0.017, 1.0), minf(g.b * 1.22 + 0.015, 1.0))
+	var far := Color(g.r * 0.42, g.g * 0.42, g.b * 0.50)
+	draw_gradient_v(Rect2(area.position.x, top, area.size.x, bot - top), near, far,
+		maxi(2, int((bot - top) / ap)))
+	# THE SEAMS WIDEN AS THEY COME FORWARD, which is the whole reason four lines read as a
+	# receding floor and four evenly spaced ones read as a ladder. Snapped to the art grid so
+	# a board edge is a whole pixel, never a grey smear across two.
+	var y := top + ap * 2.0
+	var gap := ap * 2.0
+	while y < bot - ap:
+		draw_rect(Rect2(area.position.x, art_snap(Vector2(0.0, y)).y, area.size.x, ap),
+			Color(far.r * 0.5, far.g * 0.5, far.b * 0.5, 0.60))
+		gap *= 1.55
+		y += gap
+	# the lit lip: the light he is standing in, landing on the line his boots are on
+	draw_rect(Rect2(area.position.x, top, area.size.x, ap),
+		Color(glow.r, glow.g, glow.b, 0.34))
 
 
 func draw_backdrop(s: Vector2) -> void:
@@ -12922,7 +13022,7 @@ func draw_backdrop(s: Vector2) -> void:
 	var sky_top := Color(floor_c.r * 0.7, floor_c.g * 0.7, floor_c.b * 0.9)
 	var sky_bot := Color(glow.r * 0.10 + 0.02, glow.g * 0.09 + 0.02, glow.b * 0.10 + 0.03)
 
-	var fy := s.y * 0.80
+	var fy := stage_floor_y()
 
 	# SEAM: ONE PAINTING PER HOUSE, and it replaces exactly two layers - the sky gradient
 	# and the set dressing. Everything after it (the veil, the spotlight cone, the
@@ -12932,9 +13032,9 @@ func draw_backdrop(s: Vector2) -> void:
 	# baked into it would freeze all of that, and the light is the half of this picture
 	# that is actually reacting to the player.
 	var bg_key := "bg/" + str(v["name"]).to_lower().replace(" ", "_")
-	# ...and the ground continues the painting rather than being its own hand-picked dark.
-	# Read AFTER bg_key exists and BEFORE anything draws with it.
-	floor_c = bg_floor_colour(bg_key, floor_c)
+	# (the sampled ground colour that used to be read here went with the drawn podium: nothing
+	# on this screen paints a floor any more, the painting IS the floor. It survives as
+	# venue_ground, for the two panels that have to build one - see draw_preview_floor.)
 	if _bgref:
 		# --bgref: draw ONLY the two layers the seam replaces - the sky gradient and the
 		# set dressing - and nothing after them. This is the backdrop equivalent of
@@ -12993,17 +13093,25 @@ func draw_backdrop(s: Vector2) -> void:
 	var hot := clampf(float(streak) / 15.0, 0.0, 1.0) if game_state == ST_PLAY else 0.0
 	var top := Vector2(s.x * 0.5, -40.0)
 	var spread := 300.0 - 44.0 * hot
+	# ...AND IT LANDS ON THE FLOOR, wherever this venue's floor is. The cone used to end at a
+	# fixed 0.82 of the viewport, which was a hair below the one standing line every room
+	# shared; now that the line is per-venue (see stage_floor_y) a fixed end would leave the
+	# light stopping in mid-air above his boots in the rooms whose floor sits lower. Same
+	# 2% of overshoot past the boards, measured from the boards.
+	var cone_end := fy + s.y * 0.02
 	var cone := PackedVector2Array([
 		top,
-		Vector2(s.x * 0.5 - spread, s.y * 0.82),
-		Vector2(s.x * 0.5 + spread, s.y * 0.82),
+		Vector2(s.x * 0.5 - spread, cone_end),
+		Vector2(s.x * 0.5 + spread, cone_end),
 	])
 	draw_colored_polygon(cone, Color(glow.r, glow.g, glow.b, spot * (1.0 + 0.5 * hot)))
 
 	# a SMOOTH warm light pool on the performer, built from many faint overlapping
 	# discs (bright centre fading out), so it reads as a soft spotlight instead of
 	# the hard target rings it used to be. A small floor keeps the stage from a void.
-	var pc := Vector2(s.x * 0.5, s.y * 0.50)
+	# Its centre is measured UP FROM THE FLOOR for the same reason the cone's end is
+	# measured down to it: the pool is on the man, and the man moves with the room.
+	var pc := Vector2(s.x * 0.5, fy - s.y * 0.30)
 	var pool := (0.045 + spot * 0.9) * (1.0 + 0.30 * hot)
 	# ONE textured glow, where this used to be a stack of 26 flat discs (see draw_glow):
 	# same soft pool, one draw call instead of twenty-six, and no visible rings - which
@@ -13240,9 +13348,19 @@ func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 	# the few things the act is standing among read at full strength while everything
 	# in draw_venue_dressing stays pushed back into the depth. Edge-weighted, and
 	# never inside the juggling window.
+	# THREE DRAWN THINGS LEFT HERE WHEN THE PODIUM WENT, AND THEY ARE GONE NOW (2026-08-14):
+	# a band of vector grass at the Backyard, a stroked kerb line at the Street Corner, and two
+	# candles standing at the edges of the Midnight Show. Each was scenery, each is painted in
+	# the backdrop it sat on - the lawn, the kerb, and a whole room of candlelit tables - so
+	# each was a second, cruder copy in front of a better one, exactly like the drawn crowd.
+	# The Midnight Show's pair was the plainest tell: the painting has candles ON TABLES and
+	# these two stood in mid-air beside them.
+	#
+	# What stays is what is LIGHT or what is the ACT'S OWN: the fireflies over the lawn, the
+	# busker's hat out for coins, and the mist lying on the boards. Same rule as everywhere
+	# else on this screen.
 	match vi:
-		0:   # the lawn it is all happening on, and the fireflies over it
-			draw_grass(s, fy - 4.0)
+		0:   # the fireflies over the lawn
 			for i in 9:
 				var seed := float(i) * 31.7
 				var fx := fposmod(sin(seed) * 411.0, 1.0) * s.x
@@ -13253,16 +13371,13 @@ func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var pulse := clampf(0.35 + 0.65 * sin(atick() * 0.03 + seed * 2.0), 0.0, 1.0)
 				soft_disc(Vector2(fx, fyy) + drift, 10.0, Color(0.9, 1.0, 0.5, 0.09 * pulse), 8)
 				soft_disc(Vector2(fx, fyy) + drift, 2.4, Color(0.95, 1.0, 0.6, 0.95 * pulse), 8)
-		1:   # the kerb, and the busker's own hat out on the pavement for coins
-			draw_line(Vector2(0.0, fy + 16.0), Vector2(s.x, fy + 16.0), Color(0.25, 0.24, 0.26, 0.5), 2.0)
+		1:   # the busker's own hat, out on the pavement for coins
 			draw_hat_prop(Vector2(s.x * 0.5 - 196.0, fy - 2.0))
-		6:   # the candles this room is actually lit by, and the mist lying on the boards
+		6:   # the mist lying on the boards
 			for i in 3:
 				var mx := s.x * (0.22 + 0.28 * float(i))
 				var drift := sin(atick() * 0.004 + float(i) * 2.1) * 26.0
 				fill_ellipse(Vector2(mx + drift, fy + 4.0), 190.0, 13.0, Color(0.35, 0.85, 0.55, 0.07))
-			draw_candle(Vector2(s.x * 0.13, fy - 2.0), 30.0)
-			draw_candle(Vector2(s.x * 0.87, fy - 2.0), 30.0)
 
 
 func draw_moon_window(c: Vector2, w: float, h: float, fy: float) -> void:
@@ -13497,17 +13612,9 @@ func draw_wall_clock(c: Vector2, r: float, col: Color) -> void:
 	draw_circle(c, 2.2, Color(col.r, col.g, col.b, 0.45))
 
 
-func draw_candle(base: Vector2, h: float) -> void:
-	# a candle on a stand at the edge of the stage: the only warm light in the room
-	var wax := Color(0.86, 0.82, 0.70, 0.55)
-	draw_rect(Rect2(base.x - 3.0, base.y - h, 6.0, h), wax)
-	fill_ellipse(Vector2(base.x, base.y), 9.0, 3.0, Color(0.30, 0.26, 0.20, 0.6))
-	var fl := 1.0 + 0.25 * sin(atick() * 0.09 + base.x)
-	var tip := Vector2(base.x, base.y - h - 9.0 * fl)
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(base.x - 3.0, base.y - h), Vector2(base.x + 3.0, base.y - h), tip]),
-		Color(1.0, 0.72, 0.32, 0.85))
-	draw_circle(Vector2(base.x, base.y - h - 3.0), 16.0 * fl, Color(1.0, 0.7, 0.3, 0.05))
+# draw_candle WAS DELETED HERE (2026-08-14) with its two call sites in draw_venue_foreground:
+# the Midnight Show's backdrop paints a room full of candles standing on its tables, and these
+# two stood in the air beside them. See the note at the top of draw_venue_foreground.
 
 
 func draw_theatre_wings(s: Vector2, fy: float) -> void:
@@ -13647,7 +13754,7 @@ func draw_juggler(s: Vector2) -> void:
 	# the eight-head canon, so the in-play juggler reads as a real adult person:
 	# head one eighth of the height, the crotch
 	# at the vertical midpoint, a drawn-in waist. H is the head unit off the floor line.
-	var floor_y := s.y * 0.80
+	var floor_y := stage_floor_y()
 	var H := fig_stage_H(s)
 
 	# body language: the feet stay planted but the trunk BREATHES, and a fresh catch
@@ -20409,10 +20516,8 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 		Vector2(mcx - mw * 0.34, mfy), Vector2(mcx + mw * 0.34, mfy)]),
 		Color(mglow.r, mglow.g, mglow.b, 0.06))
 	draw_glow(Vector2(mcx, mfy), mw * 0.38, Color(mglow.r, mglow.g, mglow.b, 0.18))
-	draw_rect(Rect2(mirror.position.x + 1.0, mfy, mirror.size.x - 2.0,
-		mirror.position.y + mirror.size.y - mfy - 1.0), Color(0.09, 0.06, 0.07, 0.94))
-	draw_line(Vector2(mirror.position.x + 1.0, mfy), Vector2(mirror.position.x + mirror.size.x - 1.0, mfy),
-		Color(mglow.r, mglow.g, mglow.b, 0.30), 1.4)
+	draw_preview_floor(Rect2(mirror.position + Vector2(1.0, 0.0), mirror.size - Vector2(2.0, 1.0)),
+		mfy, mglow)
 	# HE BREATHES AND HIS HANDS DRIFT, because a costume is worn by a person: a figure
 	# frozen in a T-pose is a mannequin, and the wardrobe was drawn to sit on a body that
 	# moves. Cheap - two sines - and it uses the mirror's own idle hand positions rather
@@ -20432,7 +20537,12 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	# sits PV_FLOOR below it), and reading it as the head is what put his arms up over his
 	# shoulders in a V on the first try. Hands rest AT the line, out at the catch point,
 	# with a little drift so he is a person standing rather than a mannequin on a pole.
-	var o := Vector2(mcx, mfy - PV_FLOOR * k + 3.0 * sin(t * 0.018))
+	# ...and the hand line is solved BACK FROM THE BOARDS (fig_preview_drop), not guessed at
+	# PV_FLOOR * k. The mirror draws its own floor at mfy and the figure is a fixed-size
+	# painting: with k solved from the panel this put his boots 86px above the boards, which is
+	# the tailor's half of Louis's "he's often floating". The one screen built for looking at
+	# him closely was the worst offender.
+	var o := Vector2(mcx, mfy - fig_preview_drop(k) + 3.0 * sin(t * 0.018))
 	var hl := o + Vector2(-PV_OUTER * k, 4.0 * sin(t * 0.021 + 1.2) * k)
 	var hr := o + Vector2(PV_OUTER * k, 4.0 * sin(t * 0.021) * k)
 	# HE IS WEARING WHATEVER THE CURSOR IS ON, for this one figure only. See _fit_piece: it
@@ -21361,11 +21471,15 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	for tr0 in tracks:
 		for leg0 in tracks_legs(tr0):
 			peak = maxf(peak, float(leg0["h"]) * PV_ARC)
+	# ...measured with the FIGURE'S own hand-to-foot drop rather than PV_FLOOR, so the floor this
+	# panel draws is the floor he is standing on. See fig_preview_drop: PV_FLOOR describes the
+	# traced juggler, and the painted showman's boots sat 5px below the line drawn for them.
+	var drop := fig_preview_drop()
 	var room := inner.position.y + inner.size.y - ceil_y
-	var slack := maxf(room - (peak + 7.0 + PV_FLOOR), 0.0)
+	var slack := maxf(room - (peak + 7.0 + drop), 0.0)
 	var o := Vector2(box.position.x + box.size.x * 0.5,
-		clampf(ceil_y + peak + 7.0 + slack * 0.62, ceil_y, inner.position.y + inner.size.y - PV_FLOOR - 6.0))
-	var fy := o.y + PV_FLOOR
+		clampf(ceil_y + peak + 7.0 + slack * 0.62, ceil_y, inner.position.y + inner.size.y - drop - 6.0))
+	var fy := o.y + drop
 
 	# the stage itself: a warm pool on the floor and a lit floor lip.
 	#
@@ -21376,13 +21490,10 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	# visible straight diagonals crossing the roads. The pool below him does the whole job of
 	# saying "he is lit" without drawing a shape.
 	draw_glow(Vector2(o.x, fy), box.size.x * 0.34, Color(glow.r, glow.g, glow.b, 0.16))
-	draw_rect(Rect2(inner.position.x, fy, inner.size.x, inner.position.y + inner.size.y - fy),
-		Color(0.09, 0.06, 0.07, 0.92))
 	# ...and the lip is WARM rather than the venue's glow. At a cold house (the Championship
 	# is a blue-white room) that line came out pale blue - the one cold element on a panel of
 	# crimson and gold, drawn straight across the middle of it.
-	draw_line(Vector2(inner.position.x, fy), Vector2(inner.position.x + inner.size.x, fy),
-		Color(1.0, 0.78, 0.42, 0.40), 1.5)
+	draw_preview_floor(inner, fy, Color(1.0, 0.78, 0.42))
 
 	# THE ROADS: every leg's own parabola, drawn faint and behind everything, so the
 	# pattern's SHAPE is legible in a still frame and not only in motion
@@ -25648,7 +25759,7 @@ func draw_dust(s: Vector2, n: int, glow: Color) -> void:
 
 #region PARTICLE EFFECTS & POPUPS
 func spawn_egg_break(at: Vector2) -> void:
-	var floor_y := get_viewport_rect().size.y * 0.80
+	var floor_y := stage_floor_y()
 	for i in 8:
 		var ang := randf_range(-PI, 0.0)   # shell flies upward and out
 		var spd := randf_range(2.2, 5.2)
@@ -25819,7 +25930,7 @@ func step_effects() -> void:
 	splats = keep_sp
 	# dropped props falling to the stage floor: eggs break on LANDING, everything
 	# else bounces once, rests a moment, then fades away
-	var floor_y := get_viewport_rect().size.y * 0.80
+	var floor_y := stage_floor_y()
 	var keep_f: Array[Dictionary] = []
 	for d in falling:
 		if int(d["rest"]) >= 0:
@@ -25878,7 +25989,35 @@ func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> 
 
 
 func stage_floor_y() -> float:
-	return get_viewport_rect().size.y * 0.80   # the boards, where thrown things land
+	# WHERE HIS FEET GO - AND IT BELONGS TO THE PAINTING, NOT TO A CONSTANT (2026-08-14,
+	# Louis: "he's often floating or not standing on the right place").
+	#
+	# One number stood the performer at 0.80 of the viewport in all seven rooms, and every
+	# generated room paints its floor somewhere else. The session before this one tried to
+	# close that gap from the other side - `recentre_ext.py --lift` slid each painting until
+	# its floor met the man - and it got two things wrong that are worth stating, because
+	# both look right until you photograph them:
+	#
+	#   1. A PAINTED FLOOR IS A BAND, NOT A LINE. It runs in perspective from the back of the
+	#      room to the bottom of the frame, and the "strongest horizontal edge" the lift
+	#      measured is its BACK edge - where the floor meets the wall. Standing exactly there
+	#      is standing at the back of the room, which in practice meant standing ON the
+	#      Circus's ring wall, ON the World Arena's perimeter wall and ON the Small Theatre's
+	#      curtain hem, with the whole floor stretching away in front of him, unused. He has
+	#      to stand INSIDE the band, with some floor behind his heels and more in front.
+	#   2. MOVING THE ART IS DESTRUCTIVE AND DOES NOT SURVIVE. A lift throws away rows off the
+	#      top, invents rows at the bottom, and has to be undone by hand if the painting is
+	#      ever regenerated - which is the normal way these change.
+	#
+	# So the man moves to the room. `stand` is one number per venue, measured off the painting
+	# (see venue_data), and everything on the stage hangs off this function: the hand line, the
+	# shoulders, the shadow, the light lip, the footlights, where a dropped prop lands and
+	# where an egg breaks. Changing a venue's floor is now changing one float.
+	#
+	# IT SNAPS TO THE ART GRID for the same reason stage_center does - the performer is a
+	# fixed-size sprite and a half-pixel origin resamples the entire stage.
+	var s := get_viewport_rect().size
+	return art_snap(Vector2(0.0, s.y * float(venue_data(cur_venue()).get("stand", STAND_DEFAULT)))).y
 
 
 func flower_pressure() -> float:
