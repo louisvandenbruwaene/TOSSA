@@ -70,6 +70,27 @@ PALETTE = ROOT / "Resources" / "palette" / "palette.json"
 # and points the bar at the floor - but it is easy to write, so: check the picture.
 TARGETS = {"club": 0, "knife": 0, "torch": 0, "chainsaw": 90}
 
+# THE STAGE SPRITE IS AUTHORED AT DOUBLE DENSITY (2026-08-15, Louis: "i don't think that the
+# good looking big versions of the props were scaled down for the juggling, they still look
+# very bad and pixellated").
+#
+# He was right, and the reason is not the reducer - it is the pixel BUDGET the reducer was
+# given. A club shipped as 7x32 authored pixels, drawn at ART_PIXEL 2, so it filled 14x64
+# screen pixels. Seven pixels across has to carry a crimson body, two gold bands and a bone
+# handle, and it cannot: measured, the whole sprite was 224 pixels against the card's 1760.
+# No filter, no dithering and no hand-striking recovers detail that has nowhere to sit.
+#
+# So the sprite doubles and the manifest halves its `scale` to 0.5, which is exactly the same
+# number of SCREEN pixels - one source pixel now lands on one screen pixel instead of a 2x2
+# block. The prop is not bigger, it is not scaled fractionally (0.5 x ART_PIXEL 2 = 1, a whole
+# number, which is the rule that matters), and it carries four times the information: 896
+# pixels for the club, and the bands, the handle knob and the chainsaw's teeth all survive.
+#
+# WHY THESE ARE WRITTEN DOWN RATHER THAN MEASURED OFF THE FILE. The old code read the height
+# of the sprite already on disk, which is fine exactly once and doubles the prop every run
+# after that. A target table is idempotent and says what the intended size IS.
+STAGE_H = {"club": 64, "knife": 62, "torch": 78, "chainsaw": 96}
+
 ALPHA_CUT = 0.42     # coverage a reduced pixel needs to survive as opaque
 
 
@@ -116,7 +137,11 @@ def reduce_to(card: Image.Image, w: int, h: int, pal: np.ndarray) -> np.ndarray:
 # How often a tooth is struck along the chainsaw's bar, in art pixels. 2 (every other row)
 # beat 3 on a light field: at 3 the teeth are chunkier but too far apart to read as a saw,
 # and 25 rows of bar only fit eight of them.
-TOOTH_PERIOD = 2
+# ...and it is 4 now that the sprite is authored at double density, NOT 2. The period is in
+# authored pixels, so leaving it at 2 would strike twice as many teeth into a bar of the same
+# physical length - a fine grey comb rather than a saw. Doubling it keeps the tooth SPACING on
+# screen exactly where it was tuned, and each tooth is now two pixels of bite instead of one.
+TOOTH_PERIOD = 4
 
 
 def serrate_chainsaw(a: np.ndarray) -> np.ndarray:
@@ -222,7 +247,7 @@ def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool) -> str
 	ys, xs = np.where(ca[..., 3] > 127)
 	card = card.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
 
-	h = stage.size[1]                                   # LENGTH IS FIXED - see the docstring
+	h = STAGE_H[name]                                   # LENGTH IS FIXED - see the docstring
 	w = max(2, int(round(card.size[0] * h / card.size[1])))
 	out = reduce_to(card, w, h, pal)
 	if name == "chainsaw":

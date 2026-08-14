@@ -79,7 +79,7 @@
       0.5,
       0.5
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "prop/egg": {
     "path": "res://Assets/Props/egg.png",
@@ -87,7 +87,7 @@
       0.5,
       0.5
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "prop/ring": {
     "path": "res://Assets/Props/ring.png",
@@ -95,7 +95,7 @@
       0.5,
       0.5
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "prop/club": {
     "path": "res://Assets/Props/club.png",
@@ -103,7 +103,7 @@
       0.5,
       0.558
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "prop/knife": {
     "path": "res://Assets/Props/knife.png",
@@ -111,7 +111,7 @@
       0.5,
       0.624
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "prop/torch": {
     "path": "res://Assets/Props/torch.png",
@@ -119,7 +119,7 @@
       0.5,
       0.785
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "prop/chainsaw": {
     "path": "res://Assets/Props/chainsaw.png",
@@ -127,7 +127,7 @@
       0.5,
       0.696
     ],
-    "scale": 1.0
+    "scale": 0.5
   },
   "bg/small_theatre": {
     "path": "res://Assets/Backgrounds/small_theatre.png"

@@ -17,15 +17,32 @@ is not in the PIXEL ART section is inherited from TOSSA and still true.
    resampling, over the unchanged 1280x720 coordinate space. NOT 320x180: measured `--pixel`
    captures show the juggler reads beautifully there but every HUD label turns to mush (a 13px
    label becomes 3px), and this game is text-heavy.
+   **THE ONE EXCEPTION IS THE STAGE PROPS, added 2026-08-15** (Louis: they "still look very bad
+   and pixellated"). Every `prop/*` sprite is authored at DOUBLE density and blitted through a
+   manifest `scale` of 0.5, so one source pixel lands on exactly one screen pixel. This is not a
+   relitigation of the density: the prop's size on screen is unchanged to within a pixel, and
+   0.5 x ART_PIXEL 2 = 1 keeps the whole-number rule that the lock exists to protect. It buys
+   detail nothing else could - a club had 224 authored pixels to spend on a crimson body, two
+   gold bands and a bone handle, and now has 896. See `derive_stage_props.py`'s `STAGE_H`.
 2. **Text stays at SCREEN density**, which follows from 1. Words are rendered at 1280x720, not on
    the art grid. This is why a screen full of UI never measures as "fully converted" (see
    `scripts/check_pixel_grid.py`) and that is correct, not a defect.
 3. **Style matches TOSSA.** The palette is extracted from `Game.gd` and locked to 48 colours in
    `Resources/palette/` (including a .gpl Aseprite loads). Selective or no outlines, restrained
    shading, no thick black 16-bit outlines.
-4. **Grid-snap the geometry, sprite the pictures.** Panels, bars and the spotlight cone stay
-   procedural but are rasterised on the art grid. The spotlight must keep narrowing and warming
-   as a streak builds, so it can never be baked into a backdrop.
+4. **Grid-snap the geometry, sprite the pictures.** Panels and bars stay procedural but are
+   rasterised on the art grid. Light that answers the player stays procedural for the same
+   reason it always did - a streak still warms and lifts the floor pool, so that pool can never
+   be baked into a backdrop.
+   **THE SPOTLIGHT CONE ITSELF IS DELETED (2026-08-15)**, and the rule it leaves behind is
+   worth more than the cone was. Louis: "none of the stages should have a cone light, because
+   where would that even come from?" Nothing in a backyard, on a street corner or in a circus
+   tent casts a hard triangular beam down the middle of the frame, and both arenas are already
+   lit by the floodlight arrays painted into their own backdrops. **Light must name a source the
+   picture actually contains.** That applies to a drawn cone exactly as it always applied to a
+   baked one; the drawn version simply made the same mistake one stage later in the pipeline.
+   The Circus keeps its ring of light because that ring is PAINTED ON ITS FLOOR - sawdust
+   catching the lanterns overhead, not a beam hanging in the air.
    The grid rasterisers, all one draw_rect per art row: `fill_disc_pix` / `draw_ring_pix` /
    `draw_glow_pix` (circles), `draw_capsule_pix` (limbs), `draw_arc_pix` + `draw_spoke_pix`
    (the crowd dial's bands, ticks and needle), `draw_card_pix` (every rounded panel and bar -
@@ -288,7 +305,9 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   art and a player met three different clubs. **A prop's LENGTH is fixed** by `prop_scale` and the
   collision geometry, so a derivation keeps the stage sprite's pixel height and only the width
   follows the card. **Measure the card's INK, not its canvas** - by canvas the club looked 2.6x too
-  fat and by ink it was 6->7 art px.
+  fat and by ink it was 6->7 art px. **The stage sizes are a written-down table (`STAGE_H`), not a
+  measurement of the sprite already on disk** - reading the file's own height is idempotent exactly
+  once and doubles the prop on every run after that, which is how the doubling above was applied.
 
 **Hard-won gotchas, each one paid for:**
 
