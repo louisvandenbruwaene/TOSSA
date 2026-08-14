@@ -134,31 +134,38 @@ def shift(rgb: np.ndarray, dx: int) -> np.ndarray:
 	return np.concatenate([fill, rgb[:, :-pad]], axis=1)
 
 
-# VERTICAL LIFTS FOR BACKDROPS, which is the same trick on the other axis.
+# VERTICAL LIFTS FOR BACKDROPS: RETIRED ON 2026-08-14, THE DAY AFTER THEY WERE WRITTEN.
 #
-# WHAT IT IS FOR CHANGED ON 2026-08-14 and the numbers were re-measured for the new reason.
-# It began as a way to raise the Midnight Show's cabaret tables out from under the stage
-# floor, which covered the bottom fifth of every painting. Then the drawn podium was deleted
-# and the PAINTING became the floor - so the job now is to put each painting's own floor line
-# on the performer's standing line (art y 288), because he stands at a fixed height and every
-# generated room puts its floor somewhere different. Measured as the strongest horizontal edge
-# in art y 250..345, off-centre so the figure cannot bias it, then checked against a capture
-# with the standing line drawn on it. Unlifted, he stood on the Theatre's curtain and in the
-# Circus's audience.
+# THE IDEA. The drawn podium had just been deleted and the PAINTING had become the floor, so
+# each room's floor line landed somewhere different while the performer stood at a fixed 0.80
+# of the viewport. This slid each painting up until its floor met his feet. Measured as the
+# strongest horizontal edge in art y 250..345, the lifts came out: small_theatre 20,
+# the_circus 37, world_arena 26, the_midnight_show 59.
 #
-# Lifting the picture is better than re-rolling it for the composition, because the exposed
-# strip lands BELOW y 288 where the floor covers it, so the fill is never seen at all. What is
-# lost is the same number of rows off the TOP, which on these venues is uniform curtain.
-# name -> art px to raise. MEASURED per venue as the strongest horizontal edge between art y
-# 250 and 345 (the painting's own floor line), off-centre so the performer cannot bias it,
-# then checked against a real capture with the standing line drawn on:
-#   small_theatre 296 -> its boards began 8px BELOW his feet, so he stood on the curtain
-#   the_circus    325 -> the ring floor began 37px below, so he stood in the audience
-#   world_arena   314 -> the pitch began 26px below
-#   the_midnight_show  a further 11 on top of the 48 that first brought its tables into view
-# Backyard (284), Street Corner and Championship (283) already land within a few px of 288
-# and are left alone.
-LIFTS = {"small_theatre": 20, "the_circus": 37, "world_arena": 26, "the_midnight_show": 59}
+# WHY IT IS THE WRONG MECHANISM, and both halves of this are worth keeping:
+#
+#   1. IT MEASURED THE WRONG LINE. "The strongest horizontal edge" in a painted room is the
+#      floor's BACK edge, where the floor meets the wall. Putting his feet there stands him at
+#      the very back of the room: on the Circus's ring wall, on the World Arena's perimeter
+#      wall, on the Small Theatre's curtain hem, with the entire floor stretching away unused
+#      in front of him. A painted floor is a BAND in perspective and he has to stand INSIDE
+#      it. Louis, on the shipped result: "he's often floating or not standing on the right
+#      place".
+#   2. IT MOVES THE ART TO SUIT THE CODE. A lift throws away rows off the top, invents rows at
+#      the bottom, cannot be undone without the git history, and is silently lost the moment a
+#      backdrop is regenerated - which is the normal way these change. Two of the seven were
+#      regenerated the following day.
+#
+# WHAT REPLACES IT is one float per venue in Game.gd (venue_data's `stand`, read by
+# stage_floor_y): the man moves to the room instead of the room moving to the man. It is
+# reversible, it is tunable in a second, and a regenerated painting needs one number
+# re-measured rather than a destructive script re-run.
+#
+# THE FOUR LIFTS ALREADY APPLIED ARE LEFT IN PLACE, in artifacts/paint and in Assets. They are
+# not doing harm: the extra rows of floor they brought into frame are exactly what a lower
+# standing line wants, and the `stand` values were measured against the paintings as they now
+# are. .shifted.json stays as the record that it happened.
+LIFTS: dict[str, int] = {}
 
 # THIS SCRIPT MUTATES ITS OWN SOURCE, SO IT MUST NOT RUN TWICE. Both operations here are
 # relative moves - shift the picture by dx, raise it by dy - and applying either a second time
@@ -199,6 +206,10 @@ def note_done(key: str) -> None:
 
 
 def run_lifts(write: bool, force: bool) -> None:
+	if not LIFTS:
+		print("  --lift is retired: the standing line lives in Game.gd's venue_data now "
+			  "(see the note above LIFTS). Nothing to do.")
+		return
 	done = ledger()
 	for name, dy in LIFTS.items():
 		p = SRC / f"{name}.png"

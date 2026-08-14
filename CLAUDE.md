@@ -81,10 +81,37 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   venues (dispersed floodlights diffuse fine; a contiguous out-of-gamut sky does not) - it means
   "go and look at this one", and the fix is always the prompt, never the reducer. **The locked 48
   is a WARM theatre palette**: it has no mid-luminance teal, so ask for deep indigo skies.
-- **Two framing rules a backdrop prompt must carry**, both measured off `draw_backdrop`: the
-  bottom 20% is covered by the stage floor, and the performer stands dead centre, so the centre
-  column wants to be empty. An EXTERIOR has its own: the establishing card puts its title across
-  the top centre and two panels in the bottom corners, so the hero fills the lower two thirds.
+- **THE PAINTING IS THE FLOOR, AND EVERY ROOM PUTS IT SOMEWHERE ELSE** (2026-08-14, Louis:
+  "he's often floating or not standing on the right place or there is no floor at all"). The
+  standing line is per-venue DATA - `venue_data`'s `stand`, read by `stage_floor_y`, which
+  every single thing on the stage now hangs off (hand line, shoulders, shadow, light lip,
+  footlights, where a dropped prop lands). Three things this cost, each paid for:
+  - **A painted floor is a BAND in perspective, not a line, and he stands INSIDE it.** The
+    session before measured "the strongest horizontal edge" and put his feet on it - that is
+    the floor's BACK edge, where it meets the wall, so he stood on the Circus's ring wall, on
+    the World Arena's perimeter wall and on the Small Theatre's curtain hem with the whole
+    floor unused in front of him.
+  - **Move the man, not the picture.** `recentre_ext.py --lift` slid each painting up to meet
+    him; it is RETIRED. A lift throws away rows off the top, invents rows at the bottom, and is
+    silently lost the next time a backdrop is regenerated - two of the seven were regenerated
+    the following day. One float per venue is reversible and re-measurable in a second.
+  - **The Backyard and the Midnight Show had no floor at all** and were regenerated: the old
+    Backyard was a close-up of a house wall and the Midnight Show was drapes and tables above
+    pure black, both of them legal under the old prompt rule that the bottom 20% was covered.
+- **Three framing rules a backdrop prompt must carry**, all measured off `draw_backdrop`: the
+  bottom third IS a real standable floor running edge to edge (this REPLACES "the bottom 20% is
+  covered by the stage floor, so nothing essential lives there", which is what produced the two
+  floorless venues); its back edge wants to be up around art y 260-290 so `stand` can land
+  partway down it; and the performer stands dead centre, so the centre column wants to be
+  empty. An EXTERIOR has its own: the establishing card puts its title across the top centre
+  and two panels in the bottom corners, so the hero fills the lower two thirds.
+- **THE MODEL WRITES FAKE HANDWRITING ON A PLAIN FLOOR.** Asked for texture on a large flat
+  surface it paints illegible cursive across it - two independent Backyard rolls, and saying
+  "no writing, no letters" only traded it for a tree dead centre. Invisible in a 640x360
+  thumbnail, unmistakable at 2x. `scripts/clean_ground.py` removes it (median filter, flatness
+  measured on the MEDIAN so the writing cannot hide the test from itself), and it is a repair
+  you reach for after looking, **never a sweep**: on a cobbled street or a mown pitch that same
+  small-detail-on-a-smooth-field IS the picture, and it would scrub 12-19% of it.
 - **Props are derived**: `--propref <name>` renders one prop isolated at x6 through the real
   drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
   alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a
