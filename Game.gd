@@ -12568,8 +12568,13 @@ func draw_sprite_torch_flame(key: String, which: String, pos: Vector2, ang: floa
 	var pv: Vector2 = e["pivot"]
 	var hpx := float(tex.get_size().y)
 	# art px -> the prop's own LOCAL units, so the flame turns with the tumble like everything
-	# else the transform below carries. One art px is ART_PIXEL screen px at zoom 1.
-	var u := ART_PIXEL * float(zoom) / maxf(sc, 0.001)
+	# else the transform below carries. One art px is ART_PIXEL x the key's own `scale` screen
+	# px at zoom 1, and READING THAT SCALE IS NOT OPTIONAL: the stage torch is authored at
+	# double density behind a scale of 0.5, so assuming a bare ART_PIXEL here draws the fire at
+	# twice the size of the handle carrying it. The measurements in torch_flame.json are in
+	# authored pixels of whichever sprite they were taken from, so they follow the same factor.
+	var kscale := float((art_bank[key] as Dictionary).get("scale", 1.0))
+	var u := ART_PIXEL * kscale * float(zoom) / maxf(sc, 0.001)
 	var base_y := (float(fm.get("base_row", 0)) - pv.y * hpx) * u
 	var fh := float(fm.get("height", 0)) * u
 	var hw := float(fm.get("half_width", 1.0)) * u
@@ -13088,23 +13093,24 @@ func draw_backdrop(s: Vector2) -> void:
 		Color(veil_c.r, veil_c.g, veil_c.b, veil), 24)
 	draw_stage_grade(s, fy, glow)
 
-	# spotlight cone from above centre: it narrows and warms a touch as a streak
-	# builds, the light literally rewarding focus (ART doc, Section 2)
+	# THE SPOTLIGHT CONE IS GONE (2026-08-15, Louis: "none of the stages should have a cone
+	# light, because where would that even come from?").
+	#
+	# It was a flat triangle from the top of the frame down to the boards, drawn in every
+	# venue at the venue's own `spot`. The question kills it: a backyard has no followspot
+	# rig, a street corner has no followspot rig, and the two arenas are lit by the floodlight
+	# arrays already painted into their own backdrops. Only a real theatre could motivate one,
+	# and the Small Theatre's light belongs to its footlights, which are drawn along the lip.
+	# Drawing the beam anyway is the same mistake as a baked spotlight in a painting, one step
+	# later in the pipeline: light that names a source the picture does not contain.
+	#
+	# WHAT REPLACES IT IS THE LIGHT THE ROOM ALREADY OWNS. The Circus keeps its ring of light
+	# because that ring is PAINTED ON ITS FLOOR - it is sawdust catching the big top's own
+	# lanterns, not a cone hanging in the air, which is exactly the distinction Louis drew.
+	# The soft pool below stays, quietened: it is a ground-level lift that keeps the performer
+	# legible against a dark house without claiming a lantern that is not there. `hot` survives
+	# because the pool still answers a streak, which is the half of this the player earns.
 	var hot := clampf(float(streak) / 15.0, 0.0, 1.0) if game_state == ST_PLAY else 0.0
-	var top := Vector2(s.x * 0.5, -40.0)
-	var spread := 300.0 - 44.0 * hot
-	# ...AND IT LANDS ON THE FLOOR, wherever this venue's floor is. The cone used to end at a
-	# fixed 0.82 of the viewport, which was a hair below the one standing line every room
-	# shared; now that the line is per-venue (see stage_floor_y) a fixed end would leave the
-	# light stopping in mid-air above his boots in the rooms whose floor sits lower. Same
-	# 2% of overshoot past the boards, measured from the boards.
-	var cone_end := fy + s.y * 0.02
-	var cone := PackedVector2Array([
-		top,
-		Vector2(s.x * 0.5 - spread, cone_end),
-		Vector2(s.x * 0.5 + spread, cone_end),
-	])
-	draw_colored_polygon(cone, Color(glow.r, glow.g, glow.b, spot * (1.0 + 0.5 * hot)))
 
 	# a SMOOTH warm light pool on the performer, built from many faint overlapping
 	# discs (bright centre fading out), so it reads as a soft spotlight instead of

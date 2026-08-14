@@ -85,11 +85,25 @@ SIZES = {"ball": (52, 52), "ring": (62, 62), "egg": (46, 60)}
 # the EXISTING stage sprites' exact dimensions, because those are set by the game's
 # physical prop scales and are not an art decision to revisit.
 #
-# STAGE_BANDS is lower on purpose. Six bands across eleven pixels is a band every two
-# pixels, which stops reading as shading and starts reading as stripes; four is what a
-# person shading an 11px ball by hand would use.
-STAGE_SIZES = {"ball": (11, 11), "ring": (21, 21), "egg": (10, 13)}
-STAGE_BANDS = 4
+# THE SIZES DOUBLED ON 2026-08-15, and the sentence above about them not being an art
+# decision is the one part of this note that has gone stale. The physical size on screen is
+# unchanged and still not an art decision: what changed is the DENSITY the stage draws at.
+# Every prop sprite is now authored at two pixels per screen pixel and blitted through a
+# manifest `scale` of 0.5, because at eleven pixels these were still reading as dots while
+# their own shop cards read as lit solids (Louis: the stage props "still look very bad and
+# pixellated"). See derive_stage_props.py's STAGE_H note for the full reasoning.
+#
+# THIS IS THE ONE PLACE THAT GAINS TWICE OVER. The four painted props are reduced from a
+# card, so doubling gives them more of a picture that already exists. These three are
+# COMPUTED, so a 22px ball is not a smoothed 11px ball - it is a sphere solved at 22px, with
+# its band boundaries landing on whole pixels at the size it actually ships.
+#
+# STAGE_BANDS rises 4 -> 6 with them, and for the reason the old note gives: four bands was
+# chosen because six across ELEVEN pixels is a band every two pixels, which reads as stripes
+# rather than shading. Across twenty-two there is room for six again, which is what the shop
+# card uses, so the two sizes finally agree on the same number.
+STAGE_SIZES = {"ball": (22, 22), "ring": (42, 42), "egg": (20, 26)}
+STAGE_BANDS = 6
 
 
 _bands = BANDS   # swapped to STAGE_BANDS for the stage set; see build()
