@@ -1231,12 +1231,12 @@
   },
   "_TORCH": {
     "stage": {
-      "base_row": 23,
-      "height": 23,
-      "half_width": 5.75
+      "base_row": 25,
+      "height": 25,
+      "half_width": 6.25
     },
     "card": {
-      "base_row": 32,
+      "base_row": 33,
       "height": 26,
       "half_width": 6.5
     }
