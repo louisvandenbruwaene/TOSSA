@@ -54,7 +54,17 @@ cone, and a ring wider than everything it joins reads as a tray with a wick stan
 already learned once, see CLAUDE.md. Absolute excess also means the torch's foot is the knife's
 pommel to the pixel, since the cone is 8 there.
 
-The flame and the wick are untouched, so `_TORCH` should come back unchanged - check it anyway.
+THE TORCH'S STEEL WICK IS NOW A BOUND HEAD, LIFTED FROM A GENERATION (2026-08-15, Louis asked
+PixelLab to "just create a juggling torch" and picked s11 out of eleven). Only rows 40..53 of
+that painting are kept - its wrap - because s11's own shaft is FIVE pixels on the card and four
+at stage size, thinner than the knife's blade and nowhere near something a hand catches. The
+proportions come from the generation and the material from this pipeline, which is the only
+split that survives the reduction: measured, every one of the eleven broke at stage size, three
+of them by leaving painted fire baked in under the live flame.
+
+`_TORCH` MOVES WHENEVER THE HEAD DOES and must be copied into Resources/art_manifest.json by
+hand: stage base_row 29 -> 23 here, because a fourteen-row head takes room a seven-row wick did
+not. Nothing syncs them and a stale block draws the flame off the end of the handle.
 
 USAGE
   .venv/bin/python scripts/reshape_shaft_props.py             preview to artifacts/reshape/
@@ -118,6 +128,14 @@ CLUB_BODY_BOT = 45       # the last row of the body, where the handle's collar b
 CLUB_BODY_GROW = 5       # extra rows of taper
 CLUB_HANDLE_EXTRA = 1    # extra six-row wrap periods; the knife's own handle is 0
 
+# THE TORCH'S HEAD COMES FROM THE s11 GENERATION (2026-08-15). Rows 40..53 of that painting -
+# the bound wrap under its fire. Everything else about s11 is left behind; see build_torch.
+# TORCH_HEAD_TOP is chosen so the shaft below it is 47 rows, which is 35 + 2 whole wrap
+# periods: the handle's length is quantised to the tile, so this row is the free parameter and
+# the shaft's is not.
+S11_HEAD = (40, 53)
+TORCH_HEAD_TOP = 32
+
 
 def handle_rows(y0: int, y1: int):
     """Rows y0..y1 of the knife's handle as lists of RGB, centre-aligned.
@@ -132,6 +150,28 @@ def handle_rows(y0: int, y1: int):
     for y in range(y0, y1 + 1):
         xs = np.where(op[y])[0]
         out[y] = [tuple(int(v) for v in a[y, x, :3]) for x in xs]
+    return out
+
+
+def s11_head():
+    """Rows 40..53 of the s11 painting - its bound head - warm-snapped, as lists of RGB.
+
+    Snapped through `install_prop_cards.warm_palette()` rather than the plain 48, for the
+    reason that module documents at length: every generated object has a near-black rim, and
+    the locked palette's darkest entries are COOL, so an unrestricted snap sends a third of a
+    small sprite to indigo. Measured on this head raw, its own darks are #090a10 and #390915 -
+    exactly the pixels that would go.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import install_prop_cards as ipc
+
+    a = np.asarray(Image.open(ROOT / "artifacts" / "torchgen" / "s11.png").convert("RGBA")).astype(float)
+    warm = ipc.warm_palette()
+    out = []
+    for y in range(S11_HEAD[0], S11_HEAD[1] + 1):
+        xs = np.where(a[y, :, 3] > 40)[0]
+        snapped = ipc.snap_warm(a[y, xs, :3], warm)
+        out.append([tuple(int(v) for v in c) for c in snapped])
     return out
 
 
@@ -207,7 +247,7 @@ def build_torch() -> Image.Image:
     prof = [(0.00, 0.00), (0.52, -0.07), (0.62, -0.26), (0.47, -0.48),
             (0.27, -0.70), (0.11, -0.87), (0.00, -1.00)]
     FLAME_H, FLAME_W = 26, 11.5
-    base_y = 32                      # the last row of fire, one clear of the wick below
+    base_y = TORCH_HEAD_TOP - 1      # the last row of fire, sitting straight on the head
     for i in range(FLAME_H):
         v = -i / (FLAME_H - 1.0)
         hw = 0.0
@@ -229,22 +269,36 @@ def build_torch() -> Image.Image:
                 c = ((255, 240, 204) if d < 0.35 else ((248, 184, 88) if d < 0.7 else (240, 104, 64))) if hw >= 2.0 else (240, 104, 64)
                 a[y, x] = (c[0], c[1], c[2], 255)
 
-    # --- THE WICK: a thin metal cylinder, deliberately narrower than the handle's thinnest
-    # point (8) so it reads as a separate fitting rather than as more handle.
-    STEEL = [(76, 66, 56), (104, 96, 80), (158, 145, 133), (204, 189, 168), (255, 255, 255)]
-    wick_w, wick_h, wick_y = 6, 7, 33
-    x0 = int(round(cx - wick_w / 2.0))
-    for i in range(wick_h):
-        for j in range(wick_w):
-            t = j / max(1.0, wick_w - 1)
-            c = STEEL[4] if t < 0.3 else (STEEL[2] if t < 0.7 else STEEL[0])
-            if i == wick_h - 1:
-                c = STEEL[0]
-            a[wick_y + i, x0 + j] = (c[0], c[1], c[2], 255)
+    # --- THE HEAD: a bound wrap, lifted from the s11 painting (2026-08-15, Louis picked it out
+    # of eleven generations: "fix up s11"). It replaces a thin steel wick, and it is the one
+    # part of that painting worth keeping - the rest of s11 is a five-pixel pole that reduces
+    # to four on stage, thinner than the knife's blade and far too thin to read as something a
+    # hand catches. So the PROPORTIONS come from s11 (a long shaft under a distinct head) and
+    # the material comes from the pipeline.
+    #
+    # Warm-snapped, its wrap lands on the club's own crimson family (#702020 / #903030 over
+    # #381810 / #0f090d), which is a better outcome than the design asked for: a crimson head,
+    # a brass ferrule and the knife's leather grip put the torch in the same wardrobe as the
+    # other two heavy props instead of beside them.
+    #
+    # ITS WIDTHS ARE REMAPPED, NOT SCALED. s11's head runs 13 down to 5 over a 5px pole - a
+    # ratio of 2.6 - and the same ratio over this 12px shaft would be a 31px head, which is the
+    # TRAY failure this file has already paid for once. The range [5, 13] is mapped onto
+    # [14, 20] instead, which keeps every bump in the bundle's outline while sitting a modest
+    # two pixels proud of the shaft it sits on.
+    head = s11_head()
+    hw_lo, hw_hi = min(len(r) for r in head), max(len(r) for r in head)
+    for i, row in enumerate(head):
+        want = int(round(14 + (len(row) - hw_lo) * 6.0 / max(1, hw_hi - hw_lo)))
+        x0 = int(round(cx - want / 2.0))
+        for x in range(want):
+            j = int(round((x / max(1, want - 1)) * (len(row) - 1)))
+            c = row[min(len(row) - 1, j)]
+            a[TORCH_HEAD_TOP + i, x0 + x] = (c[0], c[1], c[2], 255)
 
     # --- THE HANDLE: the knife's, tapering 8 at the foot to 12 at the shoulder.
-    top, bot = wick_y + wick_h, 92
-    seq = grip_sequence(3)
+    top, bot = TORCH_HEAD_TOP + len(head), 92
+    seq = grip_sequence(2)
     excess = [len(rows[y]) - KNIFE_GRIP_W for y in seq]
     n = bot - top + 1
     assert len(seq) == n, f"handle sequence is {len(seq)} rows, the torch has {n}"
