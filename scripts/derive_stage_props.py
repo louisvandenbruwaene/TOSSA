@@ -258,11 +258,23 @@ def strip_torch_flame(a: np.ndarray) -> tuple[np.ndarray, dict]:
 	# pass and were left as white specks stuck to the side of the wick. The near-white test is
 	# safe here ONLY because the band is contiguous from the top: the bone-cream handle is the
 	# same family of colour and is fifty rows below the fire, well outside it.
+	# TWO TESTS DOING TWO DIFFERENT JOBS, and collapsing them into one `hot` mask was wrong
+	# in a way that only showed once the props shared a handle (2026-08-15). The near-white
+	# core of a flame is #fff0cc, and so is the lit column of the new bone GRIP - the same
+	# palette entry, so no colour test can ever separate them. What separates them is WHERE
+	# THEY ARE, so the two tests are used at different stages:
+	#   * `orange` alone DEFINES the band. It has to reject the crimson sleeve, whose own
+	#     highlight #cc383d (204,56,61) sailed through a bare `r>200 & r>b+100` and dragged
+	#     the band 42 rows down a 78-row sprite. Flame is either strongly orange (high green)
+	#     or a deep red root with essentially no blue; crimson is neither.
+	#   * `core` is then cleared only INSIDE that band, where a near-white pixel can only be
+	#     fire, because the grip is thirty rows below it.
 	op = out[..., 3] > 0
-	orange = op & (out[..., 0] > 200) & (out[..., 0] > out[..., 2] + 100)
+	orange = (op & (out[..., 0] > 200) & (out[..., 0] > out[..., 2] + 100)
+			  & ((out[..., 1] > 100) | (out[..., 2] < 20)))
 	core = op & (out[..., 0] > 230) & (out[..., 1] > 200) & (out[..., 2] > 150)
-	hot = orange | core
-	rows = [y for y in range(h) if bool(hot[y].any())]
+	hot = orange
+	rows = [y for y in range(h) if bool(orange[y].any())]
 	if not rows:
 		return out, {}
 	# contiguous from the top: a stray warm speck low on a handle is not part of the fire
@@ -289,19 +301,39 @@ def strip_torch_flame(a: np.ndarray) -> tuple[np.ndarray, dict]:
 		"height": height,
 		"half_width": round(half, 2),
 	}
-	out[rows[0]:band_end + 1][hot[rows[0]:band_end + 1]] = 0
-	# ...AND THEN SWEEP THE ORPHANS. Clearing fire pixel-wise leaves whatever the generator
-	# painted AROUND the fire - a dark edge, a soot fringe - floating in mid-air beside the
-	# wick with nothing under it. Anything in the band that is not connected downward to the
-	# rest of the object is not part of the object.
-	keep = out[..., 3] > 0
-	for y in range(band_end, rows[0] - 1, -1):
-		below = keep[y + 1] if y + 1 < h else np.zeros(keep.shape[1], bool)
-		near = below.copy()
-		near[:-1] |= below[1:]
-		near[1:] |= below[:-1]
-		keep[y] &= near
-	out[~keep] = 0
+	burn = (orange | core)[rows[0]:band_end + 1]
+	out[rows[0]:band_end + 1][burn] = 0
+	# ...AND THEN SWEEP THE SPECKS, WHICH IS NOT THE SAME AS SWEEPING THE UNSUPPORTED.
+	# Clearing fire pixel-wise leaves whatever the generator painted AROUND it - a dark edge,
+	# a soot fringe - floating beside the wick with nothing under it. The first version
+	# deleted everything in the band that was not connected DOWNWARD to the rest of the
+	# object, which is a reasonable-sounding rule that deleted the wick: on a design where
+	# the fire burns all the way around a wick, clearing the fire is exactly what disconnects
+	# that wick from the collar under it. Measured, the stage torch came back with its top 26
+	# rows empty and the fire drawn over nothing.
+	#
+	# So the rule is SIZE, not support. A soot fringe is one to three pixels; the charred wick
+	# is a solid block of fifty. Anything smaller than SPECK is debris and goes.
+	SPECK = 8
+	seen = np.zeros_like(op)
+	for y in range(rows[0], band_end + 1):
+		for x in range(out.shape[1]):
+			if not op[y, x] or seen[y, x] or out[y, x, 3] == 0:
+				continue
+			stack, comp = [(y, x)], []
+			seen[y, x] = True
+			while stack:
+				cy, cx = stack.pop()
+				comp.append((cy, cx))
+				for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+					ny, nx = cy + dy, cx + dx
+					if (0 <= ny < out.shape[0] and 0 <= nx < out.shape[1]
+							and not seen[ny, nx] and out[ny, nx, 3] > 0):
+						seen[ny, nx] = True
+						stack.append((ny, nx))
+			if len(comp) < SPECK:
+				for cy, cx in comp:
+					out[cy, cx] = 0
 	return out, meta
 
 

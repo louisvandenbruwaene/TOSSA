@@ -251,6 +251,33 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   gold, while the plain one keeps a bold blade, a solid collar and a legible grip. **A prop is
   judged at the size it is thrown, not the size it is sold** - the same lesson as the club's
   three-pixel handle.
+- **THE CLUB, THE TORCH AND THE KNIFE SHARE ONE AUTHORED GRIP** (2026-08-15, Louis: "use the
+  handle of the knive for the torch and club ... give the exact same handle to the club as to
+  the torch"). `scripts/reshape_shaft_props.py` draws it once from a table - a bright collar,
+  a grip 8px wide banded with a darker wrap every 6 rows, a cap or a knob - and stamps it onto
+  both cards. **"The exact same handle" is a constraint a generator cannot meet**, because two
+  paintings of one description are two objects; when the requirement is exactness at a small
+  size, author it. Only the light/dark ROLES carry over from the knife, filled from each prop's
+  own ramp, so the club keeps its bone palette rather than turning to leather. The wrap bands
+  are the load-bearing feature: they still read as "wrapped" at the 14px the stage sprite gets,
+  where a smooth cylinder is just a stick.
+  The torch's geometry came from a REFERENCE Louis supplied (`torch_image.html`, a saved image
+  search for the Henrys nite flight torch). Two things the photographs settle: a juggling
+  torch's coloured section is only modestly wider than its shaft - a sleeve on a tube, not a
+  teardrop - and there is a bright metal collar between that sleeve and the wick. "Small" is
+  part of the spec: at 18px the collar was wider than both the 16px wick above and the 14px
+  sleeve below, and a ring wider than everything it joins reads as a TRAY with a wick standing
+  on it.
+- **THE FLAME BAND IS FOUND BY ONE TEST AND CLEARED BY TWO.** Once the props shared a bone
+  grip, `#fff0cc` was both the flame's white-hot core and the grip's lit column - the same
+  palette entry, so no colour test can separate them. Position can: `orange` alone defines the
+  band (and must reject the crimson sleeve, whose own highlight `#cc383d` sailed through a
+  bare `r>200 & r>b+100` and dragged the band 42 rows down a 78-row sprite), then near-white is
+  cleared only INSIDE that band, where it can only be fire. **And debris is swept by SIZE, not
+  by support**: the first version deleted everything in the band not connected downward, which
+  is exactly what a fire burning all the way around a wick disconnects - the stage torch came
+  back with its top 26 rows empty and the flame drawn over nothing. A soot fringe is 1-3
+  pixels; the charred wick is a block of fifty.
 - **A REPAINT AND A RE-SNAP MUST NEVER TARGET THE SAME FILE.** `install_prop_cards.py` builds
   both into one dict keyed by filename and the re-snap loop runs second, so the moment the
   knife and chainsaw gained repaints their stale `RESNAP` entries read the OLD file off disk
