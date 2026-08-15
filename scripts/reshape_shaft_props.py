@@ -1,38 +1,60 @@
 #!/usr/bin/env python3
-"""Put the KNIFE'S OWN HANDLE on the club, and rebuild the torch around a tapered one.
+"""Give the club and the torch THE KNIFE'S OWN HANDLE - its pixels, not a likeness of them.
 
-WHY A TEMPLATE LIFTED FROM THE KNIFE AND NOT A HANDLE DRAWN TO MATCH IT (2026-08-15, Louis:
-"just give the torch and club the exact handle from the knive"). The previous pass drew a
-grip *like* the knife's - same 8px width, same collar, same wrap-every-six rhythm - and the
-verdict was "the handles are way too thick". They were not. Measured, all three grips are 8
-across on the card and 7 at stage size; they were already identical to the pixel.
+2026-08-15, Louis: "the torch and club handles should be the same as the knive handle (which
+looks great), but they aren't: they are fatter, and a different color ... Just use the exact
+same thing for the club: same width and colors and decorations etc, for the torch i just
+wanted you to let the diameter grow 50% over the entire length of the torch handle (make sure
+this looks like a smooth line) and also give it the same decorations and colors etc."
 
-**WHAT DIFFERED WAS VALUE, AND VALUE IS WHAT READS AS THICKNESS.** The knife's grip runs a
-mid-brown around (82,49,33) banded with ribs at (19,9,8) - a 3:1 step, nearly black. The
-drawn one ran near-white (255,240,204) banded with (176,136,72), a 1.4:1 step. A pale object
-with weak banding advances and fattens; a dark object with hard banding recedes and reads
-slim. Two grips of exactly the same width looked like different objects, and the way to stop
-guessing about that is to stop redrawing the thing and copy it.
+WHAT THE MEASUREMENT SAID, because two previous passes argued about this from theory. Per-row
+widths off the cards, before this change:
 
-So `knife_handle()` lifts rows 50..84 of `big_knife.png` as a LUMINANCE-RATIO template - the
-collar, twenty-six rows of grip with its ribs, the brass cap - and every prop stamps that
-same template through its own ramp. The club and torch get a bone ramp (Louis, earlier:
-"white handle for the club"), but they get the knife's CONTRAST, which is the part that was
-actually wrong.
+    knife  collar 12/14/14/12,  grip 8 for 25 rows,  pommel 10/10/10/8/4
+    club   collar 12/14/14/12,  grip 8 for 25 rows,  pommel 10/10/10/8/4   <- already identical
+    torch  collar 18/18/18/18,  cone 15 -> 9,        pommel 11/10/10/10/10 <- genuinely fatter
 
-THE TORCH'S BODY IS NOW ITS HANDLE. Louis: "the red part becomes the handle completely: i
-want a conelike handle, where the thinnest part is the width of the knive handle, and the
-widest part is the current widest part of the torch, linearly growing wider and keeping the
-design of the knive handle all the way". So there is no separate sleeve any more - one cone
-running 8px at the foot to 15px at the shoulder, carrying the same rib rhythm the whole way,
-with the knife's collar as its golden border at the top.
+So the club was never wider by a pixel, and the last pass was right about that and wrong about
+what to do with it: it kept a BONE ramp, so the grip stayed cream (#fff0cc / #d8a068) against
+the knife's leather (#986038 / #704830 / #170f12) and read as a different object anyway. Value
+does drive apparent thickness - a pale grip advances - but the answer to "use the exact same
+handle" is not a better-calibrated ramp. It is the same pixels.
 
-AND THE FLAME SITS ABOVE THE WICK RATHER THAN OVER IT ("with a metal cilinder on top with
-the flame above that (not layered over it)"). This is the one part that was never an art
-problem: the wick was a black cylinder INSIDE the flame band, so the game's own live fire was
-drawn straight over it and it never showed in play. The wick is a thin metal cylinder now -
-deliberately thinner than the handle's thinnest point - and the painted flame starts ABOVE
-it, so `_TORCH.base_row` lands on its top and the drawn fire begins where the wick ends.
+`knife_handle()` therefore returns RGB, not luminance ratios, and the club is a straight
+transplant of rows 50..84. The torch is the same rows STRETCHED, so its colours are still the
+knife's own and can only ever be palette entries the knife already uses.
+
+**THIS OVERRIDES "white handle for the club"** (Louis, earlier). One handle for three props
+cannot also be per-prop colours; asked to choose, he chose the knife's.
+
+THE TORCH'S TAPER IS 8 -> 12, AND HOW THE EDGES STEP IS THE WHOLE JOB. Four pixels of growth
+over fifty-three rows is two pixels per side, and rounding a symmetric width to an integer
+moves BOTH edges at once - so the silhouette would jump two pixels wide, twice, and read as
+three stacked cylinders rather than a cone. Each edge is rounded from the fractional half-width
+INDEPENDENTLY, so the left and right steps fall on different rows and the handle widens one
+pixel at a time, alternating sides. That is "a smooth line" at this density; there is no
+smoother one available.
+
+AND THE RIB RHYTHM SURVIVES THE TILE. The torch's handle is 53 rows and the knife's is 35, so
+the grip has to repeat - and repeating rows 55..79 whole leaves a twelve-row plain stretch
+across the seam, in a grip whose ribs come every six. The tile is the SIX-ROW UNIT the knife
+is actually built from (four plain rows, then a two-row dark wrap): lead in with 54..61, repeat
+68..73 five times, tail with 74..79. 8 + 30 + 6 + 4 collar + 5 cap = 53 exactly, with no seam.
+
+Nearest-neighbour sampling is safe here, and was not last time. Stretching a row to a width
+that changes every row repeats different source columns on adjacent rows and shreds the wrap
+bands into blobs - which is why the previous pass interpolated. But the width is now piecewise
+CONSTANT for ten-odd rows at a stretch (only four steps in the whole cone), so every row in a
+run maps identically and each band stays a straight edge. Interpolating would instead invent
+colours between palette entries, which is the one thing a locked palette cannot take.
+
+The collar and the cap keep their EXCESS over the grip in absolute pixels (+4/+6/+6/+4 and
++2/+2/+2/0/-4), not as a ratio. Scaled proportionally the collar would be 21px over a 12px
+cone, and a ring wider than everything it joins reads as a tray with a wick standing on it -
+already learned once, see CLAUDE.md. Absolute excess also means the torch's foot is the knife's
+pommel to the pixel, since the cone is 8 there.
+
+The flame and the wick are untouched, so `_TORCH` should come back unchanged - check it anyway.
 
 USAGE
   .venv/bin/python scripts/reshape_shaft_props.py             preview to artifacts/reshape/
@@ -42,6 +64,7 @@ USAGE
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -54,111 +77,96 @@ ROOT = Path(__file__).resolve().parent.parent
 PROPS = ROOT / "Assets" / "Props"
 
 # The knife's handle, by row, measured off big_knife.png. Everything below is derived from
-# these two numbers, so a re-rolled knife needs them re-measured and nothing else.
-KNIFE_HANDLE_TOP = 50
-KNIFE_HANDLE_BOT = 84
+# these, so a re-rolled knife needs them re-measured and nothing else.
+KNIFE_HANDLE_TOP = 50    # first row of the brass collar
+KNIFE_HANDLE_BOT = 84    # last row of the pommel
+KNIFE_GRIP_TOP = 54      # first row below the collar
+KNIFE_GRIP_BOT = 79      # last row above the pommel
+KNIFE_GRIP_W = 8         # the grip's width, and so the torch's thinnest point
 
-# The bone ramp, darkest first. Five steps of the locked palette, spanning a range close to
-# the knife's own 3:1 rather than the 1.4:1 that made the last grip look fat.
-# ...and it is normalised over the GRIP's own range, not the whole handle's. The handle
-# includes a brass collar at 193 luminance; measured against that, the grip's body sits at
-# t=0.3 and comes out TAN however light the ramp is - which is how the first attempt at a
-# "white handle" produced a brown one. Normalising over the grip alone lets its body reach
-# the top of the ramp and its ribs the bottom, which is what carries the knife's contrast
-# into a bone-coloured object.
-BONE = [(112, 72, 48), (176, 136, 72), (216, 160, 104), (242, 204, 140), (255, 240, 204)]
-BRASS = [(112, 72, 48), (152, 96, 56), (176, 136, 72), (255, 217, 102), (255, 240, 204)]
-STEEL = [(76, 66, 56), (104, 96, 80), (158, 145, 133), (204, 189, 168), (255, 255, 255)]
+# The grip, in the three parts a tile has to respect. Its dark wraps fall at rows 61, 66-67
+# and 72-73, so the pattern is a run-in ending on the first rib, then a six-row unit (four
+# plain rows, a two-row wrap), then a plain run-out. The knife's own grip is LEAD + 2 tiles +
+# TAIL; the torch takes 5 tiles, and the seams are invisible because every one falls where a
+# unit already begins.
+KNIFE_LEAD = (54, 61)
+KNIFE_TILE = (62, 67)
+KNIFE_TAIL = (74, 79)
 
-
-def lum(rgb) -> float:
-    return 0.2126 * float(rgb[0]) + 0.7152 * float(rgb[1]) + 0.0722 * float(rgb[2])
+TORCH_GROWTH = 1.5       # Louis: "let the diameter grow 50% over the entire length"
 
 
-def knife_handle():
-    """(rows, lo, hi) - the knife's handle as per-row (x-offset, luminance) plus its range.
+def handle_rows(y0: int, y1: int):
+    """Rows y0..y1 of the knife's handle as lists of RGB, centre-aligned.
 
-    Kept as ratios rather than colours so one shape can be stamped in bone, brass or steel.
-    Each row's x positions are relative to its own centre, which is what lets the torch
-    stretch a row to a different width while keeping the rib pattern intact.
+    RGB and not a luminance ratio: the point of this pass is that the club and the torch get
+    the knife's actual colours. Keeping them as pixels also guarantees they stay inside the
+    locked 48, since they already are.
     """
-    a = np.asarray(Image.open(PROPS / "big_knife.png").convert("RGBA")).astype(float)
+    a = np.asarray(Image.open(PROPS / "big_knife.png").convert("RGBA"))
     op = a[..., 3] > 40
-    rows = []
-    for y in range(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT + 1):
+    out = {}
+    for y in range(y0, y1 + 1):
         xs = np.where(op[y])[0]
-        if len(xs) == 0:
-            continue
-        cx = (xs.min() + xs.max()) / 2.0
-        rows.append([(x - cx, lum(a[y, x, :3])) for x in xs])
-    # the GRIP's range (rows 4..29 of the handle), for the reason in BONE's note above
-    grip = [v for r in rows[4:30] for _, v in r]
-    return rows, min(grip), max(grip)
+        out[y] = [tuple(int(v) for v in a[y, x, :3]) for x in xs]
+    return out
 
 
-def ramp_at(ramp, t: float):
-    return ramp[int(np.clip(t, 0.0, 0.999) * len(ramp))]
+def torch_sequence(rows):
+    """The knife's handle stretched to the torch's 53 rows, rib rhythm intact.
+
+    Returns (source rows in order, per-row excess over the grip's own 8px width).
+    """
+    collar = list(range(KNIFE_HANDLE_TOP, KNIFE_GRIP_TOP))          # 50..53
+    cap = list(range(KNIFE_GRIP_BOT + 1, KNIFE_HANDLE_BOT + 1))     # 80..84
+    lead = list(range(KNIFE_LEAD[0], KNIFE_LEAD[1] + 1))            # 54..61, plain then a rib
+    tile = list(range(KNIFE_TILE[0], KNIFE_TILE[1] + 1))            # 62..67, one wrap period
+    tail = list(range(KNIFE_TAIL[0], KNIFE_TAIL[1] + 1))            # 74..79, plain run-out
+    seq = collar + lead + tile * 5 + tail + cap
+    excess = [len(rows[y]) - KNIFE_GRIP_W for y in seq]
+    return seq, excess
 
 
-def stamp_rows(a: np.ndarray, y0: int, rows, lo: float, hi: float, cx: float, ramp,
-               widths=None) -> int:
-    """Stamp the template into `a`. `widths[i]` stretches row i to that many pixels."""
+def blit_rows(a: np.ndarray, y0: int, rows, seq, cx: float, widths=None) -> None:
+    """Copy the knife's rows into `a`. `widths[i]` stretches row i; None keeps it native."""
     h, w = a.shape[:2]
-    for i, row in enumerate(rows):
+    for i, src in enumerate(seq):
         y = y0 + i
-        if not (0 <= y < h):
-            continue
+        row = rows[src]
         native = len(row)
-        want = native if widths is None else max(2, widths[i])
+        want, x0 = (native, int(round(cx - native / 2.0))) if widths is None else widths[i]
         for x in range(want):
-            # LINEAR sampling across the row, then quantised by the ramp. Nearest-source was
-            # tried and is visibly worse on the torch: stretching an 8px row to 15 repeats
-            # different source pixels on adjacent rows, so the wrap bands came out as ragged
-            # blobs instead of bands. Interpolating first and quantising second keeps each
-            # band a straight edge whatever width the cone is at that height.
-            u = (x / max(1, want - 1)) * (native - 1)
-            i0 = int(u)
-            i1 = min(native - 1, i0 + 1)
-            f = u - i0
-            v = row[i0][1] * (1 - f) + row[i1][1] * f
-            t = (v - lo) / max(1e-6, hi - lo)
-            c = ramp_at(ramp, t)
-            px = int(round(cx - want / 2.0)) + x
-            if 0 <= px < w:
+            # NEAREST source column. Safe because `want` is constant over long runs of rows
+            # (see the module docstring); interpolating would mix two palette entries into a
+            # colour that is in neither the knife nor the locked 48.
+            j = int(round((x / max(1, want - 1)) * (native - 1))) if want > 1 else 0
+            px = x0 + x
+            if 0 <= y < h and 0 <= px < w:
+                c = row[min(native - 1, j)]
                 a[y, px] = (c[0], c[1], c[2], 255)
-    return y0 + len(rows)
 
 
 def build_club() -> Image.Image:
+    """The knife's handle, transplanted. No stretch, no recolour, no redraw."""
     a = np.asarray(Image.open(PROPS / "big_club.png").convert("RGBA")).copy()
-    rows, lo, hi = knife_handle()
-    # the painted crimson body is rows 4..45; everything under it is replaced by the knife's
-    # handle at its NATIVE width - no stretch, no redraw, the same 35 rows it has on the knife
-    a[46:] = 0
-    stamp_rows(a, 46, rows, lo, hi, 23.0, BONE)
+    rows = handle_rows(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT)
+    seq = list(range(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT + 1))
+    a[46:] = 0                                  # the painted crimson body is rows 4..45
+    blit_rows(a, 46, rows, seq, 23.0)
     return Image.fromarray(a, "RGBA")
 
 
 def build_torch() -> Image.Image:
     a = np.zeros_like(np.asarray(Image.open(PROPS / "big_torch.png").convert("RGBA")))
     cx = 20.0
-    rows, lo, hi = knife_handle()
+    rows = handle_rows(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT)
 
-    # --- THE FLAME, lifted from the old card and moved UP so nothing overlaps it. It has to
-    # be present and it has to be the topmost thing: derive_stage_props finds it by colour,
-    # clears it, and publishes base_row as the first row below it - which is how "the flame
-    # above that, not layered over it" becomes a number the game can use.
-    # --- THE FLAME IS DRAWN, NOT LIFTED, and it is a MEASUREMENT CARRIER rather than art.
-    # Nothing ever displays it: derive_stage_props finds it by colour, clears it, writes
+    # --- THE FLAME. Drawn, not lifted, and it is a MEASUREMENT CARRIER rather than art:
+    # nothing ever displays it. derive_stage_props finds it by colour, clears it, writes
     # `big_torch_body.png` (which is what the manifest points at) and publishes its extent as
     # `_TORCH`, from which the game draws a live animated flame. So what this needs to be is
-    # the right SHAPE in the right PLACE, and drawing it beats reusing the old card's fire -
-    # that fire was painted wrapped around a black wick, so lifting only its flame-coloured
-    # pixels left a hollow ring, and lifting the lot brought the old wick with it and gave the
-    # torch two.
-    #
-    # It is rasterised from the same profile Game.gd's flame_shape uses, so the measurement
-    # the pipeline takes describes the silhouette the game will actually draw.
+    # the right SHAPE in the right PLACE. It is rasterised from the same profile Game.gd's
+    # flame_shape uses, so the pipeline measures the silhouette the game will actually draw.
     prof = [(0.00, 0.00), (0.52, -0.07), (0.62, -0.26), (0.47, -0.48),
             (0.27, -0.70), (0.11, -0.87), (0.00, -1.00)]
     FLAME_H, FLAME_W = 26, 11.5
@@ -184,8 +192,9 @@ def build_torch() -> Image.Image:
                 c = ((255, 240, 204) if d < 0.35 else ((248, 184, 88) if d < 0.7 else (240, 104, 64))) if hw >= 2.0 else (240, 104, 64)
                 a[y, x] = (c[0], c[1], c[2], 255)
 
-    # --- THE WICK: a very thin metal cylinder, deliberately narrower than the handle's
-    # thinnest point (8) so it reads as a separate fitting rather than as more handle.
+    # --- THE WICK: a thin metal cylinder, deliberately narrower than the handle's thinnest
+    # point (8) so it reads as a separate fitting rather than as more handle.
+    STEEL = [(76, 66, 56), (104, 96, 80), (158, 145, 133), (204, 189, 168), (255, 255, 255)]
     wick_w, wick_h, wick_y = 6, 7, 33
     x0 = int(round(cx - wick_w / 2.0))
     for i in range(wick_h):
@@ -196,31 +205,59 @@ def build_torch() -> Image.Image:
                 c = STEEL[0]
             a[wick_y + i, x0 + j] = (c[0], c[1], c[2], 255)
 
-    # --- THE CONE. One handle from the shoulder to the foot: the knife's own rows, tiled to
-    # fill the length, each stretched to a width running linearly from 15 at the top to 8 -
-    # the knife's own grip - at the bottom. The collar leads it (the "golden border at the
-    # top") and the cap closes it.
-    top, bot = wick_y + wick_h, 93
-    n = bot - top
-    collar, grip, cap = rows[:4], rows[4:30], rows[30:]
-    seq = list(collar)
-    while len(seq) < n - len(cap):
-        seq.append(grip[len(seq) % len(grip)])
-    seq = seq[:n - len(cap)] + list(cap)
-    widths = [int(round(16 - (16 - 8) * (i / max(1, len(seq) - 1)))) for i in range(len(seq))]
-    for i in range(len(collar)):          # collar and cap stay proud of the local cone width
-        widths[i] += 2
-    for i in range(len(cap)):
-        widths[-1 - i] += 2
-    stamp_rows(a, top, seq, lo, hi, cx, BONE, widths)
-    stamp_rows(a, top, collar, lo, hi, cx, BRASS, widths[:len(collar)])
+    # --- THE HANDLE: the knife's, tapering 8 at the foot to 12 at the shoulder.
+    top, bot = wick_y + wick_h, 92
+    seq, excess = torch_sequence(rows)
+    n = bot - top + 1
+    assert len(seq) == n, f"handle sequence is {len(seq)} rows, the torch has {n}"
+
+    # THE WIDTH RAMPS, THE EDGES ALTERNATE. Rounding a symmetric half-width about a centre
+    # cannot stagger the two sides - both cross their thresholds at the same fractional width,
+    # by symmetry, whatever the centre's phase - so the first version of this stepped two
+    # pixels at once and came out 12px for nine rows, 11px for ONE, then 10px for twenty-five:
+    # a stack of cylinders, not a cone. Round the TOTAL width instead (a linear ramp rounded
+    # gives even runs, here 7/13/13/13/7 rows) and then hand each extra pixel to a different
+    # side: left takes the odd ones, right the even ones. The silhouette grows one pixel at a
+    # time, alternating, which is as smooth as a four-pixel taper gets at this density.
+    base = KNIFE_GRIP_W                                  # the thin end, the knife's own grip
+    left0 = int(cx - base / 2.0)
+    widths = []
+    for i in range(n):
+        w = int(round(base * (TORCH_GROWTH - (TORCH_GROWTH - 1.0) * (i / (n - 1.0)))))
+        grow = w - base
+        # The collar and the cap ride proud of the local cone by the SAME absolute amount they
+        # ride proud of the knife's grip (+4/+6/+6/+4, +2/+2/+2/0/-4), and symmetrically, since
+        # they are rings rather than part of the taper. Proportional instead would put a 21px
+        # collar on a 12px cone, and a ring wider than everything it joins reads as a tray.
+        lo = left0 - math.ceil(grow / 2.0) - excess[i] // 2
+        widths.append((max(1, w + excess[i]), lo))
+
+    blit_rows(a, top, rows, seq, cx, widths)
     return Image.fromarray(a, "RGBA")
+
+
+def report(name: str, im: Image.Image) -> None:
+    a = np.asarray(im)
+    op = a[..., 3] > 40
+    runs = []
+    for y in range(a.shape[0]):
+        xs = np.where(op[y])[0]
+        if len(xs) == 0:
+            continue
+        w = int(xs.max() - xs.min() + 1)
+        if runs and runs[-1][0] == w:
+            runs[-1][2] = y
+        else:
+            runs.append([w, y, y])
+    print(f"  {name}: " + " ".join(f"{w}px@{y0}-{y1}" for w, y0, y1 in runs))
 
 
 def main() -> None:
     write = "--write" in sys.argv
     force = "--force" in sys.argv
     out = {"big_club.png": build_club(), "big_torch.png": build_torch()}
+    for n, im in out.items():
+        report(n, im)
     if not write:
         d = ROOT / "artifacts" / "reshape"
         d.mkdir(parents=True, exist_ok=True)
