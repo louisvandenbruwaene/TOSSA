@@ -1421,5 +1421,56 @@
         }
       ]
     }
+  },
+  "_SPIN": {
+    "_README": [
+      "THE PERFORMER'S TURNAROUND: one painted frame per eighth of a live Spin.",
+      "Order IS the turn - front, right profile, back, left profile, front - so",
+      "fig_spin_key just rounds the turn fraction onto this list. Reverse it and he",
+      "turns the other way; nothing else in the game knows or cares.",
+      "Built by scripts/install_spin_frames.py from a PixelLab v3 8-direction rotation",
+      "of the game's OWN performer (juggle_body plus the reach-30 arm cells) rather than",
+      "of a fresh generation, so it is the same man who was standing there when he started.",
+      "Replaces a cos(angle) width squash of the FRONT view, which mirrored his face and",
+      "lapels onto his back and collapsed to a 14%-wide smear at each profile."
+    ],
+    "dirs": [
+      "south",
+      "south-east",
+      "east",
+      "north-east",
+      "north",
+      "north-west",
+      "west",
+      "south-west"
+    ],
+    "cell": [
+      84,
+      164
+    ]
+  },
+  "char/spin_south": {
+    "path": "res://Assets/Characters/showman/spin/south.png"
+  },
+  "char/spin_south_east": {
+    "path": "res://Assets/Characters/showman/spin/south-east.png"
+  },
+  "char/spin_east": {
+    "path": "res://Assets/Characters/showman/spin/east.png"
+  },
+  "char/spin_north_east": {
+    "path": "res://Assets/Characters/showman/spin/north-east.png"
+  },
+  "char/spin_north": {
+    "path": "res://Assets/Characters/showman/spin/north.png"
+  },
+  "char/spin_north_west": {
+    "path": "res://Assets/Characters/showman/spin/north-west.png"
+  },
+  "char/spin_west": {
+    "path": "res://Assets/Characters/showman/spin/west.png"
+  },
+  "char/spin_south_west": {
+    "path": "res://Assets/Characters/showman/spin/south-west.png"
   }
 }
