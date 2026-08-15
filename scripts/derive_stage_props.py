@@ -109,8 +109,20 @@ def srgb_to_oklab(rgb: np.ndarray) -> np.ndarray:
 
 def load_palette() -> np.ndarray:
 	# same shape pixelise_prop.py reads: {"count": 48, "hex": ["#rrggbb", ...]}
+	#
+	# ...MINUS THE COOL THIRTEEN, and it has to be here as well as in install_prop_cards.py
+	# even though the card this reduces is already warm-only. The reduction AVERAGES, so it
+	# invents colours the card does not contain: a warm near-black rim area-filtered against
+	# a lit body lands on some intermediate value, and if the full 48 is on offer the nearest
+	# entry to that value can be the indigo again. Fixing the card alone would have let the
+	# purple straight back in at exactly the size it does the most damage - the stage sprite
+	# is a fifth the card's width, so its rim is a third of the whole prop. See that script's
+	# header for why the cool sixth of the palette is not a colour a prop can legitimately
+	# need, and for the measurements.
 	data = json.loads(PALETTE.read_text())
-	return np.array([[int(h[i:i + 2], 16) for i in (1, 3, 5)] for h in data["hex"]], dtype=float)
+	pal = np.array([[int(h[i:i + 2], 16) for i in (1, 3, 5)] for h in data["hex"]], dtype=float)
+	cool = (pal[:, 2] > pal[:, 0] + 6) | (pal[:, 1] > pal[:, 0] + 6)
+	return pal[~cool]
 
 
 def snap(rgb: np.ndarray, pal: np.ndarray) -> np.ndarray:

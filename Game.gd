@@ -12990,8 +12990,22 @@ func draw_preview_floor(area: Rect2, fy: float, glow: Color) -> void:
 	# panels came back with a pale grey slab across them - a concrete step, not a floor, and
 	# the brightest thing on either screen when the figure is meant to be. A floor in a dark
 	# room is dark: a little lift where the light lands, and away to near-black at the front.
+	# ...AND THE CEILING IS WHAT MAKES "KEPT DARK" TRUE AT EVERY HOUSE (2026-08-15). The lift
+	# above is a MULTIPLIER, so how dark the floor ends up is decided by the backdrop it
+	# sampled, and two of the seven venues have a genuinely pale ground - the Circus ring is
+	# lit sawdust and the Small Theatre's boards are warm oak. Measured on a Circus capture,
+	# the tailor's mirror drew its boards at 0.59/0.52/0.42 against a performer whose lit coat
+	# is 0.42: the note above was written about a bug that was still happening, on the one
+	# screen whose entire job is looking at the man. The clamp is PROPORTIONAL rather than
+	# per-channel so a warm floor stays warm instead of turning grey as it hits the limit -
+	# clipping the channels independently is what turns a colour into a wash of whichever
+	# channel was smallest.
 	var g := venue_ground()
-	var near := Color(minf(g.r * 1.30 + 0.020, 1.0), minf(g.g * 1.26 + 0.017, 1.0), minf(g.b * 1.22 + 0.015, 1.0))
+	var near := Color(g.r * 1.30 + 0.020, g.g * 1.26 + 0.017, g.b * 1.22 + 0.015)
+	var peak := maxf(near.r, maxf(near.g, near.b))
+	if peak > PV_FLOOR_MAX:
+		var kdim := PV_FLOOR_MAX / peak
+		near = Color(near.r * kdim, near.g * kdim, near.b * kdim)
 	var far := Color(g.r * 0.42, g.g * 0.42, g.b * 0.50)
 	draw_gradient_v(Rect2(area.position.x, top, area.size.x, bot - top), near, far,
 		maxi(2, int((bot - top) / ap)))
@@ -13336,6 +13350,23 @@ func draw_stage_light(s: Vector2, fy: float, vi: int, glow: Color, spot: float) 
 	#   - the footlights, once the career reaches a ticketed room, which flicker.
 	# Neither describes a surface, so neither can contradict whatever floor the painting shows.
 	var ap := float(ART_PIXEL)
+	# THE POOL FADES IN AS WELL AS OUT, and the venue that proved it needed to is the one
+	# whose light is not warm (2026-08-15). This was a single gradient starting at fy-10 at
+	# full strength and falling away forward, so its TOP was a hard step from nothing to
+	# 0.10+spot in one row. At six houses the glow is a warm orange or amber within a few
+	# points of the boards it lands on and the step is invisible. The Midnight Show's glow is
+	# Color(0.40, 0.92, 0.62) - a saturated mint, and deliberately so, because that is the
+	# room the Glow Kit exists for - laid over warm brown floorboards. Measured on a capture,
+	# the floor went (77,54,51) to (80,74,64) between two adjacent rows and then on to green:
+	# a hard horizontal line straight across the stage, with warm wood above it and cold wood
+	# below. It reads as a rendering seam, not as light.
+	#
+	# A light pool has no edge, so the fix is to give it the missing half rather than to dim
+	# it: it ramps up over the 24px behind the standing line, peaks where the light actually
+	# lands, and falls away forward exactly as before. Nothing changes at any warm venue,
+	# which is the point - this only ever showed where the light and the floor disagreed.
+	draw_gradient_v(Rect2(0, fy - 34.0, s.x, 24.0),
+		Color(glow.r, glow.g, glow.b, 0.0), Color(glow.r, glow.g, glow.b, 0.10 + spot), 8)
 	draw_gradient_v(Rect2(0, fy - 10.0, s.x, 44.0),
 		Color(glow.r, glow.g, glow.b, 0.10 + spot), Color(glow.r, glow.g, glow.b, 0.0), 10)
 	if vi >= 2:
@@ -14412,8 +14443,29 @@ func draw_worn_glasses(head: Vector2, r: float, accent: Color) -> void:
 	# instead of the card's fixed pixels, so it reads at either figure's size. Frame is
 	# a neutral tortoiseshell - a real accessory's own material, not a venue tint - and
 	# the lens catches a sliver of the venue's accent the way the hat's band pin does.
-	if art_blit_size("char/glasses", head + Vector2(0.0, -r * 0.06), Vector2(r * 2.1, r * 0.8)):
-		return   # SEAM
+	# SEAM. THE BOX IS THE VECTOR'S OWN EXTENT, AND IT WAS NOT (fixed 2026-08-15). This blit
+	# used to ask for a box 0.8r tall centred at -0.06r, so the sprite's top edge landed at
+	# -0.46r. draw_top_hat's brim reaches down to -0.40r. The two overlapped by 0.06r on every
+	# screen, which is why the geared performer had NO FOREHEAD: the hat brim sat straight down
+	# on the lenses with not one pixel of skin between them, and at 21px of head radius that
+	# turns the whole upper face into one dark smear. The drawing below never had the problem -
+	# its lenses top out at -0.34r - so the sprite path was contradicting the fallback it is
+	# supposed to be indistinguishable from, which is the tell for this class of bug.
+	#
+	# THE OTHER HALF OF IT IS A STRETCH, and it is what made the overlap. The sprite is 22x7,
+	# an aspect of 3.14; the box asked for 2.1r x 0.8r, an aspect of 2.63. That is the art
+	# drawn 20% TALLER than it was authored - so the top edge climbed into the brim, and at the
+	# same time some rows were drawn two screen pixels tall and some three, which is the one
+	# thing this project's density lock exists to prevent.
+	#
+	# So the WIDTH is left alone at 2.1r, deliberately: that is what makes the blit an exact
+	# two screen pixels per art pixel at the stage figure's radius, and moving it would trade
+	# one resampling bug for another. Only the height is corrected, to the sprite's own aspect
+	# (2.1 * 7/22 = 0.668). The ink then tops out about three screen pixels clear of the brim,
+	# which is a forehead - not much of one, but a real one, and the same one the drawing below
+	# has always had.
+	if art_blit_size("char/glasses", head + Vector2(0.0, -r * 0.02), Vector2(r * 2.1, r * 0.668)):
+		return
 	var frame := Color(0.16, 0.12, 0.09)
 	var lr := r * 0.30
 	var w := maxf(1.1, r * 0.075)
@@ -20515,12 +20567,21 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var mglow: Color = pal["glow"]
 	var mcx := mirror.position.x + mirror.size.x * 0.5
 	var mfy := mirror.position.y + mirror.size.y - 54.0
-	# a spotlight and a lit floor, the same three marks the skill preview's little stage
-	# makes - so the figure is standing somewhere rather than floating on a panel
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(mcx, mirror.position.y + 6.0),
-		Vector2(mcx - mw * 0.34, mfy), Vector2(mcx + mw * 0.34, mfy)]),
-		Color(mglow.r, mglow.g, mglow.b, 0.06))
+	# a pool of light and a lit floor, the same marks the skill preview's little stage makes -
+	# so the figure is standing somewhere rather than floating on a panel.
+	#
+	# THE CONE IS GONE HERE TOO (2026-08-15). The skills preview dropped its identical
+	# triangle on 2026-08-13 and this one was left behind, which is the whole reason it is
+	# worth a note: the two panels are described as sharing "the same three marks", so a fix
+	# to one of them has to be a fix to both or the shared description quietly stops being
+	# true. Everything that note says applied here twice over. Measured on a Circus capture,
+	# the wedge lifted the mirror's near-black card from 0.075 to 0.129 - it does not read as
+	# light at that level, it reads as a hard-edged arrow with two straight diagonals running
+	# from the top of the panel down past the performer's shoulders, pointing at him. And it
+	# had no source: this is a dressing room, the card above him is unbroken, and the game's
+	# standing rule since the stage cones came out is that light must name something the
+	# picture actually contains. The pool at his feet says "he is lit" without drawing a shape,
+	# which is exactly what the stages themselves now do.
 	draw_glow(Vector2(mcx, mfy), mw * 0.38, Color(mglow.r, mglow.g, mglow.b, 0.18))
 	draw_preview_floor(Rect2(mirror.position + Vector2(1.0, 0.0), mirror.size - Vector2(2.0, 1.0)),
 		mfy, mglow)
@@ -21188,6 +21249,11 @@ const PV_OUTER := 55.0        # the catch point (outer_pos, 100px out) at previe
 const PV_INNER := 29.7        # the throw point (inner_pos, 54px out) at preview scale
 const PV_HEAD := 22.2         # draw_juggler's head unit H at preview scale
 const PV_FLOOR := 91.0        # the floor line, below the hand line (4.11 head units)
+# The brightest a preview panel's own floor may be lit, on its strongest channel. Set just
+# under the performer's own lit coat (measured 0.42) so the boards can never out-shine the
+# figure standing on them - see draw_preview_floor, where the lift is a multiplier and the
+# pale-floored houses would otherwise carry it past this on their own.
+const PV_FLOOR_MAX := 0.38
 const PV_ARC := 99.3          # peak px of a height-1.0 throw: BASE_AIR * ARC_PER_AIR, scaled
 const PV_TIME := 1.15         # seconds a height-1.0 throw hangs. Real time is 0.7s; the
                               # preview runs ~1.6x slow so the shape is readable (Louis)
@@ -22907,6 +22973,40 @@ func menu_drapes(s: Vector2, fy: float) -> void:
 	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), _drape_idx, _drape_pts, _drape_cols)
 
 
+func menu_house_light(s: Vector2, fy: float) -> void:
+	# THE TITLE SCREEN'S LIGHT, AND THE LAST SPOTLIGHT CONE IN THE GAME IS OUT (2026-08-15).
+	#
+	# When the stage cones came out the rule they left behind was that light must name a
+	# source the picture actually contains, and it was applied to the seven venues. It was
+	# not applied HERE, on the screen every player sees first and longest - and this frame
+	# is the worst case for it, not an exception. There is nothing above the curtain: the
+	# velvet and its swags run clean off the top edge of `ui/menu_backdrop`, so a hard warm
+	# triangle hung from y=0 is a beam out of the ceiling of a room with no ceiling in it.
+	#
+	# IT ALSO READ AS TWO. This is worth recording because it is a general trap and not a
+	# quirk of one picture: a low-alpha wedge laid over VERTICAL folds is brightened by the
+	# fold pattern underneath, so the pale cloth inside the beam reads as beam and the dark
+	# fold down its middle reads as a gap between two of them. Measured on a capture, one
+	# `draw_spotlight_cone` call - one triangle, apex at a single point - looked like a
+	# crossed pair of follow-spots. Nothing was doubled anywhere in the code. **A soft beam
+	# over a striped surface does not stay one beam.**
+	#
+	# WHAT REPLACES IT IS ALREADY PAINTED IN THE BAKE: the footlights along the stage lip.
+	# They are real lamps in the picture, they are the light a house actually puts on its
+	# own curtain, and they throw UP - so the wash rises off the boards and dies out before
+	# the swags, which is both physically the right direction and compositionally the right
+	# one, because it leaves the top corners dark for the drapes to sit in.
+	#
+	# The mark keeps its halo, a touch stronger than it was (0.13 -> 0.17) to buy back the
+	# contrast the cone was providing behind it. A radial glow can do that without drawing
+	# an edge, which was always the difference between these two shapes: the halo has no
+	# geometry to notice, and the cone was nothing but geometry.
+	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.17))
+	var lift := s.y * 0.34
+	draw_gradient_v(Rect2(0.0, fy - lift, s.x, lift),
+		Color(1.0, 0.72, 0.34, 0.0), Color(1.0, 0.72, 0.34, 0.10), 12)
+
+
 func menu_backdrop(s: Vector2) -> void:
 	# THE HOUSE: the game's own stage, seen from the audience. A title screen's job is to say what
 	# the game IS before a word is read, and this game is a performer walking out in front of a
@@ -22943,8 +23043,7 @@ func menu_backdrop(s: Vector2) -> void:
 		# is what buys the wordmark its contrast, and the sprite is a good deal brighter
 		# than the drawing it replaced.
 		draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
-		draw_spotlight_cone(s, s.x * 0.5, 0.15)
-		draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
+		menu_house_light(s, fy)
 		# THE APRON FALLS AWAY at the very front of the stage, which does two jobs. The
 		# boards in the sprite are warm and bright - much brighter than the near-black
 		# floor they replaced - and the key hint sits on them in plain grey with no
@@ -22964,8 +23063,7 @@ func menu_backdrop(s: Vector2) -> void:
 	# value - the wordmark, the one thing on the screen that must read instantly, had the least
 	# contrast on it.
 	draw_rect(Rect2(0, 0, s.x, fy), Color(0.04, 0.015, 0.025, 0.34))
-	draw_spotlight_cone(s, s.x * 0.5, 0.15)
-	draw_glow(Vector2(s.x * 0.5, s.y * 0.30), s.y * 0.52, Color(1.0, 0.70, 0.32, 0.13))
+	menu_house_light(s, fy)
 	# THE SWAGS GO IN FRONT OF THE VEIL AND THE LIGHT, where draw_theatre_boxes used to be (see
 	# menu_drapes for why the boxes went). Order is the whole difference between cloth and a stain:
 	# they are the proscenium, the nearest thing in the room, so the veil that pushes the back wall

@@ -43,6 +43,28 @@ is not in the PIXEL ART section is inherited from TOSSA and still true.
    baked one; the drawn version simply made the same mistake one stage later in the pipeline.
    The Circus keeps its ring of light because that ring is PAINTED ON ITS FLOOR - sawdust
    catching the lanterns overhead, not a beam hanging in the air.
+   **THE RULE WAS APPLIED TO THE VENUES AND NOT TO THE SCREENS AROUND THEM; IT IS NOW
+   EVERYWHERE (2026-08-15).** Three sourceless beams survived the sweep, on the screens a
+   player sees most: the TITLE screen still called `draw_spotlight_cone` over a curtain that
+   runs clean off the top edge of `ui/menu_backdrop` (a beam out of the ceiling of a room with
+   no ceiling in it - `menu_house_light` replaces it with an up-wash off the footlights that
+   ARE painted in the bake, plus a slightly stronger halo behind the wordmark); the TAILOR's
+   mirror kept a hard `draw_colored_polygon` triangle that the skills preview had already
+   dropped on 2026-08-13, in a dressing room with an unbroken card above him. The remaining
+   `draw_spotlight_cone` call sites are all STORE CAPSULE art, where a dramatic beam is the
+   point and no room is being described.
+   **A SOFT BEAM OVER A STRIPED SURFACE DOES NOT STAY ONE BEAM**, and this is the general trap
+   worth remembering: a low-alpha wedge laid over vertical folds is brightened by the fold
+   pattern underneath, so lit cloth reads as beam and a dark fold down the middle reads as the
+   gap between two of them. Measured on a title capture, ONE cone with a single apex looked
+   like a crossed pair of follow-spots. Nothing was doubled anywhere in the code.
+   **AND A LIGHT POOL FADES IN AS WELL AS OUT.** `draw_stage_light`'s floor wash started at
+   full strength at `fy - 10` with nothing above it, which is a hard step from zero in one
+   row. Invisible at six houses because their glow is a warm amber within a few points of the
+   boards; at the Midnight Show, whose glow is a deliberate mint `Color(0.40, 0.92, 0.62)`
+   over brown floorboards, it drew a horizontal line across the whole stage with warm wood
+   above it and cold wood below - measured, (77,54,51) to (80,74,64) between adjacent rows.
+   **A saturated venue colour is the test case for every soft-edged wash in this file.**
    The grid rasterisers, all one draw_rect per art row: `fill_disc_pix` / `draw_ring_pix` /
    `draw_glow_pix` (circles), `draw_capsule_pix` (limbs), `draw_arc_pix` + `draw_spoke_pix`
    (the crowd dial's bands, ticks and needle), `draw_card_pix` (every rounded panel and bar -
@@ -133,6 +155,32 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
   alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a
   model's idea of a juggling club.
+- **A PROP MAY NOT SNAP INTO THE PALETTE'S COOL CORNER** (2026-08-15, `scripts/install_prop_cards.py`
+  and mirrored in `derive_stage_props.py`). The locked 48 is a warm palette whose DARKEST
+  entries are cool - `#1f1a2e` is an indigo sitting one Oklab step from `#241a14`, and there is
+  no warm mid-dark neutral grey at all. That is right for the backdrops (the Backyard, Street
+  Corner and World Arena skies are 15-19% indigo) and wrong for anything small: every generated
+  object has a dark rim, and a near-black rim's nearest entry is that indigo. Measured, the
+  chainsaw was **33% indigo plus 4% lavender** and the torch body **52% indigo** - the whole
+  outline, on a sprite whose rim is a third of its area, which is why the chainsaw read as
+  purple in flight and the torch as a cold grey stick. `warm_palette()` drops any entry where
+  blue OR green leads red by more than 6 (35 of 48 survive) before the nearest-colour search.
+  **Both halves of that test are load-bearing**: excluding only blue sent the same rim pixels
+  to `#283028`/`#141a17` instead and the knife's blade groove came out TEAL - a lateral move,
+  and one this game notices twice over. The `--warm` restriction belongs in every prop-side
+  snap and in NO backdrop-side one.
+- **`prop_big/*` IS THE SOURCE AND THE TORCH'S FLAME IS PART OF IT.** `big_torch.png` is the
+  canonical card; `strip_torch_flame` finds the fire by colour, writes `big_torch_body.png`, and
+  MEASURES the hole to publish `_TORCH`. Writing the body file directly is worse than useless -
+  the next derive silently regenerates it from the old card and the repaint vanishes with no
+  error. **`_TORCH` must be copied from `Assets/Props/torch_flame.json` into
+  `Resources/art_manifest.json` by hand after any torch re-derive**; nothing syncs them, and a
+  stale block draws the flame off the end of the handle.
+- **The model will not paint an unlit torch** - three prompts saying unlit / no flame / no fire,
+  all three burning. Same family as the fake handwriting. That turns out to be fine (see above),
+  but it also paints a cloth wick the strip cannot catch, and at 11px across that wick reads as
+  a small owl's face sitting on the pole. `install_prop_cards.py`'s `drop=(lo, hi)` splices the
+  band out and closes the picture over it.
 - **THE PERFORMER IS THE SHOWMAN**, a PixelLab-generated ringmaster - Louis reversed the
   never-generate rule on 2026-08-06 and then picked him over the traced figure and two other
   designs. He lives in the base manifest (`Assets/Characters/showman/`) with landmark geometry
