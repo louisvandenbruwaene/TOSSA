@@ -251,25 +251,59 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   gold, while the plain one keeps a bold blade, a solid collar and a legible grip. **A prop is
   judged at the size it is thrown, not the size it is sold** - the same lesson as the club's
   three-pixel handle.
-- **THE CLUB, THE TORCH AND THE KNIFE SHARE ONE AUTHORED GRIP** (2026-08-15, Louis: "use the
-  handle of the knive for the torch and club ... give the exact same handle to the club as to
-  the torch"). `scripts/reshape_shaft_props.py` draws it once from a table - a bright collar,
-  a grip 8px wide banded with a darker wrap every 6 rows, a cap or a knob - and stamps it onto
-  both cards. **"The exact same handle" is a constraint a generator cannot meet**, because two
-  paintings of one description are two objects; when the requirement is exactness at a small
-  size, author it. Only the light/dark ROLES carry over from the knife, filled from each prop's
-  own ramp, so the club keeps its bone palette rather than turning to leather. The wrap bands
-  are the load-bearing feature: they still read as "wrapped" at the 14px the stage sprite gets,
-  where a smooth cylinder is just a stick.
+- **THE CLUB AND THE TORCH CARRY THE KNIFE'S HANDLE - ITS PIXELS, NOT A LIKENESS OF THEM**
+  (2026-08-15, `scripts/reshape_shaft_props.py`). Louis, over three passes: "use the handle of
+  the knive for the torch and club", then "the handles are way too thick", then "the knive
+  handle is great and the torch and club handle need that same love". **This overrides the
+  earlier "white handle for the club"** - one handle for three props cannot also be per-prop
+  colours, and asked to choose he chose the knife's. `handle_rows()` lifts rows 50..84 of
+  `big_knife.png` as RGB; the club is a straight transplant (verified pixel-identical, offset
+  5px) and the torch is those rows stretched, so neither can leave the palette the knife is
+  already in.
+  **THE INTERMEDIATE PASS IS THE INSTRUCTIVE ONE, AND IT IS WHY THE RULE IS "COPY IT".** Told
+  the handles were too thick, it measured them - club collar 12/14/14/12, grip 8, pommel
+  10/10/10/8/4, identical to the knife to the pixel - concluded the complaint was about VALUE
+  (a pale grip advances and reads fat), and shipped the knife's contrast through a bone ramp.
+  The reasoning was right and the result was still wrong, because a cream grip beside a leather
+  one is a different object however well its contrast is calibrated. **When the ask is "the
+  exact same thing", a better-calibrated derivation is not a smaller version of the answer; it
+  is a different answer.** Only the torch was ever genuinely fatter (collar 18, cone 15->9).
+  **A SYMMETRIC ROUNDING CANNOT MAKE A SMOOTH TAPER.** The torch's cone runs 8px at the foot to
+  12 at the shoulder ("let the diameter grow 50% over the entire length ... make sure this
+  looks like a smooth line"). Rounding a half-width about a centre moves BOTH edges on the same
+  row, by symmetry, whatever phase the centre has - measured, that gave 12px for nine rows,
+  11px for ONE, then 10px for twenty-five: a stack of cylinders. Round the TOTAL width (a
+  linear ramp rounded gives even runs) and hand each extra pixel to a different side, and the
+  silhouette grows one pixel at a time, alternating: 13-row runs, left stepping at rows 60/86
+  and right at 47/73.
+  **A TILE MUST BE THE UNIT THE PATTERN IS BUILT ON.** The torch's handle is 53 rows and the
+  knife's is 35, so the grip repeats - and repeating rows 55..79 whole leaves a twelve-row
+  plain stretch across the seam in a grip whose wraps come every six. Tile the six-row unit
+  instead (four plain rows, a two-row dark wrap): lead 54..61, unit 62..67 five times, tail
+  74..79, plus 4 collar and 5 cap = 53 exactly, no seam. The wrap bands are the load-bearing
+  feature - they still read as "wrapped" at the 14px the stage sprite gets, where a smooth
+  cylinder is just a stick.
+  **Nearest-neighbour sampling is right here and was wrong before.** Stretching to a width that
+  changes every row repeats different source columns on adjacent rows and shreds the bands into
+  blobs, which is why the previous pass interpolated. The width is now piecewise CONSTANT for
+  thirteen rows at a stretch, so every row in a run maps identically. Interpolating would
+  instead invent colours between palette entries, which a locked palette cannot take.
+  The collar and cap keep their excess over the grip in ABSOLUTE pixels (+4/+6/+6/+4 and
+  +2/+2/+2/0/-4), not as a ratio: scaled proportionally the collar would be 21px over a 12px
+  cone, and a ring wider than everything it joins reads as a TRAY with a wick standing on it
+  (learned once already at 18px over a 16px wick). Absolute excess also makes the torch's foot
+  the knife's pommel to the pixel, since the cone is 8 there.
   The torch's geometry came from a REFERENCE Louis supplied (`torch_image.html`, a saved image
-  search for the Henrys nite flight torch). Two things the photographs settle: a juggling
-  torch's coloured section is only modestly wider than its shaft - a sleeve on a tube, not a
-  teardrop - and there is a bright metal collar between that sleeve and the wick. "Small" is
-  part of the spec: at 18px the collar was wider than both the 16px wick above and the 14px
-  sleeve below, and a ring wider than everything it joins reads as a TRAY with a wick standing
-  on it.
-- **THE FLAME BAND IS FOUND BY ONE TEST AND CLEARED BY TWO.** Once the props shared a bone
-  grip, `#fff0cc` was both the flame's white-hot core and the grip's lit column - the same
+  search for the Henrys nite flight torch): a juggling torch's coloured section is only modestly
+  wider than its shaft - a sleeve on a tube, not a teardrop - and there is a bright metal collar
+  between that sleeve and the wick.
+  **The wordmark has to be rebaked after any of this**, since its A is two clubs and its T a
+  knife, and `mark_prop` blits `prop_big/*` rather than drawing them.
+- **THE FLAME BAND IS FOUND BY ONE TEST AND CLEARED BY TWO.** (The specific collision below is
+  gone now that the grip is leather and owns no near-whites, but the rule stands: the strip is
+  the only thing standing between a repaint and a baked flame under the live one.) Once the
+  props shared a bone grip, `#fff0cc` was both the flame's white-hot core and the grip's lit
+  column - the same
   palette entry, so no colour test can separate them. Position can: `orange` alone defines the
   band (and must reject the crimson sleeve, whose own highlight `#cc383d` sailed through a
   bare `r>200 & r>b+100` and dragged the band 42 rows down a 78-row sprite), then near-white is
