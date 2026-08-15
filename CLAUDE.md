@@ -58,6 +58,17 @@ is not in the PIXEL ART section is inherited from TOSSA and still true.
    pattern underneath, so lit cloth reads as beam and a dark fold down the middle reads as the
    gap between two of them. Measured on a title capture, ONE cone with a single apex looked
    like a crossed pair of follow-spots. Nothing was doubled anywhere in the code.
+   **AND NEITHER DOES THE VEIL STOP AT HIS FEET** (2026-08-15, Louis: "there is a too obvious
+   cutoff below the characters feet: like dark above and light right under it"). `draw_backdrop`
+   ran its push-back wash from the top of the frame to `fy` and then simply ended, so the row
+   above the standing line carried the venue's full veil and the row below carried none - a
+   hard step in ONE row, across the whole width, a few pixels under the performer. Measured on
+   a Circus capture: (125,100,82) to (185,165,145). It reads as the floor being a separate
+   brighter object pasted under him, which is the "vector stage" look that deleting the podium
+   was supposed to end. The veil now CONTINUES at the value it already reached and decays to
+   nothing over the next 72px, so no level above the line moves and no new brightness target is
+   invented. Grading it DOWN toward the floor instead removes the step by brightening the set
+   immediately behind the performer, which is the one place the veil earns its keep.
    **AND A LIGHT POOL FADES IN AS WELL AS OUT.** `draw_stage_light`'s floor wash started at
    full strength at `fy - 10` with nothing above it, which is a hard step from zero in one
    row. Invisible at six houses because their glow is a warm amber within a few points of the
@@ -144,6 +155,36 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   partway down it; and the performer stands dead centre, so the centre column wants to be
   empty. An EXTERIOR has its own: the establishing card puts its title across the top centre
   and two panels in the bottom corners, so the hero fills the lower two thirds.
+- **`stand` IS NOT A FREE PARAMETER: THE THROW ARC SETS A MINIMUM FLOOR DEPTH** (2026-08-15,
+  `scripts/reband_backdrop.py`). The architecture says a painting puts its floor where it likes
+  and `stand` follows, and that is true about the picture and false about the game. The hand
+  line hangs off the standing line, so raising him raises every throw with him. A full-hold 1.4
+  throw peaks `BASE_AIR * 1.4 * ARC_PER_AIR` = 253px above the hand. Measured on the Midnight
+  Show repaint, whose stage band ended at art y 250 and so wanted `stand` 0.645: that apex went
+  from screen y 85 (on screen at 0.83) to **y -48**, and a High Toss to y -121. Holding the
+  throw key is not an edge case and the player has to TRACK a prop to catch it. **Reband the
+  painting to fit the game, not the other way round.** `reband_backdrop.py` rescales a
+  painting's horizontal bands: stretch is free on VERTICAL detail (hung drapes along their
+  folds), mild on HORIZONTAL detail (floorboards, which perspective foreshortens anyway), and
+  forbidden on OBJECTS - move foreground furniture at 1:1 and crop it at the frame edge
+  instead, because a chair squashed to 0.55 is a chair that is wrong.
+- **A VENUE'S `veil` BELONGS TO ITS PAINTING, SO A REPAINT HAS TO RE-MEASURE IT.** The Midnight
+  Show's 0.10 looked like a design choice and was a fact about the old art: drapes and tables
+  over near-black, which the standard 0.42 erased. The repaint has a warm oak stage, and 0.10
+  left it at luminance 85 against the old set's 45 and the Circus's 64 - making the darkest
+  room in the game the brightest, which cancels the reason the room exists (a vanishing suit
+  and a phosphor vest have nothing to vanish into on lit boards, so the Glow Kit stops being
+  worth wearing). It is the one number in `venue_data` that is about the art rather than the
+  design. 0.40 puts it back at ~62.
+- **A BACKDROP MAY HAVE A CENTRE PROBLEM `spine_busyness` CANNOT SEE.** It measures how much
+  more TEXTURED the spine band is than the rest, and read 1.15 - inside the normal range - for
+  a Midnight Show whose middle held a supper table and two seated diners the performer stood
+  on top of. A table painted in the drapes' own tones is no busier than drapes. **What makes
+  something wrong behind the performer is that it is an OBJECT, not that it is noisy**, and no
+  texture statistic sees that. Look at the centre column; do not trust the number.
+  `scripts/clear_spine.py` clones empty room over it when a re-roll will not behave, and its
+  donor test is semantic (no chair-red, no candle-bright) rather than statistical - a donor
+  picked on deviation alone brought a chair into the middle of the room without its table.
 - **THE MODEL WRITES FAKE HANDWRITING ON A PLAIN FLOOR.** Asked for texture on a large flat
   surface it paints illegible cursive across it - two independent Backyard rolls, and saying
   "no writing, no letters" only traded it for a tree dead centre. Invisible in a 640x360
