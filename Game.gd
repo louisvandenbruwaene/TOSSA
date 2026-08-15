@@ -1646,7 +1646,7 @@ var experiments := {"fire_motion": true, "club_v2": true, "card_v2": true, "shop
 #
 # Option 0 of every set IS the shipped default, so a release build (which never opens
 # the panel) always draws option 0 and needs no variant files present at all.
-var art_variants := {"lighting": 0}
+var art_variants := {"lighting": 0, "props": 0}
 const VARIANT_DEFS := [
 	# THE PERFORMER IS NO LONGER A CHOICE EITHER (2026-08-06, Louis: "showman! it looks
 	# great ... Please get rid of all others (natural, acrobat, classic)"). The SHOWMAN is
@@ -1661,6 +1661,22 @@ const VARIANT_DEFS := [
 	# wordmark bakes off the same art (see mark_prop), and there is nothing left to pick
 	# between. The loser's art and its variant manifest were deleted rather than left
 	# stranded; git has them.
+	# THE KNIFE AND THE CHAINSAW ARE A CHOICE AGAIN, AND THIS TIME ON PURPOSE (2026-08-15,
+	# Louis: "give some other options for the chainsaw and knife, but keep the current designs
+	# for when i want to switch back to them"). Note the objects panel above came OUT because
+	# a winner had emerged and there was nothing left to pick between; this is the opposite
+	# situation - three designs exist and none of them is settled - so it is exactly what a
+	# variant set is for, and the same rule still applies on the way out: when one wins it is
+	# copied into the base manifest and this entry is deleted.
+	#
+	# Files, not just a panel: the previous designs live on as `*_reserve.png` beside the new
+	# ones, which is what "switch back" has to mean if it is to survive a regeneration.
+	{"id": "props", "name": "Knife & chainsaw",
+	 "desc": "Which pair of edged props the shop sells and the act throws. The DEFAULT is a plain throwing knife (steel blade, brass collar, ribbed grip) and a crimson-and-gold saw with a toothed bar - both chosen at STAGE size rather than on the card, which is where the ornate pair loses: at 14px across a curved blade reads as a smear and a gilded guard as six pixels of unrelated gold. RESERVE is the pair that shipped before this. ORNATE is the prettier card and the busier sprite: a gilded showman's knife and a weathered antique saw. Stage sprite, shop card and the title wordmark all follow the switch, since all three derive from the same card.",
+	 "opts": [
+		{"key": "default", "name": "Working steel", "hint": "plain knife, crimson saw"},
+		{"key": "reserve", "name": "Reserve", "hint": "the designs that shipped before"},
+		{"key": "ornate", "name": "Ornate", "hint": "gilded knife, antique saw"}]},
 	{"id": "lighting", "name": "Stage light",
 	 "desc": "The grade over a venue: how far the backdrop falls back behind the performer, and how warm the spill is. Purely a wash over finished art - it moves no pixel and costs one rect, so it is safe to judge on feel alone.",
 	 "opts": [

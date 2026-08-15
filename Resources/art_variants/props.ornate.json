@@ -1,0 +1,33 @@
+{
+  "prop/knife": {
+    "path": "res://Assets/Props/knife_ornate.png",
+    "pivot": [
+      0.5,
+      0.624
+    ],
+    "scale": 0.5
+  },
+  "prop_big/knife": {
+    "path": "res://Assets/Props/big_knife_ornate.png"
+  },
+  "prop/chainsaw": {
+    "path": "res://Assets/Props/chainsaw_ornate.png",
+    "pivot": [
+      0.5,
+      0.696
+    ],
+    "scale": 0.5
+  },
+  "prop_big/chainsaw": {
+    "path": "res://Assets/Props/big_chainsaw_ornate.png"
+  },
+  "_README": [
+    "The `props` variant set, option `ornate`. Same four keys as the base manifest,",
+    "different PNGs - art_boot lays this over the base, so no drawing code knows it",
+    "exists. Option 0 (the shipped default) has no file and needs none.",
+    "Pivots and scales are COPIED FROM THE BASE and must stay copied: every design in",
+    "a set is derived at the same STAGE_H, so they share a pivot by construction, and a",
+    "variant that invented its own would spin about a different point than the prop it",
+    "is standing in for."
+  ]
+}
