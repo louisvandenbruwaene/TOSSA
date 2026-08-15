@@ -297,6 +297,21 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   search for the Henrys nite flight torch): a juggling torch's coloured section is only modestly
   wider than its shaft - a sleeve on a tube, not a teardrop - and there is a bright metal collar
   between that sleeve and the wick.
+  **AND ITS HEAD IS A GENERATION, ITS SHAFT IS NOT** (2026-08-15, Louis: "ask pixellab to just
+  create a juggling torch"). Eleven were generated and **none of them survived the pipeline**,
+  which is the "judged at the size it is thrown" rule paying for itself a third time: as
+  illustrations several beat the shipped torch, as props all eleven were worse. Bare "a juggling
+  torch" reads to the model as a THEME rather than an object - one candidate came back a whole
+  juggler, another a bonfire hung with baubles. The three that were real torches each broke at
+  stage size: a cream wick bundle survived `strip_torch_flame` as a crown of gold spikes (the
+  owl again), one flame measured 49px on a 78px sprite and ate half the prop, and two drew fire
+  as a HOLLOW OUTLINE so the strip found 1px and baked the flame in under the live one.
+  What shipped is a split: rows 40..53 of `s11.png` - its bound wrap - replace the steel wick,
+  and nothing else of it is kept, because its own shaft is 5px on the card and 4 at stage size,
+  thinner than the knife's blade. **Take PROPORTIONS from a generation and MATERIAL from the
+  pipeline.** Warm-snapped, the wrap lands on the club's crimson family, so the torch joins the
+  same wardrobe rather than standing beside it. Its widths are REMAPPED, not scaled: s11's head
+  is 2.6x its pole, and that ratio over this 12px shaft would be a 31px tray.
   **The wordmark has to be rebaked after any of this**, since its A is two clubs and its T a
   knife, and `mark_prop` blits `prop_big/*` rather than drawing them.
 - **LONGER IS NOT BIGGER, AND THE DERIVATION IS WHAT KEEPS THEM APART** (2026-08-15, Louis: "make
