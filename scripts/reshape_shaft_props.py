@@ -95,6 +95,29 @@ KNIFE_TAIL = (74, 79)
 
 TORCH_GROWTH = 1.5       # Louis: "let the diameter grow 50% over the entire length"
 
+# THE CLUB IS LENGTHENED, AND ONLY LENGTHENED (2026-08-15, Louis: "make the juggling club just
+# a tiny bit longer on both the handle and the upper part ... save the original tho"). The
+# previous card is kept as `big_club_short.png` / `club_short.png`.
+#
+# **LONGER IS NOT BIGGER, and the derivation is what keeps them apart.** derive_stage_props
+# sets the stage width from the card's aspect at a fixed `STAGE_H`, so growing the card's
+# HEIGHT and `STAGE_H["club"]` by the same fraction leaves the stage width where it was: 23 x
+# 64/77 = 19 before, 23 x 73/88 = 19 after. Grow one without the other and the club either gets
+# fatter or gets squashed.
+#
+# The two parts grow differently because they are made of different things. The handle grows by
+# exactly ONE six-row tile - the smallest step that leaves the knife's wrap rhythm intact, and
+# the only step that does. The body is a painting, so it is resampled by duplicating rows, and
+# only BELOW its two gold bands: the bands are one pixel tall each, and a nearest resample that
+# happens to land on one turns it into a two-pixel band, which at stage size is the difference
+# between a pinstripe and a stripe. Rows 4..14 are copied untouched for that reason and the
+# stretch is confined to the plain taper under them, where a duplicated row is invisible.
+CLUB_BODY_TOP = 4        # first row of the painted crimson body
+CLUB_BODY_KEEP = 14      # ...and the last row copied verbatim: the dome and both gold bands
+CLUB_BODY_BOT = 45       # the last row of the body, where the handle's collar begins
+CLUB_BODY_GROW = 5       # extra rows of taper
+CLUB_HANDLE_EXTRA = 1    # extra six-row wrap periods; the knife's own handle is 0
+
 
 def handle_rows(y0: int, y1: int):
     """Rows y0..y1 of the knife's handle as lists of RGB, centre-aligned.
@@ -112,19 +135,18 @@ def handle_rows(y0: int, y1: int):
     return out
 
 
-def torch_sequence(rows):
-    """The knife's handle stretched to the torch's 53 rows, rib rhythm intact.
+def grip_sequence(extra_tiles: int = 0):
+    """The knife's handle, optionally lengthened by whole six-row wrap periods.
 
-    Returns (source rows in order, per-row excess over the grip's own 8px width).
+    `extra_tiles = 0` is the knife's own 35 rows VERBATIM and contiguous - which is what makes
+    the club a byte-for-byte transplant rather than a near-copy. Extra tiles are spliced in at
+    a period boundary, just before the plain run-out, so the rhythm never breaks: 41 rows for
+    the club (one extra), 53 for the torch (three).
     """
-    collar = list(range(KNIFE_HANDLE_TOP, KNIFE_GRIP_TOP))          # 50..53
-    cap = list(range(KNIFE_GRIP_BOT + 1, KNIFE_HANDLE_BOT + 1))     # 80..84
-    lead = list(range(KNIFE_LEAD[0], KNIFE_LEAD[1] + 1))            # 54..61, plain then a rib
-    tile = list(range(KNIFE_TILE[0], KNIFE_TILE[1] + 1))            # 62..67, one wrap period
-    tail = list(range(KNIFE_TAIL[0], KNIFE_TAIL[1] + 1))            # 74..79, plain run-out
-    seq = collar + lead + tile * 5 + tail + cap
-    excess = [len(rows[y]) - KNIFE_GRIP_W for y in seq]
-    return seq, excess
+    base = list(range(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT + 1))
+    tile = list(range(KNIFE_TILE[0], KNIFE_TILE[1] + 1))
+    at = base.index(KNIFE_TAIL[0])
+    return base[:at] + tile * extra_tiles + base[at:]
 
 
 def blit_rows(a: np.ndarray, y0: int, rows, seq, cx: float, widths=None) -> None:
@@ -147,12 +169,27 @@ def blit_rows(a: np.ndarray, y0: int, rows, seq, cx: float, widths=None) -> None
 
 
 def build_club() -> Image.Image:
-    """The knife's handle, transplanted. No stretch, no recolour, no redraw."""
-    a = np.asarray(Image.open(PROPS / "big_club.png").convert("RGBA")).copy()
+    """The knife's handle transplanted onto a body stretched a little longer.
+
+    THE BODY IS READ FROM `big_club_short.png`, NOT FROM THE LIVE CARD, and that is the whole
+    reason the short original is kept in the repo rather than only in git. Reading the card
+    this script writes would be idempotent exactly once and then lengthen the club again on
+    every run - the same trap `STAGE_H` is a written-down table to avoid.
+    """
+    src = np.asarray(Image.open(PROPS / "big_club_short.png").convert("RGBA"))
+    a = np.zeros_like(src)
+    top, keep, bot = CLUB_BODY_TOP, CLUB_BODY_KEEP, CLUB_BODY_BOT
+
+    a[top:keep + 1] = src[top:keep + 1]          # the dome and both one-pixel gold bands
+    n_src = bot - keep                           # the plain taper, 31 rows
+    n_dst = n_src + CLUB_BODY_GROW
+    for j in range(n_dst):
+        # NEAREST, i.e. whole rows duplicated. Interpolating would mix two palette entries,
+        # and on a taper it would also blur the silhouette's own edge into a half-pixel.
+        a[keep + 1 + j] = src[keep + 1 + int(round(j * (n_src - 1) / (n_dst - 1)))]
+
     rows = handle_rows(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT)
-    seq = list(range(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT + 1))
-    a[46:] = 0                                  # the painted crimson body is rows 4..45
-    blit_rows(a, 46, rows, seq, 23.0)
+    blit_rows(a, keep + 1 + n_dst, rows, grip_sequence(CLUB_HANDLE_EXTRA), 23.0)
     return Image.fromarray(a, "RGBA")
 
 
@@ -207,7 +244,8 @@ def build_torch() -> Image.Image:
 
     # --- THE HANDLE: the knife's, tapering 8 at the foot to 12 at the shoulder.
     top, bot = wick_y + wick_h, 92
-    seq, excess = torch_sequence(rows)
+    seq = grip_sequence(3)
+    excess = [len(rows[y]) - KNIFE_GRIP_W for y in seq]
     n = bot - top + 1
     assert len(seq) == n, f"handle sequence is {len(seq)} rows, the torch has {n}"
 

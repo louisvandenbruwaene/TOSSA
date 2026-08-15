@@ -299,6 +299,25 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   between that sleeve and the wick.
   **The wordmark has to be rebaked after any of this**, since its A is two clubs and its T a
   knife, and `mark_prop` blits `prop_big/*` rather than drawing them.
+- **LONGER IS NOT BIGGER, AND THE DERIVATION IS WHAT KEEPS THEM APART** (2026-08-15, Louis: "make
+  the juggling club just a tiny bit longer on both the handle and the upper part"). The stage
+  width comes from the card's ASPECT at a fixed `STAGE_H`, so the card's height and `STAGE_H`
+  have to move together: 23x77 at 64 and 23x88 at 73 both derive to 19 wide. Bump only
+  `STAGE_H` and the club is squashed; bump only the card and it is fatter. The previous pair is
+  kept on disk as `big_club_short.png` / `club_short.png` (Louis: "save the original tho"), and
+  `build_club()` READS the short card rather than the live one - reading its own output would
+  be idempotent exactly once and lengthen the club again on every run after that, the same trap
+  `STAGE_H` is a written-down table to avoid.
+  **A PIVOT IS A FRACTION, SO CHANGING A PROP'S LENGTH MOVES IT.** `prop/club`'s pivot went
+  0.558 -> 0.545, which is not a tuning number: it is the same FEATURE, a quarter of the way
+  into the handle's collar, re-expressed against a longer sprite. Leave it and the club spins
+  about a point that is no longer its balance.
+  **The two halves grow by different mechanisms because they are different things.** The handle
+  grows by exactly one six-row wrap period - the smallest step that keeps the knife's rhythm,
+  and the only step that does. The body is a painting, so it is stretched by duplicating rows,
+  and only BELOW its two gold bands: each band is one pixel tall, and a resample that lands on
+  one turns a pinstripe into a stripe. Copy the dome and the bands verbatim; stretch only the
+  plain taper under them, where a duplicated row cannot be seen.
 - **THE FLAME BAND IS FOUND BY ONE TEST AND CLEARED BY TWO.** (The specific collision below is
   gone now that the grip is leather and owns no near-whites, but the rule stands: the strip is
   the only thing standing between a repaint and a baked flame under the live one.) Once the
