@@ -29,10 +29,15 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GODOT=${GODOT:-/opt/homebrew/bin/godot}
 
-APP_BASE="PIXELTOSSA"
-BUNDLE_ID="eu.vandenbruwaene.pixeltossa"
-ICON="$HERE/export/icons/PIXELTOSSA.icns"
-[ -f "$ICON" ] || ICON="$HERE/export/icons/TOSSA.icns"   # until the pixel icon is drawn
+# THE FORK TOOK THE NAME BACK (2026-08-15). These deliberately say TOSSA again, and the
+# warning above is now history rather than a live rule: there is no parent game left to
+# steal icons from, because the code-drawn original is archived inside this repo under
+# `legacy/tossa-vector/` and has no launcher of its own any more. Overwriting
+# /Applications/TOSSA.app and TOSSA Debug.app is exactly the intent.
+APP_BASE="TOSSA"
+BUNDLE_ID="eu.vandenbruwaene.tossa"
+ICON="$HERE/export/icons/TOSSA.icns"
+[ -f "$ICON" ] || ICON="$HERE/export/icons/PIXELTOSSA.icns"   # the icon file kept its old name
 
 build () {
 	local NAME="$1" EXE="$2" ID="$3" ARGS="$4"
