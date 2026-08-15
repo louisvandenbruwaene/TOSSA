@@ -306,24 +306,37 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   stage size: a cream wick bundle survived `strip_torch_flame` as a crown of gold spikes (the
   owl again), one flame measured 49px on a 78px sprite and ate half the prop, and two drew fire
   as a HOLLOW OUTLINE so the strip found 1px and baked the flame in under the live one.
-  What shipped is a split, and `TORCH_HEAD_SRC` names which generation supplies it (s11 first,
-  then `pro0` - "i want pro0.png for now, that one looks best"; the s11 pair is kept as
-  `big_torch_s11.png` / `torch_s11.png`). Two blocks of the painting are kept - the bound wick
-  and the ferrule under it - and nothing else, because a generated SHAFT is either five pixels
-  wide or worse than the knife's grip. **Take PROPORTIONS from a generation and MATERIAL from
-  the pipeline.** Head widths are REMAPPED, not scaled: pro0's head is 1.75x its pole and s11's
-  2.6x, and either ratio over this 12px shaft is the TRAY failure again.
-  **AND A BOUND WICK IS THE SAME COLOUR AS FIRE, WHICH IS WHY THE OWL KEEPS COMING BACK.**
-  `strip_torch_flame`'s orange test (`r > 200` plus 100 points of red over blue) is passed by
-  pro0's own wick cream `#f2cc8c` and tan `#d8a068`, so the band ran through the bundle and the
-  strip ate it - card base_row 41 instead of 33, row 33 down from 13 pixels to 4. **Darkening
-  only the top three rows fixed the CARD and not the stage sprite, and that is the lesson**: the
-  band closes on three consecutive orange-free rows, which three charred rows give at card
-  resolution, but the two sizes are measured INDEPENDENTLY and the 86->78 reduction averages
-  each output row from more than one input row. Cream bled up from the fourth row, the band
-  re-formed, and the stage strip cleared the highlights anyway. **A colour excluded by a
-  threshold cannot be excluded at one scale only** - every cream in the bundle has to drop a
-  step, at the cost of the pale straw that made the design attractive on the card.
+  **WHAT SHIPPED IS `pro0` VERBATIM** (Louis: "i want EXACTLY pro0 ... take the same handle as
+  in the png, not the one overlaid on top of it which is the same as the knives"). Its own
+  shaft, its own ferrule, its own wick; `TORCH_HEAD_SRC` names the painting and the previous
+  designs are kept as `big_torch_s11.png` / `torch_s11.png` and at commit `3930e10`.
+  **TWO PASSES REPLACED THE GENERATED SHAFT AND ONLY THE FIRST ONE NEEDED TO.** The rule "a
+  generated shaft never survives the reduction" was learned on s11, whose pole is 5px and
+  reduces to 4 - thinner than the knife's blade. pro0's shaft is already 8, the knife grip's
+  own width, so the rule does not bite on it. **A rule learned from one example needs its
+  precondition written down with it** ("check the shaft's width"), or it gets applied to the
+  next painting on authority rather than on measurement.
+  **A BOUND WICK IS THE SAME COLOUR AS FIRE, AND THAT IS WHY THE OWL KEPT COMING BACK.**
+  `strip_torch_flame` used to find fire by threshold - `r > 200` plus 100 points of red over
+  blue - and pro0's wick cream `#f2cc8c` and tan `#d8a068` both pass it, so the band ran down
+  through the wick and the strip ate it: card base_row 41 instead of 33, row 33 down from 13
+  pixels to 4. Darkening the wick's top three rows fixed the CARD and not the stage sprite,
+  because **the two sizes are measured INDEPENDENTLY and the 86->78 reduction averages each
+  output row from more than one input row** - cream bled up out of the fourth row, the band
+  re-formed, and the stage strip cleared the highlights anyway. A colour excluded by a
+  threshold cannot be excluded at one scale only.
+  **THE FIX IS THAT A LOCKED PALETTE LETS FIRE BE NAMED, NOT DESCRIBED.** Both sizes snap to
+  the same 48 entries, so the strip now tests exact membership of the flame's four (plus the
+  two near-whites of its core) instead of a threshold. That is strictly stronger than what it
+  replaces - it already rejects the brass band and the crimson body the threshold was widened
+  to exclude - and it cannot be fooled by a warm object simply being bright.
+  Its precondition is that the fire is a clean region of those entries, which pro0's is not:
+  it outlines its flame in the same near-blacks as its shaft's edge, and no colour test can
+  separate "the line around the flame" from "the line down the handle". **Position can** -
+  above the wick every pixel is fire or fire's outline, and across the wick the fire is
+  everything OUTSIDE the wick's central run - so `build_torch` folds that outline into the
+  flame's own deepest orange before the strip ever runs. Nothing a player sees changes; the
+  whole region is deleted before anything is drawn.
   **The wordmark has to be rebaked after any of this**, since its A is two clubs and its T a
   knife, and `mark_prop` blits `prop_big/*` rather than drawing them.
 - **LONGER IS NOT BIGGER, AND THE DERIVATION IS WHAT KEEPS THEM APART** (2026-08-15, Louis: "make

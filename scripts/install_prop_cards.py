@@ -234,7 +234,13 @@ REPAINTS = {
     # What works is asking for a PLAIN shaft and naming the ornament out ("no funnel, no bowl,
     # no cup"), then letting the grip carry the identity: a crimson leather wrap and a brass
     # ferrule put the torch in the same wardrobe as the club and the performer's own coat.
-    "torch": dict(src="torch_v5.png", dst="big_torch.png", canvas=(40, 96), top=4),
+    # THE TORCH IS NOT REPAINTED HERE ANY MORE (2026-08-15). `reshape_shaft_props.py` owns
+    # `big_torch.png` end to end now: it does this same warm-snap-and-place on `pro0` and then
+    # one extra step this script cannot do, folding the flame's own dark outline into the
+    # flame so `strip_torch_flame` can lift the fire without taking the wick with it. Two
+    # scripts writing one file is how a repaint gets silently reverted - see the REPAINT/RESNAP
+    # collision above, which cost exactly that - so the entry is deleted rather than left
+    # pointing at a stale painting. `artifacts/paint/torch_v6.png` is pro0, kept for provenance.
 
     # THE KNIFE AND THE CHAINSAW BECOME A CHOICE (2026-08-15, Louis: "give some other options
     # for the chainsaw and knife, but keep the current designs for when i want to switch back
