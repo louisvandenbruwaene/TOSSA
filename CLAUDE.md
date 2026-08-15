@@ -222,6 +222,41 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   but it also paints a cloth wick the strip cannot catch, and at 11px across that wick reads as
   a small owl's face sitting on the pole. `install_prop_cards.py`'s `drop=(lo, hi)` splices the
   band out and closes the picture over it.
+- **`strip_torch_flame` IS PIXEL-WISE, AND THE FLAME MEASUREMENT IS A FOOTPRINT, NOT A PLUME**
+  (2026-08-15). Both were forced by the shipped torch design - a club-shaped body, a thin brass
+  band, then a small BLACK CYLINDER with the fire burning around it (Louis's spec). Two things
+  break on that shape: a ROW-WISE strip that takes whole majority-fire rows stops dead at the
+  top of the cylinder (a dark 8px wick beside 6px of fire is only 25-43% warm), leaving the
+  flanking fire baked into the sprite under the live one - the exact thing the function exists
+  to prevent. And fire is TWO colours: the orange test misses the white-hot core (255,240,204),
+  which survived as white specks stuck to the wick. So fire is found by colour anywhere in a
+  band contiguous from the top, orphans left floating are swept, and the tests are `r>200 &
+  r>b+100` OR near-white - tighter than the row rule needed, because a pixel-wise rule has to
+  separate flame from the brass band and the crimson body. **And `half_width` is capped at
+  `height/4`**: the measurement is how far the painted fire reaches sideways, which on a
+  wrap-around design is the width of the WRAP, while the game draws one tapering plume of that
+  width. Uncapped it came back 29x10, an aspect of 2.9 against the vector reference's 5.0, and
+  the shop card showed an orange kite.
+- **THE KNIFE AND THE CHAINSAW ARE A `props` VARIANT SET** (2026-08-15, Louis: "give some other
+  options ... but keep the current designs for when i want to switch back"). Three options -
+  `default` (plain throwing knife, crimson-and-gold saw), `reserve` (what shipped before),
+  `ornate` (gilded knife, antique saw) - on the F9 panel and on `--variant props:<key>`. The
+  previous art lives on as `Assets/Props/*_reserve.png`, because "switch back" has to survive a
+  regeneration, and `derive_stage_props.py --suffix _reserve` reduces a variant through the
+  SAME path (premultiply, alpha cut, warm snap, serration, `STAGE_H`) so a variant is a
+  different look and never a different object.
+  **WHICH ONE IS DEFAULT WAS DECIDED AT STAGE SIZE, NOT ON THE CARD.** On the 36x88 card the
+  gilded knife is much the prettier picture; reduced to the 14x62 the player actually sees in
+  the air, its curved blade reads as a smear and its ornate guard as six pixels of unrelated
+  gold, while the plain one keeps a bold blade, a solid collar and a legible grip. **A prop is
+  judged at the size it is thrown, not the size it is sold** - the same lesson as the club's
+  three-pixel handle.
+- **A REPAINT AND A RE-SNAP MUST NEVER TARGET THE SAME FILE.** `install_prop_cards.py` builds
+  both into one dict keyed by filename and the re-snap loop runs second, so the moment the
+  knife and chainsaw gained repaints their stale `RESNAP` entries read the OLD file off disk
+  and silently overwrote the new art with it - the report said "repaint knife -> ink 14x82"
+  and the file on disk came out 18x79, the old design, with every line claiming success. The
+  exclusion is derived from `REPAINTS` now rather than trusting two lists to be edited together.
 - **THE PERFORMER IS THE SHOWMAN**, a PixelLab-generated ringmaster - Louis reversed the
   never-generate rule on 2026-08-06 and then picked him over the traced figure and two other
   designs. He lives in the base manifest (`Assets/Characters/showman/`) with landmark geometry

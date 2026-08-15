@@ -223,35 +223,100 @@ def strip_torch_flame(a: np.ndarray) -> tuple[np.ndarray, dict]:
 
 	The measurements handed back are in ART PIXELS of that same canvas, so the game can place
 	a live flame exactly where the painted one was - the card's proportions, not the vector
-	drawing's, which is the whole point of deriving from the card in the first place."""
+	drawing's, which is the whole point of deriving from the card in the first place.
+
+	IT IS PIXEL-WISE, NOT ROW-WISE, AND THAT IS THE SECOND VERSION OF THIS (2026-08-15).
+	The first walked down the image taking WHOLE ROWS while a row was majority-fire, and
+	stopped at the first row that was not. That is correct for a torch whose flame sits
+	entirely above its handle, which is what every torch design here had been until Louis
+	asked for one where "the flame burns around" a small black wick cylinder.
+
+	On that shape the row rule fails in the worst possible way - quietly, and by leaving
+	fire behind. Measured on the card: rows 5..16 are the flame's tip and are 57-100%
+	warm, so they strip; rows 17..33 are the CYLINDER with flame down either side of it,
+	and a dark cylinder eight pixels wide beside six pixels of fire is only 25-43% warm,
+	so the walk stops at row 17. base_row lands at the top of the cylinder, the flanking
+	fire stays baked into the sprite, and the game then draws its live animated flame
+	starting above all of it. A painted fire under a drawn one is exactly the thing this
+	function exists to prevent.
+
+	So fire is identified by COLOUR wherever it is, and the band is "every row from the
+	top down to the last row that still contains fire". The test is tightened to match:
+	`> 200` on red rather than `> 120`, because a pixel-wise rule has to separate flame
+	from the BRASS BAND (155,99,23) and the crimson body (118,16,38) that a row-wise one
+	never had to look at. The flame's own dimmest sampled pixel is (250,172,121); nothing
+	else on any of the four torch cards comes near 200 red with 100 points of red-over-blue.
+
+	base_row is then the row under the whole fire, so the live flame is drawn from the
+	BOTTOM of the wick and burns up around the cylinder, which is the design Louis asked
+	for and is also what a real torch does."""
 	out = a.copy()
 	h = out.shape[0]
-	# warm = distinctly red-of-blue and bright. The handle below is grey, brown and near-black,
-	# none of which can pass this; the flame's own dark red root can.
-	warm = (out[..., 3] > 0) & (out[..., 0] > 120) & (out[..., 0] > out[..., 2] + 30)
-	rows: list[int] = []
-	for y in range(h):
-		op = int(np.count_nonzero(out[y, :, 3] > 0))
-		if op and int(np.count_nonzero(warm[y])) * 2 >= op:
-			rows.append(y)
-		elif rows:
-			break        # the first row that is mostly NOT fire is the top of the handle
+	# ...and fire is TWO colours, not one. The orange test below misses the flame's white-hot
+	# CORE, which is exactly what it sounds like - (255,240,204) and (255,255,255) - and those
+	# have almost no red-over-blue at all, so 24 pixels of it survived the first pixel-wise
+	# pass and were left as white specks stuck to the side of the wick. The near-white test is
+	# safe here ONLY because the band is contiguous from the top: the bone-cream handle is the
+	# same family of colour and is fifty rows below the fire, well outside it.
+	op = out[..., 3] > 0
+	orange = op & (out[..., 0] > 200) & (out[..., 0] > out[..., 2] + 100)
+	core = op & (out[..., 0] > 230) & (out[..., 1] > 200) & (out[..., 2] > 150)
+	hot = orange | core
+	rows = [y for y in range(h) if bool(hot[y].any())]
 	if not rows:
 		return out, {}
-	xs = np.where(warm[rows[0]:rows[-1] + 1].any(axis=0))[0]
+	# contiguous from the top: a stray warm speck low on a handle is not part of the fire
+	band_end = rows[0]
+	for y in rows:
+		if y <= band_end + 2:
+			band_end = y
+		else:
+			break
+	xs = np.where(hot[rows[0]:band_end + 1].any(axis=0))[0]
+	height = int(band_end - rows[0] + 1)
+	# THE MEASUREMENT IS A FOOTPRINT; THE DRAWING IS A PLUME, and conflating them makes a
+	# kite. draw_sprite_torch_flame builds ONE tapering flame `height` tall and `half_width`
+	# wide, but what gets measured here is how far the painted fire reaches SIDEWAYS - and on
+	# a design whose flame burns around a wick rather than standing on top of one, that is the
+	# width of the wrap, not the width of a plume. Measured on the club-shaped torch: 29 tall
+	# by 10 half-wide, an aspect of 2.9 against the vector reference's TORCH_FLAME_H /
+	# TORCH_FLAME_W = 5.0, and on the shop card it read as an orange diamond rather than fire.
+	# Capping at height/4 keeps a plume that can wrap a wick without becoming one.
+	half = min(float(xs.max() - xs.min() + 1) / 2.0, height / 4.0)
 	meta = {
-		# the row the fire sits ON - i.e. the first row of handle, which is where its base goes
-		"base_row": int(rows[-1] + 1),
-		"height": int(len(rows)),
-		"half_width": round(float(xs.max() - xs.min() + 1) / 2.0, 2),
+		# the row the fire sits ON - i.e. the first row below all of it
+		"base_row": int(band_end + 1),
+		"height": height,
+		"half_width": round(half, 2),
 	}
-	out[rows[0]:rows[-1] + 1] = 0
+	out[rows[0]:band_end + 1][hot[rows[0]:band_end + 1]] = 0
+	# ...AND THEN SWEEP THE ORPHANS. Clearing fire pixel-wise leaves whatever the generator
+	# painted AROUND the fire - a dark edge, a soot fringe - floating in mid-air beside the
+	# wick with nothing under it. Anything in the band that is not connected downward to the
+	# rest of the object is not part of the object.
+	keep = out[..., 3] > 0
+	for y in range(band_end, rows[0] - 1, -1):
+		below = keep[y + 1] if y + 1 < h else np.zeros(keep.shape[1], bool)
+		near = below.copy()
+		near[:-1] |= below[1:]
+		near[1:] |= below[:-1]
+		keep[y] &= near
+	out[~keep] = 0
 	return out, meta
 
 
-def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool) -> str:
-	stage = Image.open(PROPS / f"{name}.png").convert("RGBA")
-	card = Image.open(PROPS / f"big_{name}.png").convert("RGBA")
+def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool,
+		suffix: str = "") -> str:
+	# `suffix` DERIVES A DESIGN VARIANT THROUGH THE SAME REDUCTION (2026-08-15). A variant is
+	# a second manifest overlaying the first with different PNGs for the same keys (see
+	# VARIANT_DEFS in Game.gd), so `--suffix _ornate` turns big_knife_ornate.png into
+	# knife_ornate.png. It has to run through THIS function rather than a copy of it: the
+	# premultiply, the hard alpha cut, the warm palette snap, the chainsaw's serration and
+	# above all STAGE_H are what make a prop the right object at the right length, and a
+	# variant that skipped any of them would be a different prop rather than a different look.
+	stage_p = PROPS / f"{name}{suffix}.png"
+	stage = Image.open(stage_p).convert("RGBA") if stage_p.exists() else Image.new("RGBA", (1, 1))
+	card = Image.open(PROPS / f"big_{name}{suffix}.png").convert("RGBA")
 	if rot:
 		card = card.rotate(rot, expand=True)
 	# tight-crop the card to its own ink first, so its padding cannot shrink the object
@@ -267,10 +332,10 @@ def build(name: str, rot: int, pal: np.ndarray, write: bool, force: bool) -> str
 	flame = {}
 	if name == "torch":
 		out, flame = strip_torch_flame(out)
-	msg = f"{name:9} {stage.size[0]:2}x{stage.size[1]:<3} -> {w:2}x{h:<3}  (card {card.size[0]}x{card.size[1]})"
+	msg = f"{name + suffix:18} {stage.size[0]:2}x{stage.size[1]:<3} -> {w:2}x{h:<3}  (card {card.size[0]}x{card.size[1]})"
 	if not write:
 		return msg + "   (report only)"
-	p = PROPS / f"{name}.png"
+	p = PROPS / f"{name}{suffix}.png"
 	status = artguard.save_guarded(p, lambda q: Image.fromarray(out, "RGBA").save(q), force)
 	if flame:
 		# ...AND THE CARD'S FIRE IS LIVE TOO (2026-08-07, Louis: "the fire only moves when
@@ -299,8 +364,12 @@ def main() -> int:
 	pal = load_palette()
 	names = [a for a in sys.argv[1:] if not a.startswith("--")]
 	names = [n for n in names if n in TARGETS] or list(TARGETS)
+	suffix = ""
+	if "--suffix" in sys.argv:
+		suffix = sys.argv[sys.argv.index("--suffix") + 1]
+		names = [n for n in names if (PROPS / f"big_{n}{suffix}.png").exists()]
 	for n in names:
-		print(build(n, TARGETS[n], pal, write, force))
+		print(build(n, TARGETS[n], pal, write, force, suffix))
 	if not write:
 		print("\n(pass --write to apply; the pivots in Resources/art_manifest.json keep their")
 		print(" long-axis fraction and move to 0.5 across, since card art is drawn symmetric)")

@@ -234,7 +234,29 @@ REPAINTS = {
     # What works is asking for a PLAIN shaft and naming the ornament out ("no funnel, no bowl,
     # no cup"), then letting the grip carry the identity: a crimson leather wrap and a brass
     # ferrule put the torch in the same wardrobe as the club and the performer's own coat.
-    "torch": dict(src="torch_v4.png", dst="big_torch.png", canvas=(40, 96), top=4),
+    "torch": dict(src="torch_v5.png", dst="big_torch.png", canvas=(40, 96), top=4),
+
+    # THE KNIFE AND THE CHAINSAW BECOME A CHOICE (2026-08-15, Louis: "give some other options
+    # for the chainsaw and knife, but keep the current designs for when i want to switch back
+    # to them"). The previous designs are preserved as `*_reserve.png` and both sets are wired
+    # onto the F9 panel as a `props` variant - see VARIANT_DEFS in Game.gd - so switching back
+    # is a keypress rather than a file swap.
+    #
+    # WHICH ONE IS THE DEFAULT WAS DECIDED AT STAGE SIZE, NOT ON THE CARD. Two knives were
+    # painted: a plain throwing knife (steel blade, brass collar, ribbed dark grip) and a
+    # gilded showman's knife (curved blade, ornate gold guard, crimson spiral grip). On the
+    # 36x88 card the gilded one is much the prettier picture. Reduced to the 14x62 the player
+    # actually sees in the air, its curved blade reads as a smear and its guard becomes six
+    # pixels of unrelated gold, while the plain one keeps a bold blade, a solid collar and a
+    # legible grip. **A prop is judged at the size it is thrown, not at the size it is sold** -
+    # the same lesson the club's three-pixel handle taught. The gilded pair ships as the
+    # `ornate` variant so the prettier card is one keypress away and nothing is thrown out.
+    "knife": dict(src="knife_a.png", dst="big_knife.png", canvas=(36, 88), top=None),
+    "chainsaw": dict(src="saw_a.png", dst="big_chainsaw.png", canvas=(72, 48), top=None),
+    "knife_ornate": dict(src="knife_b.png", dst="big_knife_ornate.png", canvas=(36, 88),
+                         top=None),
+    "chainsaw_ornate": dict(src="saw_b.png", dst="big_chainsaw_ornate.png", canvas=(72, 48),
+                            top=None),
 }
 
 # Cards already on disk that only need the warm re-snap. Nothing is repainted here - the
@@ -285,7 +307,11 @@ def build_repaint(name: str, spec: dict, pal: np.ndarray):
     rgb[op] = snap_warm(rgb[op], pal)
     ink = np.dstack([rgb, np.where(op, 255, 0)]).astype(np.uint8)
     w, h = spec["canvas"]
-    return place(ink, w, h, spec["top"]), f"ink {ink.shape[1]}x{ink.shape[0]} at row {spec['top']}"
+    # `top=None` centres the ink vertically. Only the torch pins its top row, because only
+    # the torch has a number (`_TORCH.base_row`) measured off it; for everything else the
+    # canvas is padding and derive_stage_props tight-crops the ink away before reducing.
+    top = spec["top"] if spec.get("top") is not None else max(0, (h - ink.shape[0]) // 2)
+    return place(ink, w, h, top), f"ink {ink.shape[1]}x{ink.shape[0]} at row {top}"
 
 
 def build_resnap(name: str, pal: np.ndarray):
@@ -314,7 +340,15 @@ def main() -> None:
         print(f"  repaint {name:10s} -> {spec['dst']:20s} {note}")
         if arr is not None:
             built[spec["dst"]] = arr
-    for name in RESNAP:
+    # A REPAINT AND A RE-SNAP MUST NEVER TARGET THE SAME FILE, and this guard exists because
+    # they silently did. Both stages write into one `built` dict keyed by filename, and the
+    # re-snap loop runs second - so the moment the knife and the chainsaw gained repaints,
+    # their stale RESNAP entries read the OLD file off disk and overwrote the new art with it.
+    # The report said "repaint knife -> ink 14x82" and the file on disk came out 18x79, the
+    # old design, with every line of output claiming success. Derive the exclusion rather than
+    # trusting the two lists to be edited together.
+    repainted = {spec["dst"] for spec in REPAINTS.values()}
+    for name in [n for n in RESNAP if n not in repainted]:
         arr, note = build_resnap(name, pal)
         print(f"  re-snap {name:20s} {note}")
         if arr is not None:
