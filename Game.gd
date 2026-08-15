@@ -12642,9 +12642,10 @@ func draw_sprite_torch_flame(key: String, which: String, pos: Vector2, ang: floa
 		fill_flame_pix(pos, ang, sc, b, fh * 1.22 * fl, fw * 1.30, sway * 1.2,
 			Color(1.0, 0.32, 0.06, 0.35))
 	fill_flame_pix(pos, ang, sc, b, fh * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
-	fill_flame_pix(pos, ang, sc, b, fh * 0.68 * fl, fw * 0.68, sway * 0.7, Color(1.0, 0.72, 0.20, 0.95))
+	fill_flame_pix(pos, ang, sc, b, fh * 0.68 * fl, fw * 0.68, sway * 0.7,
+		Color(1.0, 0.72, 0.20, 0.95), 11.0)
 	fill_flame_pix(pos, ang, sc, b + Vector2(0.0, -u * 0.5), fh * 0.39 * fl, fw * 0.42,
-		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95))
+		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95), 23.0)
 	var dk := stage_darkness()
 	if dk > 0.02:
 		draw_glow(pos + Vector2(0.0, base_y - fh * 0.5).rotated(ang) * sc, 42.0 * sc,
@@ -15174,9 +15175,9 @@ func fill_poly_pix(pts: PackedVector2Array, col: Color) -> void:
 
 
 func fill_flame_pix(pos: Vector2, ang: float, sc: float, base: Vector2, h: float, w: float,
-		sway: float, col: Color) -> void:
+		sway: float, col: Color, phase: float = 0.0) -> void:
 	# one layer of a flame, mapped out of the prop's local frame and filled on the art grid
-	var local := flame_shape(base, h, w, sway)
+	var local := flame_shape(base, h, w, sway, phase)
 	var out := PackedVector2Array()
 	out.resize(local.size())
 	for i in local.size():
@@ -16992,16 +16993,41 @@ const TORCH_FLAME_W := 4.4  # its peak half-width
 const FLAME_PROFILE := [Vector2(0.00, 0.00), Vector2(0.52, -0.07), Vector2(0.62, -0.26),
 	Vector2(0.47, -0.48), Vector2(0.27, -0.70), Vector2(0.11, -0.87), Vector2(0.00, -1.00)]
 
-func flame_shape(base: Vector2, h: float, w: float, sway: float) -> PackedVector2Array:
+func flame_shape(base: Vector2, h: float, w: float, sway: float,
+		phase: float = 0.0) -> PackedVector2Array:
 	# the profile up one side and back down the other, with the tip LEANING: a flame
 	# bends more the further it is from the wick, which is what sells it as burning
+	#
+	# THE TWO SIDES BREATHE INDEPENDENTLY (2026-08-15, Louis: "a better flame animation").
+	# Every layer used to share one `sway` and one width, so the whole silhouette leaned as a
+	# rigid shape and scaled as a rigid shape - a flame-shaped object being waved, rather than
+	# something burning. Fire does not do that: its edges are driven by turbulence that is not
+	# correlated left to right, so the SHAPE has to change and not just its angle.
+	#
+	# One extra sine per side is the whole cost, and it is free at the call sites because it
+	# reads the clock here rather than being threaded through fill_flame_pix. The rates are
+	# deliberately incommensurate with each other and with the flicker in draw_torch_flame
+	# (0.37 / 0.43 against 0.5 / 1.31 / 0.29 / 0.71), so nothing in the fire ever repeats on a
+	# beat the eye can find - which is the difference between "flickering" and "pulsing".
+	# `phase` is what stops the three nested layers deforming as one. They already differ in
+	# lean (the callers scale `sway` down for the inner ones), but sharing a width wobble made
+	# them a single silhouette drawn three times in three colours - the heart never crossed
+	# the body's edge, so the fire had no internal motion at all. A per-layer offset costs
+	# nothing and is what makes the core visibly lick out of the flame and back.
+	var t := fire_clock() + phase
+	var wr := w * (1.0 + 0.20 * sin(t * 0.37) + 0.08 * sin(t * 1.07))
+	var wl := w * (1.0 + 0.20 * sin(t * 0.43 + 2.1) + 0.08 * sin(t * 0.91 + 0.7))
+	# ...and the tip wanders a little further than the lean alone would take it. `p.y * p.y`
+	# already weights the lean toward the tip; this adds a slow independent drift so the very
+	# top of the flame is never exactly over the middle of the wick.
+	var lick := 0.18 * w * sin(t * 0.23 + 1.3)
 	var pts := PackedVector2Array()
 	for i in FLAME_PROFILE.size():
 		var p: Vector2 = FLAME_PROFILE[i]
-		pts.append(base + Vector2(p.x * w + sway * p.y * p.y, p.y * h))
+		pts.append(base + Vector2(p.x * wr + (sway + lick) * p.y * p.y, p.y * h))
 	for j in range(FLAME_PROFILE.size() - 2, 0, -1):
 		var q: Vector2 = FLAME_PROFILE[j]
-		pts.append(base + Vector2(-q.x * w + sway * q.y * q.y, q.y * h))
+		pts.append(base + Vector2(-q.x * wl + (sway + lick) * q.y * q.y, q.y * h))
 	return pts
 
 
@@ -17028,9 +17054,9 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 			Color(1.0, 0.32, 0.06, 0.35))
 	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
 	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * 0.68 * fl, fw * 0.68, sway * 0.7,
-		Color(1.0, 0.72, 0.20, 0.95))
+		Color(1.0, 0.72, 0.20, 0.95), 11.0)
 	fill_flame_pix(pos, ang, sc, base + Vector2(0.0, -1.0), TORCH_FLAME_H * 0.39 * fl, fw * 0.42,
-		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95))
+		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95), 23.0)
 	if rich:
 		# embers climb off the tip - in WORLD space, not the prop's, since smoke rises
 		# whatever angle the torch is held at

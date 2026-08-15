@@ -1,12 +1,12 @@
 {
   "stage": {
-    "base_row": 28,
-    "height": 28,
-    "half_width": 7.0
+    "base_row": 29,
+    "height": 29,
+    "half_width": 6.5
   },
   "card": {
-    "base_row": 34,
-    "height": 30,
-    "half_width": 7.5
+    "base_row": 33,
+    "height": 26,
+    "half_width": 6.5
   }
 }
