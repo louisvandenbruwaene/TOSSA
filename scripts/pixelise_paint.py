@@ -93,7 +93,7 @@ NAMES = ["backyard", "street_corner", "small_theatre", "the_circus",
 # the rows he actually occupies, which end at his feet. A stale number here does not break a
 # build, it just measures the wrong band and reassures you about a composition fault.
 STAND = {"backyard": 0.87, "street_corner": 0.88, "small_theatre": 0.85, "the_circus": 0.87,
-		 "championship": 0.85, "world_arena": 0.86, "the_midnight_show": 0.83}
+		 "championship": 0.85, "world_arena": 0.86, "the_midnight_show": 0.811}
 
 FIGURE_H = 172      # the performer, crown of the hat to boot sole, in art pixels
 

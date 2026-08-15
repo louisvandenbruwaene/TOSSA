@@ -11134,13 +11134,45 @@ func venue_data(i: int) -> Dictionary:
 			# actually worth wearing. The costume carries the whole theme: a suit
 			# that nearly vanishes into the dark, and a vest the same phosphor
 			# green as the Kit's own halo, so the performer visibly glows.
-			# `veil` 0.10: this set is already the darkest in the game, so the standard
-			# 0.42 push-back had nothing left to take and simply erased it (see the note
-			# at the veil in draw_backdrop). The floor is lifted off pure black for the
-			# same reason - a dark room is not an unlit one, and the boards have to read
-			# as boards for a landed prop to read as landed.
+			# `veil` 0.40, AND IT USED TO BE 0.10 (2026-08-15). The old number was not a
+			# taste call, it was a fact about the old PAINTING: that set was drapes and
+			# tables over near-black, so the standard 0.42 push-back had nothing left to
+			# take and simply erased it. The painting that replaced it - a raised stage
+			# with the supper tables in front - has a warm oak floor, and 0.10 left it at
+			# luminance 85 against the old set's 45 and the Circus's 64. That made the
+			# darkest room in the game the BRIGHTEST, which quietly cancels the reason the
+			# room exists: a suit that nearly vanishes and a phosphor-green vest have
+			# nothing to vanish into on lit boards, and the Glow Kit stops being worth
+			# wearing. **A venue's veil belongs to its painting, so a repaint has to
+			# re-measure it** - it is the one number in this table that is about the art
+			# rather than about the design. 0.40 brings the boards back to ~52, still just
+			# off the old floor and still the dimmest house on the ladder.
+			# The floor colour is lifted off pure black for the older reason, which has not
+			# changed - a dark room is not an unlit one, and the boards have to read as
+			# boards for a landed prop to read as landed.
 			return {"name": "The Midnight Show", "glow": Color(0.40, 0.92, 0.62), "floor": Color(0.045, 0.075, 0.06), "spot": 0.015,
-				"veil": 0.10, "stand": 0.83,
+				# STAND 0.811, AND THE JOURNEY TO IT IS THE POINT (2026-08-15, Louis: "for the
+				# midnight show: put the tables in front of the stage, not on top of it"). The old
+				# painting put the supper tables on the SAME floor the performer stands on, so he
+				# juggled in the middle of a restaurant among the diners rather than in front of
+				# them. The repaint is three bands: drapes, a raised stage, then the front row of
+				# tables below and in front of the stage edge, cropped by the bottom of the frame.
+				#
+				# The obvious move was to follow the new painting - its stage ended at art y 250, so
+				# `stand` went to 0.645 - and that is WRONG for a reason no amount of looking at the
+				# picture reveals. The hand line hangs off the standing line, so raising him by 133
+				# screen px raises every throw by 133. A full-hold 1.4 throw peaks BASE_AIR * 1.4 *
+				# ARC_PER_AIR = 253 px above the hand: at 0.83 that apex is screen y 85 and on
+				# screen, at 0.645 it is y -48 and gone. Holding the throw key is not an edge case,
+				# and the player has to TRACK a prop to catch it.
+				#
+				# **THE FLOOR BAND HAS A MINIMUM DEPTH, AND THE ARC SETS IT, NOT THE PAINTING.** So
+				# the painting was rebanded to fit the game instead (scripts/reband_backdrop.py):
+				# drapes stretched, boards deepened, foreground furniture moved at 1:1 and cropped.
+				# 0.811 keeps him on the boards with stage visible behind his heels and in front,
+				# and puts the 1.4 apex back at y 70. Keep pixelise_paint.py's STAND copy in step -
+				# nothing links them.
+				"veil": 0.40, "stand": 0.811,
 				"suit": Color(0.08, 0.10, 0.09), "suit_dk": Color(0.04, 0.05, 0.045), "vest": Color(0.55, 0.95, 0.65), "collar": Color(0.75, 0.92, 0.8)}
 
 
@@ -13105,6 +13137,34 @@ func draw_backdrop(s: Vector2) -> void:
 	draw_gradient_v(Rect2(0, 0, s.x, fy),
 		Color(veil_c.r, veil_c.g, veil_c.b, minf(1.0, veil * 1.55)),
 		Color(veil_c.r, veil_c.g, veil_c.b, veil), 24)
+	# ...AND IT DOES NOT STOP DEAD AT HIS FEET (2026-08-15, Louis: "there is a too obvious
+	# cutoff below the characters feet: like dark above and light right under it").
+	#
+	# The veil ran from the top of the frame to `fy` and then simply ended, so the row above
+	# the standing line carried the venue's full wash and the row below it carried none. That
+	# is a hard step in one row, across the entire width of the screen, a few pixels under the
+	# performer - measured on a Circus capture, (125,100,82) to (185,165,145), a jump of 60 per
+	# channel. It reads as the floor being a separate brighter object pasted under him, which
+	# is exactly the "vector stage" look deleting the podium was supposed to end.
+	#
+	# THE LEVELS ARE UNCHANGED AND THAT IS THE CONSTRAINT (Louis: "keep the same light
+	# levels"). Nothing above the line moves at all, and no new brightness target is invented:
+	# the veil simply CONTINUES at the value it already reached and decays to nothing over the
+	# next 72px. So the row below the line now matches the row above it - which is what removes
+	# the step - and the floor comes up to its painted brightness gradually instead of in one
+	# jump. It also happens to be right about depth for free: the boards at the back of the
+	# band are further away than the boards at the front, so they should carry more of the
+	# room's air, and this is the same near-bright/far-dark reading draw_preview_floor builds
+	# by hand for the two panels that have no painting to lean on.
+	#
+	# The other direction was tried and is recorded above: grading the veil DOWN toward the
+	# floor removes the step by brightening the set immediately behind the performer, which is
+	# the one place the veil is earning its keep.
+	var lip := minf(72.0, maxf(0.0, s.y - fy))
+	if lip > 0.0:
+		draw_gradient_v(Rect2(0, fy, s.x, lip),
+			Color(veil_c.r, veil_c.g, veil_c.b, veil),
+			Color(veil_c.r, veil_c.g, veil_c.b, 0.0), 16)
 	draw_stage_grade(s, fy, glow)
 
 	# THE SPOTLIGHT CONE IS GONE (2026-08-15, Louis: "none of the stages should have a cone
@@ -13393,9 +13453,17 @@ func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 	# The Midnight Show's pair was the plainest tell: the painting has candles ON TABLES and
 	# these two stood in mid-air beside them.
 	#
-	# What stays is what is LIGHT or what is the ACT'S OWN: the fireflies over the lawn, the
-	# busker's hat out for coins, and the mist lying on the boards. Same rule as everywhere
-	# else on this screen.
+	# What stays is what is LIGHT or what is the ACT'S OWN: the fireflies over the lawn and
+	# the mist lying on the boards. Same rule as everywhere else on this screen.
+	#
+	# AND THE BUSKER'S HAT IS GONE TOO (2026-08-15, Louis: "remove the begging hat from the
+	# street performance"). It was the last survivor of the list above and it survived on a
+	# technicality - it is the act's own object rather than scenery, which is a true sentence
+	# and the wrong test. What it actually put on the screen was a hat lying on the pavement
+	# to collect coins, twelve pixels from where the player is juggling, in a game whose
+	# currency is FLOWERS THROWN BY A CROWD. It said the Street Corner is where you beg, and
+	# every other room says you are booked. The economy is the same at all seven houses;
+	# the picture should be too.
 	match vi:
 		0:   # the fireflies over the lawn
 			for i in 9:
@@ -13408,8 +13476,6 @@ func draw_venue_foreground(s: Vector2, vi: int, fy: float, glow: Color) -> void:
 				var pulse := clampf(0.35 + 0.65 * sin(atick() * 0.03 + seed * 2.0), 0.0, 1.0)
 				soft_disc(Vector2(fx, fyy) + drift, 10.0, Color(0.9, 1.0, 0.5, 0.09 * pulse), 8)
 				soft_disc(Vector2(fx, fyy) + drift, 2.4, Color(0.95, 1.0, 0.6, 0.95 * pulse), 8)
-		1:   # the busker's own hat, out on the pavement for coins
-			draw_hat_prop(Vector2(s.x * 0.5 - 196.0, fy - 2.0))
 		6:   # the mist lying on the boards
 			for i in 3:
 				var mx := s.x * (0.22 + 0.28 * float(i))

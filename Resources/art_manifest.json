@@ -1231,14 +1231,14 @@
   },
   "_TORCH": {
     "stage": {
-      "base_row": 24,
-      "height": 24,
-      "half_width": 3.5
+      "base_row": 19,
+      "height": 19,
+      "half_width": 5.5
     },
     "card": {
-      "base_row": 28,
-      "height": 24,
-      "half_width": 4.0
+      "base_row": 26,
+      "height": 22,
+      "half_width": 6.5
     }
   },
   "char/palm_l": {

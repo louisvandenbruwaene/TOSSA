@@ -215,15 +215,26 @@ REPAINTS = {
     # directly, as the first version of this script did, is therefore worse than useless: the
     # next derive run silently regenerates it from the old card and the repaint vanishes with
     # no error anywhere. Measured - it did, and the report said "card 19x90" for a card whose
-    # ink is 11x57.
+    # ink is 11x57. So the model's refusal to paint an unlit torch turns out to hand the
+    # pipeline exactly the measurement it wants.
     #
-    # So the painted flame is USEFUL here, not an obstacle: the model's refusal to draw an
-    # unlit torch turns out to hand the pipeline exactly the measurement it wants. It also
-    # takes the cloth wick with it, because the strip's own test (bright and red-of-blue)
-    # catches cream cloth as readily as fire - which is the crop this script used to do by
-    # hand, done by the code that already existed for it.
-    "torch": dict(src="torch_v3.png", dst="big_torch.png", canvas=(40, 96), top=4, cut=0,
-                  drop=(29, 35)),
+    # THE THIRD TORCH IS THE ONE THAT SHIPS (2026-08-15, Louis: "the torch looks bad,
+    # regenerate"). Two are worth recording because both failed in ways that are easy to ask
+    # for again:
+    #   * the FUNNEL. Asking for "a cupped brass wick head" gets a wide flared bowl on a thin
+    #     stem, and at eleven pixels across a flared bowl on a stem is a GOBLET. It also came
+    #     with a plug of bound cream cloth inside it that the flame strip could not catch,
+    #     which at that size read as a small owl's face sitting on the pole. (That is what
+    #     `drop=(lo, hi)` was added to splice out; nothing needs it now, and it stays because
+    #     the next generator will do the same class of thing.)
+    #   * the DUNGEON STICK. The original card was a dark grey shaft with three brass bands
+    #     and no colour anywhere - half of it indigo, per the cool-dark trap above - so beside
+    #     a crimson-and-gold club and a warm-hilted knife it was the one prop that looked like
+    #     it came out of a different game.
+    # What works is asking for a PLAIN shaft and naming the ornament out ("no funnel, no bowl,
+    # no cup"), then letting the grip carry the identity: a crimson leather wrap and a brass
+    # ferrule put the torch in the same wardrobe as the club and the performer's own coat.
+    "torch": dict(src="torch_v4.png", dst="big_torch.png", canvas=(40, 96), top=4),
 }
 
 # Cards already on disk that only need the warm re-snap. Nothing is repainted here - the
