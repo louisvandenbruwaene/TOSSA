@@ -89,7 +89,12 @@ TARGETS = {"club": 0, "knife": 0, "torch": 0, "chainsaw": 90}
 # WHY THESE ARE WRITTEN DOWN RATHER THAN MEASURED OFF THE FILE. The old code read the height
 # of the sprite already on disk, which is fine exactly once and doubles the prop every run
 # after that. A target table is idempotent and says what the intended size IS.
-STAGE_H = {"club": 64, "knife": 62, "torch": 78, "chainsaw": 96}
+# The club went 64 -> 73 on 2026-08-15 (Louis: "a tiny bit longer on both the handle and the
+# upper part"). It had to move WITH the card's height, not instead of it: the stage width is
+# derived from the card's aspect at this height, so 23x77 at 64 and 23x88 at 73 both come out
+# 19 wide. Bumping only this number would have squashed the club; bumping only the card would
+# have made it fatter. `club_short.png` / `big_club_short.png` are the previous pair.
+STAGE_H = {"club": 73, "knife": 62, "torch": 78, "chainsaw": 96}
 
 ALPHA_CUT = 0.42     # coverage a reduced pixel needs to survive as opaque
 
