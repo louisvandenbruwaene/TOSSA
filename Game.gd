@@ -412,13 +412,21 @@ const CAP_NUDGE := [          #  x      y     scale        letter
 # needs its lift because its torches now stand on the baseline by construction rather than
 # hanging their butts below it, and the T never needed one. The x column is nearly zero now
 # too, because cap_letter_width finally measures what the S and the A really span.
-const GAME_TITLE := "PIXELTOSSA"
-const TITLE_MARK := "PIXELTOSS"
+const GAME_TITLE := "TOSSA"
+const TITLE_MARK := "TOSS"
 const MARK_WORD := "TOSSA"
-# THE FORK'S NAME, AND WHY IT TAKES THREE CONSTANTS INSTEAD OF TWO (2026-08-05).
+# THE FORK IS THE GAME NOW (2026-08-15, Louis: "make pixeltossa the default tossa ... that
+# means pixeltossa (from now on just called TOSSA) finally has its own repo"). The pixel-art
+# fork took over the name, the repository and the launchers; the code-drawn original is
+# archived under `legacy/tossa-vector/` and is not built or run from anywhere.
+#
+# THE RENAME COST ALMOST NOTHING BECAUSE THE LOGO NEVER SAID PIXELTOSSA. MARK_WORD has
+# spelled TOSSA in props since the fork began (see below: P, I, X, E and L have no honest
+# prop shape, so the mark could never have carried them), so the three baked wordmark
+# sprites are correct as they stand and no re-bake was needed. Only the TEXT name moved.
 #
 # GAME_TITLE is the game's name as TEXT: the window title, the credits, the daily share
-# string, "WISHLIST %s ON STEAM". That one is simply PIXELTOSSA and always was.
+# string, "WISHLIST %s ON STEAM".
 #
 # MARK_WORD is what the PROP WORDMARK SPELLS, and it is deliberately NOT the name. The
 # mark has no lettering in it at all - capsule_mark builds each glyph out of juggling
@@ -7253,12 +7261,25 @@ func reset_new_game() -> void:
 	save_progress()
 
 
-const OLD_NAMES: Array[String] = []      # every name this game has shipped under, newest
-										  # first - see migrate_old_saves.
-# EMPTY ON PURPOSE, AND IT IS THE SAFETY RAIL OF THE FORK (2026-08-05). PIXELTOSSA has
-# never shipped under another name, so there is nothing to migrate. TOSSA's list read
-# ["IACTO", "JUGGLE"] and inheriting it would have pulled Louis's ancient IACTO career
-# into a brand new game on first launch - harmless but baffling.
+const OLD_NAMES: Array[String] = ["PIXELTOSSA"]   # every name this game has shipped under,
+												  # newest first - see migrate_old_saves.
+# ONE ENTRY, AND THE ENTRY THAT IS *NOT* HERE IS THE LOAD-BEARING ONE (2026-08-15).
+#
+# The list was empty on purpose while this was a fork with its own name. Taking the TOSSA
+# name back means `config/name` is now "TOSSA", so `user://` moved from
+# `app_userdata/PIXELTOSSA/` to `app_userdata/TOSSA/` and every career written under the
+# fork's name is in the old folder. "PIXELTOSSA" carries them across.
+#
+# "TOSSA" MUST NEVER GO IN THIS LIST. `app_userdata/TOSSA/` is not empty - it holds the
+# code-drawn original's own `tossa_*.cfg` saves, and that is now the folder this game
+# lives in. Two things keep the two games' careers apart, and both matter:
+#   1. Our save FILENAMES stay `pixeltossa_*.cfg`. That looks odd in a game called TOSSA
+#      and it is deliberate: it is the only thing making the two sets of files
+#      distinguishable inside one shared folder, and it costs a player nothing because no
+#      save filename is ever shown. Renaming them to `tossa_*.cfg` would collide with the
+#      archived game's saves file for file.
+#   2. Adding "TOSSA" here would make migrate_old_saves copy the vector game's careers in
+#      over the top on first launch - a different game's progress, silently adopted.
 #
 # The far more important half: "TOSSA" MUST NEVER BE ADDED HERE. migrate_old_saves walks
 # to the PARENT of OS.get_user_data_dir() and reads the sibling folder named for each
@@ -21480,7 +21501,16 @@ func skill_preview(is_trick: bool, idx: int) -> Dictionary:
 									pv_carry(pv_i(LEFT), pv_o(LEFT))], "n": 3}],
 					"note": "both hands over the top"}
 		TENNIS:
-			return {"tracks": [{"legs": pv_cascade_legs(), "n": 2},
+			# THE TWO LOW PROPS ALTERNATE, AND THE DEFAULT SPREAD CANNOT MAKE THEM
+			# (2026-08-15). Two props evenly spread around the cascade's own two-throw cycle
+			# land exactly half a cycle apart, and half a cycle is that cycle's mirror - so
+			# they were thrown together, crested together as a pair above his head, and were
+			# caught together, which reads as one object cut in two rather than as a weave
+			# running under the marked prop. A quarter spaces all four throws (left, right,
+			# left, right) evenly instead: measured on the preview's own numbers, the second
+			# prop is in the catching hand at the instant the first is at its apex. See the
+			# `spread` note in draw_skill_preview.
+			return {"tracks": [{"legs": pv_cascade_legs(), "n": 2, "spread": 0.25},
 					{"legs": [pv_throw(pv_o(LEFT), pv_o(RIGHT), PV_HIGH),
 							  pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_HIGH)], "n": 1, "mark": true}],
 					"note": "one marked prop over the weave"}
@@ -21713,8 +21743,19 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		var total := pv_total(legs)
 		var marked := bool(tr.get("mark", false))
 		var ph := float(tr.get("phase", 0.0))
+		# HOW FAR APART CONSECUTIVE PROPS SIT ON THIS TRACK, as a fraction of the cycle.
+		# `1/n` (spread them evenly) is right for three props and DEGENERATE for two: a
+		# cascade cycle is two throws, so half a cycle is the pattern's own mirror, and two
+		# props half a cycle apart are reflections of each other at every instant - they
+		# leave together, peak together side by side above his head, and land together.
+		# That is not a weave, it is a synchronous fountain, and it is what Tennis's low
+		# pair had always drawn (Louis, 2026-08-15: "the tennis animation in the trick menu
+		# should alternate his lower throws"). Four throws evenly spaced around a two-throw
+		# cycle are a QUARTER apart, and at a quarter one prop is in the air while the other
+		# is in the hand that just caught it - see TENNIS in skill_preview.
+		var spread := float(tr.get("spread", 1.0 / float(n)))
 		for i in n:
-			var st := pv_state(legs, t + total * (ph + float(i) / float(n)))
+			var st := pv_state(legs, t + total * (ph + float(i) * spread))
 			props.append({"pos": o + Vector2(st["pos"]), "col": ball_color(ci),
 						  "behind": bool(st["behind"]), "mark": marked,
 						  "carry": bool(st.get("carry", false)),
