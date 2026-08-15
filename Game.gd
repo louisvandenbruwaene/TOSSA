@@ -7968,6 +7968,71 @@ func fig_design_on() -> bool:
 	return not fig_design.is_empty() and art_bank.has("char/figure")
 
 
+func fig_spin_on() -> bool:
+	# A PAINTED TURN IS AVAILABLE. Needs the _SPIN block AND every frame it names, because a
+	# turnaround missing one eighth is worse than no turnaround at all: the body would snap
+	# back to the front view for a fifth of a second in the middle of the spin. All or none,
+	# the same rule fig_anim_live applies to the two arm banks.
+	if fig_spin.is_empty():
+		return false
+	var dirs: Array = fig_spin.get("dirs", [])
+	if dirs.is_empty():
+		return false
+	for d in dirs:
+		if not art_bank.has(fig_spin_key(String(d))):
+			return false
+	return true
+
+
+func fig_spin_key(dir_name: String) -> String:
+	return "char/spin_" + dir_name.replace("-", "_")
+
+
+func fig_spin_frame(turn: float) -> String:
+	# WHICH EIGHTH OF THE TURN HE IS IN. `turn` is 0..1 across one full revolution, and the
+	# _SPIN list is in turn order, so this is a rounded index and nothing more - the art
+	# decides which way he goes round, not this function.
+	#
+	# ROUND, DO NOT TRUNCATE. A floor() holds each frame from the instant it is reached
+	# until the next one, so the figure is a whole eighth of a turn BEHIND the angle the
+	# rest of the game is using for its own spin effects (the streak arcs in
+	# draw_mini_juggler read the same clock). Rounding centres each frame on the angle it
+	# was painted at, which halves the worst error for free.
+	var dirs: Array = fig_spin.get("dirs", [])
+	var n := dirs.size()
+	if n == 0:
+		return ""
+	var i := int(round(fposmod(turn, 1.0) * float(n))) % n
+	return fig_spin_key(String(dirs[i]))
+
+
+func draw_figure_spin(cx: float, floor_y: float, tint: Color, px: float, turn: float) -> void:
+	# ONE FRAME OF THE TURNAROUND, standing where the still figure stands.
+	#
+	# Centred on `cx` and hung from `floor_y` by the sprite's own height, exactly as
+	# draw_figure_design places `char/figure` - NOT through fig_body_origin, which offsets
+	# for the arm atlas's shoulder geometry that a whole painted frame does not have.
+	# install_spin_frames.py has already pushed every frame's feet to its last row and
+	# aligned all eight on the head, so this can treat them as one sprite that happens to
+	# change picture, and he neither drifts sideways nor bobs as he goes round.
+	var key := fig_spin_frame(turn)
+	if key == "" or not art_bank.has(key):
+		return
+	var tex: Texture2D = (art_bank[key] as Dictionary)["tex"]
+	var sz := Vector2(tex.get_size()) * px
+	var pos := art_snap(Vector2(cx - sz.x * 0.5, floor_y - sz.y))
+	art_hits[key] = true
+	draw_colored_polygon(PackedVector2Array([
+		pos, pos + Vector2(sz.x, 0.0), pos + sz, pos + Vector2(0.0, sz.y)]), tint, art_uv, tex)
+
+
+func fig_spin_turn() -> float:
+	# how far through its single revolution the live Spin is, 0 at the start and 1 at the
+	# end. Shared by the stage and by anything previewing the trick, so the two can never
+	# disagree about which way round he is.
+	return 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)
+
+
 func fig_design_height(px: float = ART_PIXEL) -> float:
 	# the design's own height in SCREEN pixels, at the caller's OWN px: a preview draws the
 	# figure at half the stage's screen-pixels-per-art-pixel (see draw_figure_design), and a
@@ -12253,6 +12318,10 @@ var fig_arms: Dictionary = {}     # the performer's ARM BANK, from a manifest's 
 var fig_design: Dictionary = {}   # the active character design's landmark geometry, from a
                                   # variant manifest's _FIGURE block. EMPTY means the traced
                                   # juggler, whose proportions live in fig_ys as constants.
+var fig_spin: Dictionary = {}     # the TURNAROUND, from a manifest's _SPIN block: an ordered
+                                  # list of directions, one painted frame per eighth of a
+                                  # turn. EMPTY means no turnaround shipped, and a live Spin
+                                  # falls back to the old cos(angle) width squash.
 var art_manifest_path := ART_MANIFEST   # --artmanifest <path> points this elsewhere, which
 										# is how the placeholder set is tried on without
 										# editing (or risking) the real manifest
@@ -12294,6 +12363,7 @@ func art_boot() -> void:
 	art_bank.clear()          # re-entrant: an F9 variant change reboots the bank in place
 	fig_design.clear()        # ...and so does the active design's landmark geometry
 	fig_arms.clear()          # ...and its arm bank
+	fig_spin.clear()          # ...and its turnaround
 	torch_flame.clear()       # ...and the torch's live-fire geometry
 	art_read_manifest(art_manifest_path, true)
 	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
@@ -12341,6 +12411,12 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 		# art_blit_prop), so the game needs the painting's own idea of where the fire sits
 		# and how big it is - the card's proportions, not the vector drawing's.
 		torch_flame = (pd["_TORCH"] as Dictionary).duplicate(true)
+	if pd.has("_SPIN") and typeof(pd["_SPIN"]) == TYPE_DICTIONARY:
+		# THE TURNAROUND: eight painted frames, one per eighth of a live Spin. Read here
+		# rather than assumed from the key names, because the ORDER is the animation - the
+		# list says which way round the body goes, and fig_spin_key does nothing but round
+		# a turn fraction onto it.
+		fig_spin = (pd["_SPIN"] as Dictionary).duplicate(true)
 	if pd.has("_ARMS") and typeof(pd["_ARMS"]) == TYPE_DICTIONARY:
 		# THE ARM BANK: two lists of arms, "left" and "right", each entry an atlas slot plus
 		# the reach it was painted at and the position of its palm. Sorted by reach, which is
@@ -13939,10 +14015,13 @@ func draw_juggler(s: Vector2) -> void:
 	# itself at draw time.
 	var facing_back := _charback and _charref
 	var spin_on := spinning()
+	var painted_turn := spin_on and fig_design_on() and fig_spin_on()
 	var sx := 1.0                                 # body width scale: 1 front, ~0 profile, -1 back
-	if spin_on:
-		var sp := 1.0 - clampf(float(spin_until - tick) / float(SPIN_TICKS), 0.0, 1.0)
-		var ang := sp * TAU                       # exactly one full turn across the spin
+	if spin_on and not painted_turn:
+		# THE SQUASH IS THE FALLBACK NOW, not the mechanism. It is still exactly right for
+		# the traced juggler, who is drawn in code and has no other view of himself; a
+		# painted performer has eight, so see draw_figure_spin.
+		var ang := fig_spin_turn() * TAU          # exactly one full turn across the spin
 		sx = cos(ang)
 		facing_back = sx < 0.0
 		if absf(sx) < 0.14:                        # never collapse fully to a line at the profile
@@ -13975,7 +14054,7 @@ func draw_juggler(s: Vector2) -> void:
 		{"suit": suit, "suit_dk": suit_dk, "vest": vest, "collar": collar,
 			"accent": accent, "skin": skin, "hair": hair, "button": button},
 		facing_back, spin_on, sx, gaze)
-	if spin_on:                                                            # back to the body width-scale for the arms
+	if spin_on and not painted_turn:                                       # back to the body width-scale for the arms
 		draw_set_transform(Vector2(cx * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 
 	# arms follow the hands via a 2-bone solve, so the choreography animates
@@ -14159,6 +14238,15 @@ func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
 	# are all things a painted figure already has, and drawing them over it would be a man
 	# wearing two coats. The arms and hands are still the caller's, and still the game's.
 	if fig_design_on():
+		# A LIVE SPIN IS A PAINTED TURNAROUND, NOT A SQUASH (2026-08-15, Louis: "use
+		# pixellab to animate the spin animation"). It goes before everything else the
+		# design branch does, because for the third of a second the turn lasts the frame IS
+		# the figure: the hat, the glasses and the helmet all hang off head landmarks
+		# measured on the FRONT view, and there is no honest place to put a top hat on a
+		# man seen from behind. They come back the moment he faces forward again.
+		if spin_on and fig_spin_on():
+			draw_figure_spin(cx, floor_y, venue_figure_tint(), px, fig_spin_turn())
+			return
 		# A PAINTED FIGURE IS A FIXED-SIZE SPRITE and used to ignore `H` completely, so a
 		# PREVIEW asking for a small performer got a full stage-sized one that ran straight
 		# out of its panel - which is most of why the skills screen's mini juggler looked
@@ -15921,7 +16009,11 @@ func draw_hand(h: int) -> void:
 		# hand standing under a central lane (see fig_palm_far). The prop is drawn on its lane
 		# because that is where it is; without a hand there, the catch ring and the ball hang
 		# in open air while the performer's hands are somewhere else entirely.
-		if fig_palm_far(h):
+		# ...but NOT during a painted turn. That fallback blits the performer's own hand cut
+		# out of the FRONT view, so laying it over a body seen edge-on or from behind is a
+		# front-facing palm stuck to his back. Held props below still draw, because where a
+		# prop is remains a fact about the simulation however the man is facing.
+		if fig_palm_far(h) and not (spinning() and fig_spin_on()):
 			draw_figure_palm(h, pos)
 	else:
 		draw_mitt(pos, close, inward)
@@ -21615,7 +21707,16 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# does on stage; the head and hat are drawn outside it by draw_figure_body itself.
 	var sx := 1.0
 	var facing_back := false
-	if turn > 0.0:
+	# THE PREVIEW TURNS THE SAME WAY THE STAGE DOES. The Skills screen's Spin card is the
+	# one place a player studies the trick before ever pressing the key, so a squashed
+	# preview beside a painted stage turn would be teaching the wrong move. It cannot share
+	# fig_spin_turn(): this figure has its own little clock (`turn`), which is exactly the
+	# separation the preview's whole simulation exists for - so the frame is picked from
+	# THAT, and only the frame picker is shared.
+	var painted_turn := turn > 0.0 and fig_design_on() and fig_spin_on()
+	if painted_turn:
+		draw_figure_spin(o.x, floor_y, venue_figure_tint(), px, turn)
+	elif turn > 0.0:
 		sx = cos(turn * TAU)
 		facing_back = sx < 0.0
 		if absf(sx) < 0.16:
@@ -21625,11 +21726,17 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# the arms answer THIS preview's hands, in the painted figure's own art pixels
 	var wl := absf(hl.x - o.x) / px
 	var wr := absf(hr.x - o.x) / px
-	draw_figure_body(o.x, H, ys,
-		{"suit": suit, "suit_dk": suit_dk, "vest": vest, "collar": collar,
-			"accent": accent, "skin": skin, "hair": hair, "button": button},
-		facing_back, turn > 0.0, sx, Vector2.ZERO, px, wl, wr)
-	if turn > 0.0:
+	# A PAINTED TURN HAS ALREADY DRAWN THE WHOLE MAN, so the body and the arms below are
+	# skipped rather than drawn over it. This is not only tidiness: draw_figure_body's own
+	# spin branch reads fig_spin_turn(), which is the STAGE's clock, and this preview runs
+	# on its own `turn`. Letting the call through would have the mirror show whatever the
+	# live act is doing - usually nothing, so a frozen front view under moving streaks.
+	if not painted_turn:
+		draw_figure_body(o.x, H, ys,
+			{"suit": suit, "suit_dk": suit_dk, "vest": vest, "collar": collar,
+				"accent": accent, "skin": skin, "hair": hair, "button": button},
+			facing_back, turn > 0.0, sx, Vector2.ZERO, px, wl, wr)
+	if turn > 0.0 and not painted_turn:
 		draw_set_transform(Vector2(o.x * (1.0 - sx), 0.0), 0.0, Vector2(sx, 1.0))
 	# the stage's own arms and hands: draw_capsule_pix limbs shaded across their width, the
 	# traced mitt, the real glove. `close` is 0 - a figure at rest holds its hands open,
@@ -21638,7 +21745,7 @@ func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: flo
 	# blitted a frame of the juggling strip, which carries its own painted arms - so drawing
 	# the IK pair over it would put the very sausages Louis asked to be rid of back on the
 	# one screen built for looking closely at him. There is nothing to add here at all.
-	if not fig_anim_live():
+	if not fig_anim_live() and not painted_turn:
 		var pv_sleeve := fig_design_col("sleeve", suit) if fig_design_on() else suit
 		var pv_cuff := fig_design_col("cuff", collar) if fig_design_on() else collar
 		draw_arm(fig_shoulder(o.x, floor_y, H, LEFT, px), hl, LEFT, skin, pv_sleeve, pv_cuff)
