@@ -54,27 +54,28 @@ cone, and a ring wider than everything it joins reads as a tray with a wick stan
 already learned once, see CLAUDE.md. Absolute excess also means the torch's foot is the knife's
 pommel to the pixel, since the cone is 8 there.
 
-THE TORCH'S STEEL WICK IS NOW A BOUND HEAD, LIFTED FROM A GENERATION (2026-08-15, Louis asked
-PixelLab to "just create a juggling torch", picked s11 out of eleven, then "i want pro0.png for
-now, that one looks best"). Two blocks of `pro0` are kept - the bound wick and the metal
-ferrule under it - and nothing else, because pro0's own shaft is eight pixels of mottled brown
-that the knife's grip simply does better. **Take PROPORTIONS from a generation and MATERIAL
-from the pipeline**; measured, every one of the eleven broke at stage size when taken whole,
-three of them by leaving painted fire baked in under the live flame.
+THE TORCH IS NOT BUILT HERE ANY MORE - IT IS THE pro0 PAINTING (2026-08-15, Louis: "i want
+EXACTLY pro0: the same flame, the same handle, everything exactly like pro0 ... take the same
+handle as in the png, not the one overlaid on top of it which is the same as the knives").
 
-`TORCH_HEAD_SRC` switches designs. The s11 pair is kept on disk as `big_torch_s11.png` /
-`torch_s11.png`; to go back, point the source at `s11`, set TORCH_BUNDLE empty and
-TORCH_FERRULE to (40, 53), and take grip_sequence(2) rather than (1).
+Two passes before this grafted a generation's head onto the knife's grip, on the rule that a
+generated SHAFT never survives the reduction. That rule was learned on s11, whose pole is five
+pixels wide and reduces to four; **pro0's shaft is already eight, which is the knife grip's own
+width**, so the rule simply does not bite on this painting. The general lesson survives - check
+the shaft's width before trusting a generated prop - but "always replace it" was over-fitted to
+one example.
 
-`_TORCH` MOVES WHENEVER THE HEAD DOES and must be copied into Resources/art_manifest.json by
-hand - stage base_row 29 -> 25 over this pass. Nothing syncs them and a stale block draws the
-flame off the end of the handle.
+What is left is a warm snap, a rim fold (see `build_torch`), and `place`. Everything a player
+sees is pro0's own pixels.
 
-THE FLAME IS NOT ART AND NEVER WAS. What this script paints is a measurement carrier that
-nothing displays: derive_stage_props finds it by colour, clears it, and publishes the hole as
-`_TORCH`, from which `draw_torch_flame` draws a live animated fire every frame. Verified after
-this change - the stage sprite contains no fire at all, and the thirteen orange pixels left in
-it are the knife's own brass collar and pommel, forty rows below the band.
+`_TORCH` MOVES WHENEVER THE ART DOES and must be copied into Resources/art_manifest.json by
+hand. Nothing syncs them and a stale block draws the flame off the end of the handle.
+
+THE FLAME IS NOT ART AND NEVER WAS, which is the answer to "do animate that flame". The painted
+fire is a measurement carrier that nothing displays: derive_stage_props finds it, clears it, and
+publishes the hole as `_TORCH`, from which `draw_torch_flame` draws a live animated fire every
+frame - at exactly the place and size the painting put it, which is what makes "animate that
+flame on that exact location as in the png" a measurement problem rather than an art one.
 
 USAGE
   .venv/bin/python scripts/reshape_shaft_props.py             preview to artifacts/reshape/
@@ -138,45 +139,28 @@ CLUB_BODY_BOT = 45       # the last row of the body, where the handle's collar b
 CLUB_BODY_GROW = 5       # extra rows of taper
 CLUB_HANDLE_EXTRA = 1    # extra six-row wrap periods; the knife's own handle is 0
 
-# THE TORCH'S HEAD COMES FROM A GENERATION, ITS SHAFT DOES NOT (2026-08-15; Louis picked s11
-# from eleven, then "i want pro0.png for now, that one looks best"). Two blocks of the painting
-# are kept and nothing else: the bound cream wick BUNDLE, which is tangled inside the flame and
-# has to be cut out by colour, and the stepped metal FERRULE below it, taken whole by row.
+# THE TORCH IS THE pro0 PAINTING AND NOTHING ELSE (2026-08-15, Louis: "i want EXACTLY pro0:
+# the same flame, the same handle, everything exactly like pro0 ... take the same handle as in
+# the png, not the one overlaid on top of it which is the same as the knives").
 #
-# TORCH_HEAD_TOP is the free parameter and the shaft's length is not: the handle is quantised
-# to the knife's six-row wrap period (35 + 6k), so the head is positioned to leave a whole
-# number of periods under it. 41 rows here, which is also pro0's own shaft length - its
-# proportions survive even though none of its shaft pixels do.
+# Two earlier passes grafted a generation's HEAD onto the knife's grip, on the reasoning that a
+# generated shaft never survives the reduction. That was true of s11, whose pole is five pixels
+# wide, and it is NOT true of pro0, whose shaft is already eight - the knife grip's own width.
+# The general rule stands and this is simply a painting the rule does not bite on.
+#
+# `TORCH_HEAD_SRC` names the painting. Previous designs are kept on disk: `big_torch_s11.png` /
+# `torch_s11.png`, and the knife-grip torch before them is at commit 3930e10.
 TORCH_HEAD_SRC = "pro0"
-TORCH_BUNDLE = (29, 37)    # the bound wick, interleaved with fire on every one of these rows
-TORCH_FERRULE = (38, 47)   # the metal collar under it, clear of the flame
-TORCH_HEAD_TOP = 33
-TORCH_HEAD_PROUD = 6       # how far the widest head row sits outside the shaft's top width
 
-# The painted flame's own four entries, for cutting the bundle out from between them.
+# The fire's lowest reach in the painting. Above this row every pixel is either fire or fire's
+# outline, EXCEPT the bundle running up the middle - see build_torch's rim fold.
+TORCH_FIRE_BOT = 37
+BUNDLE_MIN = 4           # a central run narrower than this is a speck in the fire, not the wick
+
+# The painted flame's own four entries, for telling fire from wick where they interleave, and
+# the deepest of them, which the fire's folded-in outline is repainted as.
 FLAME_COLS = {(240, 104, 64), (255, 148, 61), (248, 184, 88), (255, 224, 140)}
-
-# THE BUNDLE IS TANNED DOWN OUT OF THE FIRE'S COLOUR RANGE, EVERY ROW OF IT.
-#
-# `strip_torch_flame`'s orange test (`r > 200` plus 100 points of red over blue) is passed by
-# pro0's own wick cream #f2cc8c and tan #d8a068, so the band ran straight down through the
-# bundle and the strip ate it - card base_row 41 instead of 33, rows 33..40 moth-eaten, row 33
-# down from 13 pixels to 4. **This is the pro0 "owl" defect in its third costume**, and the
-# reason it keeps coming back is that a bound wick and a flame really are the same colour.
-#
-# DARKENING ONLY THE TOP THREE ROWS FIXED THE CARD AND NOT THE STAGE SPRITE, which is the part
-# worth writing down. The band rule needs three consecutive orange-free rows to close, and
-# three charred rows under the flame give exactly that at card resolution. But the two sizes
-# are measured INDEPENDENTLY, and the 86 -> 78 reduction averages each output row from more
-# than one input row: cream from the bundle's fourth row bleeds up into the third, the band
-# re-forms, and the stage strip took base_row 31 and cleared the highlights anyway. A colour
-# that has to be excluded by a threshold cannot be excluded at one scale only.
-#
-# So every cream in the bundle drops a step. It costs the pale straw that made this design
-# attractive on the card and it is not optional: the alternative is a wick with holes in it.
-BUNDLE_TAN = {(242, 204, 140): (176, 136, 72), (216, 160, 104): (152, 96, 56),
-              (255, 240, 204): (176, 136, 72), (248, 184, 88): (152, 96, 56),
-              (255, 217, 102): (176, 136, 72), (158, 145, 133): (136, 120, 112)}
+FLAME_DEEP = (240, 104, 64)
 
 
 def handle_rows(y0: int, y1: int):
@@ -192,56 +176,6 @@ def handle_rows(y0: int, y1: int):
     for y in range(y0, y1 + 1):
         xs = np.where(op[y])[0]
         out[y] = [tuple(int(v) for v in a[y, x, :3]) for x in xs]
-    return out
-
-
-def torch_head():
-    """The generated torch's HEAD - the part between the fire and the shaft - as lists of RGB.
-
-    Snapped through `install_prop_cards.warm_palette()` rather than the plain 48, for the
-    reason that module documents at length: every generated object has a near-black rim, and
-    the locked palette's darkest entries are COOL, so an unrestricted snap sends a third of a
-    small sprite to indigo.
-
-    THE BUNDLE HAS TO BE CUT OUT OF THE FIRE, and this is the whole reason pro0 defeated the
-    normal pipeline. Its bound cream wick is not below the painted flame, it is INSIDE it -
-    rows 29..37 interleave wick tones with orange on the same scanline - so `strip_torch_flame`
-    took the fire, left the wick, and published a crown of gold spikes standing in open air.
-    Splicing the band out (`drop=`) is the documented fix and it removes the bundle along with
-    the fire. So the cut is by COLOUR instead: on those rows the flame's own four entries are
-    rejected and the longest surviving run through the centre is the bundle. That works here
-    and only here because the wick is cream-and-brown against pure orange; a cream flame core
-    would defeat it, which is why the ferrule below is taken by ROW and not by colour.
-    """
-    sys.path.insert(0, str(ROOT / "scripts"))
-    import install_prop_cards as ipc
-
-    a = np.asarray(Image.open(ROOT / "artifacts" / "torchgen" / f"{TORCH_HEAD_SRC}.png")
-                   .convert("RGBA")).astype(float)
-    warm = ipc.warm_palette()
-    out = []
-    for y in range(TORCH_BUNDLE[0], TORCH_FERRULE[1] + 1):
-        xs = np.where(a[y, :, 3] > 40)[0]
-        cols = [tuple(int(v) for v in c) for c in ipc.snap_warm(a[y, xs, :3], warm)]
-        if y <= TORCH_BUNDLE[1]:
-            keep = [i for i, c in enumerate(cols) if c not in FLAME_COLS]
-            runs = []
-            for i in keep:
-                if runs and i == runs[-1][-1] + 1:
-                    runs[-1].append(i)
-                else:
-                    runs.append([i])
-            # THE RUN THROUGH THE CENTRE, not the longest one. The flame's own dark RIM is not
-            # a flame colour, so it survives the reject as a run at each end of the scanline -
-            # and on the upper rows those rims are longer than the bundle they flank. Taking
-            # the longest run gave a one-pixel bundle for all nine rows. The bundle is the only
-            # thing on the torch's axis, so position identifies it and colour cannot.
-            mid = len(cols) // 2
-            hit = [r for r in runs if r[0] <= mid <= r[-1]]
-            if hit:
-                cols = [cols[i] for i in hit[0]]
-            cols = [BUNDLE_TAN.get(c, c) for c in cols]
-        out.append(cols)
     return out
 
 
@@ -304,101 +238,56 @@ def build_club() -> Image.Image:
 
 
 def build_torch() -> Image.Image:
-    a = np.zeros_like(np.asarray(Image.open(PROPS / "big_torch.png").convert("RGBA")))
-    cx = 20.0
-    rows = handle_rows(KNIFE_HANDLE_TOP, KNIFE_HANDLE_BOT)
+    """pro0, verbatim (2026-08-15, Louis: "i want EXACTLY pro0: the same flame, the same
+    handle, everything exactly like pro0 ... take the same handle as in the png, not the one
+    overlaid on top of it which is the same as the knives").
 
-    # --- THE FLAME. Drawn, not lifted, and it is a MEASUREMENT CARRIER rather than art:
-    # nothing ever displays it. derive_stage_props finds it by colour, clears it, writes
-    # `big_torch_body.png` (which is what the manifest points at) and publishes its extent as
-    # `_TORCH`, from which the game draws a live animated flame. So what this needs to be is
-    # the right SHAPE in the right PLACE. It is rasterised from the same profile Game.gd's
-    # flame_shape uses, so the pipeline measures the silhouette the game will actually draw.
-    prof = [(0.00, 0.00), (0.52, -0.07), (0.62, -0.26), (0.47, -0.48),
-            (0.27, -0.70), (0.11, -0.87), (0.00, -1.00)]
-    FLAME_H, FLAME_W = 26, 11.5
-    base_y = TORCH_HEAD_TOP - 1      # the last row of fire, sitting straight on the head
-    for i in range(FLAME_H):
-        v = -i / (FLAME_H - 1.0)
-        hw = 0.0
-        for k in range(len(prof) - 1):
-            if prof[k + 1][1] <= v <= prof[k][1]:
-                span = prof[k][1] - prof[k + 1][1]
-                f = 0.0 if span == 0 else (prof[k][1] - v) / span
-                hw = (prof[k][0] * (1 - f) + prof[k + 1][0] * f) * FLAME_W
-                break
-        y = base_y - i
-        for x in range(int(round(cx - hw)), int(round(cx + hw)) + 1):
-            if 0 <= x < a.shape[1] and 0 <= y < a.shape[0]:
-                # THE TIP IS ORANGE, and that is not only truer to a flame - it is what keeps
-                # the strip able to find it. The band is defined by ORANGE pixels; a tip drawn
-                # in the pale core colour has no orange beside it, so the band starts one row
-                # below and that lone white pixel survives into the stripped sprite as a speck
-                # floating above the fire. Measured: the body came back starting at row 7.
-                d = abs(x - cx) / max(0.6, hw)
-                c = ((255, 240, 204) if d < 0.35 else ((248, 184, 88) if d < 0.7 else (240, 104, 64))) if hw >= 2.0 else (240, 104, 64)
-                a[y, x] = (c[0], c[1], c[2], 255)
+    So this no longer BUILDS a torch out of parts - it warm-snaps the painting, folds the
+    flame's own dark outline into the flame so the fire is one clean region, and places it.
+    The shaft is pro0's mottled brown, the ferrule is pro0's, the wick is pro0's cream, and
+    the fire is drawn live in exactly the place pro0 painted it.
 
-    # --- THE HEAD: a bound wrap, lifted from the s11 painting (2026-08-15, Louis picked it out
-    # of eleven generations: "fix up s11"). It replaces a thin steel wick, and it is the one
-    # part of that painting worth keeping - the rest of s11 is a five-pixel pole that reduces
-    # to four on stage, thinner than the knife's blade and far too thin to read as something a
-    # hand catches. So the PROPORTIONS come from s11 (a long shaft under a distinct head) and
-    # the material comes from the pipeline.
-    #
-    # Warm-snapped, its wrap lands on the club's own crimson family (#702020 / #903030 over
-    # #381810 / #0f090d), which is a better outcome than the design asked for: a crimson head,
-    # a brass ferrule and the knife's leather grip put the torch in the same wardrobe as the
-    # other two heavy props instead of beside them.
-    #
-    # ITS WIDTHS ARE REMAPPED, NOT SCALED. s11's head runs 13 down to 5 over a 5px pole - a
-    # ratio of 2.6 - and the same ratio over this 12px shaft would be a 31px head, which is the
-    # TRAY failure this file has already paid for once. The range [5, 13] is mapped onto
-    # [14, 20] instead, which keeps every bump in the bundle's outline while sitting a modest
-    # two pixels proud of the shaft it sits on.
-    head = torch_head()
-    hw_lo, hw_hi = min(len(r) for r in head), max(len(r) for r in head)
-    shaft_top = int(round(KNIFE_GRIP_W * TORCH_GROWTH))       # 12, what the head must meet
-    for i, row in enumerate(head):
-        want = int(round(shaft_top + (len(row) - hw_lo) * TORCH_HEAD_PROUD
-                         / max(1, hw_hi - hw_lo)))
-        x0 = int(round(cx - want / 2.0))
-        for x in range(want):
-            j = int(round((x / max(1, want - 1)) * (len(row) - 1)))
-            c = row[min(len(row) - 1, j)]
-            a[TORCH_HEAD_TOP + i, x0 + x] = (c[0], c[1], c[2], 255)
+    THE ONE THING DONE TO THE PAINTING IS THE RIM FOLD, and it exists so the strip can be
+    exact. pro0 outlines its fire in near-black, and those pixels are the same palette entries
+    as the shaft's own edge - so no colour test can tell "the dark line around the flame" from
+    "the dark line down the handle". Position can: above the wick every pixel is fire or fire's
+    outline, and across the wick the fire is everything OUTSIDE the bundle's central run. Those
+    pixels are repainted in the flame's own deepest orange, which makes the fire a single
+    region of four known colours that `strip_torch_flame` lifts without touching the wick.
+    Nothing a player sees changes - the whole region is deleted before anything is drawn.
+    """
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import install_prop_cards as ipc
 
-    # --- THE HANDLE: the knife's, tapering 8 at the foot to 12 at the shoulder.
-    top, bot = TORCH_HEAD_TOP + len(head), 92
-    seq = grip_sequence(1)
-    excess = [len(rows[y]) - KNIFE_GRIP_W for y in seq]
-    n = bot - top + 1
-    assert len(seq) == n, f"handle sequence is {len(seq)} rows, the torch has {n}"
+    raw = np.asarray(Image.open(ROOT / "artifacts" / "torchgen" / f"{TORCH_HEAD_SRC}.png")
+                     .convert("RGBA")).astype(float)
+    warm = ipc.warm_palette()
+    a = np.zeros(raw.shape, np.uint8)
+    op = raw[..., 3] > 40
+    for y in range(raw.shape[0]):
+        xs = np.where(op[y])[0]
+        if len(xs) == 0:
+            continue
+        cols = [tuple(int(v) for v in c) for c in ipc.snap_warm(raw[y, xs, :3], warm)]
+        if y <= TORCH_FIRE_BOT:
+            # everything outside the bundle's own central run, on a row the fire reaches, is
+            # fire or fire's outline - see the note above
+            keep = [i for i, c in enumerate(cols) if c not in FLAME_COLS]
+            runs = []
+            for i in keep:
+                if runs and i == runs[-1][-1] + 1:
+                    runs[-1].append(i)
+                else:
+                    runs.append([i])
+            mid = len(cols) // 2
+            hit = [r for r in runs if r[0] <= mid <= r[-1] and len(r) >= BUNDLE_MIN]
+            body = set(hit[0]) if hit else set()
+            cols = [c if i in body else FLAME_DEEP for i, c in enumerate(cols)]
+        for i, x in enumerate(xs):
+            a[y, x] = (cols[i][0], cols[i][1], cols[i][2], 255)
 
-    # THE WIDTH RAMPS, THE EDGES ALTERNATE. Rounding a symmetric half-width about a centre
-    # cannot stagger the two sides - both cross their thresholds at the same fractional width,
-    # by symmetry, whatever the centre's phase - so the first version of this stepped two
-    # pixels at once and came out 12px for nine rows, 11px for ONE, then 10px for twenty-five:
-    # a stack of cylinders, not a cone. Round the TOTAL width instead (a linear ramp rounded
-    # gives even runs, here 7/13/13/13/7 rows) and then hand each extra pixel to a different
-    # side: left takes the odd ones, right the even ones. The silhouette grows one pixel at a
-    # time, alternating, which is as smooth as a four-pixel taper gets at this density.
-    base = KNIFE_GRIP_W                                  # the thin end, the knife's own grip
-    left0 = int(cx - base / 2.0)
-    widths = []
-    for i in range(n):
-        w = int(round(base * (TORCH_GROWTH - (TORCH_GROWTH - 1.0) * (i / (n - 1.0)))))
-        grow = w - base
-        # The collar and the cap ride proud of the local cone by the SAME absolute amount they
-        # ride proud of the knife's grip (+4/+6/+6/+4, +2/+2/+2/0/-4), and symmetrically, since
-        # they are rings rather than part of the taper. Proportional instead would put a 21px
-        # collar on a 12px cone, and a ring wider than everything it joins reads as a tray.
-        lo = left0 - math.ceil(grow / 2.0) - excess[i] // 2
-        widths.append((max(1, w + excess[i]), lo))
-
-    blit_rows(a, top, rows, seq, cx, widths)
-    return Image.fromarray(a, "RGBA")
-
+    y0, y1, x0, x1 = ipc.ink_box(a.astype(float))
+    return Image.fromarray(ipc.place(a[y0:y1 + 1, x0:x1 + 1], 40, 96, 4), "RGBA")
 
 def report(name: str, im: Image.Image) -> None:
     a = np.asarray(im)

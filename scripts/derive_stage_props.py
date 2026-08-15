@@ -274,10 +274,33 @@ def strip_torch_flame(a: np.ndarray) -> tuple[np.ndarray, dict]:
 	#     or a deep red root with essentially no blue; crimson is neither.
 	#   * `core` is then cleared only INSIDE that band, where a near-white pixel can only be
 	#     fire, because the grip is thirty rows below it.
+	# ...AND A THRESHOLD CANNOT SURVIVE A WICK THE COLOUR OF FIRE (2026-08-15). The rule below
+	# was `r > 200` plus 100 points of red over blue, and pro0's bound cream wick (#f2cc8c) and
+	# its tan (#d8a068) both pass it - so the band ran down through the wick and the strip ate
+	# it: card base_row 41 instead of 33, row 33 down from 13 pixels to 4. A bound wick and a
+	# flame ARE the same colour; no threshold separates them.
+	#
+	# What separates them is that this project has a LOCKED PALETTE. Both sizes are snapped to
+	# the same 48 entries, so fire can be named exactly instead of described approximately, and
+	# `#f2cc8c` is simply not one of the four the flame is painted in. That is strictly stronger
+	# than the threshold it replaces: it already rejects the brass band and the crimson body the
+	# old test was widened to exclude, and it cannot be fooled by a warm object being bright.
+	#
+	# It works because the CARD is authored into these entries and the reduction snaps back to
+	# them. A generation dropped in raw would need the warm snap first, which is where every
+	# painting in this pipeline comes from anyway.
+	FLAME_INK = [(240, 104, 64), (255, 148, 61), (248, 184, 88), (255, 224, 140)]
+	CORE_INK = [(255, 240, 204), (255, 255, 255)]
 	op = out[..., 3] > 0
-	orange = (op & (out[..., 0] > 200) & (out[..., 0] > out[..., 2] + 100)
-			  & ((out[..., 1] > 100) | (out[..., 2] < 20)))
-	core = op & (out[..., 0] > 230) & (out[..., 1] > 200) & (out[..., 2] > 150)
+
+	def is_any(inks):
+		m = np.zeros(op.shape, bool)
+		for c in inks:
+			m |= (out[..., 0] == c[0]) & (out[..., 1] == c[1]) & (out[..., 2] == c[2])
+		return op & m
+
+	orange = is_any(FLAME_INK)
+	core = is_any(CORE_INK)
 	hot = orange
 	rows = [y for y in range(h) if bool(orange[y].any())]
 	if not rows:
