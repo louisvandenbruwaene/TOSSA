@@ -3251,6 +3251,7 @@ func _input(event: InputEvent) -> void:
 					# ST_TUTDONE and ST_MENUTOUR)
 					post_lesson_show = false
 					first_show_reaction = ""   # a one-act line; never carries into a later card
+					save_progress()              # do not book the tutorial show again next launch
 					game_state = ST_MENUTOUR
 					cine_tick = 0
 				else:
@@ -3704,6 +3705,9 @@ func arm_show_guide() -> void:
 	if show_guide_seen:
 		return
 	show_guide_seen = true
+	# Remember this before the first line appears. A window close during the tour should
+	# resume the booked show, not replay every explanation card on the next launch.
+	save_progress()
 	show_guide_lines = [
 		"This is a real performance. The left rail is the room and tonight's goals; the right rail is your juggler and career.",
 		"SCORE is what this set is worth. The flower stem fills toward three goals; each goal banks a safer floor under your result.",
@@ -7316,7 +7320,12 @@ func start_slot(i: int) -> void:
 		game_state = ST_DIFFICULTY
 	else:
 		load_progress()
-		enter_day()   # an existing career resumes at its day, not mid-juggle
+		if post_lesson_show:
+			# The mandatory first show was booked before the previous session ended.
+			# Resume that onboarding beat instead of silently dropping the player in the hub.
+			begin_performance(num_balls)
+		else:
+			enter_day()   # an existing career resumes at its day, not mid-juggle
 
 
 func difficulty_input(kc: int) -> void:
@@ -7373,6 +7382,8 @@ func reset_new_game() -> void:
 	won = false
 	demo_wall_seen = false   # fixing a gap from when this flag was first added: a
 	purist_legend_seen = false   # fresh slot must not inherit a previous career's flags
+	post_lesson_show = false
+	show_guide_seen = false
 	best_scores = [0, 0, 0, 0, 0, 0, 0]
 	best_scores_purist = [0, 0, 0, 0, 0, 0, 0]
 	pattern_sel = CASCADE
@@ -11775,6 +11786,8 @@ func load_progress() -> void:
 		won = bool(cf.get_value("prog", "won", false))
 		demo_wall_seen = bool(cf.get_value("prog", "demo_wall_seen", false))
 		purist_legend_seen = bool(cf.get_value("prog", "purist_legend_seen", false))
+		post_lesson_show = bool(cf.get_value("prog", "post_lesson_show", false))
+		show_guide_seen = bool(cf.get_value("prog", "show_guide_seen", false))
 		var bs: Variant = cf.get_value("prog", "best_scores", [])
 		if bs is Array:
 			for i in mini((bs as Array).size(), best_scores.size()):
@@ -12005,6 +12018,8 @@ func save_progress() -> void:
 	cf.set_value("prog", "debug_stocked", debug_mode)
 	cf.set_value("prog", "demo_wall_seen", demo_wall_seen)
 	cf.set_value("prog", "purist_legend_seen", purist_legend_seen)
+	cf.set_value("prog", "post_lesson_show", post_lesson_show)
+	cf.set_value("prog", "show_guide_seen", show_guide_seen)
 	cf.set_value("prog", "best_scores", best_scores)
 	cf.set_value("prog", "best_scores_purist", best_scores_purist)
 	cf.set_value("prog", "pattern_sel", pattern_sel)
