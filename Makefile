@@ -1,4 +1,4 @@
-.PHONY: setup validate quick-validate test run editor scene screenshot profile format lint clean reimport help
+.PHONY: setup validate quick-validate test run editor scene screenshot profile format lint clean reimport export help
 
 help:
 	@echo "TOSSA dev commands:"
@@ -15,6 +15,7 @@ help:
 	@echo "  make lint           run gdlint (advisory)"
 	@echo "  make reimport       force-reimport assets and check for orphaned .import sidecars"
 	@echo "  make clean          remove the .godot/ cache"
+	@echo "  make export         export macOS+Windows+Linux binaries into export/"
 
 setup:
 	scripts/bootstrap.sh
@@ -50,6 +51,9 @@ lint:
 
 reimport:
 	scripts/reimport.sh
+
+export:
+	scripts/export_all.sh
 
 clean:
 	scripts/clean_cache.sh
