@@ -45,6 +45,16 @@ Codex improvements:
   menu. Prop/count/pattern/trick lessons introduce O, 1/2, P, and Space/C only when those features
   unlock. The post-show hub tour introduces Tab, the shop, progression scaling, and optional shortcuts
   across four short pages. The goal-stem demo holds its finished yellow bloom for one full second.
+- **Tutorial actions stop at teachable moments:** a held high toss must be released and caught, then
+  waits for Enter; guided throws pause with the preceding ball near its apex and guided catches pause
+  just before arrival. Free-practice tallies clamp at their target. During basics, Esc offers only
+  Resume or Restart Step, so the mandatory lesson cannot be skipped through the pause menu.
+- **First-performance HUD tour is progressive:** it walks stage, stamina, score flower, crowd,
+  routine, then stopping. The multiplier readout was removed; the flower stays hidden until its page
+  and its completed bloom is yellow. Tutorial key names use yellow bracket styling consistently.
+- **Round-prop title art has one silhouette treatment:** ball and ring card/stage sources are generated
+  from the same banded model with a dark edge instead of a pale rim. Re-run `make_round_props.py`, then
+  `pixelise_mark.py` after round-prop changes. The title A uses slightly larger, lower-reaching clubs.
 
 ## PIXEL ART (read this before touching anything visual)
 

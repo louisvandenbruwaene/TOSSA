@@ -3526,12 +3526,13 @@ func debug_panel_step(row: int, dir: int) -> void:
 
 
 func pause_input(kc: int) -> void:
+	var option_count := 2 if tut_active else 3
 	match kc:
 		KEY_UP:
-			pause_sel = (pause_sel + 2) % 3
+			pause_sel = (pause_sel + option_count - 1) % option_count
 			play_sfx("ui", -16.0)
 		KEY_DOWN:
-			pause_sel = (pause_sel + 1) % 3
+			pause_sel = (pause_sel + 1) % option_count
 			play_sfx("ui", -16.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			pause_activate()
@@ -3540,6 +3541,8 @@ func pause_input(kc: int) -> void:
 		KEY_2:
 			pause_sel = 1; pause_activate()
 		KEY_3:
+			if tut_active:
+				return
 			pause_sel = 2; pause_activate()
 		KEY_ESCAPE, KEY_P:
 			paused = false
@@ -3547,6 +3550,14 @@ func pause_input(kc: int) -> void:
 
 
 func pause_activate() -> void:
+	if tut_active:
+		if pause_sel == 0:
+			paused = false
+			play_sfx("ui2", -14.0)
+		else:
+			paused = false
+			tut_reset_step()
+		return
 	match pause_sel:
 		0:   # resume the run right where it froze
 			paused = false
@@ -3698,7 +3709,7 @@ func guide_stem_demo() -> float:
 	# The cycle is anchored to the moment the LINE arrived, not to the free-running clock:
 	# a demonstration that starts halfway up, or starts by draining, demonstrates nothing.
 	# It begins at empty, every time, as the sentence about it appears.
-	if show_guide_step != 1:
+	if show_guide_step != 2:
 		return -1.0
 	var t := fmod(float(cine_tick - show_guide_tick), GUIDE_STEM_CYCLE)
 	if t < GUIDE_STEM_RAMP:
@@ -3724,14 +3735,12 @@ func arm_show_guide() -> void:
 	# resume the booked show, not replay every explanation card on the next launch.
 	save_progress()
 	show_guide_lines = [
-		"This is a real performance. The left rail is the room and tonight's goals; the right rail is your juggler and career.",
-		"SCORE is what this set is worth. The flower stem fills toward three goals; each goal banks a safer floor under your result.",
-		"TONIGHT counts flowers earned in this act. Flowers are your money, and the purse on the right is what you already own.",
-		"THE CROWD shows patience. Clean catches and spectacle lift it; dead time and drops drain it. DROPS LEFT is how many mistakes end this act.",
-		"MULT multiplies the current run until a drop banks and resets it. STAMINA pays for catching; low stamina makes catches less reliable.",
-		"The right rail also shows REPUTATION, which opens venues, and LEVEL/XP. Level-ups award points for the character sheet [%s]." % String(k_sheet()[0]),
-		"After the first goal, [%s] cashes in. You can also stop by catching everything and holding it. Pushing farther risks score above the last banked goal." % String(k_finish()[0]),
-		"Catch timing still matters: PERFECT always lands; GOOD and LATE can fail. Keep one prop airborne, watch the hands, and play the rhythm—not the rails. Good luck.",
+		"BACKYARD names tonight's stage. This left side holds the performance information.",
+		"STAMINA is your catching energy. Rest restores it; low stamina makes catches less reliable.",
+		"SCORE is this performance. Its flower grows through three goals; each goal banks a safer result.",
+		"THE CROWD is their patience. Clean juggling lifts it; dead time and drops drain it. DROPS LEFT shows how many mistakes remain.",
+		"The bottom-left card names your pattern and objects. Their shortcuts appear there when you earn those choices.",
+		"To stop, catch every object and hold them, or press [%s] after reaching the first goal." % String(k_finish()[0]),
 	]
 	show_guide_step = 0
 	show_guide_tick = cine_tick
@@ -5192,7 +5201,7 @@ func tut_lesson(id: String) -> Array:
 	# HEIGHT is a real input, not trivia: this step only clears after a release held long
 	# enough to change the flight. It runs unfrozen so press duration can actually exist.
 	out.append({"goal": "hold_throw", "prop": PROP_BALLS, "balls": 1, "hand": RIGHT,
-		"stack": 1, "need": 1, "slow": 0.0, "say": true, "next": "go on",
+		"stack": 1, "need": 1, "slow": 0.0, "say": true, "manual": true, "next": "go on",
 		"text": "Hold [%s] until the gold gauge grows, release the high throw, then watch it and catch it. Higher arcs give you more time but are harder to secure." % TD})
 	out.append(tut_say("Use low taps for rhythm and held throws to make room. Height buys time, but very high catches are less forgiving."))
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
@@ -5236,7 +5245,7 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_say("Now the empty-hands cascade. Put all three up first; after that, catch first and throw from that same hand. We will pause on every key."))
 	out.append(tut_do("First ball up.", "throw", dom, TD, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
 	out.append(tut_do("Second ball under it.", "throw", off, TO, 3, 2, true, {"style": TUT_ADVANCED, "sequence": true}))
-	out.append(tut_do("Third ball up - now both hands are empty.", "throw", dom, TD, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
+	out.append(tut_do("When the second ball is high, put the third ball up - now both hands are empty.", "throw", dom, TD, 3, 2, true, {"style": TUT_ADVANCED, "sequence": true}))
 	var empty_actions := [
 		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
 		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
@@ -5248,10 +5257,10 @@ func tut_lesson(id: String) -> Array:
 		out.append(tut_do("Catch into the empty hand." if String(ae[0]) == "catch" else "Throw it straight back.",
 			String(ae[0]), ahe, keye, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
 	out.append(tut_say("That full sequence is the empty-hands rhythm: all three up, then catch and immediately throw from the same hand."))
-	out.append(tut_say("That is enough for now. [%s] restarts a practice deal, and %s opens the game menu. New controls will be taught only when their feature unlocks." % [String(k_restart()[0]), String(k_pause()[0])]))
+	out.append(tut_say("That is enough for now. [%s] restarts this practice deal, and [%s] opens the game menu." % [String(k_restart()[0]), String(k_pause()[0])]))
 	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
 		"next": "finish the lesson", "say": true,
-		"text": "Tangled? %s starts you over, any time you are practising." % String(k_restart()[0])})
+		"text": "Tangled? [%s] starts you over, any time you are practising." % String(k_restart()[0])})
 	return out
 
 
@@ -6231,7 +6240,11 @@ func tut_on_catch(juggled: bool, hand: int = -1) -> void:
 				else "that was the ADVANCED exchange  -  throw first, then catch")
 			tut_count = 0
 			return
-	tut_count += 1
+	var cap := int(step.get("need", 0))
+	if String(step.get("goal", "")) == "free" and cap > 0:
+		tut_count = mini(tut_count + 1, cap)
+	else:
+		tut_count += 1
 	tut_check()
 
 
@@ -6279,7 +6292,8 @@ func tut_check() -> void:
 		# keep the generic feeder from sneaking in a stray throw - see its own comment)
 		# is tuned around a step staying "done but open" for a beat, and this collapses
 		# that beat to zero for a real player only.
-		if goal != "read" and goal != "free" and (not _demo or bool(step.get("sequence", false))):
+		if goal != "read" and goal != "free" and not bool(step.get("manual", false)) \
+				and (not _demo or bool(step.get("sequence", false))):
 			tut_advance()
 
 
@@ -6487,28 +6501,29 @@ func draw_speech_line(font: Font, pos: Vector2, line: String, take: int, size: i
 	# reveals the line a character at a time (see tut_speech_chars), split across all
 	# three runs, so the highlighted key types in with the rest of the sentence rather
 	# than popping in whole.
-	var lb := line.find("[")
-	var rb := line.find("]", lb + 1) if lb >= 0 else -1
-	if lb < 0 or rb < 0:
-		draw_string(font, pos, line.substr(0, clampi(take, 0, line.length())), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
-		return
-	var pre := line.substr(0, lb)
-	var key := line.substr(lb, rb - lb + 1)
-	var post := line.substr(rb + 1)
 	var key_size := size + 3
 	var key_col := Color(1.0, 0.88, 0.32)
 	var x := pos.x
-	var r0 := clampi(take, 0, pre.length())
-	if r0 > 0:
-		draw_string(font, Vector2(x, pos.y), pre.substr(0, r0), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
-	x += font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
-	var r1 := clampi(take - pre.length(), 0, key.length())
-	if r1 > 0:
-		draw_string(font, Vector2(x, pos.y), key.substr(0, r1), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(key_size), key_col)
-	x += font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(key_size)).x
-	var r2 := clampi(take - pre.length() - key.length(), 0, post.length())
-	if r2 > 0:
-		draw_string(font, Vector2(x, pos.y), post.substr(0, r2), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
+	var at := 0
+	while at < line.length():
+		var lb := line.find("[", at)
+		var rb := line.find("]", lb + 1) if lb >= 0 else -1
+		var stop := lb if lb >= 0 and rb >= 0 else line.length()
+		if stop > at:
+			var plain := line.substr(at, stop - at)
+			var shown := clampi(take - at, 0, plain.length())
+			if shown > 0:
+				draw_string(font, Vector2(x, pos.y), plain.substr(0, shown), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size), base_col)
+			x += font.get_string_size(plain, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
+			at = stop
+		if lb < 0 or rb < 0:
+			break
+		var key := line.substr(lb, rb - lb + 1)
+		var key_shown := clampi(take - lb, 0, key.length())
+		if key_shown > 0:
+			draw_string(font, Vector2(x, pos.y), key.substr(0, key_shown), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(key_size), key_col)
+		x += font.get_string_size(key, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(key_size)).x
+		at = rb + 1
 
 
 func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
@@ -6991,11 +7006,8 @@ func draw_tut_focus(b: Ball) -> void:
 	# only the ball that currently requires an action, not the one from the previous
 	# action"). tut_focus_ball is the single answer to "which prop"; this only draws it.
 	#
-	# SOFT, NOT A DRAWN CIRCLE. An earlier pass put a hard `draw_arc` round the prop and
-	# Louis's verdict was that it looked "jagged or just positioned wrong or both" - so the
-	# body of the mark is draw_glow (one textured quad, a real radial falloff, no polygon
-	# to alias) and the ring on top is thin, antialiased and deliberately faint: it gives
-	# the glow an edge to read against a bright stage without ever being the thing you see.
+	# One soft aura is enough. A ring on top repeated the same emphasis and made a ball look
+	# selected twice, so the textured glow is now the complete focus mark.
 	if b == null:
 		return
 	var p := tut_ball_pos(b)
@@ -7005,7 +7017,6 @@ func draw_tut_focus(b: Ball) -> void:
 	var pulse := 0.5 + 0.5 * sin(atick() * 0.07)   # cine_tick runs at 120/s: halve the rate
 	var gold := Color(1.0, 0.86, 0.32)
 	draw_glow(p, r * 2.1 + 5.0 * pulse, Color(gold.r, gold.g, gold.b, 0.22 + 0.12 * pulse))
-	draw_arc(p, r + 2.5 * pulse, 0.0, TAU, 48, Color(gold.r, gold.g, gold.b, 0.30 + 0.22 * pulse), 1.6, true)
 
 
 func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
@@ -17805,7 +17816,7 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		# and nothing else: posy (FLOWER_TIERS[1], purple) the moment the third and final
 		# NUM_GOALS entry falls, and gold rose (FLOWER_TIERS[2], the yellow one) once the
 		# score has gone STEM_OVER_GOLD_AT past it. Each pays its own one-time warm_room().
-		var gold := over >= STEM_OVER_GOLD_AT
+		var gold := true
 		if gold and live and not stem_gold_bonus_given:
 			stem_gold_bonus_given = true
 			warm_room(0.05)
@@ -17822,7 +17833,7 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 			for i in 5:
 				var ta2 := atick() * 0.015 + TAU * float(i) / 5.0
 				draw_star4(bud + Vector2(cos(ta2), sin(ta2)) * 16.0, 2.2, Color(1.0, 0.97, 0.78, 0.8))
-		draw_flower(bud, 1, 2.8, atick() * 0.008, 1.0)
+		draw_flower(bud, 2, 2.8, atick() * 0.008, 1.0)
 	else:
 		# still a bud - and it swells as the goal nears, so the change is a growth and
 		# not a swap
@@ -18332,13 +18343,14 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# run out again at the same speed; that shows how the meter is supposed to fill up
 		# repeatedly"). `live` is false for the demo so the waypoint and gold bonuses cannot
 		# fire off an animation.
-		var gdemo := guide_stem_demo()
-		if gdemo >= 0.0:
-			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), gdemo, 0.0, marks,
-				Color(venue_data(run_venue)["glow"]), false)
-		else:
-			draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
-				Color(venue_data(run_venue)["glow"]))
+		if show_guide_step < 0 or show_guide_step >= 2:
+			var gdemo := guide_stem_demo()
+			if gdemo >= 0.0:
+				draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), gdemo, 0.0, marks,
+					Color(venue_data(run_venue)["glow"]), false)
+			else:
+				draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
+					Color(venue_data(run_venue)["glow"]))
 		# THE TAKINGS COLUMN STARTS CLEAR OF THE BLOOM (2026-07-27, Louis: the flower
 		# overlapped the word TONIGHT). The stem's bud sits on the centre line of the
 		# box above (its x + half its 34px width), and past the final goal it opens
@@ -18514,40 +18526,13 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if not results_open:
 		var RW := 264.0
 		var RX := s.x - 18.0 - RW
-		# THE SEGMENT, which is the addictive number now and has no ceiling to show. The big
-		# figure is what THIS stretch is worth - everything a drop is about to cost - and the
-		# small line underneath is the arithmetic behind it: the weighted catch count and the
-		# exponent it is being raised to. The exponent is the part a player plans around,
-		# because it is the one thing they chose before the act started.
-		hud_card(Rect2(RX, 16, RW, 50))
-		# WHAT THIS STREAK IS WORTH A CATCH, which is the number a player can actually act on
-		# under the new formula. The score is linear in streak length now, so the interesting
-		# figure is no longer "what would a drop cost" but "what is each catch paying me" -
-		# the thing the load, the pattern and every trick landed so far have been buying.
-		var per := seg_per_catch()
-		var heat := clampf(log_10(maxf(per, 1.0)) / 40.0, 0.0, 1.0)
-		var scol2 := Color(0.85, 0.8, 0.7).lerp(Color(1.0, 0.68, 0.22), heat)
-		var mpulse := maxi(0, 7 - (tick - last_streak_tick)) if seg_x > 0.0 else 0
-		# "Mult = N" (2026-07-31, Louis: replace the "/catch" reading with this - "Mult = 8,
-		# (or whatever the value is)"). Same one-line trick as the suffix it replaces
-		# ("$5.99/mo"): a smaller label on the number's own baseline, just leading now
-		# instead of trailing. `per` already falls the moment a drop closes the segment
-		# (close_run -> seg_open("drop") resets seg_x/seg_n) and `seg_n` already tracks the
-		# live object count (seg_sync_load, called on every count/prop/pattern change).
-		var per_fs := 26 + mpulse
-		var per_txt := score_text(per)
-		var lbl := "Mult = "
-		var lbl_w := font.get_string_size(lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x
-		draw_string(font, Vector2(RX + 14, 52), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.85, 0.72, 0.55))
-		draw_string(font, Vector2(RX + 14.0 + lbl_w + 2.0, 52), per_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(per_fs), scol2)
-		draw_string(font, Vector2(RX + RW - 150, 40), "%d in this run" % int(seg_x), HORIZONTAL_ALIGNMENT_RIGHT, 136.0, ps(12), dim)
 		# STATE: only what actually moves or matters DURING a run (Louis: the play
 		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
 		# stat points are actionable (Tab), so they get one pulsing line. Gold,
 		# Reputation, and the LV/XP bar never change mid-run - they live in the
 		# day hub, the sheet, and the results card instead of being repeated here.
 		var pts_row := points > 0
-		hud_card(Rect2(RX, 74, RW, 66.0 if pts_row else 48.0))
+		hud_card(Rect2(RX, 16, RW, 66.0 if pts_row else 48.0))
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
@@ -18558,15 +18543,15 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# elsewhere: the last drop mark and the capped streak label both do the same).
 		var stam_low := sfrac < STAM_LOW
 		var stam_a := 0.55 + 0.45 * sin(float(tick) * 0.3) if stam_low else 0.85
-		draw_string(font, Vector2(sx, 96), "STAMINA  -  LOW" if stam_low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(1.0, 0.55, 0.42, stam_a) if stam_low else Color(0.85, 0.9, 0.85, 0.85))
-		draw_string(font, Vector2(sx + sw - 80.0, 96), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(11), Color(0.85, 0.9, 0.85, 0.85))
+		draw_string(font, Vector2(sx, 38), "STAMINA  -  LOW" if stam_low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(1.0, 0.55, 0.42, stam_a) if stam_low else Color(0.85, 0.9, 0.85, 0.85))
+		draw_string(font, Vector2(sx + sw - 80.0, 38), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(11), Color(0.85, 0.9, 0.85, 0.85))
 		var stcol := Color(0.55, 0.80, 0.6)
 		if stam_low:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
-		draw_meter(sx, 102, sw, 11.0, sfrac, stcol)
+		draw_meter(sx, 44, sw, 11.0, sfrac, stcol)
 		if pts_row:
 			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-			draw_string(font, Vector2(sx, 132), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.7, 0.95, 0.7, pa))
+			draw_string(font, Vector2(sx, 74), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
@@ -18810,9 +18795,11 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 
 	var opts := [
 		{"name": "Resume", "note": "right where it froze", "col": Color(0.55, 0.88, 0.52), "icon": "play"},
-		{"name": "End the session", "note": "back to the day hub", "col": Color(0.96, 0.76, 0.4), "icon": "back"},
+		{"name": "Restart this step" if tut_active else "End the session", "note": "a fresh tutorial deal" if tut_active else "back to the day hub", "col": Color(0.96, 0.76, 0.4), "icon": "back"},
 		{"name": "Quit Game", "note": "close " + GAME_TITLE, "col": Color(0.92, 0.42, 0.36), "icon": "quit"},
 	]
+	if tut_active:
+		opts.resize(2)
 	var cw := pw - 44.0
 	var cx := px + 22.0
 	var ch := 58.0
@@ -23807,12 +23794,9 @@ const CAP_A_LEAN := 0.46       # how far each of the A's strokes leans off verti
 							   # the A splays, any smaller and it is a candle. Unchanged from the
 							   # torch version, which is why the letter's proportions did not move
 							   # when the object inside it did.
-const CAP_A_CLUB_SC := 0.0277  # the A's club scale, in units of the mark's letter height. Solved,
-							   # not tuned: a club is CLUB_LEN (40.3) units knob to nose, so the
-							   # strokes rise CLUB_LEN * cos(CAP_A_LEAN) * this = 40.3 * 0.8961 *
-							   # 0.0277 = 1.000 letter heights. They reach the cap line EXACTLY,
-							   # which is what the torch version needed three attempts and a
-							   # separate flame scale to approximate.
+const CAP_A_CLUB_SC := 0.0296  # 7% larger than the stage-fit scale. capsule_mark lowers their
+							   # baseline by the same proportion, keeping the apex while the knobs
+							   # reach the bottom of the neighbouring S.
 const CAP_CROSSBAR_AT := 0.34  # how far up the strokes the crossbar sits, 0 knob, 1 nose
 # THE CROSSBAR'S OWN SIZE CONSTANT IS GONE (2026-07-30). It was CAP_A_BALL, the ball's radius as
 # a fraction of the gap between the strokes - which is exactly the wrong way round to size it. A
@@ -24804,8 +24788,9 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				# the origin cap_club draws from is the GRIP, and the knob hangs CLUB_BUTT_Y below it
 				# along the shaft, so each club is placed by where its KNOB has to land rather than by
 				# where its origin happens to fall - the same trap the torch version already recorded.
-				var foot_l := Vector2(cxa - dx, base) - Vector2(0.0, CLUB_BUTT_Y).rotated(lean) * csc
-				var foot_r := Vector2(cxa + dx, base) - Vector2(0.0, CLUB_BUTT_Y).rotated(-lean) * csc
+				var club_base := base + size_l * 0.07
+				var foot_l := Vector2(cxa - dx, club_base) - Vector2(0.0, CLUB_BUTT_Y).rotated(lean) * csc
+				var foot_r := Vector2(cxa + dx, club_base) - Vector2(0.0, CLUB_BUTT_Y).rotated(-lean) * csc
 				var bar_off := CLUB_BUTT_Y - CLUB_LEN * CAP_CROSSBAR_AT
 				var bar_l := foot_l + Vector2(0.0, bar_off).rotated(lean) * csc
 				var bar_r := foot_r + Vector2(0.0, bar_off).rotated(-lean) * csc
@@ -25324,15 +25309,15 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 	var focus_boxes: Array[Rect2] = []
 	match show_guide_step:
 		0:
-			focus_boxes = [Rect2(18.0, 16.0, 300.0, 386.0), Rect2(s.x - 282.0, 16.0, 264.0, 386.0)]
-		1, 6:
-			focus_boxes = [Rect2(18.0, 78.0, 300.0, 196.0)]
+			focus_boxes = [Rect2(18.0, 16.0, 300.0, 52.0)]
+		1:
+			focus_boxes = [Rect2(s.x - 282.0, 16.0, 264.0, 66.0)]
 		2:
-			focus_boxes = [Rect2(18.0, 78.0, 300.0, 196.0), Rect2(s.x - 282.0, 16.0, 264.0, 386.0)]
+			focus_boxes = [Rect2(18.0, 78.0, 300.0, 196.0)]
 		3:
 			focus_boxes = [Rect2(18.0, 286.0, 300.0, 116.0)]
-		4, 5:
-			focus_boxes = [Rect2(s.x - 282.0, 16.0, 264.0, 386.0)]
+		4:
+			focus_boxes = [Rect2(18.0, s.y - 78.0, 300.0, 60.0)]
 	for fb in focus_boxes:
 		draw_rect(fb, Color(1.0, 0.88, 0.5, 0.9), false, 3.0)
 
@@ -25343,7 +25328,7 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 	# what the thing DOES. draw_hud drives the real stem off guide_stem_demo() while this
 	# line is up, so the explanation and the object explained are the same picture. All that
 	# is left here is a soft wash of light behind it, to carry the eye across.
-	if show_guide_step == 1:
+	if show_guide_step == 2:
 		var stem_c := Vector2(18.0 + 152.0 + 17.0, 78.0 + 12.0 + 74.0)
 		var wash := 0.5 + 0.5 * sin(atick() * 0.05)
 		draw_glow(stem_c, 96.0 + 10.0 * wash, Color(1.0, 0.88, 0.5, 0.10 + 0.06 * wash))
