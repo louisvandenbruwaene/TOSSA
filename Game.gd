@@ -196,6 +196,9 @@ const ST_MENUTOUR := 15  # a short "how the hub works" card (2026-07-29), shown 
 						   # once: right after the new player's own first Backyard show
 						   # (see post_lesson_show) resolves, before the day hub is ever
 						   # shown at all - see draw_menutour
+const ST_DIFFICULTY := 16  # SLOTH / BEAR / OCTOPUS, picked once on a brand new slot,
+							# before the basics tutorial begins - see start_slot,
+							# difficulty_input, draw_difficulty_screen
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -298,6 +301,17 @@ const STR_FRAME_LAST := 5         # the last N points of Strength buy one Perfec
 
 const LEFT := 0
 const RIGHT := 1
+
+# --- difficulty (chosen before the first career's tutorial, changeable later in
+# Settings) - SLOTH is far more forgiving than anything a maxed-out BEAR build can
+# reach, BEAR is the game as shipped, OCTOPUS tightens timing further and drops the
+# starting purse. See difficulty_frame_delta() / difficulty_catch_bonus() for the
+# single seam each one is applied through. ------------------------------------
+const DIFF_SLOTH := 0
+const DIFF_BEAR := 1
+const DIFF_OCTOPUS := 2
+const DIFF_NAMES := ["SLOTH", "BEAR", "OCTOPUS"]
+
 const CASCADE := 0
 const COLUMNS := 1
 const HALFSHOWER := 2
@@ -1739,6 +1753,9 @@ var _fade_prev_state := -1      # -1 so even the FIRST screen (the boot menu) fa
 var _state_fade_t := 0          # ticks since the last game_state change
 var menu_sel := 0         # cursor index in whichever menu is open
 var save_slot := 0        # which save file is active
+var diff_pick_sel := DIFF_BEAR  # the cursor on ST_DIFFICULTY, defaulting to the
+								 # standard game rather than whatever the cursor
+								 # happened to leave menu_sel at
 var remap_sel := 0        # cursor on the controls screen (keyboard column)
 var remap_wait := false   # true while the controls screen listens for the next key
 var remap_col := 0        # 0 = keyboard column has focus, 1 = gamepad column (Tab swaps)
@@ -1929,6 +1946,10 @@ var dominant_hand := RIGHT  # which hand is the strong one (Settings). It holds 
                             # extra prop on an odd count and starts the pattern -
                             # every juggler deals the odd ball to their strong hand,
                             # so a left-hander should not have to juggle mirrored.
+var difficulty := DIFF_BEAR  # SLOTH / BEAR / OCTOPUS - a global preference, not a
+                            # per-career one, same as dominant_hand: chosen once on a
+                            # brand new slot (see start_slot) and free to change any
+                            # time after from Settings.
 # (set_collide, the hard-collisions toggle, was here. Removed 2026-07-29 with the mechanic
 # it drove - see update_sim's clack loop. Its saved key is simply not read any more, which
 # is the right way to retire a setting: an old settings file keeps the value, nothing looks
@@ -2570,6 +2591,10 @@ func _ready() -> void:
 	if ua.has("--menutour"):          # dev: the post-first-show "how the hub works" card
 		game_state = ST_MENUTOUR
 		cine_tick = 0
+	if ua.has("--diffscreen"):        # dev: the SLOTH/BEAR/OCTOPUS picker, for a screenshot
+		game_state = ST_DIFFICULTY
+		diff_pick_sel = difficulty
+		cine_tick = 0
 	if ua.has("--showguide"):         # dev: the first show's own in-act guide (2026-07-31),
 		# for a screenshot without walking the whole tutorial to reach it - self-contained,
 		# since skip_menu above does not know this flag and would otherwise leave the game
@@ -2599,6 +2624,20 @@ func _ready() -> void:
 		skills_sel = int(ua[ssi + 1]) if ssi + 1 < ua.size() and not ua[ssi + 1].begins_with("--") else 0
 	if ua.has("--ladder"):            # dev: print the whole score ladder and quit
 		print_ladder()
+		get_tree().quit()
+		return
+	if ua.has("--diffcheck"):         # dev: print SLOTH/BEAR/OCTOPUS's catch windows and
+		print_difficulty_check()      # off-Perfect chance at both ends of the stat range, and quit
+		get_tree().quit()
+		return
+	var dngi := ua.find("--diffnewgame")   # dev: run reset_new_game() at a given difficulty and
+	if dngi != -1:                          # print what a fresh slot actually starts with, e.g.
+		var did := ua[dngi + 1] if dngi + 1 < ua.size() and not ua[dngi + 1].begins_with("--") else "bear"
+		difficulty = DIFF_NAMES.find(did.to_upper())
+		if difficulty < 0:
+			difficulty = DIFF_BEAR
+		reset_new_game()
+		print("diffnewgame %s: purse=%d props=%s" % [DIFF_NAMES[difficulty], money, prop_count])
 		get_tree().quit()
 		return
 	var tli := ua.find("--tailor")    # dev: open the dressing room for a screenshot,
@@ -3084,6 +3123,9 @@ func _input(event: InputEvent) -> void:
 				enter_day()
 				set_day_msg("your first day begins  -  the stage is yours")
 				play_sfx("ui2", -11.0)
+			return
+		ST_DIFFICULTY:
+			difficulty_input(kc)
 			return
 		ST_ESTABLISH:
 			establish_key()
@@ -3804,6 +3846,37 @@ func print_ladder() -> void:
 	print("at-build   seconds of unbroken juggling to the FINAL goal at that skill share")
 	print("A house is calibrated when at-build sits a little above its clock floor: the goal")
 	print("should be the thing that ends the act, not the timer.")
+
+
+func print_difficulty_check() -> void:
+	# dev (--diffcheck): THE ASK THIS FEATURE WAS BUILT AGAINST, checked by arithmetic rather
+	# than trusted by eye - "sloth has more leeway than a maxed-out hard build". Prints each
+	# difficulty's Perfect window and off-Perfect catch chance at both ends of the stat range:
+	# an UNSKILLED juggler (accuracy 5, strength 6, a plain Ball - reset_new_game's own numbers)
+	# and a MAXED one (accuracy/strength 200, a Club - the best frame_bonus() can pay out).
+	var old_diff := difficulty
+	var old_acc := accuracy
+	var old_str := strength
+	var old_prop := prop_type
+	var builds := [
+		{"tag": "unskilled", "acc": 5, "str": 6, "prop": PROP_BALLS},
+		{"tag": "maxed", "acc": 200, "str": 200, "prop": PROP_CLUBS},
+	]
+	print("%-9s %-10s %6s %6s %6s  %8s %8s" % ["DIFF", "build", "Perfect", "Good", "Late", "P(Good)", "P(Late)"])
+	for d in 3:
+		difficulty = d
+		for b in builds:
+			accuracy = int(b["acc"])
+			strength = int(b["str"])
+			prop_type = int(b["prop"])
+			print("%-9s %-10s %6d %6d %6d  %8.0f%% %8.0f%%" % [
+				DIFF_NAMES[d], String(b["tag"]), perfect_window(), good_window(), late_window(),
+				catch_chance(1, 0.0) * 100.0, catch_chance(2, 0.0) * 100.0])
+	difficulty = old_diff
+	accuracy = old_acc
+	strength = old_str
+	prop_type = old_prop
+	print("")
 
 
 func goal_seconds(gi: int) -> float:
@@ -7131,11 +7204,11 @@ func settings_input(kc: int) -> void:
 	# lost its other one when the Close Quarters Encore was replaced. The Ball.bumped field
 	# and the clack loop go with it - a setting nobody can reach is a mechanic nobody can
 	# meet, and leaving the machinery in place only makes the next reader believe it works.
-	var n := 10  # music, sound, shake, reduce-motion, fullscreen, dominant hand, catch with a
-				 # full hand, controls, records, Back. Keep this equal to the length of `rows` in
-				 # draw_settings_cards AND to what its `sections` cover - the three have to be
-				 # edited in one go, and the last time they were not, `sections` listed a row 9
-				 # that `rows` did not have.
+	var n := 11  # music, sound, shake, reduce-motion, fullscreen, dominant hand, difficulty,
+				 # catch with a full hand, controls, records, Back. Keep this equal to the
+				 # length of `rows` in draw_settings_cards AND to what its `sections` cover -
+				 # the three have to be edited in one go, and the last time they were not,
+				 # `sections` listed a row 9 that `rows` did not have.
 	match kc:
 		KEY_UP, KEY_W:
 			menu_sel = (menu_sel + n - 1) % n
@@ -7166,14 +7239,18 @@ func settings_input(kc: int) -> void:
 				5:
 					dominant_hand = LEFT if dominant_hand == RIGHT else RIGHT
 				6:
-					set_catch_full = not set_catch_full
+					# a three-way cycle, not a toggle - Left steps back, everything else
+					# (Right, Enter, Space) steps forward, same as the pick screen's own cursor
+					difficulty = (difficulty + 2) % 3 if kc == KEY_LEFT else (difficulty + 1) % 3
 				7:
+					set_catch_full = not set_catch_full
+				8:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				8:
-					game_state = ST_STATS   # the career ledger, back with Esc
 				9:
+					game_state = ST_STATS   # the career ledger, back with Esc
+				10:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -7206,14 +7283,40 @@ func start_slot(i: int) -> void:
 		return
 	var fresh := not FileAccess.file_exists(slot_path(i))
 	if fresh:
-		reset_new_game()
-		# a brand new career opens straight into the hands-on basics (one ball, then
-		# two, then the cascade); tut_finish drops into the day when they are done
-		seen_tuts.append("balls")
-		begin_tutorial("balls")
+		# a brand new career picks its pace first (SLOTH/BEAR/OCTOPUS - see
+		# difficulty_input) and THEN opens straight into the hands-on basics; the pick
+		# has to land before reset_new_game, since Octopus's empty starting purse is
+		# read there.
+		diff_pick_sel = difficulty
+		game_state = ST_DIFFICULTY
 	else:
 		load_progress()
 		enter_day()   # an existing career resumes at its day, not mid-juggle
+
+
+func difficulty_input(kc: int) -> void:
+	# three choices, Left/Right (or Up/Down - either reads naturally on three cards in
+	# a row) move the cursor, Enter commits it as the GLOBAL setting and starts the new
+	# career. There is no Back: a brand new slot has nothing to return TO but the slot
+	# screen it just came from, which Escape still reaches.
+	match kc:
+		KEY_LEFT, KEY_UP, KEY_A, KEY_W:
+			diff_pick_sel = (diff_pick_sel + 2) % 3
+			play_sfx("ui", -14.0)
+		KEY_RIGHT, KEY_DOWN, KEY_D, KEY_S:
+			diff_pick_sel = (diff_pick_sel + 1) % 3
+			play_sfx("ui", -14.0)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			difficulty = diff_pick_sel
+			save_settings()
+			reset_new_game()
+			# a brand new career opens straight into the hands-on basics (one ball, then
+			# two, then the cascade); tut_finish drops into the day when they are done
+			seen_tuts.append("balls")
+			begin_tutorial("balls")
+			play_sfx("ui2", -11.0)
+		KEY_ESCAPE:
+			game_state = ST_SLOTS
 
 
 func reset_new_game() -> void:
@@ -7224,7 +7327,7 @@ func reset_new_game() -> void:
 	speed = 0
 	pie_count = 0
 	pie_active = false
-	money = START_GOLD
+	money = 0 if difficulty == DIFF_OCTOPUS else START_GOLD   # Octopus: no starting purse
 	reputation = 0
 	prop_count = [3, 0, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
 	sync_props()
@@ -7364,6 +7467,7 @@ func load_settings() -> void:
 		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
 		set_catch_full = bool(cf.get_value("opt", "catch_full", false))
 		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
+		difficulty = clampi(int(cf.get_value("opt", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS)
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
 		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
@@ -7402,6 +7506,7 @@ func save_settings() -> void:
 	cf.set_value("opt", "reduce_motion", reduce_motion)
 	cf.set_value("opt", "catch_full", set_catch_full)
 	cf.set_value("opt", "dominant_hand", dominant_hand)
+	cf.set_value("opt", "difficulty", difficulty)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
 	cf.set_value("opt", "fullscreen", set_fullscreen)
@@ -10960,7 +11065,7 @@ func catch_chance(quality: int, over: float) -> float:
 					 # drop_ball), so whiffing entirely is still taught.
 	var acc_norm := clampf(eff_accuracy() / ACC_FULL, 0.0, 1.0)
 	var base := GOOD_BASE if quality == 1 else LATE_BASE
-	var p := base + acc_norm * ACC_CATCH_BONUS - height_penalty(over)
+	var p := base + acc_norm * ACC_CATCH_BONUS - height_penalty(over) + difficulty_catch_bonus()
 	# THE PROP IS NOT IN THIS SUM ANY MORE (2026-07-29). `fgive` gave clubs a kinder
 	# off-Perfect catch and Strength steadied a heavy prop in the hand; both are gone. A
 	# prop's character is now four flat things and no curves: what it costs in Strength to
@@ -10975,6 +11080,25 @@ func catch_chance(quality: int, over: float) -> float:
 	if spinning():
 		p -= SPIN_ACC_PENALTY      # a Spin means catching blind, so off-Perfect gets riskier
 	return clampf(p, MIN_CATCH_P, 1.0)
+
+
+func difficulty_catch_bonus() -> float:
+	# the other half of difficulty, alongside difficulty_frame_delta(): SLOTH also makes
+	# an off-Perfect catch more likely to secure, OCTOPUS less so, on top of whatever the
+	# window shift already bought or cost.
+	match difficulty:
+		DIFF_SLOTH: return 0.20
+		DIFF_OCTOPUS: return -0.15
+		_: return 0.0
+
+
+func difficulty_note(d: int) -> String:
+	# one line each, read on the picker and again on the Settings row - kept in one
+	# place so the two screens can never describe the same setting two different ways.
+	match d:
+		DIFF_SLOTH: return "wide catch windows, easygoing timing - learn the moves, not the clock"
+		DIFF_OCTOPUS: return "tight timing, fewer forgiving frames, no starting purse - the real test"
+		_: return "the standard game, as shipped"
 
 
 func focus() -> float:
@@ -11028,11 +11152,30 @@ func frame_bonus() -> int:
 	#
 	# Clamped so the Perfect band can never fall below PWIN_FLOOR, and clamped ONCE, here, so
 	# that a floored Perfect cannot leave Good and Late shifted by a different amount.
-	var b := focus_frames() + strength_frames() + int(PROPS[prop_type]["pwin"])
+	var b := focus_frames() + strength_frames() + int(PROPS[prop_type]["pwin"]) + difficulty_frame_delta()
 	if encore_on("cold"):
 		b -= 1        # Cold Hands: one frame tighter (it was two before the bands moved
 					  # together, when a tick of Perfect was a much smaller thing to lose)
 	return maxi(PWIN_FLOOR - W_PERFECT, b)
+
+
+func difficulty_frame_delta() -> int:
+	# THE SAME SHARED OFFSET frame_bonus() ALREADY USES, so a difficulty picked in
+	# Settings slides Perfect/Good/Late together exactly the way a stat or a prop does -
+	# no tier is ever eaten by another the way the old fixed-Good-boundary code used to
+	# eat it (see frame_bonus's own note).
+	#
+	# THE NUMBERS ARE SIZED AGAINST THE GAME'S OWN CEILING, not picked in a vacuum: the
+	# best a fully maxed BEAR build can reach is focus_frames() 5 + strength_frames() 1 +
+	# a club's pwin 1 = 7, a 14-tick Perfect window. SLOTH's +8 alone (with NO stats and
+	# a plain ball) already beats that at 15 - "sloth has more leeway than a maxed-out
+	# hard build", the ask this was built against. OCTOPUS's -4 is the mirror: its own
+	# maxed ceiling is 7 - 4 = 3, a 10-tick Perfect window, well under SLOTH's unskilled
+	# floor.
+	match difficulty:
+		DIFF_SLOTH: return 8
+		DIFF_OCTOPUS: return -4
+		_: return 0
 
 
 func perfect_window() -> int:
@@ -12991,6 +13134,9 @@ func _draw_screen() -> void:
 			return
 		ST_MENUTOUR:
 			draw_menutour(font, s)
+			return
+		ST_DIFFICULTY:
+			draw_difficulty_screen(font, s)
 			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
@@ -24878,9 +25024,10 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
 		{"kind": "pick", "name": "Dominant hand", "val": dominant_hand == RIGHT, "note": "holds the odd prop and starts the pattern", "col": Color(0.95, 0.7, 0.55)},
-		# ...and the tenth row the `sections` list below has been asking for since the
-		# dominant-hand row arrived: it lists rows [7, 8, 9] while `rows` only ran to 8, so
-		# `rows[9]` was an out-of-range read inside _draw - which this file's own note about
+		{"kind": "diff3", "name": "Difficulty", "val": difficulty, "note": difficulty_note(difficulty), "col": difficulty_accent(difficulty)},
+		# ...and the eleventh row the `sections` list below has been asking for since the
+		# dominant-hand row arrived: it lists rows [8, 9, 10] while `rows` only ran to 9, so
+		# `rows[10]` was an out-of-range read inside _draw - which this file's own note about
 		# script errors mid-draw says silently abandons the rest of the pass.
 		{"kind": "bool", "name": "Catch with a full hand", "val": set_catch_full, "note": "off: a hand must be empty to receive", "col": Color(0.7, 0.85, 0.6)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
@@ -24888,13 +25035,13 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},
 	]
 	# grouped into sections so it reads as a designed panel, not a wall of identical
-	# bars. The row INDEX still matches settings_input 0..9 exactly - only the y of each
+	# bars. The row INDEX still matches settings_input 0..10 exactly - only the y of each
 	# card shifts to leave room for the section headers between groups. Every row must
 	# appear in exactly one section, or a row the input can select is never drawn.
 	var sections := [
 		{"head": "AUDIO", "rows": [0, 1]},
-		{"head": "GAME FEEL", "rows": [2, 3, 4, 5, 6]},
-		{"head": "MORE", "rows": [7, 8, 9]},
+		{"head": "GAME FEEL", "rows": [2, 3, 4, 5, 6, 7]},
+		{"head": "MORE", "rows": [8, 9, 10]},
 	]
 	var pw := minf(620.0, s.x - 90.0)
 	var px := s.x * 0.5 - pw * 0.5
@@ -24945,6 +25092,16 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 						Color(1.0, 0.88, 0.55) if isr else Color(0.55, 0.5, 0.46))
 				"nav":
 					draw_string(font, Vector2(px + pw - 42.0, y + card_h * 0.5 + 7.0), ">", HORIZONTAL_ALIGNMENT_RIGHT, 28.0, ps(20), Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
+				"diff3":
+					# three labels, not two - the same "unchosen stays visible" rule as "pick",
+					# widened by one, so the row reads as which of three rather than a slider
+					var cur := int(r["val"])
+					var dxx := px + pw - 210.0
+					for di in 3:
+						var on2 := cur == di
+						draw_string(font, Vector2(dxx, y + card_h * 0.5 + 6.0), DIFF_NAMES[di], HORIZONTAL_ALIGNMENT_LEFT, 66.0, ps(13),
+							difficulty_accent(di) if on2 else Color(0.5, 0.46, 0.42))
+						dxx += 68.0
 			y += card_h + gap
 		y += sec_gap
 
@@ -25219,6 +25376,70 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(0, s.y * 0.86), "Enter  -  the day is yours", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16),
 			Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.6)
+
+
+func difficulty_accent(d: int) -> Color:
+	match d:
+		DIFF_SLOTH: return Color(0.55, 0.82, 0.70)
+		DIFF_OCTOPUS: return Color(0.88, 0.40, 0.42)
+		_: return Color(0.90, 0.70, 0.40)
+
+
+func draw_difficulty_icon_fallback(d: int, box: Rect2) -> void:
+	# what a build with no art (or --procart) shows on this card: the accent's own glow
+	# behind the difficulty's initial, exactly the "draw yourself" half of the art_blit
+	# contract every sprite in this file honours.
+	var ac := difficulty_accent(d)
+	var c := box.get_center()
+	draw_glow(c, box.size.x * 0.42, Color(ac.r, ac.g, ac.b, 0.28))
+	draw_string(title_font(), Vector2(box.position.x, c.y + box.size.y * 0.22), DIFF_NAMES[d].substr(0, 1),
+		HORIZONTAL_ALIGNMENT_CENTER, box.size.x, ps(96), Color(ac.r, ac.g, ac.b, 0.9))
+
+
+func draw_difficulty_screen(font: Font, s: Vector2) -> void:
+	# CHOSEN ONCE ON A BRAND NEW SLOT, before the basics tutorial - see start_slot and
+	# difficulty_input. Same visual family as draw_slots_cards (this screen is one step
+	# further down the same "starting a new climb" path, so the backdrop and card
+	# language match rather than jumping to the Backyard exterior the POST-tutorial
+	# cards use - that beat belongs to finishing the lesson, not to starting one).
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.66))
+	draw_string(title_font(), Vector2(0, s.y * 0.11), "CHOOSE YOUR PACE", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(38), Color(1.0, 0.86, 0.5))
+	draw_ornament(s.x * 0.5, s.y * 0.11 + 40.0, 220.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, s.y * 0.11 + 58.0), "How forgiving should catching be? You can change this later in Settings.",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.85, 0.8, 0.7, 0.9))
+
+	var gap := 28.0
+	var cw := 260.0
+	var ch := 400.0
+	var total := cw * 3.0 + gap * 2.0
+	var sx := s.x * 0.5 - total * 0.5
+	var cy := s.y * 0.27
+	var art_keys := ["ui/difficulty_sloth", "ui/difficulty_bear", "ui/difficulty_octopus"]
+	for d in 3:
+		var sel := d == diff_pick_sel
+		var ac := difficulty_accent(d)
+		var cx := sx + float(d) * (cw + gap)
+		var cy0 := cy - (10.0 if sel else 0.0)
+		var fillc := Color(ac.r * 0.18, ac.g * 0.17, ac.b * 0.18, 0.96) if sel else Color(0.10, 0.08, 0.09, 0.9)
+		var card := Rect2(cx, cy0, cw, ch)
+		soft_card(card, fillc, Color(ac.r, ac.g, ac.b, 0.92 if sel else 0.32), 2.2 if sel else 1.0, 14.0, 16.0)
+		var ibox := Rect2(cx + cw * 0.5 - 110.0, cy0 + 20.0, 220.0, 256.0)
+		if not art_blit_fit(art_keys[d], ibox):
+			draw_difficulty_icon_fallback(d, ibox)
+		var tcol := Color(1.0, 0.92, 0.62) if sel else ac
+		draw_string(title_font(), Vector2(cx, cy0 + 300.0), DIFF_NAMES[d], HORIZONTAL_ALIGNMENT_CENTER, cw, ps(24), tcol)
+		draw_wrap_fit(font, difficulty_note(d), Rect2(cx + 14.0, cy0 + 332.0, cw - 28.0, 46.0), 12,
+			Color(0.9, 0.86, 0.78, 0.95) if sel else Color(0.68, 0.64, 0.6, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
+		if sel:
+			draw_string(font, Vector2(cx, cy0 + ch - 16.0), "< pick >", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(13), Color(1.0, 0.88, 0.55, 0.6 + 0.3 * sin(float(atick()) * 0.05)))
+
+	var foot := "Left / Right    A to start    B to go back" if pad_active() else "Left / Right    Enter to start    Esc to go back"
+	draw_string(font, Vector2(0, s.y - 42.0), foot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_stats(font: Font, s: Vector2) -> void:
@@ -27837,6 +28058,7 @@ func shot_state_name() -> String:
 		ST_DEMO_WALL: return "demowall"
 		ST_PURIST_LEGEND: return "legend"
 		ST_MENUTOUR: return "menutour"
+		ST_DIFFICULTY: return "difficulty"
 	return "state%d" % game_state
 
 #endregion
