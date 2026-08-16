@@ -2312,8 +2312,11 @@ func _ready() -> void:
 		var eri := ua.find("--extref")
 		_extref = int(ua[eri + 1]) if eri + 1 < ua.size() else 0
 		art_on = false            # photograph the DRAWING, never the bake already replacing it
-	if ua.has("--debug"):   # debug build: free stat editing (uses a separate save)
-		debug_mode = true
+	if ua.has("--debug") or OS.has_feature("debug_launcher"):   # debug build: free stat
+		debug_mode = true                                        # editing (uses a separate save).
+		# OS.has_feature check mirrors in_demo_build()'s "demo" feature tag: a real export
+		# built with the "debug_launcher" custom feature starts in debug_mode with no
+		# command line needed, same as passing --debug by hand.
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
 		_force_demo = true     # "demo"-tagged export - see in_demo_build()
 	if ua.has("--fps"):        # dev: the performance probe (see _fps above)

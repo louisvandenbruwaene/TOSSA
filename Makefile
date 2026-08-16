@@ -15,7 +15,7 @@ help:
 	@echo "  make lint           run gdlint (advisory)"
 	@echo "  make reimport       force-reimport assets and check for orphaned .import sidecars"
 	@echo "  make clean          remove the .godot/ cache"
-	@echo "  make export         export macOS+Windows+Linux binaries into export/"
+	@echo "  make export         export release+debug macOS/Windows/Linux binaries into export/"
 
 setup:
 	scripts/bootstrap.sh
