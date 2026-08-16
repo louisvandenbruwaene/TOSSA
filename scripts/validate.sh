@@ -29,7 +29,15 @@ QUICK=0
 [[ "${1:-}" == "--quick" ]] && QUICK=1
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+cleanup() {
+  local status=$?
+  if [[ $status -eq 0 ]]; then
+    rm -rf "$WORK"
+  else
+    log_warn "Validation logs kept at $WORK"
+  fi
+}
+trap cleanup EXIT
 FAIL=0
 
 fail() { log_err "$1"; FAIL=1; }

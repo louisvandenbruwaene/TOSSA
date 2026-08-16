@@ -31,6 +31,8 @@ Codex improvements:
 
 - **New-career tutorial persistence:** the initial `"balls"` lesson marker is saved before the
   lesson starts. Closing the game during onboarding must never reopen that slot past the tutorial.
+- **Actionable validation failures:** `scripts/validate.sh` removes temporary logs after a pass but
+  preserves them after a failure and prints their path. A failing check must not erase its evidence.
 
 ## PIXEL ART (read this before touching anything visual)
 
