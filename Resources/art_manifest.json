@@ -249,6 +249,15 @@
   "ui/gear_glow_suit": {
     "path": "res://Assets/UI/gear/glow_suit.png"
   },
+  "ui/difficulty_sloth": {
+    "path": "res://Assets/UI/difficulty/sloth.png"
+  },
+  "ui/difficulty_bear": {
+    "path": "res://Assets/UI/difficulty/bear.png"
+  },
+  "ui/difficulty_octopus": {
+    "path": "res://Assets/UI/difficulty/octopus.png"
+  },
   "ui/victory": {
     "path": "res://Assets/UI/victory.png"
   },

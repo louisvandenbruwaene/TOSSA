@@ -638,6 +638,18 @@ review" for the accept/reject examples and why.
 - **Catch:** Perfect always secures; Good/Late are a rising-with-Accuracy, falling-with-height
   chance (90%/70% at Accuracy 100, no gear, no extra height). Accuracy 101-150 = Focus (stamina);
   151-200 buys 5 catch frames.
+- **Difficulty (added 2026-08-16):** SLOTH / BEAR / OCTOPUS, picked once on a brand new career
+  (`ST_DIFFICULTY`, between the slot screen and the basics tutorial - three PixelLab mascot
+  cards) and changeable any time after from Settings. A single shared seam each:
+  `difficulty_frame_delta()` (added into `frame_bonus()`, so it slides Perfect/Good/Late
+  together exactly like a stat or a prop does) and `difficulty_catch_bonus()` (added into
+  `catch_chance()`). SLOTH (+8 frames, +20% off-Perfect) beats even a fully maxed BEAR build's
+  own ceiling on an UNSKILLED juggler with no gear - verified with `--diffcheck`, which prints
+  every difficulty's windows and chances at both stat extremes. OCTOPUS (-4 frames, -15%) also
+  starts a fresh career with an empty purse (`reset_new_game`'s `money`) instead of `START_GOLD` -
+  the three starting balls are unaffected, only the flower purse. `--diffnewgame <name>` (pair
+  with `--debug` so it never touches a real save) prints what `reset_new_game()` actually hands
+  out at a given difficulty.
 - **Scoring:** exponential, Balatro-shaped. A *run* is the stretch since the last drop; it
   accumulates linearly and a landed trick multiplies the WHOLE run (`p^x`). A drop banks the run
   and resets to x1. `chain_mult` saturates (`1 + 3*c/(c+40)`, →x4, never capped-feeling on
