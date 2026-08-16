@@ -1847,6 +1847,7 @@ var tut_threw_r := false  # a right-hand throw happened this step
 var tut_caught_l := false # ...and the same for catches, since the basics name one key at
 var tut_caught_r := false # a time and a catch in the wrong hand must not clear the beat
 var tut_throws := 0       # throws banked this step (the `free` beats want both)
+var tut_held_throws := 0  # throws held long enough to visibly gain height this step
 var tut_hand_picked := false  # the dominant-hand question has been answered
 var tut_speech_tick := 0.0  # when the live line started arriving, in atick() units so a
 							  # frozen "do" beat still lets the line type itself out (tick
@@ -3704,10 +3705,14 @@ func arm_show_guide() -> void:
 		return
 	show_guide_seen = true
 	show_guide_lines = [
-		"Let's test out your skills with an actual audience. The goal is to receive as many flowers as you can.",
-		"That stem, growing at your side - that shows your progress toward it. Each notch on it is a smaller goal on the way, and every one you pass sprouts its own flower.",
-		"Lock in a small one if you're not sure of the next - but don't get overconfident either. You lose a standing ovation bonus if you drop, so keep the crowd happy and your hands clean if you can.",
-		"When you're ready to stop: catch everything and hold it, or press %s. Good luck out there." % String(k_finish()[0]),
+		"This is a real performance. The left rail is the room and tonight's goals; the right rail is your juggler and career.",
+		"SCORE is what this set is worth. The flower stem fills toward three goals; each goal banks a safer floor under your result.",
+		"TONIGHT counts flowers earned in this act. Flowers are your money, and the purse on the right is what you already own.",
+		"THE CROWD shows patience. Clean catches and spectacle lift it; dead time and drops drain it. DROPS LEFT is how many mistakes end this act.",
+		"MULT multiplies the current run until a drop banks and resets it. STAMINA pays for catching; low stamina makes catches less reliable.",
+		"The right rail also shows REPUTATION, which opens venues, and LEVEL/XP. Level-ups award points for the character sheet [%s]." % String(k_sheet()[0]),
+		"After the first goal, [%s] cashes in. You can also stop by catching everything and holding it. Pushing farther risks score above the last banked goal." % String(k_finish()[0]),
+		"Catch timing still matters: PERFECT always lands; GOOD and LATE can fail. Keep one prop airborne, watch the hands, and play the rhythm—not the rails. Good luck.",
 	]
 	show_guide_step = 0
 	show_guide_tick = cine_tick
@@ -5162,8 +5167,15 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_do("Now catch it.", "catch", off, CO, 1, 1))
 	out.append(tut_do("Amazing! Now throw it back.", "throw", off, TO, 1, 1))
 	out.append(tut_do("Catch it.", "catch", dom, CD, 1, 1))
+	out.append(tut_say("The catch words are timing grades: PERFECT is centred, GOOD and LATE are less secure, and a miss drops the prop."))
 	out.append(tut_free("That's it! Feel free to master one ball before moving on.", 1, 0, 0,
 		"When you are ready, press Enter for the second ball.", 1))
+	# HEIGHT is a real input, not trivia: this step only clears after a release held long
+	# enough to change the flight. It runs unfrozen so press duration can actually exist.
+	out.append({"goal": "hold_throw", "prop": PROP_BALLS, "balls": 1, "hand": RIGHT,
+		"stack": 1, "need": 1, "slow": 0.0, "say": true, "next": "go on",
+		"text": "Now hold [%s] until the gold gauge grows, then release. Holding THROW sends a higher, longer, harder-to-catch arc." % TD})
+	out.append(tut_say("Use low taps for rhythm and held throws to make room. Height buys time, but very high catches are less forgiving."))
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
 	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1))
 	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true))
@@ -5217,7 +5229,7 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_do("Catch it.", "catch", seq[0], CD if seq[0] == dom else CO, 2, 1))
 	out.append(tut_do("And the last one.", "catch", seq[1], CD if seq[1] == dom else CO, 2, 1))
 	out.append(tut_free("Keep that going: catch, throw it right back, on each side in turn.",
-		2, 6, 6, "Try it out. Enter when you've got it.", 1))
+		2, 6, 6, "Practise the two-ball exchange. Enter when you've got it.", 1))
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
 	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, 2))
 	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, 2, true))
@@ -5233,11 +5245,14 @@ func tut_lesson(id: String) -> Array:
 	# other: the cascade's own opening position, so practice starts where the drill did.
 	out.append(tut_do("And take the last one down.", "catch", dom, CD, 3, 2))
 	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, 10, 10,
-		"Prove you are ready: ten throws and ten catches.", 2))
+		"Prove it: ten throws and ten catches, always with another ball in the air.", 2, true))
 	# THE OTHER WAY, IN ONE LINE (2026-07-29, Louis: folded in from the old standalone
 	# "advanced juggling technique" lesson - see tut_finish). Once the beginner rhythm
 	# is in the hands, this is the whole difference worth naming, not a second drill.
 	out.append(tut_say("There's another way to hold it: throw all three up first, then keep your hands empty - catch, then throw, every time. Same keys, opposite order. Try it once you're ready."))
+	out.append(tut_say("Your other controls: [%s] trick, %s switch trick, %s switch prop, %s switch pattern, and %s lower or raise the prop count." % [String(k_trick()[0]), String(k_cycle()[0]), String(k_object()[0]), String(k_pattern()[0]), " / ".join(k_count())]))
+	out.append(tut_say("[%s] opens your character sheet, %s opens the shop in practice, %s restarts a practice deal, and %s opens the game menu." % [String(k_sheet()[0]), String(k_shop()[0]), String(k_restart()[0]), String(k_pause()[0])]))
+	out.append(tut_say("In a performance, [%s] takes a bow and cashes in once you have reached a goal. The first real show will explain every number on its rails." % String(k_finish()[0])))
 	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
 		"next": "finish the lesson", "say": true,
 		"text": "Tangled? %s starts you over, any time you are practising." % String(k_restart()[0])})
@@ -5248,10 +5263,14 @@ func tut_kt(h: int) -> String:
 	# the THROW key for a hand, in the player's own bindings. The tutorial names keys rather
 	# than hands ("press J"), so every line has to be built from these two functions or a
 	# left-handed player is taught somebody else's hands.
+	if pad_active():
+		return "LB" if h == LEFT else "RB"
 	return OS.get_keycode_string(K_LT if h == LEFT else K_RT)
 
 
 func tut_kc(h: int) -> String:
+	if pad_active():
+		return "LT" if h == LEFT else "RT"
 	return OS.get_keycode_string(K_LC if h == LEFT else K_RC)
 
 
@@ -5304,14 +5323,14 @@ func tut_beat(line: String, goal: String, need: int, n: int, extra: Dictionary =
 
 
 func tut_free(line: String, n: int, throws: int, catches: int, sub: String,
-		stack: int = 0) -> Dictionary:
+		stack: int = 0, require_juggle: bool = false) -> Dictionary:
 	# FREE PLAY, held open until the player has actually done it - and with no goal at all
 	# (throws and catches both zero) it is simply "play with this until you press Enter",
 	# which is what "feel free to master one ball" means. "hand": RIGHT is symbolic - see
 	# tut_do just above.
 	return {"goal": "free", "prop": PROP_BALLS, "balls": n, "hand": RIGHT, "stack": stack, "need": maxi(catches, 0),
 		"throws": throws, "slow": 0.0, "say": true, "next": "go on",
-		"text": line, "sub": sub}
+		"text": line, "sub": sub, "juggle": require_juggle}
 
 
 func advanced_lesson_steps() -> Array:
@@ -5583,6 +5602,7 @@ func tut_setup_step() -> void:
 	tut_caught_l = false
 	tut_caught_r = false
 	tut_throws = 0
+	tut_held_throws = 0
 	tut_hand_picked = false
 	tut_tricks = 0
 	tut_keys = 0
@@ -6155,12 +6175,14 @@ func tut_demo_pattern_off() -> void:
 	tut_check()
 
 
-func tut_on_throw(h: int) -> void:
+func tut_on_throw(h: int, hold: int = 0) -> void:
 	if h == LEFT:
 		tut_threw_l = true
 	else:
 		tut_threw_r = true
 	tut_throws += 1      # the `free` beats count real throws as well as catches
+	if hold >= maxi(10, HOLD_MAX / 3):
+		tut_held_throws += 1
 	tut_last_throw = h   # feed throws alternate off this, which is what crosses a cascade
 	tut_hold_mark("throw", h)
 	tut_check()
@@ -6228,6 +6250,7 @@ func tut_check() -> void:
 		"catch_l": done = tut_caught_l
 		"hand": done = tut_hand_picked
 		"free": done = tut_count >= int(step.get("need", 0)) and tut_throws >= int(step.get("throws", 0))
+		"hold_throw": done = tut_held_throws >= int(step.get("need", 1))
 		"trick_on": done = toggle_on == int(step.get("trick", -1))   # the toggle is running
 		"trick_off": done = toggle_on < 0                             # ...and now switched off
 		"trick_use": done = tut_tricks >= int(step["need"])           # arm/live: reward_trick fired
@@ -6552,7 +6575,7 @@ func draw_tut_speech(font: Font, s: Vector2, step: Dictionary) -> void:
 	# ...and the prompt, only once the beat is actually clearable, so an Enter icon never
 	# appears on a step whose key has not been pressed yet
 	if tut_advance_at >= 0:
-		draw_keycap(font, bx + bw - 78.0, by + bh - 30.0, "Enter")
+		draw_keycap(font, bx + bw - 78.0, by + bh - 30.0, String(k_finish()[0]))
 
 
 func _tut_line_len(lines: Array) -> int:
@@ -6604,7 +6627,7 @@ func draw_tut_hand_pick(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(cx, cy + 25.0), "LEFT" if h == LEFT else "RIGHT", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(16),
 			Color(1.0, 0.92, 0.62) if sel else Color(0.72, 0.68, 0.62))
 	draw_hints_row(font, bx + bw * 0.5, by + 162.0,
-		[[["Left", "Right"], "choose"], [["Enter"], "yes"]])
+		[[["Stick"] if pad_active() else ["Left", "Right"], "choose"], [k_finish(), "yes"]])
 
 
 func draw_tutorial_banner(font: Font, s: Vector2) -> void:
@@ -9771,7 +9794,7 @@ func do_throw(h: int, hold: int) -> void:
 		play_sfx("gasp", -13.0)   # the crowd inhales at a genuinely risky throw
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
 	if tut_active:
-		tut_on_throw(h)   # a guided lesson watches your throws to advance its steps
+		tut_on_throw(h, hold)   # lessons can distinguish a real held throw from a tap
 
 
 #endregion
@@ -25284,6 +25307,23 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 		ty += 24.0
 	var pa := 0.7 + 0.3 * sin(atick() * 0.14)
 	draw_string(font, Vector2(bx + bw - 100.0, by + bh - 10.0), "%s  go on" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(12), Color(1.0, 0.9, 0.7, pa))
+	# The guide points at the same rail it is naming. The outline is deliberately broad:
+	# each card already labels its individual numbers, while this teaches the screen map.
+	var focus_boxes: Array[Rect2] = []
+	match show_guide_step:
+		0:
+			focus_boxes = [Rect2(18.0, 16.0, 300.0, 386.0), Rect2(s.x - 282.0, 16.0, 264.0, 386.0)]
+		1, 6:
+			focus_boxes = [Rect2(18.0, 78.0, 300.0, 196.0)]
+		2:
+			focus_boxes = [Rect2(18.0, 78.0, 300.0, 196.0), Rect2(s.x - 282.0, 16.0, 264.0, 386.0)]
+		3:
+			focus_boxes = [Rect2(18.0, 286.0, 300.0, 116.0)]
+		4, 5:
+			focus_boxes = [Rect2(s.x - 282.0, 16.0, 264.0, 386.0)]
+	for fb in focus_boxes:
+		draw_rect(fb, Color(1.0, 0.88, 0.5, 0.9), false, 3.0)
+
 	# THE SECOND LINE MAKES THE STEM DEMONSTRATE ITSELF (2026-07-31, Louis: "instead of a
 	# dumb circle around it, make it fill up very fast and run out again at the same speed").
 	# The ring that used to be drawn here - a 90px arc thrown round the goal card - is gone:
@@ -27793,6 +27833,13 @@ func _demo_step() -> void:
 		# lesson only: the older paced lessons want this feeder running right through
 		# their own dead gaps, and always have.
 		if tut_id == "balls" and tut_advance_at >= 0:
+			return
+		# The height lesson is the one basics step whose press duration is the goal.
+		# Feed it with a genuinely held throw so --tutorial balls tests that branch too.
+		if String(tut_step_data().get("goal", "")) == "hold_throw":
+			var hh := tut_step_hand(tut_step_data())
+			if not stack(hh).is_empty():
+				do_throw(hh, maxi(10, HOLD_MAX / 3))
 			return
 		var due := tut_due_actions()
 		for e in due:

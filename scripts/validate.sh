@@ -78,6 +78,18 @@ else
 fi
 scan_run_log "$WORK/daily.log" || FAIL=1
 
+# --- 3b. Mandatory first lesson ---------------------------------------------
+# This is executable onboarding, not static copy: it must drive the real sim through
+# held-height input, the two-ball exchange, and ten consecutive juggling catches.
+log_head "3b. First-player tutorial (--tutorial balls)"
+run_headless 45 "$WORK/tutorial.log" --demo --tutorial balls || true
+if grep -q "TUTTRACE finished id=balls" "$WORK/tutorial.log"; then
+  log_ok "Mandatory tutorial completed through the real simulation."
+else
+  fail "Mandatory tutorial did not reach its completion trace."
+fi
+scan_run_log "$WORK/tutorial.log" || FAIL=1
+
 if [[ $QUICK -eq 0 ]]; then
   # --- 4. Collision sweep ---------------------------------------------------
   log_head "4. Collision sweep (--collcheck --latecatch 5)"
