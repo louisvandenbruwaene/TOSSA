@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Build the two /Applications launchers - PIXELTOSSA and PIXELTOSSA Debug - that Louis
+# Build the two /Applications launchers - TOSSA and TOSSA Debug - that Louis
 # actually clicks to play. Run this after moving or renaming the project folder.
 #
 # WHY THIS SCRIPT EXISTS. The launchers are not exported games; each is a tiny .app
@@ -37,7 +37,6 @@ GODOT=${GODOT:-/opt/homebrew/bin/godot}
 APP_BASE="TOSSA"
 BUNDLE_ID="eu.vandenbruwaene.tossa"
 ICON="$HERE/export/icons/TOSSA.icns"
-[ -f "$ICON" ] || ICON="$HERE/export/icons/PIXELTOSSA.icns"   # the icon file kept its old name
 
 build () {
 	local NAME="$1" EXE="$2" ID="$3" ARGS="$4"
