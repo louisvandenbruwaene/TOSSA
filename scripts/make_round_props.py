@@ -27,8 +27,8 @@ WHAT MAKES IT READ AS PIXEL ART RATHER THAN A SMALL RENDER:
 2. SHADING IS COMPUTED AT FINAL RESOLUTION AND QUANTISED TO BANDS, so a band boundary
    lands on an exact pixel edge. Supersampling the shading too would reintroduce the
    smooth ramp this exists to avoid.
-3. A RIM LIGHT along the shadow edge. This is the one that does the most work: without
-   it a shaded sphere reads as a flat disc with a dark side, and with it the form turns.
+3. The form is carried by six hard lighting bands, without a pale silhouette rim. At title
+   size that rim read as a white border around every coloured ball and around the ring.
 
 THEY ARE AUTHORED GREYSCALE AND MUST STAY THAT WAY. draw_prop_icon multiplies these by
 the prop's own colour, and a multiply can only ever DARKEN, so the brightest pixel has
@@ -148,18 +148,15 @@ def shade(nx, ny, nz, inside):
 	# and how pixel artists band a sphere by hand.
 	lam = ndl * 0.5 + 0.5
 	val = quantise(lam)
-	# RIM LIGHT: the bounce along the edge AWAY from the key light. This is the single
-	# thing that stops a shaded sphere reading as a flat disc with a dark side - it
-	# separates the form from the background and turns it. Keyed on how edge-on the
-	# surface is (nz small) and how far from the light it faces, so it hugs the
-	# lower-right silhouette and never touches the lit side.
-	edge = np.clip(1.0 - nz, 0.0, 1.0)
-	away = np.clip(-(nx * LIGHT[0] + ny * LIGHT[1]), 0.0, 1.0)
-	rim = (edge ** 1.5 * away) > 0.30
-	val = np.where(rim, np.maximum(val, 0.80), val)
 	# SPECULAR: a small hard cluster where the surface faces the light most directly.
 	# Pure white, because a multiply can only darken and this is the tint's anchor.
 	val = np.where(ndl > 0.955, 1.0, val)
+	# A uniform dark silhouette replaces the old pale rim. It is shared by ball and ring,
+	# so differently tinted copies still read as the same manufactured prop design.
+	padded = np.pad(inside, 1, constant_values=False)
+	core = (padded[1:-1, :-2] & padded[1:-1, 2:] & padded[:-2, 1:-1]
+		& padded[2:, 1:-1])
+	val = np.where(inside & ~core, GREY_FLOOR, val)
 	return np.where(inside, val, 0.0)
 
 
