@@ -1,13 +1,31 @@
-# PIXELTOSSA
+# TOSSA
 
 A skill-based juggling game with a light performer-career sim around it. Godot 4.7, 2D, GDScript,
-one self-contained file (`Game.gd`, ~24k lines), mostly code-rendered audio. Aimed at a polished
+one self-contained file (`Game.gd`, ~28k lines), mostly code-rendered audio. Aimed at a polished
 $10 Steam release.
 
-**This repo is the PIXEL-ART FORK of TOSSA, cut loose 2026-08-05 as its own game** with its own
-name, saves, launchers and exports. TOSSA's art is drawn entirely in code; PIXELTOSSA replaces the
-pictures with sprites on a locked palette and keeps the gameplay identical. Everything below that
-is not in the PIXEL ART section is inherited from TOSSA and still true.
+This is the pixel-art game formerly called PIXELTOSSA. It took the TOSSA name back on 2026-08-15;
+the old code-drawn version now lives read-only under `legacy/tossa-vector/`. Runtime save filenames
+deliberately retain the `pixeltossa_` prefix so the two games cannot overwrite one another. TOSSA
+replaces most pictures with sprites on a locked palette while keeping procedural fallbacks behind
+the art-manifest seam described below.
+
+## Recovery and change discipline
+
+The documented pre-Codex baseline is the annotated git tag `tossa-pre-codex-2026-08-16`. It is a
+known-good, clean state: restore it on a new branch with
+`git switch -c recovery/tossa-pre-codex tossa-pre-codex-2026-08-16`. Do not reset a working tree
+with uncommitted work.
+
+Codex work lives on `codex/improvements` and follows three rules:
+
+- one player-visible fix or improvement per commit;
+- the commit message says what changed and why, and this file records any new standing rule;
+- validate before every commit (`make quick-validate` normally, `make validate` for simulation,
+  rendering, input, or persistence changes).
+
+This makes any individual change removable with `git revert <commit>` without unwinding unrelated
+work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the Codex change list.
 
 ## PIXEL ART (read this before touching anything visual)
 
@@ -628,7 +646,7 @@ on first run; delete it only once no old build could plausibly still exist anywh
 Any new idea gets tested against these three before anything else; see CLAUDE_HISTORY.md's "idea
 review" for the accept/reject examples and why.
 
-## Current state (as of 2026-07-30)
+## Current state (as of 2026-08-16)
 
 - **Input:** per-hand THROW/CATCH, Space=trick, C=switch trick, P=pattern, O=object, 1/2=step
   count, R=restart (practice), S=shop, Tab=sheet, Esc=menu, Enter=finish/cash in. Gamepad layout
@@ -709,11 +727,11 @@ Louis's own Suno tracks, free-tier renders, **NON-COMMERCIAL** - must be re-rend
 Suno month and swapped before release. SFX synthesized at startup (`gen_sfx`), catch sounds
 quality-led, tonal stingers only, no ambient crowd bed.
 
-## Release blockers (from AUDIT_2026-07-26.md)
+## Release blockers (reviewed 2026-08-16)
 
 1. Music licensing (above).
-2. No demo export preset yet - Louis needs to add it in the editor (Project > Export > Add,
-   feature tag `demo`); a blind hand-edit of `export_presets.cfg` risks silently malforming it.
+2. No demo export preset yet. Release and portable debug presets exist for macOS, Windows and
+   Linux; a scoped demo preset still needs feature tag `demo` and an end-to-end export check.
 3. macOS signing/notarization not yet configured.
 4. A few legibility passes (controls screen, in-stage timing callouts) - see the archive for specifics.
 
