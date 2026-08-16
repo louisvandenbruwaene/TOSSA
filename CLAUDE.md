@@ -35,6 +35,9 @@ Codex improvements:
   preserves them after a failure and prints their path. A failing check must not erase its evidence.
 - **SLOTH has a gentler economy and clock:** it starts with 200 flowers and contributes a permanent
   20% base slowdown through `slow_target()`. Purist removes that assist; earned bursts still apply.
+- **The mandatory lesson proves juggling, not button tallying:** its final three-ball free-play
+  gate only counts catches that leave another prop airborne. It also verifies one held-height throw,
+  introduces timing grades and every global control, then tours both HUD rails in the first show.
 
 ## PIXEL ART (read this before touching anything visual)
 
