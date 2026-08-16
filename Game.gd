@@ -3526,7 +3526,7 @@ func debug_panel_step(row: int, dir: int) -> void:
 
 
 func pause_input(kc: int) -> void:
-	var option_count := 2 if tut_active else 3
+	var option_count := 3
 	match kc:
 		KEY_UP:
 			pause_sel = (pause_sel + option_count - 1) % option_count
@@ -3541,8 +3541,6 @@ func pause_input(kc: int) -> void:
 		KEY_2:
 			pause_sel = 1; pause_activate()
 		KEY_3:
-			if tut_active:
-				return
 			pause_sel = 2; pause_activate()
 		KEY_ESCAPE, KEY_P:
 			paused = false
@@ -3554,9 +3552,11 @@ func pause_activate() -> void:
 		if pause_sel == 0:
 			paused = false
 			play_sfx("ui2", -14.0)
-		else:
+		elif pause_sel == 1:
 			paused = false
 			tut_reset_step()
+		else:
+			get_tree().quit()
 		return
 	match pause_sel:
 		0:   # resume the run right where it froze
@@ -5229,9 +5229,9 @@ func tut_lesson(id: String) -> Array:
 	# repetitions for the alternating rhythm to become a pattern rather than a fact.
 	for _cycle in 2:
 		out.append(tut_do("Catch the first.", "catch", off, CO, 3, 2, false, {"sequence": true}))
-		out.append(tut_do("Send the next throw.", "throw", dom, TD, 3, 2, false, {"sequence": true}))
+		out.append(tut_do("Send the next throw from your strong hand.", "throw", dom, TD, 3, 2, false, {"sequence": true}))
 		out.append(tut_do("Catch on the other side.", "catch", dom, CD, 3, 2, false, {"sequence": true}))
-		out.append(tut_do("Send the next throw.", "throw", off, TO, 3, 2, false, {"sequence": true}))
+		out.append(tut_do("Send the next throw from your other hand.", "throw", off, TO, 3, 2, false, {"sequence": true}))
 	# ...and one more catch, so the air is EMPTY before free play opens (Louis's standing
 	# rule, restated 2026-07-31: "no balls in the air when you give the player control").
 	# The section used to end on a catch, which is not the same thing - the throw two beats
@@ -6197,6 +6197,12 @@ func tut_on_throw(h: int, hold: int = 0) -> void:
 
 
 func tut_on_catch(juggled: bool, hand: int = -1) -> void:
+	# Once a free-practice target is complete, its displayed achievement is banked. Extra
+	# catches (including collecting the pattern to continue) cannot reset 10 back to zero.
+	var current := tut_step_data()
+	if String(current.get("goal", "")) == "free" and tut_advance_at >= 0:
+		tut_count = int(current.get("need", tut_count))
+		return
 	# WHICH HAND CAUGHT matters now: the basics ask for one named key at a time ("catch it
 	# with D"), so a catch in the wrong hand must not clear the beat.
 	if hand == LEFT:
@@ -17664,19 +17670,22 @@ func draw_card_pix(r: Rect2, fill: Color, border: Color, border_w: float,
 		draw_rect(Rect2(p.x + w - d - e, y, e, ART_PIXEL), border)
 
 
-func hud_panel(r: Rect2, glow: bool = false) -> void:
+func hud_panel(r: Rect2, glow: bool = false, tutorial_focus: bool = false) -> void:
 	# a soft dark card with an ember hairline, so HUD numbers sit on something
 	# instead of floating loose over the stage. `glow` breathes the hairline -
 	# for a SELECTED menu row, so the cursor reads alive, not just lit; every
 	# other (static, always-on) card leaves it off and looks exactly as before.
-	if glow:
+	if tutorial_focus:
+		var fp := 0.70 + 0.30 * sin(float(cine_tick) * 0.08)
+		soft_card(r, Color(0.06, 0.035, 0.05, 0.76), Color(1.0, 0.86, 0.42, fp), 3.0, 9.0, 10.0)
+	elif glow:
 		var pulse := 0.5 + 0.5 * sin(float(cine_tick) * 0.08)
 		soft_card(r, Color(0.06, 0.035, 0.05, 0.62), Color(0.98, 0.74, 0.44, lerpf(0.34, 0.62, pulse)), 1.6, 9.0, 10.0)
 	else:
 		soft_card(r, Color(0.05, 0.03, 0.045, 0.58), Color(0.9, 0.6, 0.35, 0.26), 1.0, 9.0, 9.0)
 
 
-func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
+func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30), tutorial_focus: bool = false) -> void:
 	# the rail cards (Phase 2 HUD): a touch more opaque than hud_panel so text stays
 	# readable over a busy stage. All live HUD lives in the LEFT and RIGHT rails now, never
 	# over the centre where the props fly.
@@ -17689,7 +17698,10 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30)) -> void:
 	# hud_card is shared it was doing that on the shop's seven prop cards, the gear cards, the
 	# sheet's cards AND every rail card at once. The accent still identifies the card: it is the
 	# BORDER colour, which is the whole outline rather than one arbitrary edge.
-	soft_card(r, Color(0.075, 0.045, 0.06, 0.88), Color(accent.r, accent.g, accent.b, 0.5), 1.0, 9.0, 12.0)
+	var pulse := 0.70 + 0.30 * sin(float(cine_tick) * 0.08)
+	soft_card(r, Color(0.075, 0.045, 0.06, 0.88),
+		Color(1.0, 0.86, 0.42, pulse) if tutorial_focus else Color(accent.r, accent.g, accent.b, 0.5),
+		3.0 if tutorial_focus else 1.0, 9.0, 12.0)
 
 
 func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color,
@@ -17820,7 +17832,8 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		if gold and live and not stem_gold_bonus_given:
 			stem_gold_bonus_given = true
 			warm_room(0.05)
-		draw_flower(bud, 2 if gold else 1, STEM_BLOOM_SC + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
+		draw_flower(bud, 2, STEM_BLOOM_SC + 0.45 + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
+		draw_flower(bud, 0, 1.10 + 0.20 * over, -atick() * 0.014, 0.98)
 		if flawless:
 			for i in 5:
 				var ta := atick() * 0.015 + TAU * float(i) / 5.0
@@ -17833,7 +17846,8 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 			for i in 5:
 				var ta2 := atick() * 0.015 + TAU * float(i) / 5.0
 				draw_star4(bud + Vector2(cos(ta2), sin(ta2)) * 16.0, 2.2, Color(1.0, 0.97, 0.78, 0.8))
-		draw_flower(bud, 2, 2.8, atick() * 0.008, 1.0)
+		draw_flower(bud, 2, 3.6, atick() * 0.008, 1.0)
+		draw_flower(bud, 0, 1.10, -atick() * 0.012, 0.98)
 	else:
 		# still a bud - and it swells as the goal nears, so the change is a growth and
 		# not a swap
@@ -18290,7 +18304,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	var LW := 300.0
 	if performing and not results_open:
 		# --- the act header: venue, THE ACT, and one dot per goal reached ---
-		hud_card(Rect2(LX, 16, LW, 52))
+		hud_card(Rect2(LX, 16, LW, 52), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 0)
 		draw_fit_string(font, Vector2(LX + 14, 40), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, LW - 80.0, 18, gold)
 		var setline := "THE ACT"
 		if purist:
@@ -18310,7 +18324,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var target := next_goal()
 		var tcard_y := 78.0
 		var tcard_h := 196.0
-		hud_card(Rect2(LX, tcard_y, LW, tcard_h), Color(1.0, 0.82, 0.4, 0.4))
+		hud_card(Rect2(LX, tcard_y, LW, tcard_h), Color(1.0, 0.82, 0.4, 0.4), show_guide_step == 2)
 		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55))
 		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(26), Color(1.0, 0.94, 0.76))
 		# the record chase, top-right of the card
@@ -18449,7 +18463,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# dial is a little smaller and sits lower, and the card grew to keep the
 		# readout under the hub off its own bottom border.
 		var ccard_h := 116.0
-		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35))
+		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35), show_guide_step == 3)
 		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.9, 0.72, 0.62))
 		# the DIAL on the left, the drops you have left on the right
 		draw_gauge(Vector2(LX + 80.0, ccard_y + 82.0), 44.0, applause, peak_applause,
@@ -18532,7 +18546,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# Reputation, and the LV/XP bar never change mid-run - they live in the
 		# day hub, the sheet, and the results card instead of being repeated here.
 		var pts_row := points > 0
-		hud_card(Rect2(RX, 16, RW, 66.0 if pts_row else 48.0))
+		hud_card(Rect2(RX, 16, RW, 66.0 if pts_row else 48.0), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
@@ -18798,8 +18812,6 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 		{"name": "Restart this step" if tut_active else "End the session", "note": "a fresh tutorial deal" if tut_active else "back to the day hub", "col": Color(0.96, 0.76, 0.4), "icon": "back"},
 		{"name": "Quit Game", "note": "close " + GAME_TITLE, "col": Color(0.92, 0.42, 0.36), "icon": "quit"},
 	]
-	if tut_active:
-		opts.resize(2)
 	var cw := pw - 44.0
 	var cx := px + 22.0
 	var ch := 58.0
@@ -20139,7 +20151,7 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	var pw := 330.0
 	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
 	var cx := px + pw * 0.5
-	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0))
+	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0), false, show_guide_step == 4)
 	# no "TRICK -" prefix (the hints row already says trick, and the routine card
 	# opposite carries no prefix either), and the title shrinks to FIT the card -
 	# "BEHIND THE BACK - ON (High Toss next)" used to run off the right edge
@@ -24679,7 +24691,7 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 	# annulus, the bake went from 4.71 to 4.64 letter-heights wide, and art_blit_rect
 	# dutifully stretched 780 px of art across 792 px of box. A 1.5% stretch is every
 	# pixel of the logo resampled, on the first screen of the game.
-	if not _markref:
+	if not _markref and int(roundf(size)) != MENU_MARK:
 		var key := "ui/wordmark_%d" % int(roundf(size))
 		var wsz := art_native_size(key)
 		if wsz.x > 0.0:
@@ -25306,20 +25318,6 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(bx + bw - 100.0, by + bh - 10.0), "%s  go on" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(12), Color(1.0, 0.9, 0.7, pa))
 	# The guide points at the same rail it is naming. The outline is deliberately broad:
 	# each card already labels its individual numbers, while this teaches the screen map.
-	var focus_boxes: Array[Rect2] = []
-	match show_guide_step:
-		0:
-			focus_boxes = [Rect2(18.0, 16.0, 300.0, 52.0)]
-		1:
-			focus_boxes = [Rect2(s.x - 282.0, 16.0, 264.0, 66.0)]
-		2:
-			focus_boxes = [Rect2(18.0, 78.0, 300.0, 196.0)]
-		3:
-			focus_boxes = [Rect2(18.0, 286.0, 300.0, 116.0)]
-		4:
-			focus_boxes = [Rect2(18.0, s.y - 78.0, 300.0, 60.0)]
-	for fb in focus_boxes:
-		draw_rect(fb, Color(1.0, 0.88, 0.5, 0.9), false, 3.0)
 
 	# THE SECOND LINE MAKES THE STEM DEMONSTRATE ITSELF (2026-07-31, Louis: "instead of a
 	# dumb circle around it, make it fill up very fast and run out again at the same speed").
