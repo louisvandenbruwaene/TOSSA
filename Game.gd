@@ -311,6 +311,8 @@ const DIFF_SLOTH := 0
 const DIFF_BEAR := 1
 const DIFF_OCTOPUS := 2
 const DIFF_NAMES := ["SLOTH", "BEAR", "OCTOPUS"]
+const SLOTH_START_GOLD := 200
+const SLOTH_BASE_SLOW := 0.20
 
 const CASCADE := 0
 const COLUMNS := 1
@@ -3862,16 +3864,16 @@ func print_difficulty_check() -> void:
 		{"tag": "unskilled", "acc": 5, "str": 6, "prop": PROP_BALLS},
 		{"tag": "maxed", "acc": 200, "str": 200, "prop": PROP_CLUBS},
 	]
-	print("%-9s %-10s %6s %6s %6s  %8s %8s" % ["DIFF", "build", "Perfect", "Good", "Late", "P(Good)", "P(Late)"])
+	print("%-9s %-10s %6s %6s %6s  %8s %8s %6s" % ["DIFF", "build", "Perfect", "Good", "Late", "P(Good)", "P(Late)", "Slow"])
 	for d in 3:
 		difficulty = d
 		for b in builds:
 			accuracy = int(b["acc"])
 			strength = int(b["str"])
 			prop_type = int(b["prop"])
-			print("%-9s %-10s %6d %6d %6d  %8.0f%% %8.0f%%" % [
+			print("%-9s %-10s %6d %6d %6d  %8.0f%% %8.0f%% %5.0f%%" % [
 				DIFF_NAMES[d], String(b["tag"]), perfect_window(), good_window(), late_window(),
-				catch_chance(1, 0.0) * 100.0, catch_chance(2, 0.0) * 100.0])
+				catch_chance(1, 0.0) * 100.0, catch_chance(2, 0.0) * 100.0, slow_target() * 100.0])
 	difficulty = old_diff
 	accuracy = old_acc
 	strength = old_str
@@ -7331,7 +7333,10 @@ func reset_new_game() -> void:
 	speed = 0
 	pie_count = 0
 	pie_active = false
-	money = 0 if difficulty == DIFF_OCTOPUS else START_GOLD   # Octopus: no starting purse
+	match difficulty:
+		DIFF_SLOTH: money = SLOTH_START_GOLD
+		DIFF_OCTOPUS: money = 0
+		_: money = START_GOLD
 	reputation = 0
 	prop_count = [3, 0, 0, 0, 0, 0, 0]   # the starting kit: three worn stage balls
 	sync_props()
@@ -10987,6 +10992,10 @@ func slow_target() -> float:
 	# frame-perfect catch, and an earned fifty-Perfect thirty-second window. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
 	var a := 0.0 if purist_stat("spd") else float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
+	# SLOTH begins with the most readable assist in the game: the whole simulation runs
+	# 20% slower before any Speed investment. Purist strips it like other bought help.
+	if difficulty == DIFF_SLOTH and not purist_all():
+		a += SLOTH_BASE_SLOW
 	if pie_active and not purist_all():
 		a += PIE_SLOW
 	if _frames < amazing_until:
@@ -11100,7 +11109,7 @@ func difficulty_note(d: int) -> String:
 	# one line each, read on the picker and again on the Settings row - kept in one
 	# place so the two screens can never describe the same setting two different ways.
 	match d:
-		DIFF_SLOTH: return "wide catch windows, easygoing timing - learn the moves, not the clock"
+		DIFF_SLOTH: return "wide catches, 20% slow time, and 200 flowers to start - sloths get slow"
 		DIFF_OCTOPUS: return "tight timing, fewer forgiving frames, no starting purse - the real test"
 		_: return "the standard game, as shipped"
 

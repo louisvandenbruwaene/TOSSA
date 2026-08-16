@@ -33,6 +33,8 @@ Codex improvements:
   lesson starts. Closing the game during onboarding must never reopen that slot past the tutorial.
 - **Actionable validation failures:** `scripts/validate.sh` removes temporary logs after a pass but
   preserves them after a failure and prints their path. A failing check must not erase its evidence.
+- **SLOTH has a gentler economy and clock:** it starts with 200 flowers and contributes a permanent
+  20% base slowdown through `slow_target()`. Purist removes that assist; earned bursts still apply.
 
 ## PIXEL ART (read this before touching anything visual)
 
@@ -670,9 +672,10 @@ review" for the accept/reject examples and why.
   together exactly like a stat or a prop does) and `difficulty_catch_bonus()` (added into
   `catch_chance()`). SLOTH (+8 frames, +20% off-Perfect) beats even a fully maxed BEAR build's
   own ceiling on an UNSKILLED juggler with no gear - verified with `--diffcheck`, which prints
-  every difficulty's windows and chances at both stat extremes. OCTOPUS (-4 frames, -15%) also
-  starts a fresh career with an empty purse (`reset_new_game`'s `money`) instead of `START_GOLD` -
-  the three starting balls are unaffected, only the flower purse. `--diffnewgame <name>` (pair
+  every difficulty's windows and chances at both stat extremes. SLOTH also starts with 200 flowers
+  and a 20% base slowdown (removed by Purist like other bought assistance). OCTOPUS (-4 frames,
+  -15%) starts with an empty purse instead of `START_GOLD`; starting balls never change.
+  `--diffnewgame <name>` (pair
   with `--debug` so it never touches a real save) prints what `reset_new_game()` actually hands
   out at a given difficulty.
 - **Scoring:** exponential, Balatro-shaped. A *run* is the stretch since the last drop; it
