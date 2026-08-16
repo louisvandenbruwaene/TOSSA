@@ -27,6 +27,11 @@ Codex work lives on `codex/improvements` and follows three rules:
 This makes any individual change removable with `git revert <commit>` without unwinding unrelated
 work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the Codex change list.
 
+Codex improvements:
+
+- **New-career tutorial persistence:** the initial `"balls"` lesson marker is saved before the
+  lesson starts. Closing the game during onboarding must never reopen that slot past the tutorial.
+
 ## PIXEL ART (read this before touching anything visual)
 
 **Four decisions are locked. Do not relitigate them.**

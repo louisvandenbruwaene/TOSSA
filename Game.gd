@@ -7313,6 +7313,10 @@ func difficulty_input(kc: int) -> void:
 			# a brand new career opens straight into the hands-on basics (one ball, then
 			# two, then the cascade); tut_finish drops into the day when they are done
 			seen_tuts.append("balls")
+			# reset_new_game() saved the newly-created slot before the lesson marker existed.
+			# Persist it now so closing the window mid-lesson cannot turn the slot into an
+			# "existing" career that resumes in the day hub and silently skips the basics.
+			save_progress()
 			begin_tutorial("balls")
 			play_sfx("ui2", -11.0)
 		KEY_ESCAPE:
