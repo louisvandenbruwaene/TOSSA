@@ -37,9 +37,14 @@ Codex improvements:
   20% base slowdown through `slow_target()`. Purist removes that assist; earned bursts still apply.
 - **The mandatory lesson proves juggling, not button tallying:** its final three-ball free-play
   gate only counts catches that leave another prop airborne. It also verifies one held-height throw,
-  introduces timing grades and every global control, then tours both HUD rails in the first show.
+  introduces timing grades and core movement controls, then tours both HUD rails in the first show.
 - **First-show onboarding survives restarts:** `post_lesson_show` and `show_guide_seen` are save keys.
   A quit before that booked show resumes it; a quit after reading its HUD tour does not replay it.
+- **Tutorial controls arrive with their systems:** basics teaches hands, timing, held height, the exact
+  paused two-ball rhythm, two beginner-cascade cycles, the paused empty-hands cascade, restart and
+  menu. Prop/count/pattern/trick lessons introduce O, 1/2, P, and Space/C only when those features
+  unlock. The post-show hub tour introduces Tab, the shop, progression scaling, and optional shortcuts
+  across four short pages. The goal-stem demo holds its finished yellow bloom for one full second.
 
 ## PIXEL ART (read this before touching anything visual)
 

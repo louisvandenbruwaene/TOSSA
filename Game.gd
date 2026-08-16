@@ -1228,7 +1228,9 @@ const STEM_OVER_GOLD_AT := 0.35
 # on the other side by a comfortable margin.
 const STEM_FLOWER_SC := 1.25
 const STEM_FLOWER_OUT := 15.0     # how far the head sits off the stalk's centre line
-const GUIDE_STEM_CYCLE := 140.0   # ticks for one demonstration fill-and-drain of the stem
+const GUIDE_STEM_RAMP := 70.0     # fast fill and equally fast drain
+const GUIDE_STEM_HOLD := 120.0    # one full second with the final yellow bloom visible
+const GUIDE_STEM_CYCLE := GUIDE_STEM_RAMP * 2.0 + GUIDE_STEM_HOLD
 								   # while the first show's guide explains it (see
 								   # guide_stem_demo); 120 ticks is a second
 # ...so this is how far the celebration reaches out from the stem's centre line. The
@@ -1754,6 +1756,7 @@ const STATE_FADE_FRAMES := 14   # ~120ms at 120Hz: every screen fades in on arri
 var _fade_prev_state := -1      # -1 so even the FIRST screen (the boot menu) fades in
 var _state_fade_t := 0          # ticks since the last game_state change
 var menu_sel := 0         # cursor index in whichever menu is open
+var menutour_page := 0    # four short, contextual pages after the first performance
 var save_slot := 0        # which save file is active
 var diff_pick_sel := DIFF_BEAR  # the cursor on ST_DIFFICULTY, defaulting to the
 								 # standard game rather than whatever the cursor
@@ -3120,12 +3123,20 @@ func _input(event: InputEvent) -> void:
 				play_sfx("ui2", -11.0)
 			return
 		ST_MENUTOUR:
-			# the short "how the hub works" card - same shape again: a beat, then any
-			# key finally opens the day hub for the first time
-			if cine_tick > 40 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE, KEY_ESCAPE]:
+			# Four small pages, not one wall of systems. Enter advances; Escape still
+			# honours the global promise that it backs out without trapping the player.
+			if cine_tick > 40 and kc in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+				if menutour_page < 3:
+					menutour_page += 1
+					cine_tick = 0
+					play_sfx("ui2", -11.0)
+				else:
+					enter_day()
+					set_day_msg("your first day begins  -  the stage is yours")
+					play_sfx("ui2", -11.0)
+			elif kc == KEY_ESCAPE:
 				enter_day()
 				set_day_msg("your first day begins  -  the stage is yours")
-				play_sfx("ui2", -11.0)
 			return
 		ST_DIFFICULTY:
 			difficulty_input(kc)
@@ -3252,6 +3263,7 @@ func _input(event: InputEvent) -> void:
 					post_lesson_show = false
 					first_show_reaction = ""   # a one-act line; never carries into a later card
 					save_progress()              # do not book the tutorial show again next launch
+					menutour_page = 0
 					game_state = ST_MENUTOUR
 					cine_tick = 0
 				else:
@@ -3680,17 +3692,20 @@ func guide_stem_demo() -> float:
 	# picture of a meter cannot say - that this is a thing that FILLS, repeatedly, as you
 	# play. Returns -1.0 whenever the real number should be drawn instead.
 	#
-	# GUIDE_STEM_CYCLE is in ticks and cine_tick runs at 120/s (the standing gotcha), so 140
-	# is a fill and a drain inside about 1.2 seconds - Louis's "very fast", and symmetric
-	# because he asked for it to "run out again AT THE SAME SPEED". A triangle wave, not a
-	# sine: a sine lingers at both ends and reads as breathing rather than as filling.
+	# The stem fills quickly, HOLDS at 1.0 for a full second so the final yellow flower
+	# can actually be read, then drains at the same speed. The flat top is instructional,
+	# not easing: the completed state is the thing this demonstration exists to show.
 	# The cycle is anchored to the moment the LINE arrived, not to the free-running clock:
 	# a demonstration that starts halfway up, or starts by draining, demonstrates nothing.
 	# It begins at empty, every time, as the sentence about it appears.
 	if show_guide_step != 1:
 		return -1.0
-	var t := fmod(float(cine_tick - show_guide_tick), GUIDE_STEM_CYCLE) / (GUIDE_STEM_CYCLE * 0.5)
-	return t if t <= 1.0 else 2.0 - t
+	var t := fmod(float(cine_tick - show_guide_tick), GUIDE_STEM_CYCLE)
+	if t < GUIDE_STEM_RAMP:
+		return t / GUIDE_STEM_RAMP
+	if t < GUIDE_STEM_RAMP + GUIDE_STEM_HOLD:
+		return 1.0
+	return 1.0 - (t - GUIDE_STEM_RAMP - GUIDE_STEM_HOLD) / GUIDE_STEM_RAMP
 
 
 func arm_show_guide() -> void:
@@ -5178,85 +5193,62 @@ func tut_lesson(id: String) -> Array:
 	# enough to change the flight. It runs unfrozen so press duration can actually exist.
 	out.append({"goal": "hold_throw", "prop": PROP_BALLS, "balls": 1, "hand": RIGHT,
 		"stack": 1, "need": 1, "slow": 0.0, "say": true, "next": "go on",
-		"text": "Now hold [%s] until the gold gauge grows, then release. Holding THROW sends a higher, longer, harder-to-catch arc." % TD})
+		"text": "Hold [%s] until the gold gauge grows, release the high throw, then watch it and catch it. Higher arcs give you more time but are harder to secure." % TD})
 	out.append(tut_say("Use low taps for rhythm and held throws to make room. Height buys time, but very high catches are less forgiving."))
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
-	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1))
-	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true))
-	# THE FIRST EXCHANGE, ONE ACTION AT A TIME (2026-07-31, Louis: "right after throwing
-	# both it should pause frame by frame to tell me to catch them one by one", then:
-	# "it should ALWAYS be the first thrown ball that needs to be caught and thrown - that
-	# mistake is prominent in the 2 ball juggling tutorial").
-	#
-	# THE HAND ORDER, AND WHY IT IS NOT THE OBVIOUS ONE. These two balls DO cross - do_throw
-	# carries an explicit `if tut_active and tut_id == "balls" and num_balls == 2: cross =
-	# true`, because Cascade's parity rule would otherwise keep an even count same-handed and
-	# this step exists to rehearse the odd-count cross. So with T the airtime and the second
-	# ball thrown at the first one's peak (T/2), the props arrive:
-	#
-	#   off(T), dom(1.5T), dom(2T), off(2.5T), off(3T), dom(3.5T), ...
-	#
-	# The catch to CLOSE THE OPENING - off at T - is not scripted here at all: it belongs to
-	# the beat above ("throw the second before it lands"), where the catch guard stops the
-	# world for it while that throw is still being asked for. Every arrival after it falls to
-	# a beat below, and taking every OTHER one from that list leaves dom(1.5T), off(2.5T),
-	# dom(3.5T) - a plain [dom, off] alternation STARTING ON THE STRONG HAND.
-	#
-	# The old list started on the other hand, which put every beat one arrival behind: it
-	# named a ball that was 84 ticks out while a different one was 64 ticks from the other
-	# hand, so the ball being talked about was never the ball coming down. That is Louis's
-	# "it should always be the first thrown ball that needs to be caught and thrown", and it
-	# is why this is written from a trace (`--demo --tutorial balls`, printing every airborne
-	# prop at every beat) rather than from reasoning about the pattern: under this order every
-	# single catch beat opens with exactly ONE prop in the air and a uniform 34-tick lead,
-	# and under the old one half of them opened with two and chose the wrong one.
-	#
-	# Each catch is followed by throwing that same ball straight back - Louis's own script,
-	# "catch and throw on the RIGHT KJ KJ and on the LEFT DF DF". The throw-back carries NO
-	# `peak` flag: with two props the other one is already on its way down by the time you
-	# have caught this one, so waiting for a peak that has been and gone would stall the
-	# beat (it is the three-ball opening, where the second throw really does go under a
-	# rising first, that needs the peak hold).
-	var seq: Array[int] = [dom, off]
-	for _rep in 4:
-		for i in seq.size():
-			var ch: int = seq[i]
-			var kt := TD if ch == dom else TO
-			var kc2 := CD if ch == dom else CO
-			out.append(tut_do("Catch it.", "catch", ch, kc2, 2, 1))
-			out.append(tut_do("Throw it right back.", "throw", ch, kt, 2, 1))
-	# ...and the two closing catches, which take the next two arrivals in the same order the
-	# loop just ran (it alternates, and it ended on the other hand's throw). Both props are
-	# in the air after the last throw-back, and free play may never open on a prop still
-	# flying - Louis: "there was also a rule about not giving control to the player while
-	# any balls are in the air".
-	out.append(tut_do("Catch it.", "catch", seq[0], CD if seq[0] == dom else CO, 2, 1))
-	out.append(tut_do("And the last one.", "catch", seq[1], CD if seq[1] == dom else CO, 2, 1))
+	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1, false, {"sequence": true}))
+	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true, {"sequence": true}))
+	# Exact right-dominant order requested: J F D F K J K J D F D F K J K J ...
+	# Hands and live bindings are substituted, so the same rhythm mirrors correctly.
+	var two_actions := [
+		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
+		["catch", dom], ["throw", dom], ["catch", off], ["throw", off],
+		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
+		["catch", dom], ["throw", dom],
+	]
+	for a2: Array in two_actions:
+		var ah2 := int(a2[1])
+		var key2 := (CD if ah2 == dom else CO) if String(a2[0]) == "catch" else (TD if ah2 == dom else TO)
+		out.append(tut_do("Catch this one." if String(a2[0]) == "catch" else "Throw it back.",
+			String(a2[0]), ah2, key2, 2, 1, false, {"sequence": true}))
 	out.append(tut_free("Keep that going: catch, throw it right back, on each side in turn.",
 		2, 6, 6, "Practise the two-ball exchange. Enter when you've got it.", 1))
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
-	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, 2))
-	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, 2, true))
-	out.append(tut_do("Then catch the first.", "catch", off, CO, 3, 2))
-	out.append(tut_do("Now the same on the other side. Throw.", "throw", dom, TD, 3, 2))
-	out.append(tut_do("Catch.", "catch", dom, CD, 3, 2))
-	out.append(tut_do("And again. Throw.", "throw", off, TO, 3, 2))
-	out.append(tut_do("Catch.", "catch", off, CO, 3, 2))
+	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, 2, false, {"sequence": true}))
+	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, 2, true, {"sequence": true}))
+	# Two full left/right cycles, still paused on every action. The player gets enough
+	# repetitions for the alternating rhythm to become a pattern rather than a fact.
+	for _cycle in 2:
+		out.append(tut_do("Catch the first.", "catch", off, CO, 3, 2, false, {"sequence": true}))
+		out.append(tut_do("Send the next throw.", "throw", dom, TD, 3, 2, false, {"sequence": true}))
+		out.append(tut_do("Catch on the other side.", "catch", dom, CD, 3, 2, false, {"sequence": true}))
+		out.append(tut_do("Send the next throw.", "throw", off, TO, 3, 2, false, {"sequence": true}))
 	# ...and one more catch, so the air is EMPTY before free play opens (Louis's standing
 	# rule, restated 2026-07-31: "no balls in the air when you give the player control").
 	# The section used to end on a catch, which is not the same thing - the throw two beats
 	# earlier was still flying. This takes it, leaving two in the strong hand and one in the
 	# other: the cascade's own opening position, so practice starts where the drill did.
-	out.append(tut_do("And take the last one down.", "catch", dom, CD, 3, 2))
+	out.append(tut_do("And take the last one down.", "catch", dom, CD, 3, 2, false, {"sequence": true}))
 	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, 10, 10,
 		"Prove it: ten throws and ten catches, always with another ball in the air.", 2, true))
-	# THE OTHER WAY, IN ONE LINE (2026-07-29, Louis: folded in from the old standalone
-	# "advanced juggling technique" lesson - see tut_finish). Once the beginner rhythm
-	# is in the hands, this is the whole difference worth naming, not a second drill.
-	out.append(tut_say("There's another way to hold it: throw all three up first, then keep your hands empty - catch, then throw, every time. Same keys, opposite order. Try it once you're ready."))
-	out.append(tut_say("Your other controls: [%s] trick, %s switch trick, %s switch prop, %s switch pattern, and %s lower or raise the prop count." % [String(k_trick()[0]), String(k_cycle()[0]), String(k_object()[0]), String(k_pattern()[0]), " / ".join(k_count())]))
-	out.append(tut_say("[%s] opens your character sheet, %s opens the shop in practice, %s restarts a practice deal, and %s opens the game menu." % [String(k_sheet()[0]), String(k_shop()[0]), String(k_restart()[0]), String(k_pause()[0])]))
-	out.append(tut_say("In a performance, [%s] takes a bow and cashes in once you have reached a goal. The first real show will explain every number on its rails." % String(k_finish()[0])))
+	# EMPTY-HANDS CASCADE, exact right-dominant order requested:
+	# J F J D F K J D F K J D F ... Every key is its own stopped-world beat.
+	out.append(tut_say("Now the empty-hands cascade. Put all three up first; after that, catch first and throw from that same hand. We will pause on every key."))
+	out.append(tut_do("First ball up.", "throw", dom, TD, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
+	out.append(tut_do("Second ball under it.", "throw", off, TO, 3, 2, true, {"style": TUT_ADVANCED, "sequence": true}))
+	out.append(tut_do("Third ball up - now both hands are empty.", "throw", dom, TD, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
+	var empty_actions := [
+		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
+		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
+		["catch", off], ["throw", off],
+	]
+	for ae: Array in empty_actions:
+		var ahe := int(ae[1])
+		var keye := (CD if ahe == dom else CO) if String(ae[0]) == "catch" else (TD if ahe == dom else TO)
+		out.append(tut_do("Catch into the empty hand." if String(ae[0]) == "catch" else "Throw it straight back.",
+			String(ae[0]), ahe, keye, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
+	out.append(tut_say("That full sequence is the empty-hands rhythm: all three up, then catch and immediately throw from the same hand."))
+	out.append(tut_say("That is enough for now. [%s] restarts a practice deal, and %s opens the game menu. New controls will be taught only when their feature unlocks." % [String(k_restart()[0]), String(k_pause()[0])]))
 	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
 		"next": "finish the lesson", "say": true,
 		"text": "Tangled? %s starts you over, any time you are practising." % String(k_restart()[0])})
@@ -5285,7 +5277,7 @@ func tut_say(line: String) -> Dictionary:
 
 
 func tut_do(line: String, act: String, h: int, keyname: String, n: int, stack: int = 0,
-		peak: bool = false) -> Dictionary:
+		peak: bool = false, extra: Dictionary = {}) -> Dictionary:
 	# A LINE AND ONE KEY. `goal` names the exact press, so Enter cannot skip it (see
 	# tut_advance: a `do` beat holds until the goal is met, and only then does Enter mean
 	# anything). `peak` is Louis's "pause and highlight the first ball at its peak" beat -
@@ -5300,9 +5292,12 @@ func tut_do(line: String, act: String, h: int, keyname: String, n: int, stack: i
 	# already equals the RIGHT constant) and exactly backwards for a left-handed one, whose
 	# every deal came out mirrored onto the wrong hand entirely.
 	var g := ("throw_l" if h == LEFT else "throw_r") if act == "throw" else ("catch_l" if h == LEFT else "catch_r")
-	return {"goal": g, "prop": PROP_BALLS, "balls": n, "hand": RIGHT, "stack": stack, "need": 1, "slow": 0.0,
+	var d := {"goal": g, "prop": PROP_BALLS, "balls": n, "hand": RIGHT, "stack": stack, "need": 1, "slow": 0.0,
 		"say": true, "key": keyname, "peak": peak, "next": "go on",
 		"text": "%s  [%s]" % [line, keyname]}
+	for k in extra:
+		d[k] = extra[k]
+	return d
 
 
 func tut_beat(line: String, goal: String, need: int, n: int, extra: Dictionary = {}) -> Dictionary:
@@ -5621,7 +5616,7 @@ func tut_setup_step() -> void:
 	tut_speech_said = 0
 	tut_last_throw = other(start_hand)
 	if _demo:
-		print("TUTTRACE setup step=%d goal=%s balls=%d slow=%.2f guide=%s juggle=%s tick=%d" % [tut_step, String(step["goal"]), num_balls, tut_slow(), str(step.get("guide", false)), str(step.get("juggle", false)), tick])
+		print("TUTTRACE setup step=%d goal=%s balls=%d held=%d/%d air=%d slow=%.2f guide=%s juggle=%s tick=%d" % [tut_step, String(step["goal"]), num_balls, stack(LEFT).size(), stack(RIGHT).size(), balls_airborne(), tut_slow(), str(step.get("guide", false)), str(step.get("juggle", false)), tick])
 	# a step with nothing to DO (the key legend) is already met the moment it opens, so
 	# its Enter prompt is live immediately rather than after some press that never comes.
 	# Safe to ask now: every counter above is zeroed, so a step with a real goal cannot
@@ -6254,7 +6249,9 @@ func tut_check() -> void:
 		"catch_l": done = tut_caught_l
 		"hand": done = tut_hand_picked
 		"free": done = tut_count >= int(step.get("need", 0)) and tut_throws >= int(step.get("throws", 0))
-		"hold_throw": done = tut_held_throws >= int(step.get("need", 1))
+		# The high throw must be watched back into the hand. Clearing on release erased
+		# the ball on the next dialogue step before the player could see the arc finish.
+		"hold_throw": done = tut_held_throws >= int(step.get("need", 1)) and tut_count >= 1
 		"trick_on": done = toggle_on == int(step.get("trick", -1))   # the toggle is running
 		"trick_off": done = toggle_on < 0                             # ...and now switched off
 		"trick_use": done = tut_tricks >= int(step["need"])           # arm/live: reward_trick fired
@@ -6282,7 +6279,7 @@ func tut_check() -> void:
 		# keep the generic feeder from sneaking in a stray throw - see its own comment)
 		# is tuned around a step staying "done but open" for a beat, and this collapses
 		# that beat to zero for a real player only.
-		if goal != "read" and goal != "free" and not _demo:
+		if goal != "read" and goal != "free" and (not _demo or bool(step.get("sequence", false))):
 			tut_advance()
 
 
@@ -25410,23 +25407,42 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 	ext_center = false
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.6))
 	var fin := clampf(float(cine_tick) / 50.0, 0.0, 1.0)
-	draw_title_glow(font, s.y * 0.14, "FINDING YOUR WAY AROUND", 34, Color(1.0, 0.88, 0.5, fin), s)
+	var pages := [
+		{"title": "YOUR DAY", "head": "THREE CHOICES, THEN NIGHT FALLS", "rows": [
+			["star", "TONIGHT", "perform for flowers and reputation, practise safely, or play the daily"],
+			["moon", "REST", "food restores stamina; the inn ends the day and fully restores it"],
+			["bag", "PREPARE", "buy equipment, choose skills and patterns, tailor an outfit, spend points"],
+		], "foot": "Actions show their cost before you commit. Drawers are free to open and inspect."},
+		{"title": "HOW YOU GROW", "head": "EVERY SYSTEM SCALES FROM SOMETHING VISIBLE", "rows": [
+			["star", "REPUTATION", "opens larger venues; harder rooms pay more and ask for stronger acts"],
+			["bag", "STRENGTH", "unlocks heavier props and larger counts; the requirement is shown before play"],
+			["star", "SCORE & GOALS", "props, counts, patterns and tricks multiply score; goals bank safer progress"],
+		], "foot": "Nothing hidden is required: a closed option tells you the stat, price, or reputation it needs."},
+		{"title": "YOUR CHARACTER", "head": "POINTS SHAPE COMFORT, YOUR HANDS SHAPE THE RECORD", "rows": [
+			["star", "ACCURACY", "raises GOOD/LATE reliability; above 100 it becomes Focus and widens timing"],
+			["bag", "ENDURANCE", "raises maximum stamina; catches spend stamina and fatigue lowers reliability"],
+			["moon", "SPEED", "slows the whole simulation; SLOTH already begins with a 20% base slowdown"],
+		], "foot": "%s opens the character sheet anywhere. Holding confirm spends several saved points quickly." % String(k_sheet()[0])},
+		{"title": "SHORTCUTS", "head": "THE HUB IS HOME; SHORTCUTS ARE OPTIONAL", "rows": [
+			["bag", "%s  CHARACTER SHEET" % String(k_sheet()[0]), "stats, points, unlock paths and the meaning of each attribute"],
+			["bag", "%s  SHOP" % String(k_shop()[0]), "opens the counter during practice; the PREPARE drawer reaches it too"],
+			["moon", "%s  BACK" % String(k_pause()[0]), "closes one layer or opens the game menu; %s redeals only in practice" % String(k_restart()[0])],
+		], "foot": "New juggling buttons are taught when their prop, count, pattern, or trick unlocks."},
+	]
+	var page: Dictionary = pages[clampi(menutour_page, 0, pages.size() - 1)]
+	draw_title_glow(font, s.y * 0.14, String(page["title"]), 34, Color(1.0, 0.88, 0.5, fin), s)
 	draw_ornament(s.x * 0.5, s.y * 0.14 + 56.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
 
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
 	var py := s.y * 0.28
-	var rows := [
-		["star", "TONIGHT", "perform, practice, or take on the daily challenge"],
-		["moon", "REST", "a hot meal, the inn, or anything else that gets stamina back"],
-		["bag", "PREPARE", "the shop, your skills, the tailor, and your stats"],
-	]
+	var rows: Array = page["rows"]
 	var ka := clampf(float(cine_tick - 20) / 40.0, 0.0, 1.0)
 	if ka > 0.0:
 		var ph := 40.0 + float(rows.size()) * 56.0
 		draw_rect(Rect2(px, py, pw, ph), Color(0.05, 0.03, 0.05, 0.9 * ka))
 		hud_panel(Rect2(px, py, pw, ph))
-		draw_string(font, Vector2(px, py + 24.0), "THE DAY HUB HOLDS THREE DRAWERS", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(13),
+		draw_string(font, Vector2(px, py + 24.0), String(page["head"]), HORIZONTAL_ALIGNMENT_CENTER, pw, ps(13),
 			Color(0.85, 0.72, 0.55, ka))
 		for i in rows.size():
 			var r: Array = rows[i]
@@ -25436,12 +25452,13 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 				Color(1.0, 0.92, 0.62, ka))
 			draw_string(font, Vector2(px + 62.0, ry + 20.0), String(r[2]), HORIZONTAL_ALIGNMENT_LEFT, pw - 80.0, ps(13),
 				Color(0.85, 0.80, 0.72, ka * 0.9))
-	draw_string(font, Vector2(0, py + float(rows.size()) * 56.0 + 66.0),
-		"Tab opens your stats sheet any time, on stage or in the hub. Esc always steps back one level.",
-		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.8, 0.74, 0.64, ka))
+	draw_wrap_fit(font, String(page["foot"]), Rect2(s.x * 0.5 - 380.0,
+		py + float(rows.size()) * 56.0 + 48.0, 760.0, 42.0), 14,
+		Color(0.8, 0.74, 0.64, ka), HORIZONTAL_ALIGNMENT_CENTER)
 	if cine_tick > 40:
 		var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.05)
-		draw_string(font, Vector2(0, s.y * 0.86), "Enter  -  the day is yours", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16),
+		var next := "Enter  -  the day is yours" if menutour_page >= pages.size() - 1 else "Enter  -  next   (%d / %d)" % [menutour_page + 1, pages.size()]
+		draw_string(font, Vector2(0, s.y * 0.86), next, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16),
 			Color(1.0, 0.85, 0.55, 0.4 + 0.5 * pa))
 	draw_vignette(s, 0.6)
 
@@ -27849,12 +27866,21 @@ func _demo_step() -> void:
 		# their own dead gaps, and always have.
 		if tut_id == "balls" and tut_advance_at >= 0:
 			return
+		# A scripted sequence owns every press. While a peak-timed throw is still rising,
+		# the generic demo feeder must not "help" by throwing the next scripted ball early.
+		if bool(tut_step_data().get("sequence", false)):
+			return
 		# The height lesson is the one basics step whose press duration is the goal.
 		# Feed it with a genuinely held throw so --tutorial balls tests that branch too.
 		if String(tut_step_data().get("goal", "")) == "hold_throw":
 			var hh := tut_step_hand(tut_step_data())
-			if not stack(hh).is_empty():
+			if tut_held_throws == 0 and not stack(hh).is_empty():
 				do_throw(hh, maxi(10, HOLD_MAX / 3))
+			elif tut_held_throws > 0:
+				for hb: Ball in balls:
+					if hb.state == STATE_FLIGHT and absi(hb.land_tick - tick) <= 1:
+						on_catch(hh)
+						break
 			return
 		var due := tut_due_actions()
 		for e in due:

@@ -82,7 +82,7 @@ scan_run_log "$WORK/daily.log" || FAIL=1
 # This is executable onboarding, not static copy: it must drive the real sim through
 # held-height input, the two-ball exchange, and ten consecutive juggling catches.
 log_head "3b. First-player tutorial (--tutorial balls)"
-run_headless 45 "$WORK/tutorial.log" --demo --tutorial balls || true
+run_headless 60 "$WORK/tutorial.log" --demo --tutorial balls || true
 if grep -q "TUTTRACE finished id=balls" "$WORK/tutorial.log"; then
   log_ok "Mandatory tutorial completed through the real simulation."
 else
