@@ -38,6 +38,8 @@ Codex improvements:
 - **The mandatory lesson proves juggling, not button tallying:** its final three-ball free-play
   gate only counts catches that leave another prop airborne. It also verifies one held-height throw,
   introduces timing grades and every global control, then tours both HUD rails in the first show.
+- **First-show onboarding survives restarts:** `post_lesson_show` and `show_guide_seen` are save keys.
+  A quit before that booked show resumes it; a quit after reading its HUD tour does not replay it.
 
 ## PIXEL ART (read this before touching anything visual)
 
