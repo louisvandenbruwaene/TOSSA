@@ -156,6 +156,9 @@ def shade(nx, ny, nz, inside):
 	padded = np.pad(inside, 1, constant_values=False)
 	core = (padded[1:-1, :-2] & padded[1:-1, 2:] & padded[:-2, 1:-1]
 		& padded[2:, 1:-1])
+	padded_core = np.pad(core, 1, constant_values=False)
+	core = (padded_core[1:-1, :-2] & padded_core[1:-1, 2:]
+		& padded_core[:-2, 1:-1] & padded_core[2:, 1:-1])
 	val = np.where(inside & ~core, GREY_FLOOR, val)
 	return np.where(inside, val, 0.0)
 
