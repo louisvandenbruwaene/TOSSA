@@ -5225,19 +5225,19 @@ func tut_lesson(id: String) -> Array:
 	# THREE BALLS, two in the dominant hand: the real cascade, one exchange at a time.
 	out.append(tut_do("Three balls. Two in your strong hand. Throw the first.", "throw", dom, TD, 3, 2, false, {"sequence": true}))
 	out.append(tut_do("Wait for it to reach the top, then throw the next one under it.", "throw", off, TO, 3, 2, true, {"sequence": true}))
-	# Two full left/right cycles, still paused on every action. The player gets enough
-	# repetitions for the alternating rhythm to become a pattern rather than a fact.
-	for _cycle in 2:
-		out.append(tut_do("Catch the first.", "catch", off, CO, 3, 2, false, {"sequence": true}))
-		out.append(tut_do("Send the next throw from your strong hand.", "throw", dom, TD, 3, 2, false, {"sequence": true}))
-		out.append(tut_do("Catch on the other side.", "catch", dom, CD, 3, 2, false, {"sequence": true}))
-		out.append(tut_do("Send the next throw from your other hand.", "throw", off, TO, 3, 2, false, {"sequence": true}))
-	# ...and one more catch, so the air is EMPTY before free play opens (Louis's standing
-	# rule, restated 2026-07-31: "no balls in the air when you give the player control").
-	# The section used to end on a catch, which is not the same thing - the throw two beats
-	# earlier was still flying. This takes it, leaving two in the strong hand and one in the
-	# other: the cascade's own opening position, so practice starts where the drill did.
-	out.append(tut_do("And take the last one down.", "catch", dom, CD, 3, 2, false, {"sequence": true}))
+	# Exact right-dominant rhythm: J F D J K F D J K F D J K. Mirroring dom/off also
+	# mirrors every throw and catch for a left-dominant player. The free step re-deals
+	# cleanly if this guided rhythm still has props airborne.
+	var three_actions := [
+		["catch", off], ["throw", dom], ["catch", dom], ["throw", off],
+		["catch", off], ["throw", dom], ["catch", dom], ["throw", off],
+		["catch", off], ["throw", dom], ["catch", dom],
+	]
+	for a3: Array in three_actions:
+		var ah3 := int(a3[1])
+		var key3 := (CD if ah3 == dom else CO) if String(a3[0]) == "catch" else (TD if ah3 == dom else TO)
+		out.append(tut_do("Catch this one." if String(a3[0]) == "catch" else "Throw the next ball.",
+			String(a3[0]), ah3, key3, 3, 2, false, {"sequence": true}))
 	out.append(tut_free("That is the whole cascade. Try it out until you feel comfortable.", 3, 10, 10,
 		"Prove it: ten throws and ten catches, always with another ball in the air.", 2, true))
 	# EMPTY-HANDS CASCADE, exact right-dominant order requested:
@@ -24829,7 +24829,10 @@ func capsule_mark(s: Vector2, cy: float, size: float, alpha: float = 1.0) -> voi
 				var nab := clampi(int(round(bar_len / maxf(abr * 2.0 * 0.90, 0.001))) + 1, 4, 7)
 				for j in range(1, nab - 1):
 					var t := float(j) / float(nab - 1)
-					cap_ball(bar_l.lerp(bar_r, t), cap_s_color(j + 1), abr)
+					var bp := bar_l.lerp(bar_r, t)
+					var bc := cap_s_color(j + 1)
+					if not mark_prop("prop_big/ball", bp, 0.0, abr * 2.0, bc):
+						cap_ball(bp, bc, abr)
 			_:
 				pass
 		x += w + gap - size * n.x

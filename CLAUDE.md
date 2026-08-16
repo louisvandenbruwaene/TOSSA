@@ -41,7 +41,8 @@ Codex improvements:
 - **First-show onboarding survives restarts:** `post_lesson_show` and `show_guide_seen` are save keys.
   A quit before that booked show resumes it; a quit after reading its HUD tour does not replay it.
 - **Tutorial controls arrive with their systems:** basics teaches hands, timing, held height, the exact
-  paused two-ball rhythm, two beginner-cascade cycles, the paused empty-hands cascade, restart and
+  paused two-ball rhythm, the mirrored three-ball rhythm (`J F D J K F D J K F D J K` for a
+  right-dominant player), the paused empty-hands cascade, restart and
   menu. Prop/count/pattern/trick lessons introduce O, 1/2, P, and Space/C only when those features
   unlock. The post-show hub tour introduces Tab, the shop, progression scaling, and optional shortcuts
   across four short pages. The goal-stem demo holds its finished yellow bloom for one full second.
@@ -58,7 +59,8 @@ Codex improvements:
   `pixelise_mark.py` after round-prop changes. The title A uses slightly larger, lower-reaching clubs.
 - **The title renders its prop mark live at menu size:** the stale `wordmark_168` bake remains available
   to smaller secondary lockups, but the title itself uses the shared ball/ring/club sources so an asset
-  improvement cannot silently disappear behind an old bake.
+  improvement cannot silently disappear behind an old bake. This includes the two A-crossbar balls;
+  they go through `prop_big/ball`, exactly like both S letters, rather than `cap_ball`.
 
 ## PIXEL ART (read this before touching anything visual)
 
