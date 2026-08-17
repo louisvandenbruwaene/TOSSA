@@ -68,6 +68,25 @@ else
 fi
 scan_run_log "$WORK/booking.log" || FAIL=1
 
+# --- 2b. Demo export presets ------------------------------------------------
+# The game's `demo` feature is meaningful only if it can reach a shipping
+# binary.  Keep this check declarative: export templates are optional on a
+# development machine, while these three presets and their feature flag must
+# exist in every checkout.
+log_head "2b. Demo export presets"
+for preset in "macOS Demo" "Windows Demo" "Linux Demo"; do
+  if awk -v want="$preset" '
+    /^\[preset\.[0-9]+\]$/ { in_preset = 0 }
+    $0 == "name=\"" want "\"" { in_preset = 1 }
+    in_preset && $0 == "custom_features=\"demo\"" { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' export_presets.cfg; then
+    log_ok "$preset carries the demo feature."
+  else
+    fail "$preset is missing or does not declare custom_features=\"demo\"."
+  fi
+done
+
 # --- 3. Seeded daily act -----------------------------------------------------
 log_head "3. Daily act (--daily --demo --booking)"
 run_headless 60 "$WORK/daily.log" --daily --demo --booking || true

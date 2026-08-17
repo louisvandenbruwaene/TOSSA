@@ -15,7 +15,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/lib.sh
 require_godot
 
-PRESETS=(macOS Windows Linux "macOS Debug" "Windows Debug" "Linux Debug")
+PRESETS=(macOS Windows Linux "macOS Demo" "Windows Demo" "Linux Demo" "macOS Debug" "Windows Debug" "Linux Debug")
 DIRS=(export/macos export/windows export/linux)
 
 mkdir -p "${DIRS[@]}"
