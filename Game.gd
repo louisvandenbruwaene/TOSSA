@@ -18451,7 +18451,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_fit_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), score_text(score)],
 				HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 11, Color(0.75, 0.95, 0.7, pl))
 		else:
-			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, ps(10), Color(0.72, 0.66, 0.58, 0.7))
+			# This is an actionable instruction, not decoration.  At 10px it was the
+			# least readable line in the whole score card at the shipped 1280x720.
+			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, ps(12), Color(0.82, 0.76, 0.66, 0.88))
 
 		# --- the CROWD (patience clock) and the DROP limit ---
 		var ccard_y := 286.0
@@ -18468,7 +18470,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# the DIAL on the left, the drops you have left on the right
 		draw_gauge(Vector2(LX + 80.0, ccard_y + 82.0), 44.0, applause, peak_applause,
 			"%d%%" % int(round(applause * 100.0)), font)
-		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.9, 0.6, 0.55))
+		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(1.0, 0.72, 0.64, 0.92))
 		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
 
 		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
@@ -18499,7 +18501,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# immediately before the act; what the live HUD owes the player mid-run is WHICH
 			# challenges are on, not what they mean again. One box per challenge survives either
 			# way, which was the whole point of splitting them up in the first place.
-			var e_floor := s.y - 78.0 - 8.0    # draw_routine_hud's panel top, less a gap
+			var e_floor := s.y - 88.0 - 8.0    # draw_routine_hud's panel top, less a gap
 			var e_hi: Array[float] = []
 			var e_tot := 0.0
 			for e in encores:
@@ -20151,14 +20153,17 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	var pw := 330.0
 	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
 	var cx := px + pw * 0.5
-	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0), false, show_guide_step == 4)
+	# The cards occupy the otherwise-unused strip above the frame.  Giving the
+	# controls another 10px lets their text use the first comfortably readable
+	# pixel-font rung rather than squeezing it into a 12px baseline.
+	hud_panel(Rect2(px, s.y - 88.0, pw, 70.0), false, show_guide_step == 4)
 	# no "TRICK -" prefix (the hints row already says trick, and the routine card
 	# opposite carries no prefix either), and the title shrinks to FIT the card -
 	# "BEHIND THE BACK - ON (High Toss next)" used to run off the right edge
 	var fs := 16
 	while fs > 11 and font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x > pw - 24.0:
 		fs -= 1
-	draw_string(font, Vector2(px + 12.0, s.y - 52.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, ps(fs), lc)
+	draw_string(font, Vector2(px + 12.0, s.y - 62.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, ps(fs), lc)
 	var items: Array = []
 	var use := ""
 	match kind:
@@ -20173,7 +20178,7 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 	items.append([k_trick(), use])
 	if un.size() > 1:
 		items.append([k_cycle(), "switch trick"])
-	draw_hints_row(font, cx, s.y - 40.0, items)
+	draw_hints_row(font, cx, s.y - 38.0, items)
 
 
 func draw_routine_hud(font: Font, s: Vector2) -> void:
@@ -20184,7 +20189,7 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	var pw := 330.0
 	var px := 18.0
 	var cx := px + pw * 0.5
-	hud_panel(Rect2(px, s.y - 78.0, pw, 60.0))
+	hud_panel(Rect2(px, s.y - 88.0, pw, 70.0))
 	var oname := String(cur_prop()["name"]).to_upper()
 	var pname := String(PATTERNS[pattern]["name"]).to_upper()
 	var ocol := ball_color(0) if prop_type == PROP_BALLS else prop_color(prop_type)
@@ -20196,14 +20201,14 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz)).x
 	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz)).x
 	var jx := cx - jw * 0.5
-	draw_string(font, Vector2(jx, s.y - 52.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), ocol)
-	draw_string(font, Vector2(jx + ow, s.y - 52.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), Color(0.86, 0.76, 0.62))
+	draw_string(font, Vector2(jx, s.y - 62.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), ocol)
+	draw_string(font, Vector2(jx + ow, s.y - 62.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), Color(0.86, 0.76, 0.62))
 	var colw := pw / 3.0
 	var cy := s.y - 26.0
 	var hand_c := Color(0.92, 0.84, 0.7)
-	draw_string(font, Vector2(px, cy), "left hand  %d" % _stack_l.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(13), hand_c)
-	draw_string(font, Vector2(px + colw, cy), "in the air  %d" % balls_airborne(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(13), Color(0.7, 0.85, 1.0))
-	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(13), hand_c)
+	draw_string(font, Vector2(px, cy), "left hand  %d" % _stack_l.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(16), hand_c)
+	draw_string(font, Vector2(px + colw, cy), "in the air  %d" % balls_airborne(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(16), Color(0.7, 0.85, 1.0))
+	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(16), hand_c)
 
 
 #endregion
@@ -25054,7 +25059,7 @@ func draw_settings_screen(font: Font, s: Vector2) -> void:
 
 
 func draw_settings_cards(font: Font, s: Vector2) -> void:
-	# SETTINGS as cards - the same TEN rows in the same menu_sel order settings_input
+	# SETTINGS as cards - the same ELEVEN rows in the same menu_sel order settings_input
 	# already drives, in the Balatro-card language the shop and sheet use
 	# (hud_card/draw_meter/a toggle plate). This screen alone never picked it up and was
 	# bare text rows. (Shipped 2026-07-27, no longer a variant.)
@@ -25093,7 +25098,7 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 	]
 	var pw := minf(620.0, s.x - 90.0)
 	var px := s.x * 0.5 - pw * 0.5
-	# sized so TEN rows plus three section headers still finish above the footer: the
+	# sized so ELEVEN rows plus three section headers still finish above the footer: the
 	# dominant-hand row was the tenth, and at the old spacing Back sat under the hints
 	var card_h := 38.0
 	var gap := 6.0
@@ -27302,6 +27307,15 @@ func draw_popups(font: Font) -> void:
 		var size := 18
 		if big:
 			size = 23 + maxi(0, 6 - int(age))
+		# A high-contrast plate gives a timing grade one stable silhouette over every
+		# venue.  An outline alone was not enough when PERFECT crossed the coat, a
+		# torch halo, or a bright prop.  The plate travels with the popup, so it does
+		# not become another static HUD element in the flight space.
+		var text_w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
+		var plate := Rect2(pos.x - text_w * 0.5 - 10.0, pos.y - float(ps(size)) - 7.0,
+			text_w + 20.0, float(ps(size)) + 12.0)
+		draw_rect(plate, Color(0.035, 0.02, 0.035, a * 0.78))
+		draw_line(plate.position, Vector2(plate.end.x, plate.position.y), Color(c.r, c.g, c.b, a * 0.45), 1.0)
 		# the box is 240 wide, so its LEFT edge sits half that from the anchor: the
 		# old -60 offset centred every popup 60px right of the hand it belonged to
 		draw_text_shout(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
