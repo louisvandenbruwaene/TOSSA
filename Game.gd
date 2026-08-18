@@ -1907,10 +1907,8 @@ var dominant_hand := RIGHT  # which hand is the strong one (Settings). It holds 
                             # extra prop on an odd count and starts the pattern -
                             # every juggler deals the odd ball to their strong hand,
                             # so a left-hander should not have to juggle mirrored.
-var difficulty := DIFF_BEAR  # SLOTH / BEAR / OCTOPUS - a global preference, not a
-                            # per-career one, same as dominant_hand: chosen once on a
-                            # brand new slot (see start_slot) and free to change any
-                            # time after from Settings.
+var difficulty := DIFF_BEAR  # SLOTH / BEAR / OCTOPUS, loaded from the active slot
+var legacy_difficulty := DIFF_BEAR  # old builds stored one global value; migration only
 # (set_collide, the hard-collisions toggle, was here. Removed 2026-07-29 with the mechanic
 # it drove - see update_sim's clack loop. Its saved key is simply not read any more, which
 # is the right way to retire a setting: an old settings file keeps the value, nothing looks
@@ -7603,7 +7601,8 @@ func load_settings() -> void:
 		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
 		# Legacy migration default only: old careers predate per-slot difficulty. The first
 		# time one is loaded, save_progress writes this value into that slot's metadata.
-		difficulty = clampi(int(cf.get_value("opt", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS)
+		legacy_difficulty = clampi(int(cf.get_value("opt", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS)
+		difficulty = legacy_difficulty
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
 		set_fullscreen = bool(cf.get_value("opt", "fullscreen", false))
@@ -7642,6 +7641,9 @@ func save_settings() -> void:
 	cf.set_value("opt", "reduce_motion", reduce_motion)
 	cf.set_value("opt", "catch_full", set_catch_full)
 	cf.set_value("opt", "dominant_hand", dominant_hand)
+	# Preserve the old global value only until every old career has loaded once and written
+	# immutable per-slot metadata. It is not exposed or changed by Settings.
+	cf.set_value("opt", "difficulty", legacy_difficulty)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
 	cf.set_value("opt", "fullscreen", set_fullscreen)
@@ -11932,7 +11934,7 @@ func _migrate_lesson_id(id: String) -> String:
 func load_progress() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(save_file()) == OK:
-		difficulty = clampi(int(cf.get_value("meta", "difficulty", difficulty)), DIFF_SLOTH, DIFF_OCTOPUS)
+		difficulty = clampi(int(cf.get_value("meta", "difficulty", legacy_difficulty)), DIFF_SLOTH, DIFF_OCTOPUS)
 		slot_sprint = bool(cf.get_value("meta", "sprint", false))
 		# CLAMPED TO THE LIVE CAPS ON THE WAY IN (2026-07-29). Accuracy's ceiling came down
 		# from 250 to 200 with the Focus rework, so a save made before that can carry up to
@@ -25234,7 +25236,7 @@ func slot_info(i: int) -> Dictionary:
 		"level": int(cf.get_value("prog", "level", 1)),
 		"gold": int(cf.get_value("stats", "money", START_GOLD)),
 		"venue": "SPRINT" if bool(cf.get_value("meta", "sprint", false)) else String(venue_data(venue_index_of(rep))["name"]),
-		"difficulty": clampi(int(cf.get_value("meta", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS),
+		"difficulty": clampi(int(cf.get_value("meta", "difficulty", legacy_difficulty)), DIFF_SLOTH, DIFF_OCTOPUS),
 		"won": bool(cf.get_value("prog", "won", false)),
 	}
 
