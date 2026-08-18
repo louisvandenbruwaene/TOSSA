@@ -35,7 +35,7 @@ func _init() -> void:
 		if i >= TOSSA_CATALOG.ENCORES.size() or TOSSA_CATALOG.ENCORES[i]["id"] != expected_encores[i]:
 			push_error("Encore %d must remain %s." % [i, expected_encores[i]])
 			failed += 1
-	if TOSSA_CATALOG.PURIST_IDS != ["purist_acc", "purist_str", "purist_end", "purist_spd"]:
+	if TOSSA_CATALOG.PURIST_IDS != ["purist_acc", "purist_spd"]:
 		push_error("Purist Encore IDs changed.")
 		failed += 1
 	if TOSSA_CATALOG.VENUE_FLAVOUR.size() != 7:

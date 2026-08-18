@@ -1452,12 +1452,8 @@ var best_scores: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # best scor
 # juggler's, no glasses, no Focus window, no Strength steadying), so its records
 # are pure skill. Separate per-venue bests, toggled per booking in the day hub.
 var purist := false
-# THE PLAYER'S OWN PICKS (Louis: "choose what perks to disable, special rewards for all of
-# them at once"), one flag per PURIST_IDS entry (acc, str, end, spd). KEY_P still toggles all
-# four at once as a shortcut and keeps writing `purist` directly; KEY_1-4 in the day hub toggle
-# one stat each and keep `purist` in sync (true only once every entry here is true), so every
-# existing reader of `purist` - the record board, the HUD's PURIST tag, the Legend chase - is
-# already correct for a hand-picked all-four run and needs no changes of its own.
+# Legacy four-slot shape retained for save compatibility. Player-facing Purist is now one
+# indivisible pair: Accuracy and Speed. Strength and Endurance are never bound.
 var purist_picks: Array[bool] = [false, false, false, false]
 var best_scores_purist: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # --- the career ledger (persisted per slot): lifetime numbers behind the record
@@ -3598,17 +3594,9 @@ func begin_performance(n: int) -> void:
 	# rolled with the global randi (never the sim rng, so the deterministic catch
 	# sequence is untouched). The Backyard stays pure: no conditions on stage one.
 	encores = roll_encore(play_venue())
-	# THE PLAYER'S OWN PURIST PICKS ALWAYS WIN over whatever the house randomly offered -
-	# that is the whole point of choosing them by hand. Capped by the same purist_slots(venue)
-	# progression gate roll_encore already respects, so hand-picking cannot skip past "the
-	# Backyard stays pure" the way a raw override would.
-	if purist_picks.has(true):
-		var slots := purist_slots(play_venue())
-		var picked: Array[int] = []
-		for i in PURIST_IDS.size():
-			if purist_picks[i] and picked.size() < slots:
-				picked.append(encore_index(String(PURIST_IDS[i])))
-		encores = picked
+	# A player-booked Purist act always binds the approved pair together.
+	if purist:
+		encores = [encore_index("purist_acc"), encore_index("purist_spd")]
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -3998,17 +3986,13 @@ func encore_pool(venue: int) -> Array[int]:
 
 
 func purist_slots(venue: int) -> int:
-	# HOW MANY STATS A HOUSE MAY STRIP AT ONCE (2026-07-29, Louis: "4 at a time can happen in
-	# midnight stage, 3 at a time the stage before that, 2 the stage before that and 1 the
-	# stage before that - make sure that isn't too early"). Counting back from MAX_VENUE puts
-	# the first single-stat Purist at the Circus, which is the fourth house and well past the
-	# point where a player has stats worth stripping. Nothing below that.
-	return maxi(0, 4 - (MAX_VENUE - venue))
+	# Purist begins late and can only draw from the two approved conditions.
+	return mini(PURIST_IDS.size(), maxi(0, 4 - (MAX_VENUE - venue)))
 
 
 func roll_encore(venue: int) -> Array[int]:
-	# tonight's challenges: either ONE ordinary Encore, or a Purist night of one to four
-	# stats. They do not mix - a night that took your Accuracy away and set the stage on fire
+	# Tonight's challenges: either one ordinary Encore, or a Purist night using Accuracy,
+	# Speed, or both. They do not mix - a night that took your Accuracy away and set the stage on fire
 	# is two ideas competing for the same attention, and the Purist nights are already the
 	# deck's hardest.
 	var slots := purist_slots(venue)
@@ -4287,23 +4271,10 @@ func day_actions() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var tired := too_tired()
 	var tired_why := "too tired to work (stamina under %d)  -  sleep first" % int(TIRED_FLOOR)
-	var purist_sub := "P books it PURIST."
-	if not purist and purist_picks.has(true):
-		# a partial hand-pick, shown by name so the choice reads back without opening
-		# anything else - "1-4 to choose" only while nothing is bound yet
-		var names: Array[String] = []
-		for i in PURIST_IDS.size():
-			if purist_picks[i]:
-				var pek := encore_index(String(PURIST_IDS[i]))
-				names.append(String(ENCORES[pek]["name"]).trim_prefix("Purist: ") if pek >= 0 else String(PURIST_IDS[i]))
-		purist_sub = "%s bound (%d/4)  -  P for all." % [", ".join(names), names.size()]
-	elif purist:
-		purist_sub = "full PURIST set bound  -  P to release."
-	else:
-		purist_sub += "  1-4 to bind one stat."
+	var purist_sub := "P releases Accuracy + Speed." if purist else "P binds Accuracy + Speed for PURIST."
 	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
-		"sub": "earn pay and reputation while stamina lasts. %s" % purist_sub})
+		"sub": purist_sub})
 	if not sprint_active:
 		out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
 			"cost": "", "ok": not tired, "why": tired_why if tired else "",
@@ -4502,26 +4473,11 @@ func day_input(kc: int) -> void:
 			elif kc == KEY_RIGHT and String(rows[day_sel]["id"]).begins_with("grp:"):
 				day_activate(String(rows[day_sel]["id"]), true, "")   # right opens one
 		KEY_P:
-			# book tonight PURIST: the pure-skill ladder with its own records. A fast
-			# all-or-nothing shortcut for purist_picks below, kept in lockstep with it.
+			# One indivisible Purist booking: raw Accuracy and absolutely no slow motion.
+			# Strength and Endurance remain untouched, and there are no individual binds.
 			purist = not purist
-			purist_picks = [purist, purist, purist, purist]
-			set_day_msg("tonight is a PURIST set  -  no stat help, its own records" if purist else "back to the assisted board")
-			save_progress()
-			play_sfx("ui2", -13.0)
-		KEY_1, KEY_2, KEY_3, KEY_4:
-			# ONE STAT AT A TIME (Louis: "choose what perks to disable, special rewards for
-			# all of them at once"). Same four stats KEY_P strips together; picking every
-			# one by hand here is equivalent to KEY_P, not a lesser cousin of it - it still
-			# writes to the Purist board and still counts toward the Purist Legend chase.
-			var pi := kc - KEY_1
-			purist_picks[pi] = not purist_picks[pi]
-			purist = not purist_picks.has(false)
-			var pek := encore_index(String(PURIST_IDS[pi]))
-			var pname := String(ENCORES[pek]["name"]) if pek >= 0 else String(PURIST_IDS[pi])
-			var non := purist_picks.count(true)
-			set_day_msg(("%s ON  (%d/4 bound%s)" % [pname, non, "  -  full PURIST set" if purist else ""])
-				if purist_picks[pi] else "%s off  (%d/4 bound)" % [pname, non])
+			purist_picks = [purist, false, false, purist]
+			set_day_msg("PURIST  -  Accuracy and all slow motion bound" if purist else "back to the assisted board")
 			save_progress()
 			play_sfx("ui2", -13.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
@@ -11047,15 +11003,13 @@ func resolve_act() -> void:
 		# Same principle the collapse path is built on: the reason belongs to whichever
 		# code actually knew.
 		fail_reason = "bow"   # walked off under the first goal: say so plainly
-	# SCALES BY HOW MANY STATS ARE ACTUALLY STRIPPED, not just all-or-nothing - a
-	# player-picked or house-rolled partial Purist night used to earn no bonus at all
-	# despite being objectively harder. 1 stat = 1.1x .. 4 stats = 1.4x, matching the
-	# old flat PURIST_BONUS exactly at the ceiling so an all-four run pays the same.
+	# Scale by how many approved assists are stripped. Binding both reaches the full
+	# Purist bonus; a house-rolled single condition earns half of it.
 	var purist_n := 0
 	for pid in PURIST_IDS:
 		if purist_stat(String(pid).trim_prefix("purist_")):
 			purist_n += 1
-	var purist_mult := (1.0 + (PURIST_BONUS - 1.0) * 0.25 * float(purist_n)) if purist_n > 0 else 1.0
+	var purist_mult := (1.0 + (PURIST_BONUS - 1.0) * float(purist_n) / float(PURIST_IDS.size())) if purist_n > 0 else 1.0
 	# a completion XP bonus off the whole act's play
 	var clean := 1.0
 	if caught + dropped > 0:
@@ -11230,7 +11184,11 @@ func slow_target() -> float:
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
 	# frame-perfect catch, and an earned fifty-Perfect fifteen-second window. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
-	var a := 0.0 if purist_stat("spd") else float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
+	# Binding Speed means NO slow motion from any source—not the stat, difficulty, pie,
+	# Amazing catch, or fifty-Perfect reward.
+	if purist_stat("spd"):
+		return 0.0
+	var a := float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
 	# SLOTH begins with the most readable assist in the game: the whole simulation runs
 	# 20% slower before any Speed investment. Purist strips it like other bought help.
 	if difficulty == DIFF_SLOTH and not purist_all():
@@ -11272,25 +11230,22 @@ func slow_amount() -> float:
 
 
 func purist_all() -> bool:
-	# THE PURIST BOOKING: no gear, no stats, no help, and its own record board. This is the
-	# whole-night version and it is the only one that decides which board a score is written
-	# to. Training is never purist (practice is practice).
+	# The player-booked Accuracy + Speed pair and its own record board. Training is never
+	# Purist (practice is practice).
 	return purist and mode == MODE_PERFORM
 
 
 func purist_stat(id: String) -> bool:
-	# ...AND THE FOUR STAT-BY-STAT VERSIONS (2026-07-29, Louis: "split purist night into all
-	# four stats with combinations of them possible in late game stages"). One Encore per
-	# stat, each stripping only its own, so a night can ask for hands with no Accuracy while
-	# leaving the stamina and the slow motion alone. The booking-level Purist above implies
-	# all four at once, which is what keeps the old board meaning what it always meant.
+	# Strength and Endurance are structural: they decide what can be fielded and whether a
+	# goal is physically reachable. Only Accuracy and Speed may ever be bound.
+	if id != "acc" and id != "spd":
+		return false
 	return purist_all() or encore_on("purist_" + id)
 
 
 func purist_run() -> bool:
 	# "is anything at all being stripped tonight", for the readouts and the gear checks
-	return purist_all() or purist_stat("acc") or purist_stat("str") \
-		or purist_stat("end") or purist_stat("spd")
+	return purist_stat("acc") or purist_stat("spd")
 
 
 func eff_accuracy() -> float:
@@ -11324,7 +11279,7 @@ func catch_chance(quality: int, over: float) -> float:
 	# throw, what it costs in stamina, what it is worth in the score, and whether it moves
 	# the Perfect FRAMES (clubs +1, the chainsaw -1). Knives and torches buy crowd patience
 	# instead, and torches glow. Nothing about a prop touches the catch ODDS.
-	if not purist_all():
+	if not purist_stat("acc"):
 		if wearing("gloves"):
 			p += GLOVES_FGIVE       # silk gloves: comfort, on the odds only, never the window
 		if wearing("glasses"):
@@ -12083,9 +12038,12 @@ func load_progress() -> void:
 		purist = bool(cf.get_value("day", "purist", false))
 		# an OLD save has no per-stat picks at all - default them to match the one flag
 		# it does have, so a save from before this existed still reads as consistent
-		var pp: Variant = cf.get_value("day", "purist_picks", [purist, purist, purist, purist])
+		var pp: Variant = cf.get_value("day", "purist_picks", [purist, false, false, purist])
 		if pp is Array and (pp as Array).size() == 4:
-			purist_picks = [bool(pp[0]), bool(pp[1]), bool(pp[2]), bool(pp[3])]
+			# Collapse legacy individual Accuracy/Speed choices into the one supported pair;
+			# old Strength/Endurance-only choices are discarded.
+			purist = purist or bool(pp[0]) or bool(pp[3])
+			purist_picks = [purist, false, false, purist]
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
 		venue_pick = int(cf.get_value("day", "venue_pick", -1))
