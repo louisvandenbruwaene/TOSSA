@@ -23,8 +23,10 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 - [x] **Make the next career goal obvious after onboarding.** The selected performance card
   now surfaces the nearest unowned trick or pattern using the player’s real missing
   requirements, alongside the existing next-venue reputation goal.
-- [ ] **Give venues distinct audience taste and a named rival.** Build on the existing Encore/
-  venue structure; do not perturb flight physics or introduce unreadable random hazards.
+- [~] **Give venues distinct audience taste and a named rival.** Every venue now introduces a
+  named rival and states what its crowd values. Build the first explicit, deterministic audience
+  response on the existing Encore/venue structure; do not perturb flight physics or introduce
+  unreadable random hazards.
 - [ ] **Increase repeatable performance variety.** Add prop- and pattern-specific challenges,
   then deterministic ghost replays once the recording contract is specified.
 - [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall

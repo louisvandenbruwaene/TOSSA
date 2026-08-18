@@ -11297,6 +11297,19 @@ const DEMO_MAX_VENUE := 1   # a SCOPED FREE DEMO (Still open) never lets venue_i
 							 # first couple of unlocks without giving away the game - Louis's
 							 # call, change the one number to give away more or less.
 
+# Venue flavour is presentation-only for now: it makes every room’s audience legible
+# before the act without secretly altering timing or score. A later taste mechanic must
+# explicitly state its reward and have a deterministic harness before reading this data.
+const VENUE_FLAVOUR := [
+	{"rival": "Mara Bell", "taste": "clean catches and a steady first show"},
+	{"rival": "The Lark", "taste": "bold height over safe little throws"},
+	{"rival": "Viktor Vale", "taste": "a composed routine under bright lights"},
+	{"rival": "Rosa Ribbons", "taste": "showmanship and dangerous props"},
+	{"rival": "Kai Mercury", "taste": "speed, clean patterns, and nerve"},
+	{"rival": "Aurelia Voss", "taste": "a record worth travelling for"},
+	{"rival": "Nocturne", "taste": "control when the room goes dark"},
+]
+
 
 #endregion
 
@@ -11360,6 +11373,10 @@ func cur_venue() -> int:
 	# menu/results screens and previews (e.g. the Controls screen's backdrop) can
 	# override which venue palette we render; view_venue < 0 means no override
 	return view_venue if view_venue >= 0 else play_venue()
+
+
+func venue_flavour(i: int) -> Dictionary:
+	return VENUE_FLAVOUR[clampi(i, 0, VENUE_FLAVOUR.size() - 1)]
 
 
 const STAND_DEFAULT := 0.86   # see `stand` below, and stage_floor_y
@@ -26015,6 +26032,8 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_title_glow(font, s.y * 0.12 + 12.0, vn, 52, Color(1.0, 0.9, 0.55), s)
 	draw_ornament(s.x * 0.5, s.y * 0.12 + 72.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_text_shout(font, Vector2(0, s.y * 0.12 + 96.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.86, 0.78, 0.66, 0.8 * tagA))
+	var flavour := venue_flavour(establish_venue)
+	draw_text_shout(font, Vector2(0, s.y * 0.12 + 116.0), "RIVAL  %s  ·  they want %s" % [String(flavour["rival"]).to_upper(), String(flavour["taste"])], HORIZONTAL_ALIGNMENT_CENTER, s.x, 12, Color(0.86, 0.72, 0.9, 0.78 * tagA))
 
 	# The two corner blocks are BARE TEXT now - no hud_panel behind them. They were rounded
 	# cards with a fill and a border, i.e. exactly the "windows of info" Louis asked to be rid
