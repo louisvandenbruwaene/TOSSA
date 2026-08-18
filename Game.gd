@@ -13101,12 +13101,13 @@ func art_blit_prop(kind: int, pos: Vector2, sc: float, ang: float, tint: Color) 
 	# live, on top, every frame - which is the only way it can move, and moving is what a
 	# fire does. See strip_torch_flame for why the bake stops at the wick.
 	if key == "prop/torch":
-		draw_sprite_torch_flame("prop/torch", "stage", pos, ang, sc, zoom)
+		draw_sprite_torch_flame("prop/torch", "stage", pos, ang, sc, zoom,
+			prop_glows(PROP_TORCHES) and is_dark_context())
 	return true
 
 
 func draw_sprite_torch_flame(key: String, which: String, pos: Vector2, ang: float, sc: float,
-		zoom: int) -> void:
+		zoom: int, blue: bool = false) -> void:
 	# The live flame, fitted to the SPRITE's fire rather than to the vector drawing's.
 	#
 	# The two are not the same size and that is not a defect: the stage torch is derived from
@@ -13144,16 +13145,19 @@ func draw_sprite_torch_flame(key: String, which: String, pos: Vector2, ang: floa
 	# the most obvious remaining seam in the game once the props themselves were sprites.
 	# a card is a still, close-up portrait and can afford the outer aura the stage cannot -
 	# the same concession draw_torch_flame's `rich` makes, for the same reason
-	if which == "card":
+	if which == "card" and not blue:
 		fill_flame_pix(pos, ang, sc, b, fh * 1.22 * fl, fw * 1.30, sway * 1.2,
 			Color(1.0, 0.32, 0.06, 0.35))
-	fill_flame_pix(pos, ang, sc, b, fh * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
+	var outer := Color(0.18, 0.48, 1.0, 0.95) if blue else Color(1.0, 0.44, 0.10, 0.95)
+	var middle := Color(0.32, 0.76, 1.0, 0.95) if blue else Color(1.0, 0.72, 0.20, 0.95)
+	var core := Color(0.78, 0.94, 1.0, 0.95) if blue else Color(1.0, 0.96, 0.72, 0.95)
+	fill_flame_pix(pos, ang, sc, b, fh * fl, fw, sway, outer)
 	fill_flame_pix(pos, ang, sc, b, fh * 0.68 * fl, fw * 0.68, sway * 0.7,
-		Color(1.0, 0.72, 0.20, 0.95), 11.0)
+		middle, 11.0)
 	fill_flame_pix(pos, ang, sc, b + Vector2(0.0, -u * 0.5), fh * 0.39 * fl, fw * 0.42,
-		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95), 23.0)
+		sway * 0.35, core, 23.0)
 	var dk := stage_darkness()
-	if dk > 0.02:
+	if dk > 0.02 and not blue:
 		draw_glow(pos + Vector2(0.0, base_y - fh * 0.5).rotated(ang) * sc, 42.0 * sc,
 			Color(1.0, 0.60, 0.22, 0.34 * dk))
 
@@ -16684,12 +16688,14 @@ func draw_flame_in_dark(b: Ball, pos: Vector2) -> void:
 	var sc := prop_scale(b.kind)
 	# the pool of light the fire throws. It is centred on the prop's TRUE position
 	# (the flame itself rides out on the tumble), so the catch point stays legible.
-	draw_circle(pos, 30.0 * sc, Color(1.0, 0.52, 0.18, 0.07))
-	draw_circle(pos, 16.0 * sc, Color(1.0, 0.60, 0.24, 0.10))
-	draw_torch_flame(pos, prop_spin_angle(b), sc)
+	var blue := prop_glows(b.kind)
+	if not blue:
+		draw_circle(pos, 30.0 * sc, Color(1.0, 0.52, 0.18, 0.07))
+		draw_circle(pos, 16.0 * sc, Color(1.0, 0.60, 0.24, 0.10))
+	draw_torch_flame(pos, prop_spin_angle(b), sc, false, blue)
 
 
-const GLOW_PHOS := Color(0.62, 1.0, 0.72)   # the Kit's phosphor: a cool green-white that
+const GLOW_PHOS := Color(0.30, 0.68, 1.0)   # the Kit's phosphor: an electric blue that
 											# reads as CHARGED rather than merely bright,
 											# and never collides with a venue's own palette
 
@@ -16756,8 +16762,8 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	# flat circles - a coloured dot with a white dot inside - which said WHERE a prop was
 	# and nothing else, so paying for it bought a pair of pixels.
 	#
-	# Now it is a real phosphorescent prop: a wide soft bloom, the prop's OWN SILHOUETTE
-	# in charged green over it, and a hot core inside that. Because the silhouette is the
+	# Now it is a real phosphorescent prop: the prop's OWN SILHOUETTE in charged blue,
+	# without an aura that makes separate objects bleed into one another. Because the silhouette is the
 	# real one, a glowing ring still reads as a ring and a glowing club as a club - the
 	# whole point of buying the thing is that the pattern stays legible in the dark, and
 	# a cascade of identical dots is not a legible pattern.
@@ -16771,14 +16777,8 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	# find, which is what 60,000 buys now that the shape itself never goes away.
 	var fl := (0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)) * lit
 	var phos := Color(lerpf(GLOW_PHOS.r, col.r, 0.25), lerpf(GLOW_PHOS.g, col.g, 0.25), lerpf(GLOW_PHOS.b, col.b, 0.25))
-	draw_glow_pix(pos, 26.0 * sc, Color(phos.r, phos.g, phos.b, 0.30 * fl))
 	if kind >= 0:
 		glow_silhouette(pos, kind, sc, ang, Color(phos.r, phos.g, phos.b, 0.85 * fl))
-	# the hot white centre is the single biggest reason an uncharged prop was easy to
-	# track, so it is the KIT'S: a bright point that says exactly where, for the player
-	# who paid for one. Without it the prop is its own dim phosphor and nothing else.
-	if lit >= 0.99:
-		fill_disc_pix(pos, 3.4 * sc, Color(1.0, 1.0, 1.0, 0.55 * fl))   # the Kit's hot core, on the grid
 
 
 func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color) -> void:
@@ -16809,6 +16809,10 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 				draw_colored_polygon(PackedVector2Array([
 					Vector2(-2.6, -2), Vector2(2.6, -2), Vector2(6, -16), Vector2(-6, -16)]), col)
 				draw_circle(Vector2(0, -16.5), 6.0, col)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		PROP_TORCHES:
+			draw_set_transform(pos, ang, Vector2.ONE * sc)
+			draw_line(Vector2(0, TORCH_BUTT), Vector2(0, TORCH_WICK + 1.0), col, 4.0)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		PROP_KNIVES:
 			draw_set_transform(pos, ang, Vector2.ONE * sc)
@@ -16892,13 +16896,6 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 			var fl := 0.90 + 0.10 * sin(fire_clock() * 0.5 + pos.x * 0.03)
 			draw_glow(torch_fire_center(pos, prop_spin_angle(b), sc), 40.0 * sc,
 				Color(1.0, 0.58, 0.20, 0.34 * dk * fl))
-	if glow_props_lit() and b.kind != PROP_TORCHES:
-		# THE GLOW KIT, earning its price on any dark stage rather than only inside a
-		# Blackout: the prop is charged, so it carries its own soft bloom wherever the
-		# house lights are poor. Torches are exempt - they are already the thing this
-		# is imitating, and a phosphor bloom on a flame reads as a bug.
-		var gfl := 0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)
-		draw_glow_pix(pos, 24.0 * sc, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.26 * gfl))
 	if b.trick >= 0:
 		# a trick throw carries a warm glowing ring so the crowd (and player) reads it as special
 		var pulse := 0.5 + 0.5 * sin(float(tick) * 0.35)
@@ -16908,6 +16905,10 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		# and what a hard pixel edge only made more obvious
 		draw_glow_pix(pos, 17.0 * sc, Color(1.0, 0.85, 0.5, 0.30))
 	draw_prop_body(b, pos, prop_spin_angle(b), sc)
+	if glow_props_lit():
+		# Charged stock is blue material, not a light source: overlay its clean silhouette
+		# without any surrounding bloom. A glowing torch keeps its separately drawn blue flame.
+		glow_silhouette(pos, b.kind, sc, prop_spin_angle(b), Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.82))
 
 
 func draw_prop_body(b: Ball, pos: Vector2, ang: float, sc: float) -> void:
@@ -17563,7 +17564,8 @@ func flame_shape(base: Vector2, h: float, w: float, sway: float,
 	return pts
 
 
-func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -> void:
+func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false,
+		blue: bool = false) -> void:
 	# the FIRE only, no handle. Split out so Blackout's dark stretch can draw the very
 	# same flame the lit torch draws (same size, same tumble, same flicker) instead of
 	# a second, smaller hand-written one - the two used to disagree, and a torch
@@ -17581,15 +17583,18 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 	var fw := TORCH_FLAME_W / 0.62      # flame_shape's profile peaks at 0.62 of `w`
 	# ...on the art grid, the same as the sprite torch's live fire - see fill_poly_pix. The
 	# shop card and the Blackout stretch both come through here, and both are pixel art.
-	if rich:
+	if rich and not blue:
 		fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * 1.22 * fl, fw * 1.30, sway * 1.2,
 			Color(1.0, 0.32, 0.06, 0.35))
-	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * fl, fw, sway, Color(1.0, 0.44, 0.10, 0.95))
+	var outer := Color(0.18, 0.48, 1.0, 0.95) if blue else Color(1.0, 0.44, 0.10, 0.95)
+	var middle := Color(0.32, 0.76, 1.0, 0.95) if blue else Color(1.0, 0.72, 0.20, 0.95)
+	var core := Color(0.78, 0.94, 1.0, 0.95) if blue else Color(1.0, 0.96, 0.72, 0.95)
+	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * fl, fw, sway, outer)
 	fill_flame_pix(pos, ang, sc, base, TORCH_FLAME_H * 0.68 * fl, fw * 0.68, sway * 0.7,
-		Color(1.0, 0.72, 0.20, 0.95), 11.0)
+		middle, 11.0)
 	fill_flame_pix(pos, ang, sc, base + Vector2(0.0, -1.0), TORCH_FLAME_H * 0.39 * fl, fw * 0.42,
-		sway * 0.35, Color(1.0, 0.96, 0.72, 0.95), 23.0)
-	if rich:
+		sway * 0.35, core, 23.0)
+	if rich and not blue:
 		# embers climb off the tip - in WORLD space, not the prop's, since smoke rises
 		# whatever angle the torch is held at
 		var tipw := pos + Vector2(sway * 0.8, -24.0 * sc).rotated(ang)
@@ -17601,7 +17606,7 @@ func draw_torch_flame(pos: Vector2, ang: float, sc: float, rich: bool = false) -
 	# the light the fire throws. In play this is the one thing that matters about a
 	# torch, so it is drawn only where it can be SEEN - a dark house, or a shop card.
 	var dk := 1.0 if rich else stage_darkness()
-	if dk > 0.02:
+	if dk > 0.02 and not blue:
 		draw_glow(torch_fire_center(pos, ang, sc), (54.0 if rich else 42.0) * sc,
 			Color(1.0, 0.60, 0.22, 0.34 * dk))
 
@@ -17686,18 +17691,20 @@ const PROP_ICON_OFF := [0.0, 0.0, 0.0, -4.2, -5.2, -8.0, -2.0]
 
 func draw_glow_shop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
 	# The reverse of a shop card uses the same large PixelLab-authored portrait as its
-	# ordinary face, now treated as phosphorescent stock: dark niche, green bloom, charged
-	# portrait. This keeps both sides recognisably the same physical object.
+	# ordinary face, now treated as phosphorescent stock: a clean blue charged portrait in
+	# a dark niche. This keeps both sides recognisably the same physical object.
 	var pulse := 0.88 + 0.12 * sin(atick() * 0.06 + float(kind)) if live else 0.94
-	draw_glow_pix(pos, 62.0 * mag, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.26 * pulse))
 	fill_ellipse(pos + Vector2(0.0, 42.0 * mag), 28.0 * mag, 6.0 * mag, Color(0.0, 0.0, 0.0, 0.5))
 	var bkey := "prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower()
 	var ang := (-0.34 + 0.20 * sin(atick() * 0.016)) if bool(PROPS[kind]["spins"]) and live else (-0.34 if bool(PROPS[kind]["spins"]) else 0.0)
 	if art_blit(bkey, pos, 1.0, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse)):
-		draw_glow_pix(pos, 10.0 * mag, Color(0.9, 1.0, 0.72, 0.24 * pulse))
+		if kind == PROP_TORCHES:
+			draw_sprite_torch_flame(bkey, "card", pos, ang, 1.0, 1, true)
 		return
 	var sc: float = PROP_ICON_MAG[kind] * mag
 	glow_silhouette(pos, kind, sc, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse))
+	if kind == PROP_TORCHES:
+		draw_torch_flame(pos, ang, sc, false, true)
 
 
 func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
