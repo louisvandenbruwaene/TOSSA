@@ -1388,7 +1388,10 @@ var reputation := 0       # rises with great sets, falls with poor ones; scales 
 var sprint_active := false  # transient, unsaved high-stakes route; see begin_sprint
 var sprint_failed := false
 var sprint_started_ms := 0
+var sprint_finished_ms := -1
+var sprint_seed := 0
 var sprint_replay: Dictionary = {}
+var sprint_replays: Array[Dictionary] = []
 var prop_type := PROP_BALLS  # the object being juggled this run
 # how many of each prop you own (balls are free and unlimited, see have()). You buy
 # props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
@@ -7420,6 +7423,11 @@ func begin_sprint() -> void:
 	sprint_active = true
 	sprint_failed = false
 	sprint_started_ms = Time.get_ticks_msec()
+	sprint_finished_ms = -1
+	# The route seed is part of its rules, not the wall clock. Every attempt in this
+	# build sees the same simulation rolls, and each stage derives its own stream below.
+	sprint_seed = 20260818
+	sprint_replays.clear()
 	reset_new_game()
 	seen_tuts = ["balls"]
 	pending_tuts.clear()
@@ -7428,7 +7436,8 @@ func begin_sprint() -> void:
 
 
 func sprint_clock_text() -> String:
-	return TOSSA_FORMAT.duration_text(int((Time.get_ticks_msec() - sprint_started_ms) / 1000))
+	var end_ms := sprint_finished_ms if sprint_finished_ms >= 0 else Time.get_ticks_msec()
+	return TOSSA_FORMAT.duration_text(int((end_ms - sprint_started_ms) / 1000))
 
 
 func sprint_record(action: String) -> void:
@@ -8977,7 +8986,7 @@ func start_run(n: int) -> void:
 	last_rep_delta = 0
 	run_venue = play_venue()   # records and the results card key off where you performed
 	if sprint_active and mode == MODE_PERFORM and booking_active:
-		sprint_replay = TOSSA_REPLAY.new_record(20260705, run_venue, prop_type, pattern, num_balls)
+		sprint_replay = TOSSA_REPLAY.new_record(sprint_seed + run_venue, run_venue, prop_type, pattern, num_balls)
 	else:
 		sprint_replay = {}
 	results_open = false
@@ -9026,7 +9035,7 @@ func start_run(n: int) -> void:
 	trick_score = 0
 	trick_msg = ""
 	trick_msg_tick = -999
-	rng.seed = 20260705
+	rng.seed = sprint_seed + run_venue if sprint_active else 20260705
 	seed_input_edges()   # a key still held from the previous screen must not edge-fire
 	collapsing = false
 	falling.clear()
@@ -10873,6 +10882,12 @@ func resolve_act() -> void:
 	booking_active = false
 	var complete := goals_hit >= NUM_GOALS
 	sprint_failed = sprint_active and not complete
+	if sprint_active and not sprint_replay.is_empty():
+		sprint_replays.append(sprint_replay.duplicate(true))
+	if sprint_active and (not complete or run_venue >= TOP_VENUE) and sprint_finished_ms < 0:
+		# Freeze the clock at the failed act or final accepted outcome. Results animation,
+		# reading the receipt, and the victory roll are outside the timed attempt.
+		sprint_finished_ms = Time.get_ticks_msec()
 	# the push-your-luck settles here: a COLLAPSE strips the score back to the last
 	# goal actually reached (goals already reached are safe, everything past them is
 	# what you gambled), and a collapse before the first goal banks nothing at all.
@@ -26180,6 +26195,8 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": GAME_TITLE, "b": ""})
 	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
+	if sprint_active and sprint_finished_ms >= 0:
+		cur += 44.0; rows.append({"y": cur, "kind": "sub", "a": "SPRINT FINISH   %s" % sprint_clock_text(), "b": ""})
 	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
 	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %s" % score_text(float(career["best_score"])), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
 	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
