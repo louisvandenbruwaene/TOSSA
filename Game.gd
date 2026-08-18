@@ -8,6 +8,7 @@ const TOSSA_CATALOG = preload("res://scripts/TossaCatalog.gd")
 const TOSSA_REPLAY = preload("res://scripts/TossaReplay.gd")
 const TOSSA_SAVE_SCHEMA = preload("res://scripts/TossaSaveSchema.gd")
 const TOSSA_GEOMETRY = preload("res://scripts/TossaGeometry.gd")
+const TOSSA_REWARDS = preload("res://scripts/TossaRewards.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -850,7 +851,7 @@ const TRICK_COOLDOWN := 0          # NO COOLDOWN (2026-07-29, Louis: "change the
 
 # --- slow motion (ideas.rtf): every source adds its share, stacking linearly.
 # The Speed stat is permanent and capped, the Pie is a bought minute, the
-# Amazing! frame-perfect catch and a run of ten straight Perfects are earned
+# Amazing! frame-perfect catch and fifty Perfects in one drop-free run are earned
 # bursts. Slow motion stretches the catch windows in REAL time, which is what
 # makes five clubs and seven torches humanly possible.
 # NERFED 2026-07-16 and RE-CUT 2026-07-29 (Louis: "change the speed stat: up to 20% max:
@@ -867,17 +868,16 @@ const SPEED_PER_PCT := 10      # ...and how many of them buy 1% of slow motion, 
 								# capped stat is worth 20%
 const PIE_COST := 1000         # a slice lasts the WHOLE DAY, until you sleep
 const PIE_SLOW := 0.10         # the slice's share of slow motion
-const BURST_SLOW := 0.10       # each earned burst's share (Amazing!, the chain)
+const BURST_SLOW := 0.10       # each earned burst's share (Amazing!, fifty Perfects)
 const SLOW_TOTAL_CAP := 0.5    # the stack's hard ceiling, jitter-free and earned
 const AMAZING_FRAMES := 360    # the frame-perfect reward burst (three seconds)
-const CHAIN_NEED := 50         # perfect catches in a row to earn a slow window
-const CHAIN_FRAMES := 1800     # ...which then lasts fifteen seconds, then re-earn
+const PERFECT_BURST_FRAMES := 1800 # fifty Perfects in one drop-free run earn fifteen seconds
 const SLOW_RAMP := 0.0025      # slow motion ramps LINEARLY in and out per frame
 							   # (a hard step made the player miss, Louis; slowed
 							   # further so both easing in and out give real
 							   # reaction time instead of a sudden gear change)
 const SLOW_MIN_BALLS := 3      # under three props the crowd holds no breath:
-							   # no chain or Amazing! farming with two balls
+							   # no Perfect-burst or Amazing! farming with two balls
 # --- lessons (Louis): a lesson is taught in thick time, so a beginner can SEE the arc
 # and the window. It starts nearly frozen and speeds up as the lesson goes on, so the
 # last step is close to real speed and the player is never dumped from a slow world
@@ -1383,8 +1383,8 @@ var speed := 0            # the Speed stat: every 4 points slows the world 1% (c
 var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
 var pie_active := false   # a pie eaten in the hub works until you SLEEP
 var amazing_until := -999999   # real-frame deadline of the Amazing! burst
-var chain_until := -999999     # real-frame deadline of the fifty-Perfect window
-var perfect_chain := 0    # consecutive PERFECT catches toward the next window
+var perfect_burst_until := -999999 # real-frame deadline of the fifty-Perfect window
+var run_perfects := 0     # Perfects since the last drop; Good/Late catches preserve this
 var _slow_cur := 0.0      # the LIVE slow amount, easing linearly toward target
 var _tick_acc := 1.0      # fractional sim-tick accumulator while slowed
 var _frames := 0          # real frames in play (the slow-mo timers run on this)
@@ -9156,9 +9156,9 @@ func start_run(n: int) -> void:
 	falling.clear()
 	# slow motion: the earned bursts reset per run (the pie keeps working all
 	# day, so pie_active is untouched here and only sleep clears it)
-	perfect_chain = 0
+	run_perfects = 0
 	amazing_until = -999999
-	chain_until = -999999
+	perfect_burst_until = -999999
 	_slow_cur = 0.0
 	_tick_acc = 1.0
 	hpos = [inner_pos(LEFT), inner_pos(RIGHT)]   # rest inward, everywhere (2026-07-31, Louis)
@@ -9424,7 +9424,6 @@ func on_catch(h: int) -> void:
 			else:
 				play_sfx("late", -11.0)
 			streak = 0
-			perfect_chain = 0
 			return
 	# see tut_quiet_fx: a helped lesson catch fires no popup and no particle, because the
 	# lesson is about to stop the world on top of whatever it spawned
@@ -9437,21 +9436,27 @@ func on_catch(h: int) -> void:
 			seg_add_catch(0)   # a Perfect is worth three catches to the segment
 		warm_room(APPL_PERFECT + prop_thrill())   # danger thrills the room
 		add_xp(3)
-		# the slow-motion earn, only when a REAL pattern is up (three props or
-		# more, so two lazy balls cannot farm it): a FRAME-perfect catch is an
-		# Amazing! burst, and FIFTY straight Perfects buy thirty seconds of thick
-		# time, after which the count starts over for the next thirty
+		# The slow-motion earn, only when a REAL pattern is up (three props or
+		# more, so two lazy balls cannot farm it): a frame-perfect catch is an
+		# Amazing! burst. Fifty Perfects anywhere in this DROP-FREE run buy fifteen
+		# seconds of thick time. A Good or Late catch costs score quality but does not
+		# erase forty-nine already-earned Perfects; only a drop closes this run.
 		if num_balls >= SLOW_MIN_BALLS:
-			perfect_chain += 1
+			var burst := TOSSA_REWARDS.record_catch(run_perfects, 0)
+			run_perfects = int(burst["progress"])
 			if best_d == 0:
 				amazing_until = _frames + AMAZING_FRAMES
 				if fx:
 					add_popup(hpos[h] + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
-			if perfect_chain >= CHAIN_NEED:
-				perfect_chain = 0
-				chain_until = _frames + CHAIN_FRAMES
+			if bool(burst["triggered"]):
+				perfect_burst_until = _frames + PERFECT_BURST_FRAMES
+				if _demo:
+					print("PERFECT_BURST seconds=%d progress=%d tick=%d" % [
+						PERFECT_BURST_FRAMES / 120, run_perfects, tick])
 				if fx:
-					add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.30), "FIFTY PERFECT  -  thirty seconds of thick time", Color(0.75, 0.92, 1.0))
+					var vs := get_viewport_rect().size
+					add_popup(Vector2(vs.x * 0.5, vs.y * 0.30), "50 PERFECTS", Color(1.0, 0.86, 0.42))
+					add_popup(Vector2(vs.x * 0.5, vs.y * 0.30), "THICK TIME  15s", Color(0.75, 0.92, 1.0))
 				play_sfx("record", -8.0)
 		if fx:
 			add_popup(hpos[h], "PERFECT", Color(1.0, 0.86, 0.42))
@@ -9493,7 +9498,7 @@ func on_catch(h: int) -> void:
 		elif streak % 5 == 0:
 			play_sfx("streak", -7.0)   # a rising flourish at every fifth in a row
 	elif best_d <= good_window():
-		perfect_chain = 0
+		run_perfects = int(TOSSA_REWARDS.record_catch(run_perfects, 1)["progress"])
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
@@ -9516,8 +9521,8 @@ func on_catch(h: int) -> void:
 		if streak % 5 == 0:
 			play_sfx("streak", -8.0)
 	else:
+		run_perfects = int(TOSSA_REWARDS.record_catch(run_perfects, 2)["progress"])
 		streak = 0
-		perfect_chain = 0
 		if critic_hard() or critic_easy():
 			seg_open("critic")
 		if scores:
@@ -11203,7 +11208,7 @@ func stamina_mult() -> float:
 func slow_target() -> float:
 	# where the slow amount is HEADING, 0..1. All sources stack linearly
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
-	# frame-perfect catch, and an earned fifty-Perfect thirty-second window. Purist sets
+	# frame-perfect catch, and an earned fifty-Perfect fifteen-second window. Purist sets
 	# strip the bought shares but keep the earned bursts (those are skill).
 	var a := 0.0 if purist_stat("spd") else float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
 	# SLOTH begins with the most readable assist in the game: the whole simulation runs
@@ -11214,7 +11219,7 @@ func slow_target() -> float:
 		a += PIE_SLOW
 	if _frames < amazing_until:
 		a += BURST_SLOW
-	if _frames < chain_until:
+	if _frames < perfect_burst_until:
 		a += BURST_SLOW
 	if tut_active:
 		a = maxf(a, tut_slow())   # a lesson sets a FLOOR on slowness, never a sum: it
@@ -12289,7 +12294,7 @@ func drop_ball(b: Ball, why: String) -> void:
 	dropped += 1
 	career["drops"] = int(career["drops"]) + 1
 	streak = 0
-	perfect_chain = 0
+	run_perfects = TOSSA_REWARDS.reset_on_drop()
 	last_drop_tick = tick
 	applause = maxf(0.0, applause - 0.26)
 	if tut_active:
@@ -18745,8 +18750,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var stext := "SLOW  %d%%" % int(round(slow * 100.0))
 			if pie_active:
 				stext += "  ·  PIE"
-			if _frames < chain_until:
-				stext += "  ·  %ds" % int(ceil(float(chain_until - _frames) / 120.0))
+			if _frames < perfect_burst_until:
+				stext += "  ·  %ds" % int(ceil(float(perfect_burst_until - _frames) / 120.0))
 			draw_fit_string(font, Vector2(sx, status_y), stext, HORIZONTAL_ALIGNMENT_LEFT, sw, 12,
 				Color(0.68, 0.92, 1.0, 0.96))
 			status_y += 18.0
@@ -27498,7 +27503,8 @@ func draw_popups(font: Font) -> void:
 		c.a = a
 		var txt := String(p["text"])
 		# the big moments land bigger, with a quick settle from oversized to rest
-		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL") or txt.ends_with("STREAK")
+		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL") \
+			or txt.ends_with("STREAK") or txt == "50 PERFECTS"
 		var size := 18
 		if big:
 			size = 23 + maxi(0, 6 - int(age))

@@ -57,10 +57,10 @@ fi
 # regression or a reordered persisted pattern is easy to miss in a screenshot and
 # too important to leave to visual review alone.
 log_head "1b. Extracted pure contracts"
-for test_script in tests/test_format.gd tests/test_catalog.gd tests/test_replay.gd tests/test_save_schema.gd tests/test_geometry.gd; do
+for test_script in tests/test_format.gd tests/test_catalog.gd tests/test_replay.gd tests/test_save_schema.gd tests/test_geometry.gd tests/test_rewards.gd; do
   log="$WORK/$(basename "$test_script" .gd).log"
   if "$GODOT_BIN" --headless --path "$PIXELTOSSA_ROOT" --script "$test_script" >"$log" 2>&1; then
-    grep -E 'TossaFormat:|TossaCatalog:|TossaReplay:|TossaSaveSchema:|TossaGeometry:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
+    grep -E 'TossaFormat:|TossaCatalog:|TossaReplay:|TossaSaveSchema:|TossaGeometry:|TossaRewards:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
   else
     cat "$log" | sed 's/^/    /'
     fail "Pure contract failed: $test_script"
@@ -80,6 +80,11 @@ if grep -q "^ACT " "$WORK/booking.log"; then
 else
   log_err "No 'ACT ...' resolve line found - act did not resolve."
   FAIL=1
+fi
+if grep -q '^PERFECT_BURST seconds=15 progress=0 tick=' "$WORK/booking.log"; then
+  log_ok "Fifty Perfects triggered the live 15-second reward and reset its tally."
+else
+  fail "The booked-act harness did not trigger the live fifty-Perfect reward."
 fi
 scan_run_log "$WORK/booking.log" || FAIL=1
 
