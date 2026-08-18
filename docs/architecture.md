@@ -7,7 +7,7 @@ for the reasoning behind any specific system.
 
 ## The one-file shape
 
-Godot 4.7, GDScript, one scene (`Main.tscn`), one script (`Game.gd`, ~23k lines, ~700 functions),
+Godot 4.7, GDScript, one scene (`Main.tscn`), one script (`Game.gd`, ~28k lines, ~700 functions),
 zero addons, zero autoloads. This is a deliberate, reviewed tradeoff (see
 `AUDIT_2026-07-26.md`), not neglect - the file is internally organized into ~100 `#region`
 blocks grouped **by game system**, not by declaration type (consts/vars/funcs for the throw
@@ -25,6 +25,22 @@ Systems living in the one file, roughly top-to-bottom as they appear:
 - Screen drawing (`_draw_screen` dispatch - see `docs/scenes.md`)
 - Procedurally-generated audio (`gen_sfx`)
 - Dev/test harness (all `--flag`-gated: `--demo`, `--booking`, `--collcheck`, `--fps`, etc.)
+
+## Incremental extraction boundary
+
+`Game.gd` remains the runtime orchestrator. New files are allowed only when they have a
+small, explicit contract that can be checked outside a live act. The first seam is
+`scripts/TossaFormat.gd`: pure number/score formatting, exercised by
+`tests/test_format.gd` (`make test-format`). `Game.gd` keeps tiny forwarding helpers so
+existing callers do not need a mechanical, conflict-prone rename.
+
+Follow this order for future extractions:
+
+1. Pure formatting and immutable catalog data, each with a focused test.
+2. Save schema/migration helpers, with committed fixture saves before moving behavior.
+3. Geometry/calibration helpers, with collision-harness coverage.
+4. Only then consider a screen or simulation component; do not split rendering or live
+   juggling simply to reduce line count.
 
 ## No scene tree, no autoloads
 

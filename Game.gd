@@ -1,4 +1,9 @@
 extends Node2D
+
+# Pure formatting is intentionally outside this 28k-line orchestrator. Keep the
+# wrappers below so existing gameplay and drawing call sites retain their domain
+# vocabulary while the implementation is independently testable.
+const TOSSA_FORMAT = preload("res://scripts/TossaFormat.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -18213,55 +18218,15 @@ func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
 
 
 func score_text(v: float) -> String:
-	# HOW A BIG NUMBER IS PRINTED, and the switch has to happen somewhere. Under a million it
-	# is an ordinary comma-grouped figure, because that is a number a player reads as a
-	# quantity. Past that, digits stop being information - nobody reads the difference between
-	# 41,882,610 and 41,883,004 - so it goes to E notation, which is also the only honest way
-	# to print 1e47.
-	#
-	# THE THRESHOLD IS HIGH ON PURPOSE (2026-07-29, Louis: "the scoring should feel normal and
-	# not exponential in the beginning. It's only the later stages that have E counting"). At
-	# 1e6 the Small Theatre already printed in exponent form, which made an early career look
-	# like a spreadsheet. At 1e9 the first four houses read as ordinary comma-grouped numbers -
-	# the Backyard finishes under a thousand - and E notation arrives with the Circus, where the
-	# figures genuinely stop being quantities and start being scenery.
-	if not is_finite(v):
-		return "E300+"
-	var a := absf(v)
-	if a < 1.0e9:
-		return commafy(int(round(v)))
-	var e := int(floor(log(a) / log(10.0)))
-	var m := a / pow(10.0, float(e))
-	return "%s%.2fe%d" % ["-" if v < 0.0 else "", m, e]
+	return TOSSA_FORMAT.score_text(v)
 
 
 func mult_text(v: float) -> String:
-	# the RUN multiplier, which lives in a far smaller range than the score and wants to keep
-	# its decimals for as long as it can
-	if v < 100.0:
-		return "%.2f" % v
-	if v < 1.0e6:
-		return commafy(int(round(v)))
-	return score_text(v)
+	return TOSSA_FORMAT.mult_text(v)
 
 
 func commafy(n: int) -> String:
-	# A THOUSANDS SEPARATOR FOR MONEY AND COUNTS, and for nothing that could be a SCORE
-	# (2026-07-29). Its argument is an int, and a score is a float that routinely passes
-	# 1e30 now, so handing it one silently saturates at 9,223,372,036,854,775,807 - which is
-	# exactly what the establish card printed for all three of its goals and for the record
-	# to beat, three times over, in a panel it also overflowed. `score_text` is the function
-	# for anything that came out of the scoring: it commafies while a number is small enough
-	# to read and switches to E notation when it is not.
-	var raw := str(absi(n))
-	var out := ""
-	var c := 0
-	for i in range(raw.length() - 1, -1, -1):
-		out = raw[i] + out
-		c += 1
-		if c % 3 == 0 and i > 0:
-			out = "," + out
-	return ("-" if n < 0 else "") + out
+	return TOSSA_FORMAT.commafy(n)
 
 
 func draw_hud(font: Font, s: Vector2) -> void:
