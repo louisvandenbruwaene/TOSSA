@@ -73,8 +73,8 @@ done
 # (see CLAUDE.md's ANTE LADDER section - Theatre alone can take 200-370s
 # even for a bot), so a higher venue here would make this check slow and
 # venue-pacing-dependent rather than a quick "does resolution still work".
-log_head "2. Booked act (--demo --booking --venue 0)"
-if run_headless 90 "$WORK/booking.log" --demo --booking --venue 0; then :; fi
+log_head "2. Booked act (--demo --booking --venue 0 --prop 0)"
+if run_headless 90 "$WORK/booking.log" --demo --booking --venue 0 --prop 0; then :; fi
 if grep -q "^ACT " "$WORK/booking.log"; then
   log_ok "$(grep '^ACT ' "$WORK/booking.log" | tail -1)"
 else
@@ -104,7 +104,7 @@ done
 
 # --- 3. Seeded daily act -----------------------------------------------------
 log_head "3. Daily act (--daily --demo --booking)"
-run_headless 60 "$WORK/daily.log" --daily --demo --booking || true
+run_headless 60 "$WORK/daily.log" --daily --demo --booking --prop 0 || true
 if grep -q "^ACT \|daily_share\|share" "$WORK/daily.log"; then
   log_ok "Daily act resolved."
 else
@@ -123,6 +123,16 @@ else
   fail "Mandatory tutorial did not reach its completion trace."
 fi
 scan_run_log "$WORK/tutorial.log" || FAIL=1
+
+# --- 3c. Dangerous-prop consequence -----------------------------------------
+log_head "3c. Dangerous-prop recovery (--prop 6)"
+run_headless 30 "$WORK/injury.log" --demo --booking --venue 0 --prop 6 || true
+if grep -q '^ACT .*reason=chainsaw_injury' "$WORK/injury.log"; then
+  log_ok "A chainsaw drop ended the act through its distinct recovery path."
+else
+  fail "Dangerous-prop drop did not resolve as chainsaw_injury."
+fi
+scan_run_log "$WORK/injury.log" || FAIL=1
 
 if [[ $QUICK -eq 0 ]]; then
   # --- 4. Collision sweep ---------------------------------------------------
