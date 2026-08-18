@@ -33,8 +33,8 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   contract; wire accepted act actions into it before implementing playback.
 - [~] **Add a dedicated Sprint route for speedruns.** The main menu now starts a transient,
   unsaved Sprint: no Practice, one drop ends the attempt, and each three-goal stage clear
-  advances the venue and awards its next-stage flower grant. Next: add a visible timer and
-  deterministic seed/ghost playback for competitive records.
+  advances the venue and awards its next-stage flower grant. The live HUD shows an attempt
+  timer. Next: deterministic seed/ghost playback and a recorded final time.
 - [ ] **Make dangerous-prop drops carry distinct theatrical consequences.** A dropped knife,
   torch, or chainsaw should immediately end the run and apply a meaningful recovery cost;
   stage a short, readable injury beat (cut hand / arm injury / face burn) that respects

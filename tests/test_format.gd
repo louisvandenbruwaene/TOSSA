@@ -14,6 +14,7 @@ func _init() -> void:
 		["non-finite score", TOSSA_FORMAT.score_text(INF), "E300+"],
 		["small multiplier", TOSSA_FORMAT.mult_text(2.5), "2.50"],
 		["large multiplier", TOSSA_FORMAT.mult_text(1234567.0), "1,234,567"],
+		["sprint duration", TOSSA_FORMAT.duration_text(3723), "01:02:03"],
 	]
 	var failed := 0
 	for test_case in cases:
