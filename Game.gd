@@ -1228,6 +1228,7 @@ const ENCORES := [
 	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives, torches and chainsaws score."},
 	{"id": "scared",    "name": "A Scared Audience",  "desc": "Blades and flames frighten this room. Only balls, eggs and rings score."},
 	{"id": "fancy",     "name": "A Fancy Audience",   "desc": "A dress-circle crowd, and eggs are a busker's gag. Eggs score nothing tonight."},
+	{"id": "study",     "name": "The Study",          "desc": "The house booked a Cascade. Only Cascade routines score tonight."},
 	{"id": "critic",    "name": "The Critic",         "desc": "A late catch breaks the spell: your run starts over from nothing. It costs you nothing else."},
 	{"id": "critic_hard","name": "The Critic, Twice", "desc": "Anything short of a Perfect breaks the spell and your run starts over from nothing."},
 	{"id": "purist_acc","name": "Purist: Hands",      "desc": "Your trained Accuracy counts for nothing tonight. Raw hands."},
@@ -3931,6 +3932,8 @@ func encore_pool(venue: int) -> Array[int]:
 			continue
 		if id == "blackout" and not can_juggle_glowing():
 			continue
+		if id == "study" and venue < 2:
+			continue   # a first-stage pattern brief should arrive after the player has met P
 		if id == "critic_hard" and venue < 4:
 			continue   # a Good catch ending the run is the hardest rule in the deck
 		pool.append(i)
@@ -4012,9 +4015,14 @@ func dangerous_prop(kind: int = -1) -> bool:
 	return prop_weight(kind) >= 3
 
 
-func encore_scores_prop() -> bool:
-	# WHETHER TONIGHT'S CROWD WILL BE PAID BY THIS PROP AT ALL. Three houses have an opinion
-	# and they are mirror images of each other, which is why they share one function:
+func encore_scores_run() -> bool:
+	# WHETHER TONIGHT'S CROWD WILL BE PAID BY THIS ROUTINE AT ALL. Three houses have an opinion
+	# about props and The Study has one about the pattern, so this remains a single scoring
+	# gate: a challenge never changes the physics or lies about a catch; it only states what
+	# the house will pay for. A run uses one prop and one pattern, so both checks are stable
+	# from its first throw to its bow.
+	#
+	# The prop opinions are mirror images of each other:
 	#   For the Danger  - a crowd that came for danger will not be fobbed off with balls
 	#   Scared Audience - ...and a nervous one will not watch knives at all
 	#   Fancy Audience  - eggs are a busker's gag, not an act, whatever you do with them
@@ -4024,6 +4032,8 @@ func encore_scores_prop() -> bool:
 	if encore_on("scared") and dangerous_prop():
 		return false
 	if encore_on("fancy") and prop_type == PROP_EGGS:
+		return false
+	if encore_on("study") and pattern != CASCADE:
 		return false
 	return true
 
@@ -9193,8 +9203,9 @@ func on_catch(h: int) -> void:
 	# once to the whole stretch rather than per catch. What survives at this choke point is
 	# the question of whether the crowd is willing to be paid by THIS prop tonight, which is
 	# a yes or a no: "For the Danger" wants danger, a Scared Audience will not have it, a
-	# Fancy Audience will not have eggs. Everything else about the catch happens regardless.
-	var scores := encore_scores_prop()
+	# Fancy Audience will not have eggs, and The Study pays only for a Cascade. Everything
+	# else about the catch happens regardless.
+	var scores := encore_scores_run()
 	# A HAND THAT CATCHES WHILE ALREADY HOLDING IS DONE THROWING (2026-08-07, Louis). Stamped
 	# here, at the moment the second prop actually lands, rather than at the press: a refused
 	# or mistimed press must not cost the player a hand. Read BEFORE the append, so "was this
@@ -10585,8 +10596,8 @@ func reward_trick(t: int, at: Vector2, height: float = 0.0) -> void:
 	if t < 0 or t >= TRICKS.size():
 		return
 	var td: Dictionary = TRICKS[t]
-	if not encore_scores_prop():
-		return   # a prop this crowd will not be paid by scores nothing, and neither do its tricks
+	if not encore_scores_run():
+		return   # a routine this crowd will not be paid by scores nothing, nor do its tricks
 	# **THE MULTIPLICATION ALREADY HAPPENED, AT THE PRESS.** This function runs on every catch
 	# of a shaped throw, so multiplying here is multiplying per CATCH - which is the time-based
 	# exponential the per-activation rule exists to remove. What is left for a landing to do is
