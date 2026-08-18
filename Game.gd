@@ -4361,6 +4361,32 @@ func day_rows() -> Array[Dictionary]:
 	return out
 
 
+func next_unlock_hint() -> String:
+	# A career should always name one nearby reason to keep going. Choose the closest
+	# unowned skill by its actual missing requirements, not by table order, so the hub
+	# never points at a distant late-game card while a practical unlock is one show away.
+	var best: Dictionary = {}
+	var best_gap := 1_000_000
+	for catalog: Array in [TRICKS, PATTERNS]:
+		for skill: Dictionary in catalog:
+			var sid := String(skill.get("id", ""))
+			if sid == "" or skill_free(skill) or gifted.has(sid):
+				continue
+			var gap := maxi(0, int(skill.get("perf", 0)) - int(career["perfs"])) * 100
+			gap += maxi(0, int(skill.get("lvl", 1)) - level) * 20
+			gap += maxi(0, int(skill.get("acc", 0)) - accuracy)
+			gap += maxi(0, int(skill.get("str", 0)) - strength)
+			gap += maxi(0, int(skill.get("end", 0)) - endurance)
+			gap += maxi(0, int(skill.get("spd", 0)) - speed)
+			gap += maxi(0, int(skill.get("ven", 0)) - venue_index()) * 80
+			if gap < best_gap:
+				best = skill
+				best_gap = gap
+	if best.is_empty():
+		return "all skills unlocked  -  chase a venue record"
+	return "next unlock: %s  -  %s" % [String(best["name"]), skill_req_text(best)]
+
+
 func day_group_col(gid: String) -> Color:
 	for g in DAY_GROUPS:
 		if String(g["id"]) == gid:
@@ -22488,6 +22514,7 @@ func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> floa
 		h += 20.0                                   # the record to chase
 		if next_venue_rep() > 0:
 			h += 18.0                               # ...and how the next stage opens
+		h += font.get_multiline_string_size(next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	return h
 
 
@@ -22553,6 +22580,9 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		if nxt > 0:
 			draw_string(font, Vector2(tx, y + 32.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
 				HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.84, 0.74, 0.90, 0.92))
+			y += 18.0
+		draw_multiline_string(font, Vector2(tx, y + 14.0), next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1,
+			Color(0.72, 0.92, 0.70, 0.94))
 
 
 func crescent_points(c: Vector2, r: float, off: Vector2, ir: float) -> PackedVector2Array:
