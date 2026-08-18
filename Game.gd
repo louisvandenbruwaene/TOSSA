@@ -1545,6 +1545,9 @@ var shop_open := false
 var sheet_sel := 0        # 0..3 across the four stat cards
 var shop_sel := 0         # the prop cards, then the gear row - see shop_gear0()
 var shop_room := 0        # which half of the shop is showing - see SHOP_ROOM_FRONT/BACK
+var shop_glow_side := false
+var shop_flip_from_glow := false
+var shop_flip_tick := -9999.0
 var skills_open := false   # the Skills reference: every trick and pattern, and how to use it
 var skills_sel := 0        # which entry the Skills reference has expanded
 # THE TAILOR (2026-07-28 evening, Louis: "where is my tailer room where i can dress my
@@ -2489,6 +2492,12 @@ func _ready() -> void:
 			sheet_open = true
 		if ua.has("--shop"):    # dev: open the shop for a screenshot
 			shop_open = true
+			if ua.has("--shopglow"):
+				shop_glow_side = true
+			if ua.has("--shopflip"):
+				shop_flip_from_glow = false
+				shop_glow_side = true
+				shop_flip_tick = atick()
 		if ua.has("--results"):   # dev: fabricate a finished act to screenshot the card
 			mode = MODE_PERFORM
 			run_venue = 4
@@ -4867,7 +4876,10 @@ func shop_buy_sel() -> void:
 	# through the door, which is the one slot that is not a purchase
 	var props := shop_props()
 	if shop_sel < props.size():
-		try_buy(props[shop_sel])
+		if shop_glow_side:
+			try_buy_glow(props[shop_sel])
+		else:
+			try_buy(props[shop_sel])
 		return
 	var g := shop_gear()
 	var gi := shop_sel - props.size()
@@ -4933,16 +4945,19 @@ func shop_input(kc: int) -> void:
 			# for the pad: X routes to Space outside live play, and nothing else in the
 			# shop claims it - the same trick the save-slot screen uses for delete.
 			if shop_sel < shop_gear0():
-				try_top_up(shop_props()[shop_sel])
+				if shop_glow_side:
+					try_top_up_glow(shop_props()[shop_sel])
+				else:
+					try_top_up(shop_props()[shop_sel])
 			else:
 				shop_buy_sel()
 		KEY_G:
-			# BUY THE GLOWING SET of the lit prop, the same one-press basket B buys the plain
-			# one with. Its own key rather than a mode on B, because the two are very different
-			# amounts of money and a player should never find out which one they bought after
-			# the fact.
-			if shop_sel < shop_gear0():
-				try_top_up_glow(shop_props()[shop_sel])
+			# Flip the whole display between the ordinary and phosphorescent stock. Purchase
+			# buttons keep their meaning on either face: Enter buys one and B buys a set.
+			shop_flip_from_glow = shop_glow_side
+			shop_glow_side = not shop_glow_side
+			shop_flip_tick = atick()
+			play_sfx("ui2", -11.0)
 
 
 func skills_input(kc: int) -> void:
@@ -5104,6 +5119,26 @@ func try_top_up_glow(kind: int) -> void:
 	shop_msg_ms = int(Time.get_ticks_msec())
 	shop_msg_warn = false
 	shop_buy_ms = int(Time.get_ticks_msec())
+	save_progress()
+	play_sfx("money", -6.0)
+
+
+func try_buy_glow(kind: int) -> void:
+	var cost := glow_cost(kind)
+	if money < cost:
+		shop_msg = "not enough in your purse for one glowing %s" % String(PROPS[kind]["name"]).to_lower()
+		shop_msg_ms = int(Time.get_ticks_msec())
+		shop_msg_warn = true
+		play_sfx("whiff", -10.0)
+		return
+	if not confirm_spend("glow%d" % kind, cost, true):
+		return
+	money -= cost
+	glow_count[kind] += 1
+	shop_buy_ms = int(Time.get_ticks_msec())
+	shop_msg = "one glowing %s bought" % String(PROPS[kind]["name"]).to_lower()
+	shop_msg_ms = shop_buy_ms
+	shop_msg_warn = false
 	save_progress()
 	play_sfx("money", -6.0)
 
@@ -17722,6 +17757,22 @@ func prop_spin_angle(b: Ball) -> float:
 const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.78, 1.90, 1.72, 1.30]
 const PROP_ICON_OFF := [0.0, 0.0, 0.0, -4.2, -5.2, -8.0, -2.0]
 
+func draw_glow_shop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
+	# The reverse of a shop card uses the same large PixelLab-authored portrait as its
+	# ordinary face, now treated as phosphorescent stock: dark niche, green bloom, charged
+	# portrait. This keeps both sides recognisably the same physical object.
+	var pulse := 0.88 + 0.12 * sin(atick() * 0.06 + float(kind)) if live else 0.94
+	draw_glow_pix(pos, 62.0 * mag, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.26 * pulse))
+	fill_ellipse(pos + Vector2(0.0, 42.0 * mag), 28.0 * mag, 6.0 * mag, Color(0.0, 0.0, 0.0, 0.5))
+	var bkey := "prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower()
+	var ang := (-0.34 + 0.20 * sin(atick() * 0.016)) if bool(PROPS[kind]["spins"]) and live else (-0.34 if bool(PROPS[kind]["spins"]) else 0.0)
+	if art_blit(bkey, pos, 1.0, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse)):
+		draw_glow_pix(pos, 10.0 * mag, Color(0.9, 1.0, 0.72, 0.24 * pulse))
+		return
+	var sc: float = PROP_ICON_MAG[kind] * mag
+	glow_silhouette(pos, kind, sc, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse))
+
+
 func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
 	# the prop as SHOP GOODS: the very same shape the stage draws (never a second art
 	# style for the same object), set in a small lit niche with a shadow under it, hung
@@ -21476,13 +21527,15 @@ func draw_shop(font: Font, s: Vector2) -> void:
 
 	var tx := px + 40.0
 	var innerw := pw - 80.0
-	draw_string(title_font(), Vector2(tx, py + 52.0), "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(34), Color(1.0, 0.86, 0.55))
+	var glow_face := shop_visible_glow_side()
+	draw_string(title_font(), Vector2(tx, py + 52.0), "GLOW SHOP" if glow_face else "SHOP", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(34),
+		GLOW_PHOS if glow_face else Color(1.0, 0.86, 0.55))
 	# WHICH ROOM, said in the header rather than left to be inferred from the goods
 	# ...and it no longer has to teach a hotkey. The C hint lived here because C was the
 	# only way through the curtain; the door is a card on the gear row now and explains
 	# itself where every other purchase does.
-	var sub := "to juggle N of a prop, own N of them"
-	draw_string(font, Vector2(tx + 118.0, py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13),
+	var sub := "phosphorescent props for dark stages" if glow_face else "to juggle N of a prop, own N of them"
+	draw_string(font, Vector2(tx + (194.0 if glow_face else 118.0), py + 50.0), sub, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13),
 		Color(0.95, 0.72, 0.55) if shop_room == SHOP_ROOM_BACK else Color(0.75, 0.68, 0.6))
 	draw_purse(font, px + pw - 40.0, py + 52.0)
 
@@ -21564,7 +21617,8 @@ func shop_stat_rows(i: int) -> Array:
 	return [
 		["Strength", "%d" % prop_str_unit(i), Color(0.86, 0.80, 0.72)],
 		["max objects", "%d" % max_count(i), Color(0.72, 0.88, 0.70) if max_count(i) >= MIN_BALLS else Color(0.95, 0.6, 0.45)],
-		["Owned", "%d" % prop_count[i], Color(0.75, 0.9, 0.72) if prop_count[i] >= num_balls else Color(0.95, 0.68, 0.35)],
+		["Glow owned" if shop_visible_glow_side() else "Owned", "%d" % (glow_count[i] if shop_visible_glow_side() else prop_count[i]),
+			Color(0.75, 0.9, 0.72) if (glow_count[i] if shop_visible_glow_side() else prop_count[i]) >= num_balls else Color(0.95, 0.68, 0.35)],
 	]
 
 
@@ -21642,7 +21696,32 @@ func draw_shop_hover(font: Font, i: int, card: Rect2, s: Vector2) -> void:
 	draw_enter_arrow(lx + 4.0, y0 + 4.0, y0 + 17.0, 4.0, Color(0.92, 0.78, 0.50, 0.85))
 
 
+func shop_flip_progress() -> float:
+	return clampf((atick() - shop_flip_tick) / 20.0, 0.0, 1.0)
+
+
+func shop_visible_glow_side() -> bool:
+	var p := shop_flip_progress()
+	return (shop_flip_from_glow if p < 0.5 else shop_glow_side) if p < 1.0 else shop_glow_side
+
+
 func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
+	# A card turn is a horizontal projection of a half-rotation: it narrows to its edge,
+	# swaps faces while invisible, then opens out again. Every card reads the same clock,
+	# so G turns the whole display as one cabinet rather than flipping only the cursor.
+	var p := shop_flip_progress()
+	var glow_face := shop_glow_side
+	var scale_x := 1.0
+	if p < 1.0:
+		scale_x = maxf(0.035, absf(cos(p * PI)))
+		glow_face = shop_flip_from_glow if p < 0.5 else shop_glow_side
+	var centre := r.get_center()
+	draw_set_transform(centre, 0.0, Vector2(scale_x, 1.0))
+	draw_shop_prop_face(font, i, Rect2(r.position - centre, r.size), sel, glow_face)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func draw_shop_prop_face(font: Font, i: int, r: Rect2, sel: bool, glow_face: bool) -> void:
 	# THE CARD IS THE OBJECT (2026-07-30, Louis: "I want the entire card to be the objects
 	# picture. Right above it should be a small cardlike window with its price").
 	#
@@ -21653,8 +21732,8 @@ func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
 	# `draw_shop_hover` rather than printed seven times over whether or not anyone is asking.
 	# The prop was previously drawn at about 60px inside a niche taking a fifth of the card;
 	# it is now the card.
-	var pcol := prop_color(i)
-	var cost := int(PROPS[i]["cost"])
+	var pcol := GLOW_PHOS if glow_face else prop_color(i)
+	var cost := glow_cost(i) if glow_face else int(PROPS[i]["cost"])
 	var afford := money >= cost
 	if sel:
 		soft_card(r, Color(pcol.r * 0.19, pcol.g * 0.18, pcol.b * 0.19, 0.97),
@@ -21682,7 +21761,10 @@ func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
 	# fallback row's 141 without a prop growing out through its own card.
 	var pic := Rect2(r.position.x + 6.0, chip.end.y + 4.0, r.size.x - 12.0, r.end.y - chip.end.y - 12.0)
 	var mag := clampf(minf(pic.size.x / 132.0, pic.size.y / 106.0), 0.62, 1.72)
-	draw_prop_icon(i, pic.get_center() + Vector2(0.0, pic.size.y * 0.06), mag, sel)
+	if glow_face:
+		draw_glow_shop_icon(i, pic.get_center() + Vector2(0.0, pic.size.y * 0.06), mag, sel)
+	else:
+		draw_prop_icon(i, pic.get_center() + Vector2(0.0, pic.size.y * 0.06), mag, sel)
 
 
 func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
@@ -21810,11 +21892,10 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 		if shop_sel < shop_gear0():
 			var pk: int = shop_props()[shop_sel]
 			detail_head = String(PROPS[pk]["name"])
-			detail = String(PROPS[pk]["trait"])
-			# ...and what a GLOWING set of them would cost, since this is the only place in
-			# the game that sells one, and the card itself is full to its foot.
-			var gown := glow_count[pk] if pk < glow_count.size() else 0
-			detail += "   [G] glowing: own %d, %s each" % [gown, commafy(glow_cost(pk))]
+			if shop_visible_glow_side():
+				detail = "charged for dark stages   own %d   Enter buys one, B completes the set" % glow_count[pk]
+			else:
+				detail = String(PROPS[pk]["trait"])
 		else:
 			var gi := shop_sel - shop_gear0()
 			var gl := shop_gear()
@@ -21828,11 +21909,11 @@ func draw_shop_tail(font: Font, px: float, py: float, pw: float, ph: float, tx: 
 	# ---------------- footer: the keys ----------------
 	if pad_active():
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
-			[[["Stick"], "choose"], [k_finish(), "buy one"], [["X"], "the set"], [["G"], "glowing"], [k_sheet(), "leave"]])
+			[[["Stick"], "choose"], [k_finish(), "buy one"], [["X"], "the set"], [["G"], "plain" if shop_glow_side else "glowing"], [k_sheet(), "leave"]])
 	else:
 		draw_hints_row(font, px + pw * 0.5, py + ph - 38.0,
 			[[["Left", "Right"], "choose"], [["Enter"], "buy one"], [["B"], "the set"],
-			 [["G"], "glowing"], [["Tab"], "leave"]])
+				 [["G"], "plain" if shop_glow_side else "glowing"], [["Tab"], "leave"]])
 
 
 #endregion
