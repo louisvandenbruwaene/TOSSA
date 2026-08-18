@@ -724,13 +724,14 @@ review" for the accept/reject examples and why.
   `--diffnewgame <name>` (pair
   with `--debug` so it never touches a real save) prints what `reset_new_game()` actually hands
   out at a given difficulty.
-- **Scoring:** exponential, Balatro-shaped. A *run* is the stretch since the last drop; it
-  accumulates linearly and a landed trick multiplies the WHOLE run (`p^x`). A drop banks the run
-  and resets to x1. `chain_mult` saturates (`1 + 3*c/(c+40)`, →x4, never capped-feeling on
-  screen). Goals are gated on BOTH a number and a minimum time (`GOAL_MIN_S_LOW/HIGH`) so an
-  exponential build can't finish a house in four seconds. `safe_pow`/`SCORE_CEIL` (1e300) keep
-  everything off `INF`; `score_text` switches to E-notation past a million. Toggle tricks pay
-  per-catch (shape every throw); live tricks (Spin) pay per-press - never conflate the two.
+- **Scoring:** exponential, Balatro-shaped. A *run* is the stretch since the last drop; catches
+  accumulate linearly while each distinct trick multiplies and raises the act through the formula
+  documented beside `score_log10()`. A drop banks the segment. Goals require all three of score,
+  the venue clock (`GOAL_MIN_S_LOW/HIGH`), and 75% of the target catch credit in one drop-free run;
+  this last gate is visible in the HUD and prevents one multiplier-heavy trick from instantly
+  winning a goal. `TossaBalance.gd` owns the tested ladder: Backyard final 1,920 at the expected
+  build, rising to about 1.02E25 at the Midnight Show. `SCORE_CEIL` (1e300) keeps everything off
+  `INF`; `score_text` switches to E-notation past a million.
 - **Props:** balls/rings/clubs/knives/torches/eggs/chainsaw. Cost to throw = `PROP_STR_UNIT` x
   count (one rule); `PROP_SIG` is a score EXPONENT; `pwin` shifts all three catch bands together.
 - **Patterns:** Cascade, Columns, Half Shower, Shower, Reverse Cascade, Tennis. Arms reach exactly

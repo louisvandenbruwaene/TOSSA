@@ -332,8 +332,11 @@ sheet, the results card and the establishing card were all looked at.
    the panel. Anything that came out of the scoring goes through `score_text`.
 
 **Still open, and needing Louis:**
-- **The balance numbers.** `GOAL_CATCHES` is set so a house's final goal is about one clean
-  run of half the act's clock floor. That is arithmetic, not play. It is one array.
+- [x] **The goal ladder now spans the career without instant trick clears.** Expected-build
+  finals run from 1,920 in the Backyard to about 1.02E25 at the Midnight Show. Score, the
+  house clock, and a visible 75% drop-free run floor must all open before a goal banks.
+- [ ] **Human balance playtesting.** The arithmetic is locked by `test_balance.gd`; the exact
+  targets still want feel-testing with real hands across the full career.
 - **The Shower's `s`** is assumed at 1.8.
 - **Trick spam** is unnerfed by design, suggestion at section 13.
 - **The T of the logo** still reads as a dagger with a knife across it rather than as a T.

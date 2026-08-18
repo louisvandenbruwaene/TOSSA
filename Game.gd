@@ -9,6 +9,7 @@ const TOSSA_REPLAY = preload("res://scripts/TossaReplay.gd")
 const TOSSA_SAVE_SCHEMA = preload("res://scripts/TossaSaveSchema.gd")
 const TOSSA_GEOMETRY = preload("res://scripts/TossaGeometry.gd")
 const TOSSA_REWARDS = preload("res://scripts/TossaRewards.gd")
+const TOSSA_BALANCE = preload("res://scripts/TossaBalance.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -3735,30 +3736,27 @@ func arm_show_guide() -> void:
 # The FINAL goal per venue, in PERFECT catches (goal_catches converts to the weighted units
 # the segment actually counts in, so a scrappier act simply needs more of them).
 #
-# CALIBRATED AGAINST `--ladder`, and the first pass was ten times too small: 18 at the
-# Backyard cleared the final goal in seven seconds against a thirty-second clock floor, so
-# the timer, not the juggling, would have ended every act.
+# CALIBRATED AGAINST `--ladder`. The expected build now reaches the final number at about
+# the house's clock floor; the earlier half-floor targets made the timer, not the juggling,
+# decide every act. A separate 75% clean-run gate prevents one enormous trick multiplier
+# from turning a single catch into a goal.
 #
 # THE ONE THING TO UNDERSTAND BEFORE RETUNING THESE. The score is a sum of segments, but a
 # sum of exponentials is dominated by its largest term to the point where the others are not
 # really there: at the Arena's exponent of 21, a segment 20% shorter than your best
 # contributes about a hundredth of it. So the practical meaning of a goal is **one clean run
-# of this many catches**, not a total, and these are set at roughly half the act's clock
-# floor for exactly that reason - a night has room for a drop or two and still a real run
-# left in it.
-const GOAL_CATCHES := [40.0, 60.0, 80.0, 100.0, 130.0, 165.0, 200.0]
-const GOAL_CATCH_STEP := [0.50, 0.72, 1.0]   # first, second, final, as a share of the above
+# of this many catches**, not a total. These live in TossaBalance so the progression test
+# and the act cannot quietly acquire different ladders.
+const GOAL_CATCHES := TOSSA_BALANCE.PERFECT_CATCHES
 
 
 func goal_catches(venue: int, gi: int) -> float:
 	# the weighted catch count this goal is asking for, before it is turned into a score.
 	# Weighted: a Perfect is worth three of these, so a flawless act reaches the number in a
 	# third of the catches - which is exactly the reward a Perfect is supposed to carry.
-	var base := float(GOAL_CATCHES[clampi(venue, 0, GOAL_CATCHES.size() - 1)]) * CATCH_WEIGHT[0]
-	var step := float(GOAL_CATCH_STEP[clampi(gi, 0, GOAL_CATCH_STEP.size() - 1)])
 	var a := minf(pow(ANTE_CATCH_GROWTH, float(ante[clampi(venue, 0, ante.size() - 1)])), ANTE_CATCH_CAP)
 	var enc := 1.3 if (encore_on("long") and gi == NUM_GOALS - 1) else 1.0
-	return base * step * a * enc
+	return TOSSA_BALANCE.weighted_goal(venue, gi, CATCH_WEIGHT[0], a, enc)
 
 
 func goal_for(venue: int, gi: int) -> float:
@@ -3770,9 +3768,22 @@ func goal_for(venue: int, gi: int) -> float:
 	#
 	# Tricks are deliberately not in it: they are the player's own upside, so landing them is
 	# how you clear a goal early rather than something the house already expected of you.
-	var x := goal_catches(venue, gi)
-	var expo := float(num_balls)
-	return from_log10(log_10(x) + expo * log_10(prop_sig() * pattern_mult() * float(prop_str_unit()) + 1.0))
+	return TOSSA_BALANCE.score_for(goal_catches(venue, gi), num_balls, prop_sig(),
+		pattern_mult(), float(prop_str_unit()))
+
+
+func best_run_x() -> float:
+	# Goals care about the best single drop-free stretch, just as the exponential score does.
+	# Closing a segment banks that proof; changing a load or dropping later cannot erase work
+	# already performed cleanly in this act.
+	var best := seg_x
+	for sg in segments:
+		best = maxf(best, float(sg.get("x", 0.0)))
+	return best
+
+
+func goal_run_required(venue: int, gi: int) -> float:
+	return TOSSA_BALANCE.run_required(goal_catches(venue, gi))
 
 
 # THE BUILD EACH HOUSE EXPECTS, as data rather than as a sentence in a comment. VENUE_BASE was
@@ -3813,7 +3824,7 @@ func print_ladder() -> void:
 	# the real one. A goal is a run length now, so the only question left is how long that
 	# run takes, and the score it works out to is one call to the same goal_for the game
 	# itself uses. A calibration tool that shares the formula cannot disagree with the game.
-	print("%-18s %-13s %-16s %5s %8s %9s %14s %9s" % ["VENUE", "BUILD", "PATTERN", "skill", "catch/s", "goal 1", "final (score)", "at-build"])
+	print("%-18s %-13s %-16s %5s %8s %9s %14s %9s %9s" % ["VENUE", "BUILD", "PATTERN", "skill", "catch/s", "goal 1", "final (score)", "at-build", "run floor"])
 	for v in GOAL_CATCHES.size():
 		var b: Dictionary = LADDER_BUILD[v]
 		var n := int(b["n"])
@@ -3829,23 +3840,20 @@ func print_ladder() -> void:
 		var per_catch: float = lerpf(CATCH_WEIGHT[2], CATCH_WEIGHT[0], skill)
 		var need1 := goal_catches(v, 0) / per_catch
 		var need3 := goal_catches(v, 2) / per_catch
-		# the score those runs work out to, in the SAME expression goal_for uses - one streak
-		# of that length, no tricks. (`str` moved from the exponent into the base 2026-07-30 -
-		# see score_log10 - so a calibration tool carrying its own copy of the scoring has to
-		# be kept in step by hand here, which is exactly the drift this rewrite was supposed
-		# to have ended; there is no way around it while this tool previews builds the live
-		# game state is not actually in.)
-		var e := float(n)
-		var base := prop_sig(pk) * float(PATTERNS[pat]["mult"]) * float(int(PROP_STR_UNIT[pk])) + 1.0
-		var g1 := from_log10(log_10(goal_catches(v, 0)) + e * log_10(base))
-		var g3 := from_log10(log_10(goal_catches(v, 2)) + e * log_10(base))
+		# The exact same pure score seam used by goal_for, supplied with this preview build.
+		var g1 := TOSSA_BALANCE.score_for(goal_catches(v, 0), n, prop_sig(pk),
+			float(PATTERNS[pat]["mult"]), float(PROP_STR_UNIT[pk]))
+		var g3 := TOSSA_BALANCE.score_for(goal_catches(v, 2), n, prop_sig(pk),
+			float(PATTERNS[pat]["mult"]), float(PROP_STR_UNIT[pk]))
 		var floor_s: float = lerpf(GOAL_MIN_S_LOW[2], GOAL_MIN_S_HIGH[2], float(v) / float(maxi(MAX_VENUE, 1)))
-		print("%-18s %2dx %-9s %-16s %5.2f %8.2f %9s %14s %8.0fs  (clock floor %.0fs, %.0f catches)" % [
+		var run_floor := TOSSA_BALANCE.run_required(goal_catches(v, 2)) / CATCH_WEIGHT[0]
+		print("%-18s %2dx %-9s %-16s %5.2f %8.2f %9s %14s %8.0fs %8.0f  (clock floor %.0fs, first %.0f)" % [
 			String(venue_data(v)["name"]), n, String(PROPS[pk]["name"]), String(PATTERNS[pat]["name"]),
-			skill, cps, score_text(g1), score_text(g3), need3 / maxf(cps, 0.001), floor_s, need1])
+			skill, cps, score_text(g1), score_text(g3), need3 / maxf(cps, 0.001), run_floor, floor_s, need1])
 	print("")
 	print("catch/s    catches a second at that count, from the tap airtime")
 	print("at-build   seconds of unbroken juggling to the FINAL goal at that skill share")
+	print("run floor  Perfect-equivalent catches required in one drop-free stretch")
 	print("A house is calibrated when at-build sits a little above its clock floor: the goal")
 	print("should be the thing that ends the act, not the timer.")
 
@@ -9567,8 +9575,9 @@ func check_goals() -> void:
 	# for the next number and risk the collapse.
 	if not booking_active or mode != MODE_PERFORM or tut_active:
 		return
-	while goals_hit < NUM_GOALS and score >= goal_for(run_venue, goals_hit) \
-			and goal_clock_open(goals_hit):
+	while goals_hit < NUM_GOALS and TOSSA_BALANCE.goal_ready(score,
+			goal_for(run_venue, goals_hit), goal_clock_open(goals_hit), best_run_x(),
+			goal_catches(run_venue, goals_hit)):
 		goals_hit += 1
 		var s := get_viewport_rect().size
 		var names := ["FIRST GOAL", "SECOND GOAL", "FINAL GOAL"]
@@ -18594,24 +18603,31 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			goal_head = "NEXT GOAL"
 		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), Color(0.85, 0.72, 0.55))
 		if goals_hit < NUM_GOALS:
-			# THE NUMBER, and then - only while it matters - THE CLOCK. A goal banks on both
-			# gates (see GOAL_MIN_S), and a bar sitting full with nothing happening is the one
-			# failure a hidden gate always causes: the player concludes the game is broken.
-			# So the moment the score passes the bar, the target line becomes a countdown and
-			# says plainly what is being waited for.
+			# A goal banks on score, clock, AND a sustained run. All three stay visible: a full
+			# score stem with no explanation looks broken, especially when a trick supplied the
+			# number long before the player's actual juggling earned the house.
 			var clock_left := goal_clock_left(goals_hit)
-			if score >= target and clock_left > 0.0:
+			var run_have := best_run_x() / CATCH_WEIGHT[0]
+			var run_need := goal_run_required(run_venue, goals_hit) / CATCH_WEIGHT[0]
+			var run_line := "run  %.0f / %.0f" % [minf(run_have, run_need), run_need]
+			if score >= target and clock_left <= 0.0 and run_have < run_need:
+				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), "RUN  %.0f / %.0f" % [run_have, run_need],
+					HORIZONTAL_ALIGNMENT_LEFT, 140.0, 19, Color(1.0, 0.82, 0.46))
+				draw_string(font, Vector2(LX + 14, tcard_y + 150), "hold one clean stretch",
+					HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(1.0, 0.82, 0.46, 0.9))
+			elif score >= target and clock_left > 0.0:
 				var cp := 0.65 + 0.35 * sin(float(tick) * 0.12)
 				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), "%.1fs" % clock_left,
 					HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(0.72, 0.95, 0.68, cp))
-				draw_string(font, Vector2(LX + 14, tcard_y + 150), "number beaten  -  hold the set",
+				draw_string(font, Vector2(LX + 14, tcard_y + 150), run_line,
 					HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(0.72, 0.95, 0.68, 0.85))
 			else:
 				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), score_text(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
 				if clock_left > 0.0:
-					# ...and before the number is beaten, the clock is still worth showing,
-					# quietly, so nobody is surprised by it later
-					draw_string(font, Vector2(LX + 14, tcard_y + 150), "opens in %.0fs" % clock_left,
+					draw_string(font, Vector2(LX + 14, tcard_y + 150), "%s  ·  %.0fs" % [run_line, clock_left],
+						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(12), Color(0.84, 0.78, 0.68, 0.9))
+				else:
+					draw_string(font, Vector2(LX + 14, tcard_y + 150), run_line,
 						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(12), Color(0.84, 0.78, 0.68, 0.9))
 		else:
 			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, ps(12), Color(1.0, 0.88, 0.5))
