@@ -13776,7 +13776,9 @@ func draw_backdrop(s: Vector2) -> void:
 	# Midnight uses the same veil permanently. The performer is deliberately left legible
 	# enough to time a catch against: the challenge is finding props, not guessing hands.
 	if full_dark_stage():
-		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.88))
+		# Near-black, not erased: architecture, floorboards, and the front row must still
+		# be discoverable once the eye settles, while phosphor remains the brightest read.
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.72))
 
 
 # draw_crowd AND crowd_person WERE DELETED HERE (2026-08-14). They drew the house as rows of
