@@ -9448,6 +9448,8 @@ func on_catch(h: int) -> void:
 	# lesson is about to stop the world on top of whatever it spawned
 	var fx := not tut_quiet_fx()
 	if best_d <= wperf:
+		var perfect_callout := TOSSA_REWARDS.perfect_callout(best_d, num_balls >= SLOW_MIN_BALLS)
+		var amazing_catch := perfect_callout == "AMAZING!"
 		streak += 1
 		best_streak = maxi(best_streak, streak)
 		last_streak_tick = tick
@@ -9465,8 +9467,6 @@ func on_catch(h: int) -> void:
 			run_perfects = int(burst["progress"])
 			if best_d == 0:
 				amazing_until = _frames + AMAZING_FRAMES
-				if fx:
-					add_popup(hpos[h] + Vector2(0, -52), "AMAZING!", Color(0.75, 0.92, 1.0))
 			if bool(burst["triggered"]):
 				perfect_burst_until = _frames + PERFECT_BURST_FRAMES
 				if _demo:
@@ -9478,7 +9478,8 @@ func on_catch(h: int) -> void:
 					add_popup(Vector2(vs.x * 0.5, vs.y * 0.30), "THICK TIME  15s", Color(0.75, 0.92, 1.0))
 				play_sfx("record", -8.0)
 		if fx:
-			add_popup(hpos[h], "PERFECT", Color(1.0, 0.86, 0.42))
+			var callout_col := Color(0.75, 0.92, 1.0) if amazing_catch else Color(1.0, 0.86, 0.42)
+			add_popup(hpos[h], perfect_callout, callout_col)
 		play_sfx("perfect", -5.0)
 		if fx:
 			spawn_parts(hpos[h], Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
@@ -18651,14 +18652,6 @@ func draw_hud(font: Font, s: Vector2) -> void:
 						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(12), Color(0.84, 0.78, 0.68, 0.9))
 		else:
 			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, ps(12), Color(1.0, 0.88, 0.5))
-		if goals_hit > 0:
-			# from the first goal on, spell out the gamble: a collapse strips the score
-			# back to the last goal's value (goal_for(goals_hit-1)), so everything earned
-			# ABOVE that is what you are risking by pushing on - true even after all three
-			# goals, while you chase a record (the old "every point is yours" was wrong).
-			var banked := goal_for(run_venue, mini(goals_hit, NUM_GOALS) - 1)
-			draw_fit_string(font, Vector2(LX + 14, tcard_y + 158), "risking  %s" % score_text(maxf(0.0, score - banked)),
-				HORIZONTAL_ALIGNMENT_LEFT, 136.0, 12, Color(1.0, 0.72, 0.55))
 		# the standing offer: from the first goal on, the cash-in is always open
 		if goals_hit >= 1:
 			var pl := 0.7 + 0.3 * sin(float(tick) * 0.14)
@@ -27592,20 +27585,20 @@ func draw_popups(font: Font) -> void:
 		c.a = a
 		var txt := String(p["text"])
 		# the big moments land bigger, with a quick settle from oversized to rest
-		var big := txt == "PERFECT" or txt == "NEW RECORD!" or txt.begins_with("LEVEL") \
+		var big := txt in ["PERFECT", "AMAZING!"] or txt == "NEW RECORD!" or txt.begins_with("LEVEL") \
 			or txt.ends_with("STREAK") or txt == "50 PERFECTS"
 		var size := 18
 		if big:
 			size = 23 + maxi(0, 6 - int(age))
-		# A high-contrast plate gives a timing grade one stable silhouette over every
-		# venue.  An outline alone was not enough when PERFECT crossed the coat, a
-		# torch halo, or a bright prop.  The plate travels with the popup, so it does
-		# not become another static HUD element in the flight space.
-		var text_w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
-		var plate := Rect2(pos.x - text_w * 0.5 - 10.0, pos.y - float(ps(size)) - 7.0,
-			text_w + 20.0, float(ps(size)) + 12.0)
-		draw_rect(plate, Color(0.035, 0.02, 0.035, a * 0.78))
-		draw_line(plate.position, Vector2(plate.end.x, plate.position.y), Color(c.r, c.g, c.b, a * 0.45), 1.0)
+		# Longer stage notices retain a high-contrast plate. PERFECT and AMAZING return
+		# to their original outline-only treatment: they are rapid catch feedback, not
+		# floating cards, and only one of them can exist for a given catch.
+		if txt not in ["PERFECT", "AMAZING!"]:
+			var text_w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
+			var plate := Rect2(pos.x - text_w * 0.5 - 10.0, pos.y - float(ps(size)) - 7.0,
+				text_w + 20.0, float(ps(size)) + 12.0)
+			draw_rect(plate, Color(0.035, 0.02, 0.035, a * 0.78))
+			draw_line(plate.position, Vector2(plate.end.x, plate.position.y), Color(c.r, c.g, c.b, a * 0.45), 1.0)
 		# the box is 240 wide, so its LEFT edge sits half that from the anchor: the
 		# old -60 offset centred every popup 60px right of the hand it belonged to
 		draw_text_shout(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)

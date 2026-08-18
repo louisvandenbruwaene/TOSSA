@@ -63,6 +63,9 @@ Codex improvements:
 - **Fifty Perfects reward a drop-free run, not a deleted chain:** Good and Late catches preserve the
   tally; a drop or a new run clears it. The fiftieth Perfect grants 15 seconds of thick time and starts
   the next tally at zero. `scripts/TossaRewards.gd` carries the tested progress rule.
+- **Perfect and Amazing are mutually exclusive catch grades:** an eligible frame-perfect catch says
+  `AMAZING!`; every other Perfect says `PERFECT`. Neither carries a black popup plate, and the score
+  rail no longer repeats the amount currently at risk.
 - **Round-prop title art has one silhouette treatment:** ball and ring card/stage sources are generated
   from the same banded model with a dark edge instead of a pale rim. Re-run `make_round_props.py`, then
   `pixelise_mark.py` after round-prop changes. The title A uses slightly larger, lower-reaching clubs.

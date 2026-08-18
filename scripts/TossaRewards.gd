@@ -22,3 +22,9 @@ static func record_catch(progress: int, quality: int, eligible: bool = true) -> 
 
 static func reset_on_drop() -> int:
 	return 0
+
+
+static func perfect_callout(timing_distance: int, amazing_eligible: bool) -> String:
+	# A frame-perfect catch replaces the ordinary grade; callers render exactly this one
+	# result, never AMAZING and PERFECT together.
+	return "AMAZING!" if timing_distance == 0 and amazing_eligible else "PERFECT"
