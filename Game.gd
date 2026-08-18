@@ -1386,6 +1386,7 @@ var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
 var sprint_active := false  # transient, unsaved high-stakes route; see begin_sprint
 var sprint_failed := false
+var sprint_started_ms := 0
 var prop_type := PROP_BALLS  # the object being juggled this run
 # how many of each prop you own (balls are free and unlimited, see have()). You buy
 # props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
@@ -7416,11 +7417,16 @@ func begin_sprint() -> void:
 	# The familiar act and shop systems remain in use; only the rules around them change.
 	sprint_active = true
 	sprint_failed = false
+	sprint_started_ms = Time.get_ticks_msec()
 	reset_new_game()
 	seen_tuts = ["balls"]
 	pending_tuts.clear()
 	enter_day()
 	set_day_msg("SPRINT  -  no practice. One drop ends the attempt; clear all 3 goals to advance.")
+
+
+func sprint_clock_text() -> String:
+	return TOSSA_FORMAT.duration_text(int((Time.get_ticks_msec() - sprint_started_ms) / 1000))
 
 
 const OLD_NAMES: Array[String] = ["PIXELTOSSA"]   # every name this game has shipped under,
@@ -18301,6 +18307,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if purist:
 			setline += "   PURIST"
 		draw_string(font, Vector2(LX + 14, 60), setline, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), warm)
+		if sprint_active:
+			draw_string(font, Vector2(LX + 126, 60), "SPRINT  " + sprint_clock_text(), HORIZONTAL_ALIGNMENT_RIGHT, LW - 140.0, ps(12), Color(0.72, 0.92, 1.0))
 		for i in NUM_GOALS:
 			var dotc := Vector2(LX + LW - 20.0 - float(NUM_GOALS - 1 - i) * 18.0, 34.0)
 			if i < goals_hit:

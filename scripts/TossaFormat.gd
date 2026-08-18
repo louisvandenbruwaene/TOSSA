@@ -44,3 +44,8 @@ static func mult_text(v: float) -> String:
 	if v < 1.0e6:
 		return commafy(int(round(v)))
 	return score_text(v)
+
+
+static func duration_text(total_seconds: int) -> String:
+	var safe := maxi(0, total_seconds)
+	return "%02d:%02d:%02d" % [safe / 3600, (safe / 60) % 60, safe % 60]
