@@ -51,6 +51,8 @@ declare -a TARGETS=(
   "credits:60:credits:--credits"
   # --- menus and meta screens ----------------------------------------------
   "settings:40:settings:--settings"
+  "controls_keyboard:60:remap:--remap"
+  "controls_gamepad:60:remap:--remap --pad"
   "slots:40:slots:--slots"
   "stats:40:stats:--stats"
   "f9_experiments:40:f9:--f9"

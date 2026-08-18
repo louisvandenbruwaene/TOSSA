@@ -7798,65 +7798,98 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	view_venue = 2
 	draw_backdrop(s)
 	view_venue = -1
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.68))
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.76))
 	draw_title_glow(font, s.y * 0.06, "CONTROLS", 36, Color(1.0, 0.88, 0.5), s)
 	draw_ornament(s.x * 0.5, s.y * 0.06 + 62.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
-	var pw := 620.0
-	var px := s.x * 0.5 - pw * 0.5
 	var kb_focus := remap_col == 0
 	var pad_focus := remap_col == 1
+	var card_y := 132.0
+	var card_h := 350.0
+	var card_w := 528.0
+	var gap := 32.0
+	var left_x := s.x * 0.5 - card_w - gap * 0.5
+	var right_x := s.x * 0.5 + gap * 0.5
+	var kb_card := Rect2(left_x, card_y, card_w, card_h)
+	var pad_card := Rect2(right_x, card_y, card_w, card_h)
+	hud_panel(kb_card, kb_focus)
+	hud_panel(pad_card, pad_focus)
 
-	# --- keyboard column (the six core actions) ---
-	var oy := s.y * 0.222
-	draw_string(font, Vector2(px, oy - 22.0), "KEYBOARD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14),
-		Color(0.95, 0.82, 0.5, 0.9) if kb_focus else Color(0.6, 0.56, 0.5, 0.6))
+	# BOTH DEVICES STAY LEGIBLE. Focus belongs to the border and selected row, not to
+	# the text's opacity: the old screen halved every unfocused colour and made the gamepad
+	# reference almost disappear. A controls screen is a reference even when its other column
+	# has the cursor.
+	draw_string(font, Vector2(left_x + 20.0, card_y + 32.0), "KEYBOARD",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.86, 0.52))
+	draw_string(font, Vector2(left_x + 20.0, card_y + 53.0), "six bindings - select one to change it",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.72, 0.66, 0.58, 0.9))
+	var oy := card_y + 88.0
 	for i in REMAP_ACTS.size():
 		var sel := kb_focus and i == remap_sel
-		var ry := oy + float(i) * 40.0
+		var ry := oy + float(i) * 41.0
 		if sel:
-			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0), true)
-		var dim := 1.0 if kb_focus else 0.5
+			hud_panel(Rect2(left_x + 12.0, ry - 25.0, card_w - 24.0, 38.0), true)
 		var nm := String(REMAP_ACTS[i][1])
-		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18),
-			Color(1.0, 0.9, 0.6) if sel else Color(0.8 * dim, 0.74 * dim, 0.66 * dim))
+		draw_string(font, Vector2(left_x + 24.0, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16),
+			Color(1.0, 0.9, 0.6) if sel else Color(0.84, 0.78, 0.69))
 		var kname := OS.get_keycode_string(action_key(String(REMAP_ACTS[i][0])))
 		if sel and remap_wait:
 			var pa := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
-			draw_string(font, Vector2(px + pw - 220.0, ry), "press a key...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, ps(16), Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
+			draw_string(font, Vector2(left_x + card_w - 224.0, ry), "press a key...",
+				HORIZONTAL_ALIGNMENT_RIGHT, 188.0, ps(15), Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa))
 		else:
-			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(kname.length())), ry - 13.0, kname)
+			draw_keycap(font, left_x + card_w - 38.0 - maxf(23.0,
+				font.get_string_size(kname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 12.0), ry - 17.0, kname)
 
-	# --- gamepad column (TRICK + SWITCH TRICK only - catch/throw stay on the
-	# triggers/bumpers, always, never remapped: see PAD_ACTS) ---
-	var gy := oy + float(REMAP_ACTS.size()) * 40.0 + 30.0
-	draw_string(font, Vector2(px, gy - 22.0), "GAMEPAD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14),
-		Color(0.95, 0.82, 0.5, 0.9) if pad_focus else Color(0.6, 0.56, 0.5, 0.6))
-	for i in PAD_ACTS.size():
-		var sel := pad_focus and i == pad_remap_sel
-		var ry := gy + float(i) * 40.0
+	# The gamepad card includes the four fixed hand bindings. Previously it listed only
+	# Trick and Switch Trick, then described the most important four controls in a tiny
+	# sentence. The player should be able to learn either device by reading one complete card.
+	draw_string(font, Vector2(right_x + 20.0, card_y + 32.0), "GAMEPAD",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.86, 0.52))
+	draw_string(font, Vector2(right_x + 20.0, card_y + 53.0), "hand controls are fixed - two bindings can change",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.72, 0.66, 0.58, 0.9))
+	var pad_rows := [
+		["Left hand  CATCH", "LT", false], ["Left hand  THROW", "LB", false],
+		["Right hand  CATCH", "RT", false], ["Right hand  THROW", "RB", false],
+		["TRICK  (the one-shot powerup)", pad_button_glyph(PAD_TRICK), true],
+		["SWITCH TRICK", pad_button_glyph(PAD_CYCLE), true],
+	]
+	for i in pad_rows.size():
+		var editable := bool(pad_rows[i][2])
+		var edit_i := i - 4
+		var sel := editable and pad_focus and edit_i == pad_remap_sel
+		var ry := oy + float(i) * 41.0
 		if sel:
-			hud_panel(Rect2(px - 16.0, ry - 22.0, pw + 32.0, 38.0), true)
-		var dim := 1.0 if pad_focus else 0.5
-		var nm := String(PAD_ACTS[i][1])
-		draw_string(font, Vector2(px, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18),
-			Color(1.0, 0.9, 0.6) if sel else Color(0.8 * dim, 0.74 * dim, 0.66 * dim))
-		var gname := pad_button_glyph(pad_action_button(String(PAD_ACTS[i][0])))
+			hud_panel(Rect2(right_x + 12.0, ry - 25.0, card_w - 24.0, 38.0), true)
+		var nm := String(pad_rows[i][0])
+		draw_string(font, Vector2(right_x + 24.0, ry), nm, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16),
+			Color(1.0, 0.9, 0.6) if sel else Color(0.84, 0.78, 0.69))
+		var gname := String(pad_rows[i][1])
 		if sel and remap_wait:
 			var pa2 := 0.5 + 0.5 * sin(float(cine_tick) * 0.12)
-			draw_string(font, Vector2(px + pw - 220.0, ry), "press a button...", HORIZONTAL_ALIGNMENT_RIGHT, 220.0, ps(16), Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa2))
+			draw_string(font, Vector2(right_x + card_w - 224.0, ry), "press a button...",
+				HORIZONTAL_ALIGNMENT_RIGHT, 188.0, ps(15), Color(1.0, 0.85, 0.45, 0.5 + 0.5 * pa2))
 		else:
-			draw_keycap(font, px + pw - maxf(28.0, 14.0 + 7.0 * float(gname.length())), ry - 13.0, gname)
-	draw_string(font, Vector2(px, gy + float(PAD_ACTS.size()) * 40.0 + 4.0),
-		"catch and throw always stay on the triggers and bumpers",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.68, 0.63, 0.56, 0.8))
+			draw_keycap(font, right_x + card_w - 38.0 - maxf(23.0,
+				font.get_string_size(gname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 12.0), ry - 17.0, gname)
 
-	# the other in-play keys, listed here so live play never has to show them
-	var refy := gy + float(PAD_ACTS.size()) * 40.0 + 44.0
-	draw_ornament(s.x * 0.5, refy, 150.0, Color(0.82, 0.62, 0.34, 0.6))
-	draw_string(font, Vector2(0, refy + 22.0), "OTHER KEYS", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.95, 0.8, 0.55, 0.9))
-	draw_string(font, Vector2(0, refy + 46.0), "Enter  finish / end the set      Esc  pause      Tab  character sheet      S  shop", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, refy + 70.0), "practice only:    R  restart      1  2  ball count      O  change prop      P  change pattern", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.76, 0.66))
-	draw_string(font, Vector2(0, s.y - 40.0), "Up / Down    Enter rebind    Tab switch device    Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
+	# The fixed reference is a real card with keycaps, not two compressed prose lines.
+	# It is deliberately device-neutral: these are the keyboard names players see in
+	# tutorials, while the gamepad's fixed navigation buttons remain visible contextually.
+	var ref_card := Rect2(left_x, 506.0, card_w * 2.0 + gap, 136.0)
+	hud_panel(ref_card)
+	draw_string(font, Vector2(ref_card.position.x, ref_card.position.y + 28.0), "OTHER KEYS",
+		HORIZONTAL_ALIGNMENT_CENTER, ref_card.size.x, ps(15), Color(0.95, 0.82, 0.55, 0.95))
+	draw_hints_row(font, s.x * 0.5, ref_card.position.y + 40.0, [
+		[["Enter"], "finish the set"], [["Esc"], "pause"],
+		[["Tab"], "character"], [["S"], "shop"],
+	])
+	draw_hints_row(font, s.x * 0.5, ref_card.position.y + 78.0, [
+		[["R"], "restart practice"], [["1", "2"], "ball count"],
+		[["O"], "change prop"], [["P"], "change pattern"],
+	])
+	draw_string(font, Vector2(0, s.y - 42.0),
+		"Up / Down select     Enter rebind     Tab switch device     Esc back",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.78, 0.71, 0.63))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
