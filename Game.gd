@@ -18401,21 +18401,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	var warm := Color(0.86, 0.76, 0.62)
 	var dim := Color(0.72, 0.65, 0.56)
 
-	# slow motion reads on screen: a cool veil + a quiet label, tucked low so it never
-	# fights the rails or the stage
+	# Slow motion keeps its cool veil across the stage; its exact amount lives in the
+	# existing stamina/status card below, not in another window over the performer.
 	var slow := slow_amount()
 	if slow > 0.005:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.55, 0.72, 1.0, 0.03 + 0.09 * slow))
-		var stext := "SLOW  %d%%" % int(round(slow * 100.0))
-		if pie_active:
-			stext += "   (pie)"
-		if _frames < chain_until:
-			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
-		var slow_w := 190.0
-		var slow_x := s.x * 0.5 - slow_w * 0.5
-		draw_rect(Rect2(slow_x, s.y - 120.0, slow_w, 28.0), Color(0.025, 0.04, 0.07, 0.88))
-		draw_rect(Rect2(slow_x, s.y - 120.0, slow_w, 28.0), Color(0.55, 0.88, 1.0, 0.5), false, 1.0)
-		draw_text_shout(font, Vector2(slow_x, s.y - 100.0), stext, HORIZONTAL_ALIGNMENT_CENTER, slow_w, 16, Color(0.75, 0.94, 1.0, 0.96))
 	if sprint_active and not sprint_ghost_replay.is_empty() and not results_open:
 		# The ghost is playback, never input: cyan rings repeat the best route's accepted
 		# actions at their recorded simulation ticks while the player's hands remain sovereign.
@@ -18698,7 +18688,9 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# Reputation, and the LV/XP bar never change mid-run - they live in the
 		# day hub, the sheet, and the results card instead of being repeated here.
 		var pts_row := points > 0
-		hud_card(Rect2(RX, 16, RW, 66.0 if pts_row else 48.0), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
+		var slow_row := slow > 0.005
+		var status_rows := int(pts_row) + int(slow_row)
+		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows)), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
@@ -18715,9 +18707,19 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if stam_low:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 		draw_meter(sx, 44, sw, 11.0, sfrac, stcol)
+		var status_y := 74.0
+		if slow_row:
+			var stext := "SLOW  %d%%" % int(round(slow * 100.0))
+			if pie_active:
+				stext += "  ·  PIE"
+			if _frames < chain_until:
+				stext += "  ·  %ds" % int(ceil(float(chain_until - _frames) / 120.0))
+			draw_fit_string(font, Vector2(sx, status_y), stext, HORIZONTAL_ALIGNMENT_LEFT, sw, 12,
+				Color(0.68, 0.92, 1.0, 0.96))
+			status_y += 18.0
 		if pts_row:
 			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-			draw_string(font, Vector2(sx, 74), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.7, 0.95, 0.7, pa))
+			draw_string(font, Vector2(sx, status_y), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.7, 0.95, 0.7, pa))
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock

@@ -19,8 +19,8 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   geometry now share the same tested functions used by the live simulation and collision sweep.
   Do not split live juggling or rendering merely to reduce line count.
 - [x] **Make the stage legible at native 1280×720.** The HUD pass enlarged task-critical
-  secondary text and controls, plated timing grades and the slow-motion indicator, and kept
-  all of them clear of the performer and flight paths.
+  secondary text and controls, plated timing grades, and moved the slow-motion percentage into
+  the existing stamina/status card so all of them stay clear of the performer and flight paths.
 - [x] **Make the next career goal obvious after onboarding.** The selected performance card
   now surfaces the nearest unowned trick or pattern using the player’s real missing
   requirements, alongside the existing next-venue reputation goal.
