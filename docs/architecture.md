@@ -44,6 +44,10 @@ Follow this order for future extractions:
 4. Only then consider a screen or simulation component; do not split rendering or live
    juggling simply to reduce line count.
 
+`scripts/TossaReplay.gd` is a versioned pure contract for a future ghost reader: it records a
+run header and ordered accepted actions, but is not wired into live input yet. Its format is
+covered by `tests/test_replay.gd` (`make test-replay`).
+
 ## No scene tree, no autoloads
 
 There is nothing to inspect via Godot's usual node/scene tooling - a Godot MCP server's scene-
