@@ -831,14 +831,7 @@ const TR_SPIN := 2
 #     multiplier in the game.
 # All three still gate the same skills in the same order at the same levels; only the numbers on
 # their own tracks moved, and no prop, count or pattern requirement was touched.
-const TRICKS := [
-	{"id": "btb",  "name": "Behind the Back",  "kind": "toggle", "lvl": 3, "acc": 25, "perf": 5, "min_air": 0, "diff": 1.20, "cascade_only": true, "shout": "BEHIND THE BACK!",
-	 "desc": "Toggle: every throw loops behind the back. Cascade only - no other pattern survives it. Every catch under it multiplies the run."},
-	{"id": "high", "name": "High Toss",        "kind": "toggle", "lvl": 5, "str": 75, "perf": 10, "min_air": 0, "diff": 1.10, "cascade_only": false, "shout": "HIGH TOSS!",
-	 "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
-	{"id": "spin", "name": "Spin",             "kind": "live",   "lvl": 8, "spd": 75, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!",
-	 "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
-]
+const TRICKS := TOSSA_CATALOG.TRICKS
 const SPIN_TICKS := 44             # how long a Spin lasts (about a third of a second)
 const TRICK_COOLDOWN := 0          # NO COOLDOWN (2026-07-29, Louis: "change the spin cooldown
 							        # to zero but make it impossible to catch or throw while
