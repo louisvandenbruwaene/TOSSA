@@ -30,6 +30,11 @@ func _init() -> void:
 	if TOSSA_REWARDS.reset_on_drop() != 0:
 		push_error("A drop must clear the drop-free Perfect tally.")
 		failed += 1
+	if TOSSA_REWARDS.perfect_callout(0, true) != "AMAZING!" \
+			or TOSSA_REWARDS.perfect_callout(1, true) != "PERFECT" \
+			or TOSSA_REWARDS.perfect_callout(0, false) != "PERFECT":
+		push_error("Each Perfect catch must choose exactly one Perfect-or-Amazing callout.")
+		failed += 1
 	if failed == 0:
 		print("TossaRewards: drop-free Perfect reward verified")
 	quit(failed)
