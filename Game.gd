@@ -3249,7 +3249,7 @@ func _input(event: InputEvent) -> void:
 					enter_day()
 					if sprint_active:
 						var next_name := String(venue_data(venue_pick)["name"])
-						set_day_msg("SPRINT STAGE CLEARED  -  %s is next. Spend your flowers, then play." % next_name)
+						set_day_msg("SPRINT STAGE CLEARED  -  %s is next. Prepare, then play." % next_name)
 					elif daily_active:
 						# enter_day() clears day_msg first - the share line has to land
 						# after, or it never survives the trip back to the hub. Already
@@ -4298,7 +4298,7 @@ func day_actions() -> Array[Dictionary]:
 		purist_sub += "  1-4 to bind one stat."
 	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
-		"sub": "%s and reputation, while stamina lasts. %s" % [coin_word(), purist_sub]})
+		"sub": "earn pay and reputation while stamina lasts. %s" % purist_sub})
 	if not sprint_active:
 		out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
 			"cost": "", "ok": not tired, "why": tired_why if tired else "",
@@ -4309,24 +4309,24 @@ func day_actions() -> Array[Dictionary]:
 	var full := stamina >= stamina_max - 1.0
 	var eat_why := ""
 	if money < EAT_COST:
-		eat_why = "not enough %s" % coin_word()
+		eat_why = "not enough in your purse"
 	elif full:
 		eat_why = "not hungry yet"
 	out.append({"id": "eat", "grp": "rest", "icon": "plate", "name": "EAT a hot meal",
-		"cost": "%d %s" % [EAT_COST, coin_word()], "ok": money >= EAT_COST and not full, "why": eat_why,
+		"cost": str(EAT_COST), "currency": true, "ok": money >= EAT_COST and not full, "why": eat_why,
 		"sub": "stamina back. Every third meal adds a point of Strength."})
 	out.append({"id": "inn", "grp": "rest", "icon": "bed", "name": "SLEEP at the inn",
-		"cost": "%d %s" % [INN_COST, coin_word()], "ok": money >= INN_COST,
-		"why": "not enough %s  -  the innkeeper does not haggle" % coin_word() if money < INN_COST else "",
-		"sub": "ends the day, wake fully rested. Keep %d %s aside or the road ends." % [INN_COST, coin_word()]})
+		"cost": str(INN_COST), "currency": true, "ok": money >= INN_COST,
+		"why": "not enough in your purse  -  the innkeeper does not haggle" if money < INN_COST else "",
+		"sub": "ends the day, wake fully rested. Keep the inn fee aside or the road ends."})
 	# UNCLE DAN'S PIE IS SOLD WHERE IT IS EATEN (2026-07-29, Louis: "Uncle dan's pie should
 	# also be only for sale in the rest menu"). It was a shop card, which put a stimulant on
 	# the same row as juggling clubs; the rest drawer is where every other restorative already
 	# lives and where a player is when they want one. Buying costs no day segment - it is a
 	# pie, not an evening.
 	out.append({"id": "buy_pie", "grp": "rest", "icon": "pie", "name": "BUY Uncle Dan's Pie",
-		"cost": "%s %s" % [commafy(PIE_COST), coin_word()], "ok": money >= PIE_COST,
-		"why": "not enough %s" % coin_word() if money < PIE_COST else "",
+		"cost": commafy(PIE_COST), "currency": true, "ok": money >= PIE_COST,
+		"why": "not enough in your purse" if money < PIE_COST else "",
 		"sub": "a stimulant slice for the pantry. You have %d. Eating one slows the whole day %d%%." % [pie_count, int(round(PIE_SLOW * 100.0))]})
 	if pie_count > 0:
 		out.append({"id": "pie", "grp": "rest", "icon": "pie", "name": "EAT Uncle Dan's Pie",
@@ -4341,11 +4341,11 @@ func day_actions() -> Array[Dictionary]:
 		# ends purely because a performance went wrong.
 		out.append({"id": "tomato", "grp": "rest", "icon": "tomato", "name": "EAT a thrown tomato",
 			"cost": "have %d" % tomatoes, "ok": not full, "why": "not hungry yet" if full else "",
-			"sub": "free, and a little humbling: +%d stamina, no %s, no Strength." % [int(TOMATO_EAT_STAM), coin_word()]})
+			"sub": "free, and a little humbling: +%d stamina, no pay, no Strength." % int(TOMATO_EAT_STAM)})
 	if have(PROP_EGGS) > 0:
 		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
 			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
-			"sub": "no %s and no Strength tick: just +%d stamina, and one fewer egg to juggle." % [coin_word(), int(EGG_EAT_STAM)]})
+			"sub": "no pay and no Strength tick: just +%d stamina, and one fewer egg to juggle." % int(EGG_EAT_STAM)})
 	if true:
 		# DRINKS BELONG WHERE THE RECOVERY IS (2026-07-28, Louis, describing them as
 		# bought "in the resting area"). They are stocked from the shop too and always
@@ -4353,9 +4353,9 @@ func day_actions() -> Array[Dictionary]:
 		# the tomato, the egg - is on this drawer, and a restock is the same errand as a
 		# meal. It costs no day segment: it is a case of cans, not an evening out.
 		out.append({"id": "drinks", "grp": "rest", "icon": "drink", "name": "STOCK Energy Drinks",
-			"cost": "%s %s" % [commafy(ENERGY_DRINK_BATCH_COST), coin_word()],
+			"cost": commafy(ENERGY_DRINK_BATCH_COST), "currency": true,
 			"ok": money >= ENERGY_DRINK_BATCH_COST,
-			"why": "not enough %s" % coin_word() if money < ENERGY_DRINK_BATCH_COST else "",
+			"why": "not enough in your purse" if money < ENERGY_DRINK_BATCH_COST else "",
 			"sub": "%d cans for the helmet, %d in reserve now. Each is +%d%% stamina, poured the moment you run dry." % [
 				ENERGY_DRINK_BATCH, energy_drinks, int(ENERGY_DRINK_STAMINA_PCT * 100.0)]})
 	out.append({"id": "shop", "grp": "prep", "icon": "shop", "name": "SHOP",
@@ -5050,7 +5050,7 @@ func confirm_spend(id: String, cost: int, in_shop: bool) -> bool:
 		return true
 	_confirm_id = id
 	_confirm_ms = now
-	var wtext := "careful  -  that leaves you short of the inn (%d %s). press again to spend anyway" % [INN_COST, coin_word()]
+	var wtext := "careful  -  that leaves you short of the inn fee. press again to spend anyway"
 	if in_shop:
 		shop_msg = wtext
 		shop_msg_ms = now
@@ -5121,7 +5121,7 @@ func try_top_up(kind: int) -> void:
 		want = num_balls   # already fielded: top up a spare set for the drops to come
 	var can := clampi(int(floor(float(money) / float(maxi(cost, 1)))), 0, want)
 	if can <= 0:
-		shop_msg = "not enough %s for even one" % coin_word()
+		shop_msg = "not enough in your purse for even one"
 		shop_msg_ms = int(Time.get_ticks_msec())
 		shop_msg_warn = true
 		play_sfx("whiff", -10.0)
@@ -5134,7 +5134,7 @@ func try_top_up(kind: int) -> void:
 	shop_buy_ms = int(Time.get_ticks_msec())
 	save_progress()
 	play_sfx("money", -4.0)
-	shop_msg = "%d %s  -  %s %s" % [can, prop_plural(kind), commafy(cost * can), coin_word()]
+	shop_msg = "%d %s bought  -  %s paid" % [can, prop_plural(kind), commafy(cost * can)]
 	if can < want:
 		shop_msg += "  (all the purse would take)"
 	shop_msg_ms = int(Time.get_ticks_msec())
@@ -10869,7 +10869,7 @@ func add_xp(amount: int) -> void:
 			money += mg
 			career["mastery"] = int(career.get("mastery", 0)) + points
 			points = 0
-			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d  -  MASTERY  +%d %s" % [level, mg, coin_word()], Color(1.0, 0.9, 0.5))
+			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d  -  MASTERY PAY" % level, Color(1.0, 0.9, 0.5))
 			play_sfx("money", -8.0)
 		else:
 			add_popup(Vector2(s.x * 0.5, s.y * 0.34), "LEVEL %d" % level, Color(1.0, 0.9, 0.5))
@@ -11352,7 +11352,7 @@ func difficulty_note(d: int) -> String:
 	# one line each, read on the picker and again on the Settings row - kept in one
 	# place so the two screens can never describe the same setting two different ways.
 	match d:
-		DIFF_SLOTH: return "wide catches, 20% slow time, and 200 flowers to start - sloths get slow"
+		DIFF_SLOTH: return "wide catches, 20% slow time, and a generous starting purse - sloths get slow"
 		DIFF_OCTOPUS: return "tight timing, fewer forgiving frames, no starting purse - the real test"
 		_: return "the standard game, as shipped"
 
@@ -16185,7 +16185,7 @@ func wear_piece_def(piece: String) -> Dictionary:
 		"boots":   return {"name": "Stage Boots",      "gear": "boots", "cost": BOOTS_COST,         "note": "every throw costs one less stamina"}
 		"hat":     return {"name": "Top Hat",          "gear": "hat", "cost": HAT_COST,           "note": "better tributes, more often"}
 		"coat":    return {"name": "Tailcoat",         "gear": "coat", "cost": COAT_COST,          "note": "the crowd warms %d%% faster" % int(round((COAT_WARM - 1.0) * 100.0))}
-		"vest":    return {"name": "Sequin Waistcoat", "gear": "vest", "cost": VEST_COST,          "note": "+%d%% flowers thrown" % int(round((VEST_RATE - 1.0) * 100.0))}
+		"vest":    return {"name": "Sequin Waistcoat", "gear": "vest", "cost": VEST_COST,          "note": "+%d%% stage tribute" % int(round((VEST_RATE - 1.0) * 100.0))}
 		"helmet":  return {"name": "Energy Helmet",    "gear": "helmet", "cost": ENERGY_HELMET_COST, "note": "drinks pour themselves as you run dry"}
 		"glow":    return {"name": "Glow Suit",        "gear": "glow_suit", "cost": GLOW_SUIT_COST,     "note": "you glow on a dark stage instead of vanishing into it"}
 	return {"name": piece, "cost": 0, "note": ""}
@@ -16196,7 +16196,7 @@ func tailor_buy(piece: String, stage: int) -> void:
 	var cost := wear_cost(piece, stage)
 	if owns_wear(piece, stage) or money < cost:
 		if money < cost:
-			set_day_msg("not enough %s  -  %s asks %s" % [coin_word(), String(d["name"]), commafy(cost)])
+			set_day_msg("not enough in your purse  -  %s asks %s" % [String(d["name"]), commafy(cost)])
 			play_sfx("whiff", -10.0)
 		return
 	if not confirm_spend("wear_%s_%d" % [piece, stage], cost, false):
@@ -16294,8 +16294,8 @@ func try_outfit_tonight() -> void:
 		set_day_msg("the rest of tonight's set is on")
 		play_sfx("ui2", -13.0)
 	else:
-		set_day_msg("%d piece%s for %s  -  %s %s" % [to_buy.size(), "" if to_buy.size() == 1 else "s",
-			suit_name(st), commafy(spent), coin_word()])
+		set_day_msg("%d piece%s for %s  -  %s paid" % [to_buy.size(), "" if to_buy.size() == 1 else "s",
+			suit_name(st), commafy(spent)])
 		play_sfx("money", -6.0)
 
 
@@ -18843,12 +18843,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 #endregion
 
 #region RESULTS CARD, PAUSE MENU, TRICK/ROUTINE HUD
-func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0) -> void:
+func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0,
+		currency: bool = false) -> void:
 	if a <= 0.0:
 		return
 	var slide := (1.0 - a) * 10.0
 	draw_string(font, Vector2(lx + slide, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(18), Color(0.78, 0.72, 0.66, a))
-	draw_string(font, Vector2(rx - 300.0 + slide, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, ps(18), Color(vc.r, vc.g, vc.b, a))
+	var value_right := rx + slide
+	if currency:
+		draw_coin_mark(Vector2(value_right - 8.0, y - 6.0), 7.0, Color(vc.r, vc.g, vc.b, a), true)
+		value_right -= 20.0
+	draw_string(font, Vector2(value_right - 300.0, y), value, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, ps(18), Color(vc.r, vc.g, vc.b, a))
 
 
 func results_age() -> int:
@@ -18966,7 +18971,7 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var tval := "%d   (+%s)" % [tricks_landed, commafy(trick_score)] if trick_score > 0 else str(tricks_landed)
 	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99), ra.call(3)); y += rowh
 	draw_line(Vector2(lx, y - 6.0), Vector2(rx, y - 6.0), Color(0.9, 0.6, 0.35, 0.2), 1.0)
-	_result_row(font, lx, rx, y + 20.0, "Pay", "+%s %s" % [commafy(last_pay), coin_word()], Color(1.0, 0.86, 0.45), ra.call(4)); y += rowh
+	_result_row(font, lx, rx, y + 20.0, "Pay", "+%s" % commafy(last_pay), Color(1.0, 0.86, 0.45), ra.call(4), true); y += rowh
 	var rsign := "+" if last_rep_delta >= 0 else ""
 	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
 	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
@@ -20647,10 +20652,10 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	# hand leaves them banked until the next level-up converts the lot. Asking that
 	# player to "press a column's number" is an instruction that does nothing.
 	if all_stats_capped():
-		var mt := "MASTERY  -  every stat at its ceiling. New levels now pay %s." % coin_word()
+		var mt := "MASTERY  -  every stat at its ceiling. New levels now add to your purse."
 		if points > 0:
-			mt = "MASTERY  -  every stat at its ceiling. Your %d point%s turn%s to %s at the next level." % [
-				points, "" if points == 1 else "s", "s" if points == 1 else "", coin_word()]
+			mt = "MASTERY  -  every stat at its ceiling. Your %d point%s turn%s into pay at the next level." % [
+				points, "" if points == 1 else "s", "s" if points == 1 else ""]
 		draw_fit_string(font, Vector2(tx, by0 + 22.0), mt, HORIZONTAL_ALIGNMENT_CENTER, innerw, 13, Color(1.0, 0.88, 0.55))
 	elif points > 0:
 		var pa := 0.72 + 0.28 * sin(float(Time.get_ticks_msec()) * 0.006)
@@ -20800,12 +20805,11 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(tx, dy), eff, HORIZONTAL_ALIGNMENT_CENTER, innerw, ps(12), Color(0.82, 0.79, 0.72))
 	if debug_mode:
 		# the legend has to NAME the hold, or the fast path is a secret. And it says
-		# coin_word(), never a literal "gold": the purse beside it reads "flowers", and
-		# this file's own rule is that a typed currency name is a bug waiting for the
-		# switch to be flipped. Through draw_fit_string because it is now long enough to
+		# The debug legend calls this the purse too; the flower mark is the only currency
+		# label anywhere player-facing. Through draw_fit_string because it is long enough to
 		# reach the panel edge, and draw_string CLIPS rather than shortens.
 		draw_fit_string(font, Vector2(tx, dy + 16.0),
-			"DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N %s (hold: x%s)  ,/. rep" % [coin_word(), commafy(MONEY_HOLD_STEP)],
+			"DEBUG  1/2/3/4 up  Q/W/E/R dn  M/N purse (hold: x%s)  ,/. rep" % commafy(MONEY_HOLD_STEP),
 			HORIZONTAL_ALIGNMENT_CENTER, innerw, 12, Color(0.6, 0.9, 1.0))
 	var th_items: Array = [[["Stick"] if pad_active() else ["Left", "Right"], "branch"]]
 	if points > 0:
@@ -22681,8 +22685,8 @@ func draw_day(font: Font, s: Vector2) -> void:
 		scol = scol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 	var to_str := MEALS_PER_STR - (meals % MEALS_PER_STR)
 	var ledger := [
-		{"icon": "coin", "col": Color(0.98, 0.60, 0.72), "label": "PURSE",
-		 "big": "%s %s" % [commafy(money), coin_word()], "note": "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"]},
+		 {"icon": "coin", "col": Color(0.98, 0.60, 0.72), "label": "PURSE",
+		 "big": commafy(money), "note": "%d meal%s to the next point of Strength" % [to_str, "" if to_str == 1 else "s"]},
 		{"icon": "star", "col": Color(0.84, 0.72, 0.92), "label": "REPUTATION",
 		 "big": commafy(reputation), "note": rep_tier()},
 	]
@@ -22840,9 +22844,15 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 	var cost := String(r["cost"])
 	var cost_w := 0.0
 	if cost != "":
-		cost_w = minf(120.0, font.get_string_size(cost, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 8.0)
-		draw_string(font, Vector2(right - cost_w, box.position.y + 28.0), cost,
-			HORIZONTAL_ALIGNMENT_RIGHT, cost_w, ps(12), Color(0.88, 0.80, 0.64, 0.9) if ok else Color(0.58, 0.54, 0.5))
+		var cost_col := Color(0.88, 0.80, 0.64, 0.9) if ok else Color(0.58, 0.54, 0.5)
+		var mark_w := 20.0 if bool(r.get("currency", false)) else 0.0
+		cost_w = minf(120.0, font.get_string_size(cost, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 8.0 + mark_w)
+		var cost_right := right
+		if bool(r.get("currency", false)):
+			draw_coin_mark(Vector2(right - 7.0, box.position.y + 22.0), 6.5, cost_col, true)
+			cost_right -= mark_w
+		draw_string(font, Vector2(cost_right - cost_w + mark_w, box.position.y + 28.0), cost,
+			HORIZONTAL_ALIGNMENT_RIGHT, cost_w - mark_w, ps(12), cost_col)
 	draw_fit_string(font, Vector2(tx, box.position.y + 29.0), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT,
 		right - cost_w - tx - 8.0, 17, title_c)
 	if not sel:
@@ -25267,7 +25277,11 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 		if exists:
 			draw_string(title_font(), Vector2(cx, cy + 186.0), "Lv %d" % int(info["level"]), HORIZONTAL_ALIGNMENT_CENTER, cw, ps(34), Color(1.0, 0.95, 0.82))
 			draw_fit_string(font, Vector2(cx, cy + 214.0), String(info["venue"]), HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(0.84, 0.78, 0.68))
-			draw_fit_string(font, Vector2(cx, cy + 238.0), "%s %s" % [commafy(int(info["gold"])), coin_word()], HORIZONTAL_ALIGNMENT_CENTER, cw, 14, Color(1.0, 0.86, 0.45))
+			var purse_txt := commafy(int(info["gold"]))
+			var purse_w := font.get_string_size(purse_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14)).x
+			var purse_left := cx + cw * 0.5 - (purse_w + 22.0) * 0.5
+			draw_string(font, Vector2(purse_left, cy + 238.0), purse_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(1.0, 0.86, 0.45))
+			draw_coin_mark(Vector2(purse_left + purse_w + 12.0, cy + 232.0), 7.0, Color(1.0, 0.86, 0.45), true)
 			if crowned:
 				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(1.0, 0.82, 0.4))
 			draw_string(font, Vector2(cx, cy + ch - 18.0), "[X] delete", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(0.88, 0.55, 0.5) if sel else Color(0.7, 0.5, 0.47, 0.7))
@@ -25436,7 +25450,7 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 		"%d day%s on the road" % [int(career["days"]), "" if int(career["days"]) == 1 else "s"],
 		"%s performances,  %s catches" % [commafy(int(career["perfs"])), commafy(int(career["catches"]))],
 		"best streak %s,  highest score %s" % [commafy(int(career["best_streak"])), score_text(float(career["best_score"]))],
-		"%s %s earned, and all of it spent" % [commafy(int(career["gold_earned"])), coin_word()],
+		"%s earned on stage, and all of it spent" % commafy(int(career["gold_earned"])),
 	]
 	for i in lines.size():
 		var la := clampf(float(cine_tick - 80 - i * 30) / 40.0, 0.0, 1.0)
@@ -25604,7 +25618,7 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		# purse the player is handed in the last beat of the tutorial was drawn in the currency
 		# art of two economies ago, while the hub they walk into next draws flowers.
 		draw_coin_mark(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 1.0, 1.0, ka))
-		draw_string(font, Vector2(kx + 140.0, ky + 72.0), "%s %s" % [commafy(money), coin_word()], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.86, 0.45, ka))
+		draw_string(font, Vector2(kx + 140.0, ky + 72.0), commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.86, 0.45, ka))
 		for i in 3:
 			var bc := ball_color(i)
 			bc.a = ka
@@ -25634,7 +25648,7 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 	var fin := clampf(float(cine_tick) / 50.0, 0.0, 1.0)
 	var pages := [
 		{"title": "YOUR DAY", "head": "THREE CHOICES, THEN NIGHT FALLS", "rows": [
-			["star", "TONIGHT", "perform for flowers and reputation, practise safely, or play the daily"],
+			["star", "TONIGHT", "perform for pay and reputation, practise safely, or play the daily"],
 			["moon", "REST", "food restores stamina; the inn ends the day and fully restores it"],
 			["bag", "PREPARE", "buy equipment, choose skills and patterns, tailor an outfit, spend points"],
 		], "foot": "Actions show their cost before you commit. Drawers are free to open and inspect."},
@@ -25859,10 +25873,10 @@ func draw_stats(font: Font, s: Vector2) -> void:
 		["longest streak ever", commafy(int(career["best_streak"]))],
 		["highest score anywhere", score_text(float(career["best_score"]))],
 		["tricks landed", commafy(int(career["tricks"]))],
-		["%s earned on stage" % coin_word(), commafy(int(career["gold_earned"]))],
+		["pay earned on stage", commafy(int(career["gold_earned"]))],
 	]
 	if int(career.get("mastery", 0)) > 0:
-		lines.append(["mastery points turned to %s" % coin_word(), commafy(int(career["mastery"]))])
+		lines.append(["mastery points converted", commafy(int(career["mastery"]))])
 	for i in lines.size():
 		var ry := ly + 34.0 + float(i) * 30.0
 		draw_string(font, Vector2(rx, ry), String(lines[i][0]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), Color(0.85, 0.78, 0.66))
@@ -26914,15 +26928,6 @@ func step_effects() -> void:
 
 
 #region WHAT THE ROOM THROWS (flowers and tomatoes)
-func coin_word() -> String:
-	# WHAT THE CURRENCY IS CALLED, everywhere it is written. It is one function and not
-	# a literal because the name has changed once already (it was "gold" until the crowd
-	# started paying in flowers) and six player-facing strings were found still saying
-	# the old word next to a purse reading the new one. `money` is one variable; only
-	# its name is content. Never type the word - ask here.
-	return "flowers"
-
-
 func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> void:
 	# the currency's own MARK, used by the purse readouts and the hub's ledger card:
 	# a coin in the gold economy, a flower in the flower one, so the two never disagree

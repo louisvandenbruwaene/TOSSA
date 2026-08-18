@@ -758,7 +758,8 @@ review" for the accept/reject examples and why.
   challenge may color the act (never at the Backyard).
 - **Skills are a face-down deck**, dealt (not auto-unlocked) at the same pacing walls as before;
   `owned_skills`/`gifted` is what you own, `skill_gate_cleared` is what you've earned a card for.
-- **Economy:** FLOWERS are the currency (visual + word, no "gold"/"f" anywhere). The crowd throws
+- **Economy:** The flower mark is the currency unit in player-facing UI; never spell out a currency
+  name or abbreviate it. The crowd throws
   them live during a good run; tomatoes are the failure-currency (stamina only, capped kept).
 - **Day loop:** TONIGHT (perform/practice/daily) / REST (meal/inn/pie/energy drinks) / PREPARE
   (shop/tailor/skills) drawers. Tailor is a real loadout - wearing gates a per-house bonus,
