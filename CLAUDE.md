@@ -762,8 +762,8 @@ review" for the accept/reject examples and why.
 - **Economy:** The flower mark is the currency unit in player-facing UI; never spell out a currency
   name or abbreviate it. The crowd throws
   them live during a good run; tomatoes are the failure-currency (stamina only, capped kept).
-- **Glow props are blue material, not lamps:** charged objects use a clean electric-blue portrait or
-  silhouette with no surrounding aura. A charged torch keeps an animated blue flame.
+- **Glow props are green material, not lamps:** charged objects use a clean phosphor-green portrait or
+  silhouette with no surrounding aura. Only a charged torch's animated flame turns electric blue.
 - **Day loop:** TONIGHT (perform/practice/daily) / REST (meal/inn/pie) / PREPARE
   (shop/skills/stats) drawers. Tailor, its wardrobe art/data, and energy-drink save data remain
   dormant for a later redesign; hats, glasses, and the Energy Helmet must not draw or grant buffs.
