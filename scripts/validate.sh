@@ -52,17 +52,20 @@ else
   fail "Parse check failed."
 fi
 
-# --- 1b. Pure formatting contract -------------------------------------------
-# This protects the small extracted seam which formats every score, record, and
-# cash amount. A power-of-ten regression is easy to miss in a screenshot and too
-# important to leave to visual review alone.
-log_head "1b. Pure formatting contract"
-if "$GODOT_BIN" --headless --path "$PIXELTOSSA_ROOT" --script tests/test_format.gd >"$WORK/format.log" 2>&1; then
-  log_ok "$(grep 'TossaFormat:' "$WORK/format.log" | tail -1)"
-else
-  cat "$WORK/format.log" | sed 's/^/    /'
-  fail "Pure formatting contract failed."
-fi
+# --- 1b. Extracted pure contracts -------------------------------------------
+# These protect the seams intentionally moved out of Game.gd. A power-of-ten score
+# regression or a reordered persisted pattern is easy to miss in a screenshot and
+# too important to leave to visual review alone.
+log_head "1b. Extracted pure contracts"
+for test_script in tests/test_format.gd tests/test_catalog.gd; do
+  log="$WORK/$(basename "$test_script" .gd).log"
+  if "$GODOT_BIN" --headless --path "$PIXELTOSSA_ROOT" --script "$test_script" >"$log" 2>&1; then
+    grep -E 'TossaFormat:|TossaCatalog:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
+  else
+    cat "$log" | sed 's/^/    /'
+    fail "Pure contract failed: $test_script"
+  fi
+done
 
 # --- 2. A real booked act ---------------------------------------------------
 # Venue 0 (Backyard) on purpose: this is a fast correctness smoke test, not a
