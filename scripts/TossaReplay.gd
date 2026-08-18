@@ -9,6 +9,7 @@ extends RefCounted
 
 
 const VERSION := 1
+const ROUTE_VERSION := 1
 
 
 static func new_record(seed: int, venue: int, prop: int, pattern: int, ball_count: int) -> Dictionary:
@@ -53,3 +54,62 @@ static func is_valid(record: Dictionary) -> bool:
 			return false
 		last_tick = event_tick
 	return true
+
+
+static func new_route(seed: int) -> Dictionary:
+	return {"version": ROUTE_VERSION, "seed": seed, "total_ms": -1, "stages": []}
+
+
+static func append_stage(route: Dictionary, record: Dictionary) -> bool:
+	if not route.has("stages") or not route["stages"] is Array or not is_valid(record):
+		return false
+	var stages: Array = route["stages"]
+	if not stages.is_empty() and int(record["venue"]) <= int(stages.back().get("venue", -1)):
+		return false
+	stages.append(record.duplicate(true))
+	return true
+
+
+static func finish_route(route: Dictionary, total_ms: int) -> bool:
+	if total_ms < 0 or not route.has("stages") or (route["stages"] as Array).is_empty():
+		return false
+	route["total_ms"] = total_ms
+	return true
+
+
+static func is_valid_route(route: Dictionary) -> bool:
+	if int(route.get("version", -1)) != ROUTE_VERSION or int(route.get("seed", -1)) < 0:
+		return false
+	if int(route.get("total_ms", -1)) < 0 or not route.get("stages", null) is Array:
+		return false
+	var last_venue := -1
+	for stage in route["stages"]:
+		if not stage is Dictionary or not is_valid(stage) or int(stage["venue"]) <= last_venue:
+			return false
+		last_venue = int(stage["venue"])
+	return last_venue >= 0
+
+
+static func stage_for_venue(route: Dictionary, venue: int) -> Dictionary:
+	if not is_valid_route(route):
+		return {}
+	for stage in route["stages"]:
+		if int(stage["venue"]) == venue:
+			return (stage as Dictionary).duplicate(true)
+	return {}
+
+
+static func actions_at_tick(record: Dictionary, tick: int, cursor: int) -> Dictionary:
+	# A monotonic cursor makes live playback O(events), while returning it keeps this
+	# helper pure and leaves ownership of playback state with the caller.
+	var actions: Array[String] = []
+	var next := maxi(0, cursor)
+	if not is_valid(record):
+		return {"actions": actions, "cursor": next}
+	var events: Array = record["events"]
+	while next < events.size() and int(events[next]["tick"]) < tick:
+		next += 1
+	while next < events.size() and int(events[next]["tick"]) == tick:
+		actions.append(String(events[next]["action"]))
+		next += 1
+	return {"actions": actions, "cursor": next}

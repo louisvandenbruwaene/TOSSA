@@ -243,6 +243,7 @@ const NUM_SLOTS := 3
 const SAVE_PATH_DEBUG := "user://pixeltossa_debug.cfg"  # debug build: separate progress
 const SAVE_PATH_DEMO := "user://pixeltossa_demo.cfg"     # --demo/--shot autoplay: never a real career save
 const SETTINGS_PATH := "user://pixeltossa_settings.cfg" # global options, shared by slots
+const SPRINT_GHOST_PATH := "user://tossa_sprint_best.json"
 const POINTS_PER_LEVEL := 2   # base stat points per level-up; add_xp adds +level/50 on top.
 							  # HALVED WITH THE XP CURVE (2026-07-29): levels come twice as
 							  # fast now, so a level has to be worth about half as much or the
@@ -1392,6 +1393,11 @@ var sprint_finished_ms := -1
 var sprint_seed := 0
 var sprint_replay: Dictionary = {}
 var sprint_replays: Array[Dictionary] = []
+var sprint_ghost_route: Dictionary = {}
+var sprint_ghost_replay: Dictionary = {}
+var sprint_ghost_cursor := 0
+var sprint_ghost_flash: Array[int] = [-999, -999]
+var sprint_ghost_kind: Array[String] = ["", ""]
 var prop_type := PROP_BALLS  # the object being juggled this run
 # how many of each prop you own (balls are free and unlimited, see have()). You buy
 # props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
@@ -2826,6 +2832,7 @@ func _physics_process(delta: float) -> void:
 	# the rate floors at 0.12: near-frozen, never stopped.
 	var _phys_t0 := Time.get_ticks_usec() if _fps else 0
 	_frames += 1
+	sprint_ghost_step()
 	if not _demo:
 		_read_inputs()
 	_slow_cur = move_toward(_slow_cur, slow_target(), SLOW_RAMP)
@@ -7428,6 +7435,7 @@ func begin_sprint() -> void:
 	# build sees the same simulation rolls, and each stage derives its own stream below.
 	sprint_seed = 20260818
 	sprint_replays.clear()
+	sprint_ghost_route = load_sprint_ghost()
 	reset_new_game()
 	seen_tuts = ["balls"]
 	pending_tuts.clear()
@@ -7443,6 +7451,47 @@ func sprint_clock_text() -> String:
 func sprint_record(action: String) -> void:
 	if sprint_active and not sprint_replay.is_empty():
 		TOSSA_REPLAY.append_event(sprint_replay, tick, action)
+
+
+func load_sprint_ghost() -> Dictionary:
+	if not FileAccess.file_exists(SPRINT_GHOST_PATH):
+		return {}
+	var file := FileAccess.open(SPRINT_GHOST_PATH, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	return parsed if parsed is Dictionary and TOSSA_REPLAY.is_valid_route(parsed) else {}
+
+
+func save_sprint_ghost() -> void:
+	if sprint_finished_ms < 0 or sprint_failed or sprint_replays.is_empty():
+		return
+	var route := TOSSA_REPLAY.new_route(sprint_seed)
+	for replay in sprint_replays:
+		if not TOSSA_REPLAY.append_stage(route, replay):
+			return
+	var elapsed := sprint_finished_ms - sprint_started_ms
+	if not TOSSA_REPLAY.finish_route(route, elapsed):
+		return
+	var old := load_sprint_ghost()
+	if not old.is_empty() and int(old["total_ms"]) <= elapsed:
+		return
+	var file := FileAccess.open(SPRINT_GHOST_PATH, FileAccess.WRITE)
+	if file != null:
+		file.store_string(JSON.stringify(route))
+		sprint_ghost_route = route
+
+
+func sprint_ghost_step() -> void:
+	if not sprint_active or sprint_ghost_replay.is_empty() or results_open:
+		return
+	var frame := TOSSA_REPLAY.actions_at_tick(sprint_ghost_replay, tick, sprint_ghost_cursor)
+	sprint_ghost_cursor = int(frame["cursor"])
+	for action in frame["actions"]:
+		var a := String(action)
+		var hand := LEFT if "_l" in a else RIGHT
+		sprint_ghost_flash[hand] = tick
+		sprint_ghost_kind[hand] = "CATCH" if a.begins_with("catch") else "THROW"
 
 
 const OLD_NAMES: Array[String] = ["PIXELTOSSA"]   # every name this game has shipped under,
@@ -8987,8 +9036,13 @@ func start_run(n: int) -> void:
 	run_venue = play_venue()   # records and the results card key off where you performed
 	if sprint_active and mode == MODE_PERFORM and booking_active:
 		sprint_replay = TOSSA_REPLAY.new_record(sprint_seed + run_venue, run_venue, prop_type, pattern, num_balls)
+		sprint_ghost_replay = TOSSA_REPLAY.stage_for_venue(sprint_ghost_route, run_venue)
+		sprint_ghost_cursor = 0
+		sprint_ghost_flash = [-999, -999]
+		sprint_ghost_kind = ["", ""]
 	else:
 		sprint_replay = {}
+		sprint_ghost_replay = {}
 	results_open = false
 	results_record = false
 	first_show_reaction = ""   # never carries a stale line into an unrelated act's card
@@ -10888,6 +10942,8 @@ func resolve_act() -> void:
 		# Freeze the clock at the failed act or final accepted outcome. Results animation,
 		# reading the receipt, and the victory roll are outside the timed attempt.
 		sprint_finished_ms = Time.get_ticks_msec()
+		if complete:
+			save_sprint_ghost()
 	# the push-your-luck settles here: a COLLAPSE strips the score back to the last
 	# goal actually reached (goals already reached are safe, everything past them is
 	# what you gambled), and a collapse before the first goal banks nothing at all.
@@ -18310,6 +18366,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if _frames < chain_until:
 			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
 		draw_text_shout(font, Vector2(0, s.y - 96.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
+	if sprint_active and not sprint_ghost_replay.is_empty() and not results_open:
+		# The ghost is playback, never input: cyan rings repeat the best route's accepted
+		# actions at their recorded simulation ticks while the player's hands remain sovereign.
+		for gh: int in [LEFT, RIGHT]:
+			var age := tick - sprint_ghost_flash[gh]
+			if age >= 0 and age < 18:
+				var ga := 1.0 - float(age) / 18.0
+				var gp: Vector2 = hpos[gh] + Vector2(-30.0 if gh == LEFT else 30.0, -18.0)
+				draw_arc(gp, 13.0 + float(age) * 0.7, 0.0, TAU, 24, Color(0.45, 0.95, 1.0, ga), 2.0)
+				draw_string(font, Vector2(gp.x - 44.0, gp.y - 20.0), sprint_ghost_kind[gh],
+					HORIZONTAL_ALIGNMENT_CENTER, 88.0, ps(11), Color(0.55, 0.96, 1.0, ga))
 
 	# THE COLLAPSE, as it happens: the act is coming down and the player is told the one
 	# reason WHY while the props are still in the air, which is the moment it lands
