@@ -7,6 +7,7 @@ const TOSSA_FORMAT = preload("res://scripts/TossaFormat.gd")
 const TOSSA_CATALOG = preload("res://scripts/TossaCatalog.gd")
 const TOSSA_REPLAY = preload("res://scripts/TossaReplay.gd")
 const TOSSA_SAVE_SCHEMA = preload("res://scripts/TossaSaveSchema.gd")
+const TOSSA_GEOMETRY = preload("res://scripts/TossaGeometry.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -12441,17 +12442,20 @@ func update_sim() -> void:
 				fpos.append(flight_pos(b))
 		for i in fly.size():
 			for j in range(i + 1, fly.size()):
-				var d := fpos[i].distance_to(fpos[j])
-				var rr := BALL_RADIUS_PX * (prop_hit_scale(fly[i].kind) + prop_hit_scale(fly[j].kind))
-				if _collcheck and d - rr < _coll_min:
-					_coll_min = d - rr
+				var hit_i := BALL_RADIUS_PX * prop_hit_scale(fly[i].kind)
+				var hit_j := BALL_RADIUS_PX * prop_hit_scale(fly[j].kind)
+				var clearance := TOSSA_GEOMETRY.edge_clearance(fpos[i], fpos[j], hit_i, hit_j)
+				if _collcheck and clearance < _coll_min:
+					_coll_min = clearance
 					_coll_at = _coll_pair(fpos[i], fpos[j], fly[i], fly[j])
 				if _collcheck:
 					# the same pair judged at DRAWN size - what the player actually sees
 					# passing through what (see _coll_min_drawn)
-					var dr := BALL_RADIUS_PX * (prop_scale(fly[i].kind) + prop_scale(fly[j].kind))
-					if d - dr < _coll_min_drawn:
-						_coll_min_drawn = d - dr
+					var draw_i := BALL_RADIUS_PX * prop_scale(fly[i].kind)
+					var draw_j := BALL_RADIUS_PX * prop_scale(fly[j].kind)
+					var drawn_clearance := TOSSA_GEOMETRY.edge_clearance(fpos[i], fpos[j], draw_i, draw_j)
+					if drawn_clearance < _coll_min_drawn:
+						_coll_min_drawn = drawn_clearance
 						_coll_at_drawn = _coll_pair(fpos[i], fpos[j], fly[i], fly[j])
 	for b in lost:
 		drop_ball(b, "DROP")
@@ -12587,11 +12591,7 @@ func flight_pos(b: Ball) -> Vector2:
 	# straight up and down on the very same curve. Flight time is set by the
 	# throw's height alone (b.land_tick, from the hold), never by how wide it is,
 	# so a wide throw of the same height just travels faster across.
-	var span := maxi(1, b.land_tick - b.launch_tick)
-	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
-	var pos := b.from_pos.lerp(b.to_pos, p)
-	pos.y -= 4.0 * b.arc * p * (1.0 - p)   # the parabola: peak height = b.arc at mid-flight
-	return pos
+	return TOSSA_GEOMETRY.flight_position(b.from_pos, b.to_pos, b.arc, b.launch_tick, b.land_tick, tick)
 
 
 func flight_vel(b: Ball) -> Vector2:
@@ -12611,9 +12611,7 @@ func flight_vel(b: Ball) -> Vector2:
 	#   pos = from + (to - from) * p,  pos.y -= 4 * arc * p * (1 - p),  p = (tick - t0)/span
 	# the derivative is (to - from) - (0, 4 * arc * (1 - 2p)), all over span. Smooth
 	# everywhere, exactly zero vertical speed at the apex, and no sampling artifact.
-	var span := maxi(1, b.land_tick - b.launch_tick)
-	var p := clampf(float(tick - b.launch_tick) / float(span), 0.0, 1.0)
-	return (b.to_pos - b.from_pos - Vector2(0.0, 4.0 * b.arc * (1.0 - 2.0 * p))) / float(span)
+	return TOSSA_GEOMETRY.flight_velocity(b.from_pos, b.to_pos, b.arc, b.launch_tick, b.land_tick, tick)
 
 
 # -----------------------------------------------------------------------------

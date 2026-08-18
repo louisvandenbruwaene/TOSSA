@@ -72,6 +72,9 @@ Codex improvements:
   Flowers are not also confiscated; one consequence is enough.
 - **Save migrations have fixture-backed pure helpers:** migration logic belongs in
   `scripts/TossaSaveSchema.gd`; `Game.gd` owns file IO and applies the translated values.
+- **Flight and collision audits share pure geometry:** parabolic position/velocity and edge
+  clearance live in `scripts/TossaGeometry.gd`, with contract tests. The live wrappers retain
+  domain names; the audit must not grow a second copy of the clearance formula.
 
 ## PIXEL ART (read this before touching anything visual)
 

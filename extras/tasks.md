@@ -11,11 +11,12 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ## Current improvement roadmap (2026-08-18)
 
-- [~] **Make `Game.gd` safer for future AI-assisted edits without changing play.** Keep it as
+- [x] **Make `Game.gd` safer for future AI-assisted edits without changing play.** Keep it as
   the orchestrator and extract only independently testable pure seams. The formatting and
   persisted catalogs, replay format, and pattern save migrations now have contract tests
   (`scripts/TossaFormat.gd`, `scripts/TossaCatalog.gd`, `scripts/TossaReplay.gd`,
-  `scripts/TossaSaveSchema.gd`, `tests/`). Next candidate: collision-covered geometry.
+  `scripts/TossaSaveSchema.gd`, `scripts/TossaGeometry.gd`, `tests/`). Flight and clearance
+  geometry now share the same tested functions used by the live simulation and collision sweep.
   Do not split live juggling or rendering merely to reduce line count.
 - [x] **Make the stage legible at native 1280×720.** The HUD pass enlarged task-critical
   secondary text and controls, plated timing grades and the slow-motion indicator, and kept
