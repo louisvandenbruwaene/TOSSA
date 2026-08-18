@@ -35,6 +35,11 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   unsaved Sprint: no Practice, one drop ends the attempt, and each three-goal stage clear
   advances the venue and awards its next-stage flower grant. Next: add a visible timer and
   deterministic seed/ghost playback for competitive records.
+- [ ] **Make dangerous-prop drops carry distinct theatrical consequences.** A dropped knife,
+  torch, or chainsaw should immediately end the run and apply a meaningful recovery cost;
+  stage a short, readable injury beat (cut hand / arm injury / face burn) that respects
+  reduced-motion and offers a non-graphic presentation. Specify whether recovery is flowers,
+  lost stamina, or both before wiring it into the economy.
 - [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
   behavior, documented collision combinations, save migrations, and focused screenshots.
 
