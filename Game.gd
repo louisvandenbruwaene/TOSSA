@@ -6,6 +6,7 @@ extends Node2D
 const TOSSA_FORMAT = preload("res://scripts/TossaFormat.gd")
 const TOSSA_CATALOG = preload("res://scripts/TossaCatalog.gd")
 const TOSSA_REPLAY = preload("res://scripts/TossaReplay.gd")
+const TOSSA_SAVE_SCHEMA = preload("res://scripts/TossaSaveSchema.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -11971,26 +11972,9 @@ func load_progress() -> void:
 				best_scores_purist[i] = float((bp as Array)[i])
 		pattern_ver = int(cf.get_value("prog", "pattern_ver", 0))
 		var raw_pattern_sel := int(cf.get_value("prog", "pattern_sel", CASCADE))
-		if pattern_ver < 2:
-			# migrate a pre-2026-07-19 save straight from PATTERNS' ORIGINAL 8-entry
-			# layout (Cascade0 Fountain1 Columns2 HalfShower3 Shower4 RCasc5
-			# Waterfall6 Tennis7) to the current one in a single jump - no real save
-			# was ever written in the brief intermediate 7-entry (Waterfall-removed-
-			# only) shape, so there is nothing between "pre-migration" and "current"
-			# worth stepping through. Fountain and Waterfall both fold into their
-			# closest surviving relative rather than silently becoming whatever now
-			# sits at their old index once (each shifted by their own amount).
-			match raw_pattern_sel:
-				0, 1: raw_pattern_sel = CASCADE       # Cascade itself, or Fountain folded in
-				2: raw_pattern_sel = COLUMNS
-				3: raw_pattern_sel = HALFSHOWER
-				4: raw_pattern_sel = SHOWER
-				5: raw_pattern_sel = RCASC
-				6: raw_pattern_sel = HALFSHOWER       # Waterfall folded into Half Shower
-				7: raw_pattern_sel = TENNIS
-				_: raw_pattern_sel = CASCADE          # anything unrecognised: the safe default
-			pattern_ver = 2
-		pattern_sel = clampi(raw_pattern_sel, 0, PATTERNS.size() - 1)
+		var pattern_migration := TOSSA_SAVE_SCHEMA.migrate_pattern(raw_pattern_sel, pattern_ver)
+		pattern_sel = int(pattern_migration["index"])
+		pattern_ver = int(pattern_migration["version"])
 		var cr: Variant = cf.get_value("prog", "career", {})
 		if cr is Dictionary:
 			for k in career:
