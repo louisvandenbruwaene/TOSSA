@@ -22863,9 +22863,10 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
 			chase = "record to beat   %s" % score_text(rec_table()[vi])
 		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.96, 0.83, 0.52, 0.92))
+		y += 20.0
 		var nxt := next_venue_rep()
 		if nxt > 0:
-			draw_string(font, Vector2(tx, y + 32.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
+			draw_string(font, Vector2(tx, y + 14.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
 				HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.84, 0.74, 0.90, 0.92))
 			y += 18.0
 		draw_multiline_string(font, Vector2(tx, y + 14.0), next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1,
