@@ -30,7 +30,7 @@ func _init() -> void:
 		if i >= TOSSA_CATALOG.TRICKS.size() or TOSSA_CATALOG.TRICKS[i]["id"] != expected_tricks[i]:
 			push_error("Trick index %d must remain %s." % [i, expected_tricks[i]])
 			failed += 1
-	var expected_encores := ["hecklers", "fright", "gale", "blackout", "cold", "long", "understudy", "fire", "scared", "fancy", "study", "critic", "critic_hard", "purist_acc", "purist_str", "purist_end", "purist_spd"]
+	var expected_encores := ["hecklers", "fright", "gale", "blackout", "cold", "long", "understudy", "fire", "scared", "fancy", "study", "lines", "overhand", "critic", "critic_hard", "purist_acc", "purist_str", "purist_end", "purist_spd"]
 	for i in expected_encores.size():
 		if i >= TOSSA_CATALOG.ENCORES.size() or TOSSA_CATALOG.ENCORES[i]["id"] != expected_encores[i]:
 			push_error("Encore %d must remain %s." % [i, expected_encores[i]])
@@ -38,6 +38,13 @@ func _init() -> void:
 	if TOSSA_CATALOG.PURIST_IDS != ["purist_acc", "purist_str", "purist_end", "purist_spd"]:
 		push_error("Purist Encore IDs changed.")
 		failed += 1
+	if TOSSA_CATALOG.VENUE_FLAVOUR.size() != 7:
+		push_error("Every venue must keep one named rival and deterministic taste.")
+		failed += 1
+	for venue in TOSSA_CATALOG.VENUE_FLAVOUR:
+		if String(venue.get("rival", "")).is_empty() or String(venue.get("trigger", "")).is_empty():
+			push_error("Venue flavour entries require a rival and trigger.")
+			failed += 1
 	if failed == 0:
 		print("TossaCatalog: patterns, props, tricks, and encores verified")
 	quit(failed)

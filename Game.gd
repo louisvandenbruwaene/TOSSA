@@ -1337,6 +1337,7 @@ var streak := 0
 var best_streak := 0
 var dropped := 0
 var caught := 0
+var venue_taste_seen := false
 var running := false      # true once the player makes the first throw
 var started := false
 var popups: Array[Dictionary] = []
@@ -3943,6 +3944,13 @@ func encore_pool(venue: int) -> Array[int]:
 			continue
 		if id == "study" and venue < 2:
 			continue   # a first-stage pattern brief should arrive after the player has met P
+		if id == "lines" and (venue < 2 or not pattern_unlocked(COLUMNS)):
+			continue
+		if id == "overhand":
+			var has_overhand := pattern_unlocked(HALFSHOWER) or pattern_unlocked(SHOWER) \
+				or pattern_unlocked(RCASC) or pattern_unlocked(TENNIS)
+			if venue < 3 or not has_overhand:
+				continue
 		if id == "critic_hard" and venue < 4:
 			continue   # a Good catch ending the run is the hardest rule in the deck
 		pool.append(i)
@@ -4043,6 +4051,10 @@ func encore_scores_run() -> bool:
 	if encore_on("fancy") and prop_type == PROP_EGGS:
 		return false
 	if encore_on("study") and pattern != CASCADE:
+		return false
+	if encore_on("lines") and pattern != COLUMNS:
+		return false
+	if encore_on("overhand") and pattern not in [HALFSHOWER, SHOWER, RCASC, TENNIS]:
 		return false
 	return true
 
@@ -9013,6 +9025,7 @@ func start_run(n: int) -> void:
 	best_streak = 0
 	dropped = 0
 	caught = 0
+	venue_taste_seen = false
 	# per-ACT state re-arms every run (the challenge roll is owned by
 	# begin_performance, so practice and a dev autoplay never carry one)
 	goals_hit = 0
@@ -9466,6 +9479,7 @@ func on_catch(h: int) -> void:
 		if fx:
 			add_popup(hpos[h], "late", Color(0.95, 0.62, 0.4))
 		play_sfx("late", -11.0)
+	reward_venue_taste("perfect" if best_d <= wperf else "catch")
 	# the record chase: passing your own best AT this venue mid-act is a moment. The
 	# act is one continuous run now, so its live score IS the number the record
 	# board will judge.
@@ -9897,6 +9911,8 @@ func do_throw(h: int, hold: int) -> void:
 	# and a timid low weave slowly bores the room even as it stays tidy.
 	if mode == MODE_PERFORM and not tut_active:
 		warm_room(APPL_THROW_HEIGHT * clampf(frac, 0.0, 1.4))
+		if frac >= 0.75:
+			reward_venue_taste("height")
 	if mode == MODE_PERFORM and not tut_active and frac >= 1.1:
 		play_sfx("gasp", -13.0)   # the crowd inhales at a genuinely risky throw
 	play_sfx("throw", -13.0, clampf(1.2 - 0.09 * float(weight - 1) - 0.15 * frac, 0.5, 1.4))   # whup, lower for heavy/high
@@ -11425,18 +11441,7 @@ const DEMO_MAX_VENUE := 1   # a SCOPED FREE DEMO (Still open) never lets venue_i
 							 # first couple of unlocks without giving away the game - Louis's
 							 # call, change the one number to give away more or less.
 
-# Venue flavour is presentation-only for now: it makes every room’s audience legible
-# before the act without secretly altering timing or score. A later taste mechanic must
-# explicitly state its reward and have a deterministic harness before reading this data.
-const VENUE_FLAVOUR := [
-	{"rival": "Mara Bell", "taste": "clean catches and a steady first show"},
-	{"rival": "The Lark", "taste": "bold height over safe little throws"},
-	{"rival": "Viktor Vale", "taste": "a composed routine under bright lights"},
-	{"rival": "Rosa Ribbons", "taste": "showmanship and dangerous props"},
-	{"rival": "Kai Mercury", "taste": "speed, clean patterns, and nerve"},
-	{"rival": "Aurelia Voss", "taste": "a record worth travelling for"},
-	{"rival": "Nocturne", "taste": "control when the room goes dark"},
-]
+const VENUE_FLAVOUR := TOSSA_CATALOG.VENUE_FLAVOUR
 
 
 #endregion
@@ -11505,6 +11510,33 @@ func cur_venue() -> int:
 
 func venue_flavour(i: int) -> Dictionary:
 	return VENUE_FLAVOUR[clampi(i, 0, VENUE_FLAVOUR.size() - 1)]
+
+
+func venue_taste_matches(event: String) -> bool:
+	if mode != MODE_PERFORM or not booking_active or tut_active:
+		return false
+	match String(venue_flavour(run_venue)["trigger"]):
+		"perfect": return event == "perfect"
+		"height": return event == "height"
+		"cascade": return event == "catch" and pattern == CASCADE
+		"danger": return event == "catch" and dangerous_prop()
+		"pattern": return event == "catch" and pattern != CASCADE
+		"record": return event == "catch" and (num_balls >= 5 or tricks_landed > 0)
+		"dark": return event == "catch" and (encore_on("blackout") or prop_glows())
+	return false
+
+
+func reward_venue_taste(event: String) -> void:
+	if not venue_taste_matches(event):
+		return
+	# A small, repeatable patience reward: enough for the advertised taste to matter,
+	# never enough to replace accurate catching. The first match names the response.
+	warm_room(0.003)
+	if not venue_taste_seen:
+		venue_taste_seen = true
+		var rival := String(venue_flavour(run_venue)["rival"])
+		add_popup(Vector2(get_viewport_rect().size.x * 0.5, get_viewport_rect().size.y * 0.25),
+			"%s APPROVES" % rival.to_upper(), Color(0.86, 0.72, 1.0))
 
 
 const STAND_DEFAULT := 0.86   # see `stand` below, and stage_floor_y
