@@ -131,7 +131,7 @@ scan_run_log "$WORK/demowall.log" || FAIL=1
 # This is executable onboarding, not static copy: it must drive the real sim through
 # held-height input, the two-ball exchange, and ten consecutive juggling catches.
 log_head "3b. First-player tutorial (--tutorial balls)"
-run_headless 60 "$WORK/tutorial.log" --demo --tutorial balls || true
+run_headless 60 "$WORK/tutorial.log" --demo --tutcheck --tutorial balls || true
 if grep -q "TUTTRACE finished id=balls" "$WORK/tutorial.log"; then
   log_ok "Mandatory tutorial completed through the real simulation."
 else
@@ -139,8 +139,24 @@ else
 fi
 scan_run_log "$WORK/tutorial.log" || FAIL=1
 
-# --- 3c. Dangerous-prop consequence -----------------------------------------
-log_head "3c. Dangerous-prop recovery (--prop 6)"
+# --- 3c. Intermediate lesson choreography -----------------------------------
+# Count and pattern lessons share one guided grammar: every prop goes up, then each
+# arrival is caught and thrown back for two whole cycles. Exercise both the four-ball
+# milestone and a shaped pattern so neither side of that shared beat can silently stall.
+log_head "3c. Intermediate tutorials (count, pattern, toggle, live trick)"
+for lesson in count_4 pattern_columns trick_btb trick_spin; do
+  log="$WORK/tutorial_${lesson}.log"
+  run_headless 20 "$log" --demo --tutcheck --tutorial "$lesson" || true
+  if grep -q "TUTTRACE finished id=${lesson}" "$log"; then
+    log_ok "$lesson completed its two-cycle guided pattern."
+  else
+    fail "$lesson did not complete its two-cycle guided pattern."
+  fi
+  scan_run_log "$log" || FAIL=1
+done
+
+# --- 3d. Dangerous-prop consequence -----------------------------------------
+log_head "3d. Dangerous-prop recovery (--prop 6)"
 run_headless 30 "$WORK/injury.log" --demo --booking --venue 0 --prop 6 || true
 if grep -q '^ACT .*reason=chainsaw_injury' "$WORK/injury.log"; then
   log_ok "A chainsaw drop ended the act through its distinct recovery path."
