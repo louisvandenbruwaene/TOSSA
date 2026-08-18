@@ -316,8 +316,8 @@ const STR_FRAME_LAST := 5         # the last N points of Strength buy one Perfec
 const LEFT := 0
 const RIGHT := 1
 
-# --- difficulty (chosen before the first career's tutorial, changeable later in
-# Settings) - SLOTH is far more forgiving than anything a maxed-out BEAR build can
+# --- difficulty (chosen once when a save file is created) - SLOTH is far more
+# forgiving than anything a maxed-out BEAR build can
 # reach, BEAR is the game as shipped, OCTOPUS tightens timing further and drops the
 # starting purse. See difficulty_frame_delta() / difficulty_catch_bonus() for the
 # single seam each one is applied through. ------------------------------------
@@ -1393,6 +1393,7 @@ var _frames := 0          # real frames in play (the slow-mo timers run on this)
 var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
 var sprint_active := false  # transient, unsaved high-stakes route; see begin_sprint
+var slot_sprint := false    # immutable save-file type; a Sprint slot starts that route directly
 var sprint_failed := false
 var sprint_started_ms := 0
 var sprint_finished_ms := -1
@@ -7288,7 +7289,7 @@ func settings_input(kc: int) -> void:
 	# lost its other one when the Close Quarters Encore was replaced. The Ball.bumped field
 	# and the clack loop go with it - a setting nobody can reach is a mechanic nobody can
 	# meet, and leaving the machinery in place only makes the next reader believe it works.
-	var n := 11  # music, sound, shake, reduce-motion, fullscreen, dominant hand, difficulty,
+	var n := 10  # music, sound, shake, reduce-motion, fullscreen, dominant hand,
 				 # catch with a full hand, controls, records, Back. Keep this equal to the
 				 # length of `rows` in draw_settings_cards AND to what its `sections` cover -
 				 # the three have to be edited in one go, and the last time they were not,
@@ -7323,18 +7324,14 @@ func settings_input(kc: int) -> void:
 				5:
 					dominant_hand = LEFT if dominant_hand == RIGHT else RIGHT
 				6:
-					# a three-way cycle, not a toggle - Left steps back, everything else
-					# (Right, Enter, Space) steps forward, same as the pick screen's own cursor
-					difficulty = (difficulty + 2) % 3 if kc == KEY_LEFT else (difficulty + 1) % 3
-				7:
 					set_catch_full = not set_catch_full
-				8:
+				7:
 					remap_sel = 0
 					remap_wait = false
 					game_state = ST_REMAP   # the controls reference (and rebind the six actions)
-				9:
+				8:
 					game_state = ST_STATS   # the career ledger, back with Esc
-				10:
+				9:
 					menu_sel = 0
 					game_state = ST_MENU
 			play_sfx("ui2", -12.0)
@@ -7357,17 +7354,24 @@ func start_slot(i: int) -> void:
 	sprint_active = false
 	sprint_failed = false
 	save_slot = i
-	# Defer touching the selected save until AFTER difficulty and run type. Sprint owns a
-	# transient career and must never load or overwrite this slot. Debug's one stocked save
-	# is always existing; measuring a numbered path there would incorrectly reset it.
+	# Difficulty and run type are creation choices, never launch questions. An existing slot
+	# loads its immutable identity and goes directly where it belongs.
 	start_slot_fresh = false if debug_mode else not FileAccess.file_exists(slot_path(i))
+	if not start_slot_fresh:
+		load_progress()
+		if slot_sprint:
+			begin_sprint()
+		elif post_lesson_show:
+			begin_performance(num_balls)
+		else:
+			enter_day()
+		return
 	diff_pick_sel = difficulty
 	game_state = ST_DIFFICULTY
 
 
 func difficulty_input(kc: int) -> void:
-	# Difficulty is the first choice inside Play for every run. Enter commits the global
-	# setting, then Normal Career / Sprint gets its own explicit screen.
+	# Difficulty is asked exactly once, while creating a fresh save file.
 	match kc:
 		KEY_LEFT, KEY_UP, KEY_A, KEY_W:
 			diff_pick_sel = (diff_pick_sel + 2) % 3
@@ -7379,7 +7383,6 @@ func difficulty_input(kc: int) -> void:
 			difficulty = diff_pick_sel
 			sprint_active = false
 			sprint_failed = false
-			save_settings()
 			play_mode_sel = 0
 			game_state = ST_PLAY_MODE
 			play_sfx("ui2", -11.0)
@@ -7397,23 +7400,15 @@ func play_mode_input(kc: int) -> void:
 			play_sfx("ui", -14.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			play_sfx("ui2", -11.0)
+			slot_sprint = play_mode_sel == 1
 			if play_mode_sel == 1:
+				save_slot_identity()
 				begin_sprint()
 				return
-			if debug_mode:
-				load_progress()
-				enter_day()
-			elif start_slot_fresh:
-				reset_new_game()
-				seen_tuts.append("balls")
-				save_progress()
-				begin_tutorial("balls")
-			else:
-				load_progress()
-				if post_lesson_show:
-					begin_performance(num_balls)
-				else:
-					enter_day()
+			reset_new_game()
+			seen_tuts.append("balls")
+			save_progress()
+			begin_tutorial("balls")
 		KEY_ESCAPE:
 			game_state = ST_DIFFICULTY
 
@@ -7624,6 +7619,15 @@ func slot_path(i: int) -> String:
 	return "user://pixeltossa_slot%d.cfg" % i
 
 
+func save_slot_identity() -> void:
+	# A Sprint slot still needs a tiny file so its one-time choices survive even though the
+	# route itself remains disposable and never writes career progress.
+	var cf := ConfigFile.new()
+	cf.set_value("meta", "difficulty", difficulty)
+	cf.set_value("meta", "sprint", slot_sprint)
+	cf.save(slot_path(save_slot))
+
+
 func delete_slot(i: int) -> void:
 	var dir := DirAccess.open("user://")
 	var fn := "pixeltossa_slot%d.cfg" % i
@@ -7641,6 +7645,8 @@ func load_settings() -> void:
 		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
 		set_catch_full = bool(cf.get_value("opt", "catch_full", false))
 		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
+		# Legacy migration default only: old careers predate per-slot difficulty. The first
+		# time one is loaded, save_progress writes this value into that slot's metadata.
 		difficulty = clampi(int(cf.get_value("opt", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS)
 		set_music = clampf(float(cf.get_value("opt", "music", 1.0)), 0.0, 1.0)
 		set_sfx = clampf(float(cf.get_value("opt", "sfx", 1.0)), 0.0, 1.0)
@@ -7680,7 +7686,6 @@ func save_settings() -> void:
 	cf.set_value("opt", "reduce_motion", reduce_motion)
 	cf.set_value("opt", "catch_full", set_catch_full)
 	cf.set_value("opt", "dominant_hand", dominant_hand)
-	cf.set_value("opt", "difficulty", difficulty)
 	cf.set_value("opt", "music", set_music)
 	cf.set_value("opt", "sfx", set_sfx)
 	cf.set_value("opt", "fullscreen", set_fullscreen)
@@ -11972,6 +11977,8 @@ func _migrate_lesson_id(id: String) -> String:
 func load_progress() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(save_file()) == OK:
+		difficulty = clampi(int(cf.get_value("meta", "difficulty", difficulty)), DIFF_SLOTH, DIFF_OCTOPUS)
+		slot_sprint = bool(cf.get_value("meta", "sprint", false))
 		# CLAMPED TO THE LIVE CAPS ON THE WAY IN (2026-07-29). Accuracy's ceiling came down
 		# from 250 to 200 with the Focus rework, so a save made before that can carry up to
 		# fifty points the game no longer has a use for - and an out-of-range stat is the
@@ -12210,6 +12217,8 @@ func save_progress() -> void:
 	if sprint_active:
 		return   # a Sprint must never overwrite a normal career slot
 	var cf := ConfigFile.new()
+	cf.set_value("meta", "difficulty", difficulty)
+	cf.set_value("meta", "sprint", slot_sprint)
 	cf.set_value("stats", "accuracy", accuracy)
 	cf.set_value("stats", "strength", strength)
 	cf.set_value("stats", "endurance", endurance)
@@ -25259,7 +25268,8 @@ func slot_info(i: int) -> Dictionary:
 		"exists": true,
 		"level": int(cf.get_value("prog", "level", 1)),
 		"gold": int(cf.get_value("stats", "money", START_GOLD)),
-		"venue": String(venue_data(venue_index_of(rep))["name"]),
+		"venue": "SPRINT" if bool(cf.get_value("meta", "sprint", false)) else String(venue_data(venue_index_of(rep))["name"]),
+		"difficulty": clampi(int(cf.get_value("meta", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS),
 		"won": bool(cf.get_value("prog", "won", false)),
 	}
 
@@ -25323,6 +25333,8 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 			var purse_left := cx + cw * 0.5 - (purse_w + 22.0) * 0.5
 			draw_string(font, Vector2(purse_left, cy + 238.0), purse_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(1.0, 0.86, 0.45))
 			draw_coin_mark(Vector2(purse_left + purse_w + 12.0, cy + 232.0), 7.0, Color(1.0, 0.86, 0.45), true)
+			draw_string(font, Vector2(cx, cy + (280.0 if crowned else 260.0)), DIFF_NAMES[int(info["difficulty"])], HORIZONTAL_ALIGNMENT_CENTER, cw, ps(11),
+				difficulty_accent(int(info["difficulty"])))
 			if crowned:
 				draw_string(font, Vector2(cx, cy + 262.0), "WORLD'S GREATEST", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(1.0, 0.82, 0.4))
 			draw_string(font, Vector2(cx, cy + ch - 18.0), "[X] delete", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(0.88, 0.55, 0.5) if sel else Color(0.7, 0.5, 0.47, 0.7))
@@ -25342,13 +25354,13 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 func draw_settings_screen(font: Font, s: Vector2) -> void:
 	# the one call site every screen uses to open Settings, same seam as
 	# draw_sheet_screen (see there). settings_input owns the behaviour: menu_sel is a
-	# bare index 0..9 into the rows, which is why the row list below and settings_input
+	# bare index into the rows, which is why the row list below and settings_input
 	# must always carry the SAME rows in the SAME order.
 	draw_settings_cards(font, s)
 
 
 func draw_settings_cards(font: Font, s: Vector2) -> void:
-	# SETTINGS as cards - the same ELEVEN rows in the same menu_sel order settings_input
+	# SETTINGS as cards - the same ten rows in the same menu_sel order settings_input
 	# already drives, in the Balatro-card language the shop and sheet use
 	# (hud_card/draw_meter/a toggle plate). This screen alone never picked it up and was
 	# bare text rows. (Shipped 2026-07-27, no longer a variant.)
@@ -25366,29 +25378,23 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 		{"kind": "bool", "name": "Reduce motion", "val": reduce_motion, "note": "fewer jolts and bursts", "col": Color(0.6, 0.82, 0.72)},
 		{"kind": "bool", "name": "Fullscreen", "val": set_fullscreen, "note": "F11 anywhere", "col": Color(0.6, 0.75, 0.95)},
 		{"kind": "pick", "name": "Dominant hand", "val": dominant_hand == RIGHT, "note": "holds the odd prop and starts the pattern", "col": Color(0.95, 0.7, 0.55)},
-		{"kind": "diff3", "name": "Difficulty", "val": difficulty, "note": difficulty_note(difficulty), "col": difficulty_accent(difficulty)},
-		# ...and the eleventh row the `sections` list below has been asking for since the
-		# dominant-hand row arrived: it lists rows [8, 9, 10] while `rows` only ran to 9, so
-		# `rows[10]` was an out-of-range read inside _draw - which this file's own note about
-		# script errors mid-draw says silently abandons the rest of the pass.
 		{"kind": "bool", "name": "Catch with a full hand", "val": set_catch_full, "note": "off: a hand must be empty to receive", "col": Color(0.7, 0.85, 0.6)},
 		{"kind": "nav", "name": "Controls", "val": false, "note": "rebind the keys", "col": Color(0.8, 0.7, 0.95)},
 		{"kind": "nav", "name": "Records and history", "val": false, "note": "your career ledger", "col": Color(0.95, 0.82, 0.5)},
 		{"kind": "nav", "name": "Back", "val": false, "note": "", "col": Color(0.7, 0.66, 0.62)},
 	]
 	# grouped into sections so it reads as a designed panel, not a wall of identical
-	# bars. The row INDEX still matches settings_input 0..10 exactly - only the y of each
+	# bars. The row INDEX still matches settings_input exactly - only the y of each
 	# card shifts to leave room for the section headers between groups. Every row must
 	# appear in exactly one section, or a row the input can select is never drawn.
 	var sections := [
 		{"head": "AUDIO", "rows": [0, 1]},
-		{"head": "GAME FEEL", "rows": [2, 3, 4, 5, 6, 7]},
-		{"head": "MORE", "rows": [8, 9, 10]},
+		{"head": "GAME FEEL", "rows": [2, 3, 4, 5, 6]},
+		{"head": "MORE", "rows": [7, 8, 9]},
 	]
 	var pw := minf(620.0, s.x - 90.0)
 	var px := s.x * 0.5 - pw * 0.5
-	# sized so ELEVEN rows plus three section headers still finish above the footer: the
-	# dominant-hand row was the tenth, and at the old spacing Back sat under the hints
+	# Sized so every row plus three section headers finishes above the footer.
 	var card_h := 38.0
 	var gap := 6.0
 	var sec_gap := 14.0
@@ -25434,16 +25440,6 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 						Color(1.0, 0.88, 0.55) if isr else Color(0.55, 0.5, 0.46))
 				"nav":
 					draw_string(font, Vector2(px + pw - 42.0, y + card_h * 0.5 + 7.0), ">", HORIZONTAL_ALIGNMENT_RIGHT, 28.0, ps(20), Color(1.0, 0.9, 0.6) if sel else Color(0.7, 0.64, 0.58))
-				"diff3":
-					# three labels, not two - the same "unchosen stays visible" rule as "pick",
-					# widened by one, so the row reads as which of three rather than a slider
-					var cur := int(r["val"])
-					var dxx := px + pw - 210.0
-					for di in 3:
-						var on2 := cur == di
-						draw_string(font, Vector2(dxx, y + card_h * 0.5 + 6.0), DIFF_NAMES[di], HORIZONTAL_ALIGNMENT_LEFT, 66.0, ps(13),
-							difficulty_accent(di) if on2 else Color(0.5, 0.46, 0.42))
-						dxx += 68.0
 			y += card_h + gap
 		y += sec_gap
 
