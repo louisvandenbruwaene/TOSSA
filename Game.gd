@@ -5,6 +5,7 @@ extends Node2D
 # vocabulary while the implementation is independently testable.
 const TOSSA_FORMAT = preload("res://scripts/TossaFormat.gd")
 const TOSSA_CATALOG = preload("res://scripts/TossaCatalog.gd")
+const TOSSA_REPLAY = preload("res://scripts/TossaReplay.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -1387,6 +1388,7 @@ var reputation := 0       # rises with great sets, falls with poor ones; scales 
 var sprint_active := false  # transient, unsaved high-stakes route; see begin_sprint
 var sprint_failed := false
 var sprint_started_ms := 0
+var sprint_replay: Dictionary = {}
 var prop_type := PROP_BALLS  # the object being juggled this run
 # how many of each prop you own (balls are free and unlimited, see have()). You buy
 # props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
@@ -7429,6 +7431,11 @@ func sprint_clock_text() -> String:
 	return TOSSA_FORMAT.duration_text(int((Time.get_ticks_msec() - sprint_started_ms) / 1000))
 
 
+func sprint_record(action: String) -> void:
+	if sprint_active and not sprint_replay.is_empty():
+		TOSSA_REPLAY.append_event(sprint_replay, tick, action)
+
+
 const OLD_NAMES: Array[String] = ["PIXELTOSSA"]   # every name this game has shipped under,
 												  # newest first - see migrate_old_saves.
 # ONE ENTRY, AND THE ENTRY THAT IS *NOT* HERE IS THE LOAD-BEARING ONE (2026-08-15).
@@ -8969,6 +8976,10 @@ func start_run(n: int) -> void:
 	last_pay = 0
 	last_rep_delta = 0
 	run_venue = play_venue()   # records and the results card key off where you performed
+	if sprint_active and mode == MODE_PERFORM and booking_active:
+		sprint_replay = TOSSA_REPLAY.new_record(20260705, run_venue, prop_type, pattern, num_balls)
+	else:
+		sprint_replay = {}
 	results_open = false
 	results_record = false
 	first_show_reaction = ""   # never carries a stale line into an unrelated act's card
@@ -9244,6 +9255,7 @@ func on_catch(h: int) -> void:
 				% [tick, "L" if h == LEFT else "R", stack(h).size()])
 	best.state = STATE_HAND
 	stack(h).append(best)
+	sprint_record("catch_l" if h == LEFT else "catch_r")
 	catch_flash[h] = tick
 	caught += 1
 	career["catches"] = int(career["catches"]) + 1
@@ -9498,6 +9510,7 @@ func do_throw(h: int, hold: int) -> void:
 	# call do_throw directly rather than through the press handler.
 	if not hand_can_throw(h):
 		return
+	sprint_record("throw_l:%d" % hold if h == LEFT else "throw_r:%d" % hold)
 	var b: Ball = stack(h).pop_front()
 	b.trail = PackedVector2Array()
 	b.flat = false     # ...and every throw re-decides whether it is a pass or a throw. A
