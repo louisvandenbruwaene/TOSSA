@@ -1380,7 +1380,7 @@ var ante: Array[int] = [0, 0, 0, 0, 0, 0, 0]   # complete acts per venue: the st
 # progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
-var endurance := 0        # raises max Stamina (100 base + 9 each, to 1000); gates heavy props later
+var endurance := 0        # raises max Stamina (200 base + 8 each, to 1000); gates heavy props later
 var speed := 0            # the Speed stat: every 4 points slows the world 1% (cap 100 = 25%)
 var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
 var pie_active := false   # a pie eaten in the hub works until you SLEEP
@@ -1437,8 +1437,8 @@ var energy_drinks := 0    # owned stock, automatically sipped as stamina runs ou
 var level := 1
 var xp := 0               # xp accumulated inside the current level
 var points := 0           # unspent stat points
-var stamina := 100.0      # within-run resource; empty = you cannot catch, so mind it
-var stamina_max := 100.0  # 100 base + 9 per Endurance point, to 1000 at Endurance 100
+var stamina := 200.0      # within-run resource; empty = you cannot catch, so mind it
+var stamina_max := 200.0  # 200 base + 8 per Endurance point, to 1000 at Endurance 100
 var run_xp := 0           # xp earned in the current run, for the results screen
 var last_pay := 0         # gold earned from the last finished performance
 var last_rep_delta := 0   # reputation change from the last performance, for the results screen
@@ -2408,7 +2408,7 @@ func _ready() -> void:
 			strength = STR_CAP
 			endurance = END_CAP
 			speed = SPEED_CAP
-			stamina_max = 100.0 + 9.0 * float(endurance)
+			stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 			stamina = stamina_max
 		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
 		if pi != -1 and pi + 1 < ua.size():
@@ -5604,7 +5604,7 @@ func tut_setup_step() -> void:
 		caught = 0
 		dropped = 0
 		running = false
-		stamina_max = 100.0 + 9.0 * float(endurance)
+		stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 		stamina = stamina_max
 		hpos = [inner_pos(LEFT), inner_pos(RIGHT)]   # rest inward, everywhere (2026-07-31, Louis)
 		hclose = [0.0, 0.0]
@@ -7464,7 +7464,7 @@ func reset_new_game() -> void:
 	perfs_since_unlock = 0
 	aid_pie_day = -1
 	aid_meal_used = false
-	stamina_max = 100.0 + 9.0 * float(endurance)
+	stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 	stamina = stamina_max
 	save_progress()
 
@@ -9103,7 +9103,7 @@ func start_run(n: int) -> void:
 	started = false
 	# a WIND PURIST plays on a beginner's lungs: the stat is stripped for this act only, so
 	# the pool is what a fresh juggler carries and every throw costs the same as it always did
-	stamina_max = 100.0 + 9.0 * float(0 if purist_stat("end") else endurance)
+	stamina_max = TOSSA_BALANCE.stamina_capacity(0 if purist_stat("end") else endurance)
 	# stamina PERSISTS through the day now: only sleep (or a meal) restores it, so
 	# a third booking in one evening is genuinely tired work. Dev auto-runs top up
 	# so screenshots stay comparable.
@@ -11809,7 +11809,7 @@ func invest(which: String, defer_save: bool = false) -> void:
 			if endurance >= END_CAP:
 				return
 			endurance += 1
-			stamina_max = 100.0 + 9.0 * float(endurance)
+			stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 		"spd":
 			if speed >= SPEED_CAP:
 				return   # the permanent slow tops out (ideas.rtf): no point wasted
@@ -11940,7 +11940,7 @@ func _adjust(which: String, delta: int) -> void:
 			strength = clampi(strength + delta, 1, STR_CAP)
 		"end":
 			endurance = clampi(endurance + delta, 0, END_CAP)
-			stamina_max = 100.0 + 9.0 * float(endurance)
+			stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 			stamina = minf(stamina, stamina_max)
 		"spd":
 			speed = clampi(speed + delta, 0, SPEED_CAP)
@@ -12143,10 +12143,15 @@ func load_progress() -> void:
 	# bool with no notion of a slot at all), can load with a hat and the Energy Helmet both
 	# marked worn. See wear_normalize.
 	wear_normalize()
-	stamina_max = 100.0 + 9.0 * float(endurance)
+	stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 	# stamina persists through the day now (sleep restores it). An old save that
-	# predates the day loop simply wakes rested.
-	stamina = clampf(float(cf.get_value("day", "stamina", stamina_max)), 0.0, stamina_max)
+	# predates the day loop simply wakes rested. Curve v1 was 100 + 9*Endurance; preserve
+	# the player's percentage when moving it to 200 + 8*Endurance, so a full Backyard
+	# save loads full rather than remaining stranded at the obsolete 100-point ceiling.
+	var saved_stamina := float(cf.get_value("day", "stamina", stamina_max))
+	if int(cf.get_value("day", "stamina_curve", 1)) < 2:
+		saved_stamina = TOSSA_BALANCE.migrate_legacy_stamina(saved_stamina, endurance)
+	stamina = clampf(saved_stamina, 0.0, stamina_max)
 	if venue_pick < 0:
 		venue_pick = venue_index()   # older saves default to their grandest stage
 	# THE DEBUG BUILD STOCKS ITSELF (see debug_stock). Outside the load block on purpose:
@@ -12177,7 +12182,7 @@ func debug_stock() -> void:
 	strength = STR_CAP
 	endurance = END_CAP
 	speed = SPEED_CAP
-	stamina_max = 100.0 + 9.0 * float(endurance)
+	stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 	stamina = stamina_max
 	money = 100_000_000            # past anything the shop can ask for, and it is a sandbox
 	reputation = 12000             # clears every gate including the Midnight Show's 6000
@@ -12270,6 +12275,7 @@ func save_progress() -> void:
 	cf.set_value("day", "venue_pick", venue_pick)
 	cf.set_value("day", "meals", meals)
 	cf.set_value("day", "stamina", stamina)
+	cf.set_value("day", "stamina_curve", 2)
 	cf.save(save_file())
 
 
@@ -20524,7 +20530,7 @@ func stat_milestones(which: String) -> Array[Dictionary]:
 			# no named skill: labelled with the stamina pool it reaches, which IS the effect
 			for frac in [0.25, 0.5, 0.75, 1.0]:
 				var ev := int(round(float(cap) * frac))
-				add.call(ev, "%d stamina" % int(round(100.0 + 9.0 * float(ev))))
+				add.call(ev, "%d stamina" % int(round(TOSSA_BALANCE.stamina_capacity(ev))))
 		"spd":
 			# every whole percent of slow motion is its own step: SPEED_PER_PCT points buys
 			# one, and it accrues CONTINUOUSLY (see slow_target) - a point is never wasted

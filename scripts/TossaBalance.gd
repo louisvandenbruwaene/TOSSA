@@ -7,6 +7,8 @@ const SCORE_CEIL := 1.0e300
 const PERFECT_CATCHES := [80.0, 120.0, 160.0, 200.0, 260.0, 330.0, 400.0]
 const GOAL_STEPS := [0.50, 0.72, 1.0]
 const RUN_SHARE := 0.75
+const BASE_STAMINA := 200.0
+const STAMINA_PER_ENDURANCE := 8.0
 
 
 static func weighted_goal(venue: int, goal_index: int, perfect_weight: float,
@@ -39,3 +41,12 @@ static func run_ready(best_weighted_run: float, weighted_goal_catches: float) ->
 static func goal_ready(score: float, target: float, clock_open: bool,
 		best_weighted_run: float, weighted_goal_catches: float) -> bool:
 	return score >= target and clock_open and run_ready(best_weighted_run, weighted_goal_catches)
+
+
+static func stamina_capacity(endurance: int) -> float:
+	return BASE_STAMINA + STAMINA_PER_ENDURANCE * float(maxi(0, endurance))
+
+
+static func migrate_legacy_stamina(saved_stamina: float, endurance: int) -> float:
+	var old_capacity := 100.0 + 9.0 * float(maxi(0, endurance))
+	return clampf(saved_stamina / old_capacity, 0.0, 1.0) * stamina_capacity(endurance)
