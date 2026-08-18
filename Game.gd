@@ -16697,9 +16697,8 @@ func draw_flame_in_dark(b: Ball, pos: Vector2) -> void:
 	draw_torch_flame(pos, prop_spin_angle(b), sc, false, blue)
 
 
-const GLOW_PHOS := Color(0.30, 0.68, 1.0)   # the Kit's phosphor: an electric blue that
-											# reads as CHARGED rather than merely bright,
-											# and never collides with a venue's own palette
+const GLOW_PHOS := Color(0.62, 1.0, 0.72)   # charged material stays phosphor green;
+											# only a charged torch's flame turns electric blue
 
 func fire_clock() -> float:
 	# EVERY FIRE IN THE GAME READS ITS TIME FROM HERE, so one switch stops all of them
@@ -16764,7 +16763,7 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	# flat circles - a coloured dot with a white dot inside - which said WHERE a prop was
 	# and nothing else, so paying for it bought a pair of pixels.
 	#
-	# Now it is a real phosphorescent prop: the prop's OWN SILHOUETTE in charged blue,
+	# Now it is a real phosphorescent prop: the prop's OWN SILHOUETTE in charged green,
 	# without an aura that makes separate objects bleed into one another. Because the silhouette is the
 	# real one, a glowing ring still reads as a ring and a glowing club as a club - the
 	# whole point of buying the thing is that the pattern stays legible in the dark, and
@@ -16908,7 +16907,7 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		draw_glow_pix(pos, 17.0 * sc, Color(1.0, 0.85, 0.5, 0.30))
 	draw_prop_body(b, pos, prop_spin_angle(b), sc)
 	if glow_props_lit():
-		# Charged stock is blue material, not a light source: overlay its clean silhouette
+		# Charged stock is green material, not a light source: overlay its clean silhouette
 		# without any surrounding bloom. A glowing torch keeps its separately drawn blue flame.
 		glow_silhouette(pos, b.kind, sc, prop_spin_angle(b), Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, 0.82))
 
