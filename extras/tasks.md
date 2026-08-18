@@ -13,34 +13,30 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 - [~] **Make `Game.gd` safer for future AI-assisted edits without changing play.** Keep it as
   the orchestrator and extract only independently testable pure seams. The formatting and
-  persisted-pattern seams now have contract tests (`scripts/TossaFormat.gd`,
-  `scripts/TossaCatalog.gd`, `tests/`). Next candidates: immutable prop/venue catalogs, then
-  save-schema helpers with fixtures, then collision-covered geometry.
+  persisted catalogs, replay format, and pattern save migrations now have contract tests
+  (`scripts/TossaFormat.gd`, `scripts/TossaCatalog.gd`, `scripts/TossaReplay.gd`,
+  `scripts/TossaSaveSchema.gd`, `tests/`). Next candidate: collision-covered geometry.
   Do not split live juggling or rendering merely to reduce line count.
-- [ ] **Make the stage legible at native 1280×720.** Continue the HUD pass: task-critical
-  secondary text, controls, timing grades, and the slow-motion indicator must remain readable
-  without covering the performer or flight paths.
+- [x] **Make the stage legible at native 1280×720.** The HUD pass enlarged task-critical
+  secondary text and controls, plated timing grades and the slow-motion indicator, and kept
+  all of them clear of the performer and flight paths.
 - [x] **Make the next career goal obvious after onboarding.** The selected performance card
   now surfaces the nearest unowned trick or pattern using the player’s real missing
   requirements, alongside the existing next-venue reputation goal.
-- [~] **Give venues distinct audience taste and a named rival.** Every venue now introduces a
-  named rival and states what its crowd values. Build the first explicit, deterministic audience
-  response on the existing Encore/venue structure; do not perturb flight physics or introduce
-  unreadable random hazards.
-- [~] **Increase repeatable performance variety.** The Encore deck now includes The Study, a
-  clear Cascade-only pattern brief alongside the existing prop-specific audiences. Add more
-  optional pattern briefs. The future ghost format now has a versioned, tested pure recording
-  contract; wire accepted act actions into it before implementing playback.
-- [~] **Add a dedicated Sprint route for speedruns.** The main menu now starts a transient,
+- [x] **Give venues distinct audience taste and a named rival.** Every venue introduces a named
+  rival, states what its crowd values, and pays that exact deterministic behavior with a small
+  patience response. It never changes flight physics or introduces random hazards.
+- [x] **Increase repeatable performance variety.** The Encore deck includes Cascade, Columns,
+  and overhand-pattern briefs alongside the prop-specific audiences. Sprint actions use a
+  versioned, tested recording contract and the best completed route plays back as cyan input cues.
+- [x] **Add a dedicated Sprint route for speedruns.** The main menu starts a transient,
   unsaved Sprint: no Practice, one drop ends the attempt, and each three-goal stage clear
-  advances the venue and awards its next-stage flower grant. The live HUD shows an attempt
-  timer. Next: deterministic seed/ghost playback and a recorded final time.
-- [ ] **Make dangerous-prop drops carry distinct theatrical consequences.** A dropped knife,
-  torch, or chainsaw should immediately end the run and apply a meaningful recovery cost;
-  stage a short, readable injury beat (cut hand / arm injury / face burn) that respects
-  reduced-motion and offers a non-graphic presentation. Specify whether recovery is flowers,
-  lost stamina, or both before wiring it into the economy.
-- [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
+  advances the venue and awards its next-stage flower grant. The route has a fixed seed, frozen
+  finish/failure time, best-route input ghost, and final time on results and victory screens.
+- [x] **Make dangerous-prop drops carry distinct theatrical consequences.** A dropped knife,
+  torch, or chainsaw immediately ends the run with its own non-graphic, reduced-motion-safe beat.
+  Recovery empties stamina and therefore requires food or sleep; it never also confiscates flowers.
+- [x] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
   behavior, documented collision combinations, save migrations, and focused screenshots.
 
 ---

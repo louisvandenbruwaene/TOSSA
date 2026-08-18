@@ -2341,6 +2341,11 @@ func _ready() -> void:
 	if skip_menu:
 		save_slot = 0
 		load_progress()
+		if ua.has("--demowall"):
+			# The behavioral smoke flag must be repeatable even after the demo save has
+			# already seen the card in an earlier run.
+			demo_wall_seen = false
+			pending_demo_wall = false
 		var start_n := 3
 		var bi := ua.find("--balls")   # dev: force the ball count (audit even-count Cascade, e.g. 4/6)
 		if bi != -1 and bi + 1 < ua.size():
@@ -18347,15 +18352,15 @@ func k_count() -> Array[String]:
 
 func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
 	# a small keyboard-key box; returns its width so hints can chain
-	var w := maxf(21.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 11.0)
+	var w := maxf(23.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 12.0)
 	# SEAM: the CAP only. The width above and the label below are LAYOUT and must not move
 	# when art arrives - every hint row in the game chains off this return value, and a key
 	# hint whose text stopped fitting its box would be a legibility regression, not a
 	# restyle. So the sprite is stretched to the box the text asked for, never the reverse.
-	if not art_blit_rect("ui/keycap", Rect2(x, y, w, 19.0)):
-		draw_rect(Rect2(x, y, w, 19.0), Color(0.15, 0.10, 0.10, 0.92))
-		draw_rect(Rect2(x, y, w, 19.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
-	draw_string(font, Vector2(x, y + 14.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, ps(12), Color(1.0, 0.9, 0.7))
+	if not art_blit_rect("ui/keycap", Rect2(x, y, w, 22.0)):
+		draw_rect(Rect2(x, y, w, 22.0), Color(0.15, 0.10, 0.10, 0.92))
+		draw_rect(Rect2(x, y, w, 22.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
+	draw_string(font, Vector2(x, y + 16.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, ps(13), Color(1.0, 0.9, 0.7))
 	return w
 
 
@@ -18364,16 +18369,16 @@ func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
 	var total := 0.0
 	for it in items:
 		for k in it[0]:
-			total += maxf(21.0, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12)).x + 11.0) + 3.0
-		total += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 22.0
+			total += maxf(23.0, font.get_string_size(String(k), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 12.0) + 3.0
+		total += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14)).x + 22.0
 	total -= 22.0
 	var x := cx - total * 0.5
 	for it in items:
 		for k in it[0]:
 			x += draw_keycap(font, x, y, String(k)) + 3.0
 		x += 3.0
-		draw_string(font, Vector2(x, y + 14.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.82, 0.74, 0.62, 0.9))
-		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 16.0
+		draw_string(font, Vector2(x, y + 16.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(0.88, 0.80, 0.68, 0.95))
+		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14)).x + 16.0
 
 
 func score_text(v: float) -> String:
@@ -18408,7 +18413,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stext += "   (pie)"
 		if _frames < chain_until:
 			stext += "   thick time %ds" % int(ceil(float(chain_until - _frames) / 120.0))
-		draw_text_shout(font, Vector2(0, s.y - 96.0), stext, HORIZONTAL_ALIGNMENT_CENTER, s.x, 15, Color(0.75, 0.9, 1.0, 0.9))
+		var slow_w := 190.0
+		var slow_x := s.x * 0.5 - slow_w * 0.5
+		draw_rect(Rect2(slow_x, s.y - 120.0, slow_w, 28.0), Color(0.025, 0.04, 0.07, 0.88))
+		draw_rect(Rect2(slow_x, s.y - 120.0, slow_w, 28.0), Color(0.55, 0.88, 1.0, 0.5), false, 1.0)
+		draw_text_shout(font, Vector2(slow_x, s.y - 100.0), stext, HORIZONTAL_ALIGNMENT_CENTER, slow_w, 16, Color(0.75, 0.94, 1.0, 0.96))
 	if sprint_active and not sprint_ghost_replay.is_empty() and not results_open:
 		# The ghost is playback, never input: cyan rings repeat the best route's accepted
 		# actions at their recorded simulation ticks while the player's hands remain sovereign.
@@ -18419,7 +18428,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				var gp: Vector2 = hpos[gh] + Vector2(-30.0 if gh == LEFT else 30.0, -18.0)
 				draw_arc(gp, 13.0 + float(age) * 0.7, 0.0, TAU, 24, Color(0.45, 0.95, 1.0, ga), 2.0)
 				draw_string(font, Vector2(gp.x - 44.0, gp.y - 20.0), sprint_ghost_kind[gh],
-					HORIZONTAL_ALIGNMENT_CENTER, 88.0, ps(11), Color(0.55, 0.96, 1.0, ga))
+					HORIZONTAL_ALIGNMENT_CENTER, 88.0, ps(12), Color(0.55, 0.96, 1.0, ga))
 	if injury_prop >= 0 and collapsing:
 		# One restrained colour beat, with no wound drawing. Reduced Motion holds a
 		# constant low-alpha wash; otherwise it breathes once behind the collapse copy.
@@ -18550,7 +18559,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# than the column the bloom leaves - so it steps down a size or two rather
 		# than losing the word that carries the meaning
 		draw_string(font, Vector2(col_x, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
-			ps(fit_size(font, mood, col_w, 12, 10)), mc)
+			ps(fit_size(font, mood, col_w, 13, 11)), mc)
 		# the ask, and the gamble, in the card's left column beside the hat
 		var goal_head := "FIRST GOAL"
 		if goals_hit >= NUM_GOALS:
@@ -18577,7 +18586,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 					# ...and before the number is beaten, the clock is still worth showing,
 					# quietly, so nobody is surprised by it later
 					draw_string(font, Vector2(LX + 14, tcard_y + 150), "opens in %.0fs" % clock_left,
-						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(0.78, 0.72, 0.62, 0.75))
+						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(12), Color(0.84, 0.78, 0.68, 0.9))
 		else:
 			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, ps(12), Color(1.0, 0.88, 0.5))
 		if goals_hit > 0:
@@ -18650,8 +18659,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			for e in encores:
 				if e < 0 or e >= ENCORES.size():
 					continue
-				var eln := _wrap_lines(font, String(ENCORES[e]["desc"]), LW - 28, 11).size()
-				e_hi.append(36.0 + 15.0 * float(maxi(eln, 2)))
+				var eln := _wrap_lines(font, String(ENCORES[e]["desc"]), LW - 28, 12).size()
+				e_hi.append(36.0 + 16.0 * float(maxi(eln, 2)))
 				e_tot += e_hi[e_hi.size() - 1] + 6.0
 			var e_tight := eay + e_tot > e_floor
 			var ei := 0
@@ -18664,7 +18673,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				hud_card(Rect2(LX, eay, LW, ehh), Color(ec.r, ec.g, ec.b, 0.5))
 				draw_fit_string(font, Vector2(LX + 14, eay + 22.0), String(ENCORES[e]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
 				if not e_tight:
-					_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 11, Color(0.9, 0.82, 0.72, 0.9))
+					_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 12, Color(0.94, 0.86, 0.76, 0.94))
 				eay += ehh + 6.0
 	elif not performing:
 		# training: no contest, just the mode. The prop and pattern are NOT repeated
