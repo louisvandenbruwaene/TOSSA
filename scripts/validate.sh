@@ -105,12 +105,22 @@ done
 # --- 3. Seeded daily act -----------------------------------------------------
 log_head "3. Daily act (--daily --demo --booking)"
 run_headless 60 "$WORK/daily.log" --daily --demo --booking --prop 0 || true
-if grep -q "^ACT \|daily_share\|share" "$WORK/daily.log"; then
-  log_ok "Daily act resolved."
+if grep -q "^${GAME_TITLE:-TOSSA} Daily " "$WORK/daily.log"; then
+	log_ok "Daily act resolved."
 else
-  log_warn "No daily resolve line found (daily challenge is documented UNVERIFIED in CLAUDE.md)."
+	fail "Daily act did not emit its dated share receipt."
 fi
 scan_run_log "$WORK/daily.log" || FAIL=1
+
+# --- 3a. Demo ceiling transition --------------------------------------------
+log_head "3a. Demo-wall transition (--demowall --venue 2)"
+run_headless 60 "$WORK/demowall.log" --demowall --demo --booking --venue 2 --prop 0 || true
+if grep -q '^ACT .*demowall=true' "$WORK/demowall.log"; then
+  log_ok "Crossing the scoped demo ceiling armed the demo-wall card."
+else
+  fail "Demo ceiling did not arm pending_demo_wall after resolution."
+fi
+scan_run_log "$WORK/demowall.log" || FAIL=1
 
 # --- 3b. Mandatory first lesson ---------------------------------------------
 # This is executable onboarding, not static copy: it must drive the real sim through
@@ -223,16 +233,30 @@ fi
 
 # --- 7. Windowed screenshot smoke test ---------------------------------------
 if [[ $QUICK -eq 0 ]]; then
-  log_head "7. Windowed screenshot smoke test"
-  shot="$WORK/smoke.png"
-  run_windowed 45 "$WORK/shot.log" --demo --booking --venue 2 --shot "$shot" --shotat 700 || true
-  if [[ -s "$shot" ]]; then
-    log_ok "Captured $(du -h "$shot" | cut -f1) screenshot with no draw errors."
-  else
-    fail "Screenshot was not produced (check $WORK/shot.log before it's cleaned up: cat that path now)."
-    cat "$WORK/shot.log" | tail -20 | sed 's/^/    /'
-  fi
-  scan_run_log "$WORK/shot.log" || FAIL=1
+  log_head "7. Focused windowed screenshot smoke tests"
+  declare -a SHOT_CASES=(
+    "stage:700:--demo --booking --venue 2 --prop 0"
+    "results:60:--results"
+    "demo_wall:60:--wallcard"
+  )
+  for shot_case in "${SHOT_CASES[@]}"; do
+    shot_name="${shot_case%%:*}"
+    shot_rest="${shot_case#*:}"
+    shot_at="${shot_rest%%:*}"
+    shot_flags="${shot_rest#*:}"
+    shot="$WORK/${shot_name}.png"
+    shot_log="$WORK/shot_${shot_name}.log"
+    # shellcheck disable=SC2086
+    run_windowed 45 "$shot_log" $shot_flags --shot "$shot" --shotat "$shot_at" || true
+    if [[ -s "$shot" ]]; then
+      log_ok "$shot_name: captured $(du -h "$shot" | cut -f1) with no draw errors."
+    else
+      fail "$shot_name screenshot was not produced."
+      tail -20 "$shot_log" | sed 's/^/    /'
+    fi
+    scan_run_log "$shot_log" || FAIL=1
+  done
+  shot="$WORK/stage.png"  # the live frame used by the art-grid advisory below
 else
   log_warn "7. Screenshot smoke test skipped (--quick)."
 fi

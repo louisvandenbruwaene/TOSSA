@@ -11136,9 +11136,9 @@ func resolve_act() -> void:
 	if _demo:
 		# dev: report the whole-act outcome, so --demo --booking is a one-shot end-to-end
 		# check of the resolve path (goals, stripping, pay, rep)
-		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s reason=%s score=%s pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s reason=%s score=%s pay=%d rep=%+d record=%s demowall=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
-			fail_reason, score_text(score), last_pay, last_rep_delta, str(results_record), tick, run_flowers,
+			fail_reason, score_text(score), last_pay, last_rep_delta, str(results_record), str(pending_demo_wall), tick, run_flowers,
 			run_tomatoes, ovation_bonus, peak_applause])
 		if daily_active:
 			print(daily_share)
