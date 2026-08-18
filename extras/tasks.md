@@ -198,8 +198,9 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   scheme. Torches keep glowing and knives keep buying patience, as flat prop character.
 - [x] `trick_difficulty`'s context scaling (weight, count and pattern inflating a trick's
   base) and `apply_trick_mult`'s running `run_mult`, replaced by the per-segment product.
-- [ ] The fifty-Perfect slow-motion burst is keyed on `perfect_chain`, which no longer
-  exists as a concept. It needs a new trigger or it goes.
+- [x] **The fifty-Perfect slow-motion burst now belongs to a drop-free run.** Good and Late
+  catches preserve progress; a drop or a new run clears it. The fiftieth Perfect grants the
+  documented 15-second window, resets the tally, and can be earned again.
 
 ### Still to design
 

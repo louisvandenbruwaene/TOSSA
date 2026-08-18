@@ -57,6 +57,9 @@ Codex improvements:
 - **The controls screen is a complete two-device reference:** keyboard and gamepad live in parallel
   cards and remain readable regardless of which one has focus. Fixed gamepad hand controls are shown
   alongside the two remappable actions; secondary keyboard controls use keycaps rather than prose.
+- **Fifty Perfects reward a drop-free run, not a deleted chain:** Good and Late catches preserve the
+  tally; a drop or a new run clears it. The fiftieth Perfect grants 15 seconds of thick time and starts
+  the next tally at zero. `scripts/TossaRewards.gd` carries the tested progress rule.
 - **Round-prop title art has one silhouette treatment:** ball and ring card/stage sources are generated
   from the same banded model with a dark edge instead of a pale rim. Re-run `make_round_props.py`, then
   `pixelise_mark.py` after round-prop changes. The title A uses slightly larger, lower-reaching clubs.
@@ -786,7 +789,6 @@ quality-led, tonal stingers only, no ambient crowd bed.
 2. No demo export preset yet. Release and portable debug presets exist for macOS, Windows and
    Linux; a scoped demo preset still needs feature tag `demo` and an end-to-end export check.
 3. macOS signing/notarization not yet configured.
-4. The remaining in-stage timing-callout legibility pass - see the archive for specifics.
 
 ## Still open (backlog, not yet built or not yet verified - see CLAUDE_HISTORY.md for full detail on each)
 
