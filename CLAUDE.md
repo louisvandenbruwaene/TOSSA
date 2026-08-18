@@ -34,7 +34,8 @@ Codex improvements:
 - **Actionable validation failures:** `scripts/validate.sh` removes temporary logs after a pass but
   preserves them after a failure and prints their path. A failing check must not erase its evidence.
 - **SLOTH has a gentler economy and clock:** it starts with 200 flowers and contributes a permanent
-  20% base slowdown through `slow_target()`. Purist removes that assist; earned bursts still apply.
+  20% base slowdown through `slow_target()`. A Purist Speed bind forces all slow motion to zero,
+  including difficulty, pies, and earned bursts.
 - **The mandatory lesson proves juggling, not button tallying:** its final three-ball free-play
   gate only counts catches that leave another prop airborne. It also verifies one held-height throw,
   introduces timing grades and core movement controls, then tours both HUD rails in the first show.
@@ -768,6 +769,8 @@ review" for the accept/reject examples and why.
   Midnight Show (bonus 7th, gated on having won + Reputation 6000).
 - **Records/pay/rep:** per-venue assisted + Purist boards; pay scales with surviving score; rep
   swings on goals reached.
+- **Purist is one paired booking:** P binds Accuracy and Speed together. Individual binds do not
+  exist; Strength and Endurance are never stripped, and a Speed bind disables every slow-mo source.
 
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
