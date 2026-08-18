@@ -235,6 +235,7 @@ const TIRED_FLOOR := 12.0  # below this stamina you cannot work, only sleep
 const VENUE_PAY := 0.35    # each venue tier pays this much more than the last
 const BUSK_FLOOR := 8      # a broke juggler always earns at least this from the hat
 const BROKE_GOLD := 20     # the busking floor applies below this purse
+const SPRINT_STAGE_GRANT := [500, 1200, 2800, 6500, 14000, 30000, 0]
 const NUM_SLOTS := 3
 
 # --- progression / stats meta (GDD Section 4; skill-first guardrails hold) -----
@@ -1383,6 +1384,8 @@ var _tick_acc := 1.0      # fractional sim-tick accumulator while slowed
 var _frames := 0          # real frames in play (the slow-mo timers run on this)
 var money := START_GOLD   # earned by performing (not training)
 var reputation := 0       # rises with great sets, falls with poor ones; scales pay
+var sprint_active := false  # transient, unsaved high-stakes route; see begin_sprint
+var sprint_failed := false
 var prop_type := PROP_BALLS  # the object being juggled this run
 # how many of each prop you own (balls are free and unlimited, see have()). You buy
 # props by quantity in the shop, and to juggle N of a prop you must own N. Eggs are
@@ -3153,6 +3156,14 @@ func _input(event: InputEvent) -> void:
 	# it costs a fresh day segment), spend/shop, or Enter/Esc back into the day.
 	# It stays open behind the sheet and shop, so you can invest then continue.
 	if results_open and ovation_left <= 0 and not sheet_open and not shop_open:
+		if sprint_active and sprint_failed:
+			# The attempt is over on its first failed performance; there is no retry inside it.
+			results_open = false
+			sprint_active = false
+			game_state = ST_MENU
+			menu_sel = 0
+			play_sfx("ui", -12.0)
+			return
 		match kc:
 			KEY_R, KEY_SPACE:
 				if not too_tired():
@@ -3199,7 +3210,10 @@ func _input(event: InputEvent) -> void:
 					cine_tick = 0
 				else:
 					enter_day()
-					if daily_active:
+					if sprint_active:
+						var next_name := String(venue_data(venue_pick)["name"])
+						set_day_msg("SPRINT STAGE CLEARED  -  %s is next. Spend your flowers, then play." % next_name)
+					elif daily_active:
 						# enter_day() clears day_msg first - the share line has to land
 						# after, or it never survives the trip back to the hub. Already
 						# on the clipboard too (resolve_act), for a player who quits
@@ -4033,8 +4047,8 @@ func critic_hard() -> bool:
 
 
 func drop_limit() -> int:
-	# three drops and the crowd turns. The Understudy lowers it to one.
-	if encore_on("understudy"):
+	# Sprint and The Understudy both make the first drop terminal.
+	if sprint_active or encore_on("understudy"):
 		return 1
 	return DROP_LIMIT
 
@@ -4224,9 +4238,10 @@ func day_actions() -> Array[Dictionary]:
 	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
 		"sub": "%s and reputation, while stamina lasts. %s" % [coin_word(), purist_sub]})
-	out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
-		"cost": "", "ok": not tired, "why": tired_why if tired else "",
-		"sub": "no crowd, no pay. Work as long as you can stand."})
+	if not sprint_active:
+		out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
+			"cost": "", "ok": not tired, "why": tired_why if tired else "",
+			"sub": "no crowd, no pay. Work as long as you can stand."})
 	out.append({"id": "daily", "grp": "work", "icon": "cal", "name": "DAILY CHALLENGE",
 		"cost": String(venue_data(daily_venue())["name"]), "ok": not tired, "why": tired_why if tired else "",
 		"sub": "today's stage and Encore, the same for every juggler playing today. Costs a segment, same as PERFORM."})
@@ -7143,7 +7158,7 @@ func menu_options() -> Array[String]:
 	# found it confusing on the START menu, a button that looked pressable but
 	# wasn't really for pressing, so it's gone; the real win still rolls credits
 	# on its own, from actually clearing the World Arena - see resolve_act/results.)
-	var opts: Array[String] = ["Play"]
+	var opts: Array[String] = ["Play", "Sprint"]
 	opts.append("Settings")
 	opts.append("Quit")
 	return opts
@@ -7168,6 +7183,8 @@ func menu_input(kc: int) -> void:
 				"Play":
 					menu_sel = 0
 					game_state = ST_SLOTS
+				"Sprint":
+					begin_sprint()
 				"Settings":
 					menu_sel = 0
 					game_state = ST_SETTINGS
@@ -7279,6 +7296,8 @@ func apply_fullscreen() -> void:
 
 #region SAVE SLOTS
 func start_slot(i: int) -> void:
+	sprint_active = false
+	sprint_failed = false
 	save_slot = i
 	# THE DEBUG BUILD HAS ONE SAVE, NOT THREE, and it must never be reset. save_file()
 	# returns SAVE_PATH_DEBUG whenever debug_mode is on, so the per-slot file this screen
@@ -7322,6 +7341,8 @@ func difficulty_input(kc: int) -> void:
 			play_sfx("ui", -14.0)
 		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
 			difficulty = diff_pick_sel
+			sprint_active = false
+			sprint_failed = false
 			save_settings()
 			reset_new_game()
 			# a brand new career opens straight into the hands-on basics (one ball, then
@@ -7388,6 +7409,18 @@ func reset_new_game() -> void:
 	stamina_max = 100.0 + 9.0 * float(endurance)
 	stamina = stamina_max
 	save_progress()
+
+
+func begin_sprint() -> void:
+	# Transient high-stakes route: reset its own in-memory career and never writes to a slot.
+	# The familiar act and shop systems remain in use; only the rules around them change.
+	sprint_active = true
+	sprint_failed = false
+	reset_new_game()
+	seen_tuts = ["balls"]
+	pending_tuts.clear()
+	enter_day()
+	set_day_msg("SPRINT  -  no practice. One drop ends the attempt; clear all 3 goals to advance.")
 
 
 const OLD_NAMES: Array[String] = ["PIXELTOSSA"]   # every name this game has shipped under,
@@ -10723,6 +10756,8 @@ func pattern_by_id(pid: String) -> int:
 
 
 func announce_unlocks() -> void:
+	if sprint_active:
+		return   # Sprint has no lesson detours; requirement-based skills remain selectable.
 	# a requirement can be crossed on ANY progress axis - a level, a stat spend, a
 	# stage reached - so after each of those this rechecks everything and announces
 	# whatever is newly open. queue_lesson's own once-ever dedupe is the memory of
@@ -10818,6 +10853,7 @@ func resolve_act() -> void:
 	# pay, reputation, records, XP and the win all read the act's single score.
 	booking_active = false
 	var complete := goals_hit >= NUM_GOALS
+	sprint_failed = sprint_active and not complete
 	# the push-your-luck settles here: a COLLAPSE strips the score back to the last
 	# goal actually reached (goals already reached are safe, everything past them is
 	# what you gambled), and a collapse before the first goal banks nothing at all.
@@ -10896,6 +10932,15 @@ func resolve_act() -> void:
 		applause = 1.0    # they are on their feet, and the gauge has to agree
 		play_sfx("streak", -3.0)
 	last_pay = int(round(float(run_flowers) * purist_mult))
+	if sprint_active and complete:
+		# A cleared Sprint stage always funds the next stage's practical upgrade rather
+		# than asking a speedrun to farm its current room. The grant is part of the result
+		# receipt (and career ledger), not hidden money.
+		var grant: int = int(SPRINT_STAGE_GRANT[clampi(run_venue, 0, SPRINT_STAGE_GRANT.size() - 1)])
+		last_pay += grant
+		if run_venue < TOP_VENUE:
+			venue_pick = run_venue + 1
+			reputation = maxi(reputation, VENUE_REP[venue_pick])
 	if money < BROKE_GOLD and score > 0.0:
 		last_pay = maxi(last_pay, BUSK_FLOOR)
 	money += last_pay
@@ -11979,6 +12024,8 @@ func debug_stock() -> void:
 
 
 func save_progress() -> void:
+	if sprint_active:
+		return   # a Sprint must never overwrite a normal career slot
 	var cf := ConfigFile.new()
 	cf.set_value("stats", "accuracy", accuracy)
 	cf.set_value("stats", "strength", strength)

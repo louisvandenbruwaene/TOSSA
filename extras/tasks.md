@@ -31,11 +31,10 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   clear Cascade-only pattern brief alongside the existing prop-specific audiences. Add more
   optional pattern briefs. The future ghost format now has a versioned, tested pure recording
   contract; wire accepted act actions into it before implementing playback.
-- [ ] **Add a dedicated Sprint route for speedruns.** Keep the ordinary career's real stakes;
-  do not make game-over silently retain every stat. A Sprint should be a fixed, clocked,
-  restartable route with no day-life friction, rapid rewards for clean three-goal acts, and a
-  deterministic seed/recording contract so a handful of exceptional shows can reach the final
-  stage competitively.
+- [~] **Add a dedicated Sprint route for speedruns.** The main menu now starts a transient,
+  unsaved Sprint: no Practice, one drop ends the attempt, and each three-goal stage clear
+  advances the venue and awards its next-stage flower grant. Next: add a visible timer and
+  deterministic seed/ghost playback for competitive records.
 - [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
   behavior, documented collision combinations, save migrations, and focused screenshots.
 
