@@ -630,50 +630,12 @@ const PROP_CLUBS := 3
 const PROP_KNIVES := 4
 const PROP_TORCHES := 5
 const PROP_CHAINSAW := 6
-const PROPS := [
-	# balls are REAL STOCK too (Louis: they don't appear out of thin air): a fresh
-	# juggler starts with three, and the fourth ball onward is bought like any prop.
-	#
-	# PER-PROP CHARACTER, REWRITTEN 2026-07-29 (Louis: "clubs just give 1 extra perfect
-	# frame, knives just give the crowd more patience, torches give more patience and glow
-	# in the dark (so no multipliers or whatever), the chainsaw has one fewer perfect
-	# frames"). A prop is four flat facts and no curves now:
-	#   what it costs to THROW    - PROP_STR_UNIT, per object, times the count
-	#   what it costs in STAMINA  - "stam", the early limiter (rings stay cheap for their
-	#                               weight, which is their whole signature)
-	#   what it is worth in SCORE - PROP_SIG, the exponent's `p`
-	#   what it does to the TIMING - "pwin", now only ever +1 (clubs), 0 or -1 (chainsaw),
-	#                                and it moves ALL the bands, not just Perfect
-	# plus two things that are not numbers at all: knives and torches buy crowd patience
-	# (prop_thrill), and torches glow.
-	#
-	# THREE LEVERS CAME OUT and it is worth knowing why, because each was a real idea that
-	# stopped fitting. "smult", the per-prop score multiplier, is replaced by PROP_SIG doing
-	# the same job in the exponent, where it is worth vastly more. "fgive", clubs' kinder
-	# off-Perfect odds, is replaced by their +1 frame, which is the same generosity stated in
-	# the currency the whole catch model now uses. And the graded pwin ladder (-1, -2, -3, -4
-	# by weight) said "heavier is harder to CATCH", which is no longer true of anything: a
-	# prop you are strong enough to throw catches like any other. Heaviness is priced once,
-	# at the arms, and it is not charged twice.
-	{"name": "Ball",    "weight": 1, "cost": 20,   "stam": 1, "spins": false, "pwin": 0,  "trait": "the honest baseline - cheapest, lightest on the arms, and the count is all yours"},
-	{"name": "Egg",     "weight": 1, "cost": 1,    "stam": 2, "spins": false, "pwin": 0,  "trait": "a gamble - nearly free and worth a touch more, but ONE drop and it is gone for good"},
-	{"name": "Ring",    "weight": 2, "cost": 200,  "stam": 2, "spins": false, "pwin": 0,  "trait": "low stamina for their weight - the endurance prop, built for the longest sets"},
-	{"name": "Club",    "weight": 3, "cost": 500,  "stam": 4, "spins": true,  "pwin": 1,  "trait": "one extra frame on every catch - the forgiving prop, and the only one that gives timing back"},
-	{"name": "Knife",   "weight": 4, "cost": 1000, "stam": 5, "spins": true,  "pwin": 0,  "trait": "danger the room can see - a knife act holds a crowd's patience far longer"},
-	{"name": "Torch",   "weight": 5, "cost": 2000, "stam": 6, "spins": true,  "pwin": 0,  "trait": "self-lit and thrilling - they hold a crowd like knives AND they shine when the stage goes dark"},
-	# THE CHAINSAW (2026-07-28, Louis: "a new object: the chainsaw. make it actually move
-	# around and work"). The top of the ladder and deliberately the end of it: heaviest,
-	# dearest, and the only prop that is RUNNING while it flies - the chain really travels
-	# round the bar, on its own clock, and the engine note rides with it. It is the prop a
-	# career builds toward: 13 Strength per object, so a full fifteen of them is 195 and
-	# very nearly the whole stat.
-	{"name": "Chainsaw", "weight": 6, "cost": 9000, "stam": 8, "spins": true, "pwin": -1, "trait": "one frame less on every catch - the hardest timing in the game, and the biggest number"},
-]
 # THE SCORE SIGNATURE, `p` in the segment formula (2026-07-29, Louis's own values). It is an
 # EXPONENT, not a multiplier: a segment is worth x^(n*p), so seven torches (p 3) run at an
 # exponent of 21 where seven balls run at 7. That is why the old flat "smult" could go - a
 # tenth of an exponent is worth more than any multiplier the table used to carry.
-const PROP_SIG := [1.0, 1.2, 1.4, 1.6, 2.0, 3.0, 5.0]
+const PROPS := TOSSA_CATALOG.PROPS
+const PROP_SIG := TOSSA_CATALOG.PROP_SIG
 const WEIGHT_STAM := 0.25    # each weight step adds this fraction of a CATCH's stamina cost
 const PWIN_FLOOR := 3          # the Perfect window never tightens below this many ticks, whatever
 							   # the prop, the Cold Hands encore, or their sum - always hittable
