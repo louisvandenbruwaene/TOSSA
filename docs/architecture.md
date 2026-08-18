@@ -31,8 +31,10 @@ Systems living in the one file, roughly top-to-bottom as they appear:
 `Game.gd` remains the runtime orchestrator. New files are allowed only when they have a
 small, explicit contract that can be checked outside a live act. The first seam is
 `scripts/TossaFormat.gd`: pure number/score formatting, exercised by
-`tests/test_format.gd` (`make test-format`). `Game.gd` keeps tiny forwarding helpers so
-existing callers do not need a mechanical, conflict-prone rename.
+`tests/test_format.gd` (`make test-format`). `scripts/TossaCatalog.gd` now owns the
+persisted pattern catalog, whose order is locked by `tests/test_catalog.gd`
+(`make test-catalog`). `Game.gd` keeps aliases/forwarding helpers so existing callers do
+not need a mechanical, conflict-prone rename.
 
 Follow this order for future extractions:
 

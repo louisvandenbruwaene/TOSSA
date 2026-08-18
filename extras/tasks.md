@@ -12,9 +12,10 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 ## Current improvement roadmap (2026-08-18)
 
 - [~] **Make `Game.gd` safer for future AI-assisted edits without changing play.** Keep it as
-  the orchestrator and extract only independently testable pure seams. First seam: formatting
-  (`scripts/TossaFormat.gd` + `tests/test_format.gd`). Next candidates: immutable prop/pattern/
-  venue catalogs, then save-schema helpers with fixtures, then collision-covered geometry.
+  the orchestrator and extract only independently testable pure seams. The formatting and
+  persisted-pattern seams now have contract tests (`scripts/TossaFormat.gd`,
+  `scripts/TossaCatalog.gd`, `tests/`). Next candidates: immutable prop/venue catalogs, then
+  save-schema helpers with fixtures, then collision-covered geometry.
   Do not split live juggling or rendering merely to reduce line count.
 - [ ] **Make the stage legible at native 1280×720.** Continue the HUD pass: task-critical
   secondary text, controls, timing grades, and the slow-motion indicator must remain readable
