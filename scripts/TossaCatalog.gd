@@ -40,3 +40,28 @@ const TRICKS := [
 	{"id": "high", "name": "High Toss", "kind": "toggle", "lvl": 5, "str": 75, "perf": 10, "min_air": 0, "diff": 1.10, "cascade_only": false, "shout": "HIGH TOSS!", "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
 	{"id": "spin", "name": "Spin", "kind": "live", "lvl": 8, "spd": 75, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!", "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
 ]
+
+
+# Booking conditions have stable string IDs used by saves, daily seeds, and dev flags.
+# Their order is not persisted, but the contract test protects accidental removals/renames.
+const ENCORES := [
+	{"id": "hecklers", "name": "The Hecklers", "desc": "The crowd is impatient. Their attention drains twice as fast."},
+	{"id": "fright", "name": "Stage Fright", "desc": "The lights are in your eyes. No landing markers."},
+	{"id": "gale", "name": "The Gale", "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
+	{"id": "blackout", "name": "Blackout", "desc": "The house lights are out. An ordinary prop is INVISIBLE in the air. Glow-in-the-dark props shine, and a torch is a flame with no handle under it."},
+	{"id": "cold", "name": "Cold Hands", "desc": "Every catch window is one tick tighter."},
+	{"id": "long", "name": "The Long Set", "desc": "The final goal asks for a longer run, but the crowd is patient. An endurance test."},
+	{"id": "understudy", "name": "The Understudy", "desc": "One drop and it is over."},
+	{"id": "fire", "name": "For the Danger", "desc": "This crowd came for danger. Only clubs, knives, torches and chainsaws score."},
+	{"id": "scared", "name": "A Scared Audience", "desc": "Blades and flames frighten this room. Only balls, eggs and rings score."},
+	{"id": "fancy", "name": "A Fancy Audience", "desc": "A dress-circle crowd, and eggs are a busker's gag. Eggs score nothing tonight."},
+	{"id": "study", "name": "The Study", "desc": "The house booked a Cascade. Only Cascade routines score tonight."},
+	{"id": "critic", "name": "The Critic", "desc": "A late catch breaks the spell: your run starts over from nothing. It costs you nothing else."},
+	{"id": "critic_hard", "name": "The Critic, Twice", "desc": "Anything short of a Perfect breaks the spell and your run starts over from nothing."},
+	{"id": "purist_acc", "name": "Purist: Hands", "desc": "Your trained Accuracy counts for nothing tonight. Raw hands."},
+	{"id": "purist_str", "name": "Purist: Arms", "desc": "Your Strength counts for nothing tonight: three of the lightest thing you own."},
+	{"id": "purist_end", "name": "Purist: Wind", "desc": "Your Endurance counts for nothing tonight. A beginner's stamina."},
+	{"id": "purist_spd", "name": "Purist: Nerve", "desc": "Your Speed counts for nothing tonight. No slow motion at all."},
+]
+
+const PURIST_IDS := ["purist_acc", "purist_str", "purist_end", "purist_spd"]

@@ -1217,26 +1217,8 @@ const APPL_SPIN := 0.010
 #     the hard-mode SETTING, which is where it always really belonged.
 #   * The Critic split in two. Both end the segment on a bad catch, which is a far heavier
 #     thing than the old "it simply does not score" now that a segment is an exponential.
-const ENCORES := [
-	{"id": "hecklers",  "name": "The Hecklers",       "desc": "The crowd is impatient. Their attention drains twice as fast."},
-	{"id": "fright",    "name": "Stage Fright",       "desc": "The lights are in your eyes. No landing markers."},
-	{"id": "gale",      "name": "The Gale",           "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
-	{"id": "blackout",  "name": "Blackout",           "desc": "The house lights are out. An ordinary prop is INVISIBLE in the air. Glow-in-the-dark props shine, and a torch is a flame with no handle under it."},
-	{"id": "cold",      "name": "Cold Hands",         "desc": "Every catch window is one tick tighter."},
-	{"id": "long",      "name": "The Long Set",       "desc": "The final goal asks for a longer run, but the crowd is patient. An endurance test."},
-	{"id": "understudy","name": "The Understudy",     "desc": "One drop and it is over."},
-	{"id": "fire",      "name": "For the Danger",     "desc": "This crowd came for danger. Only clubs, knives, torches and chainsaws score."},
-	{"id": "scared",    "name": "A Scared Audience",  "desc": "Blades and flames frighten this room. Only balls, eggs and rings score."},
-	{"id": "fancy",     "name": "A Fancy Audience",   "desc": "A dress-circle crowd, and eggs are a busker's gag. Eggs score nothing tonight."},
-	{"id": "study",     "name": "The Study",          "desc": "The house booked a Cascade. Only Cascade routines score tonight."},
-	{"id": "critic",    "name": "The Critic",         "desc": "A late catch breaks the spell: your run starts over from nothing. It costs you nothing else."},
-	{"id": "critic_hard","name": "The Critic, Twice", "desc": "Anything short of a Perfect breaks the spell and your run starts over from nothing."},
-	{"id": "purist_acc","name": "Purist: Hands",      "desc": "Your trained Accuracy counts for nothing tonight. Raw hands."},
-	{"id": "purist_str","name": "Purist: Arms",       "desc": "Your Strength counts for nothing tonight: three of the lightest thing you own."},
-	{"id": "purist_end","name": "Purist: Wind",       "desc": "Your Endurance counts for nothing tonight. A beginner's stamina."},
-	{"id": "purist_spd","name": "Purist: Nerve",      "desc": "Your Speed counts for nothing tonight. No slow motion at all."},
-]
-const PURIST_IDS := ["purist_acc", "purist_str", "purist_end", "purist_spd"]
+const ENCORES := TOSSA_CATALOG.ENCORES
+const PURIST_IDS := TOSSA_CATALOG.PURIST_IDS
 const PURIST_NIGHT_CHANCE := 0.22   # how often a house that allows Purists asks for one
 									 # instead of an ordinary challenge. Low, because a
 									 # Purist night takes a stat the player has spent the
