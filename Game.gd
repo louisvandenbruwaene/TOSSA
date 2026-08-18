@@ -207,9 +207,10 @@ const ST_MENUTOUR := 15  # a short "how the hub works" card (2026-07-29), shown 
 						   # once: right after the new player's own first Backyard show
 						   # (see post_lesson_show) resolves, before the day hub is ever
 						   # shown at all - see draw_menutour
-const ST_DIFFICULTY := 16  # SLOTH / BEAR / OCTOPUS, picked once on a brand new slot,
-							# before the basics tutorial begins - see start_slot,
+const ST_DIFFICULTY := 16  # SLOTH / BEAR / OCTOPUS, chosen inside Play before run type
+							# and before a fresh slot's basics tutorial - see start_slot,
 							# difficulty_input, draw_difficulty_screen
+const ST_PLAY_MODE := 17   # Normal Career / Sprint, always offered after difficulty
 
 # --- the day loop (GDD 4.5): light texture and stakes, never a chore -----------
 # A day holds three action segments. Performing or practicing spends one, eating
@@ -1710,6 +1711,9 @@ var menu_sel := 0         # cursor index in whichever menu is open
 var menutour_page := 0    # four short, contextual pages after the first performance
 var save_slot := 0        # which save file is active
 var diff_pick_sel := DIFF_BEAR  # the cursor on ST_DIFFICULTY, defaulting to the
+
+var play_mode_sel := 0          # Normal Career / Sprint after choosing difficulty
+var start_slot_fresh := false   # deferred until the player chooses Normal Career
 								 # standard game rather than whatever the cursor
 								 # happened to leave menu_sel at
 var remap_sel := 0        # cursor on the controls screen (keyboard column)
@@ -2557,6 +2561,10 @@ func _ready() -> void:
 		game_state = ST_DIFFICULTY
 		diff_pick_sel = difficulty
 		cine_tick = 0
+	if ua.has("--playmode"):          # dev: the post-difficulty Normal / Sprint choice
+		game_state = ST_PLAY_MODE
+		play_mode_sel = 0
+		cine_tick = 0
 	if ua.has("--showguide"):         # dev: the first show's own in-act guide (2026-07-31),
 		# for a screenshot without walking the whole tutorial to reach it - self-contained,
 		# since skip_menu above does not know this flag and would otherwise leave the game
@@ -3097,6 +3105,9 @@ func _input(event: InputEvent) -> void:
 			return
 		ST_DIFFICULTY:
 			difficulty_input(kc)
+			return
+		ST_PLAY_MODE:
+			play_mode_input(kc)
 			return
 		ST_ESTABLISH:
 			establish_key()
@@ -7205,7 +7216,7 @@ func menu_options() -> Array[String]:
 	# found it confusing on the START menu, a button that looked pressable but
 	# wasn't really for pressing, so it's gone; the real win still rolls credits
 	# on its own, from actually clearing the World Arena - see resolve_act/results.)
-	var opts: Array[String] = ["Play", "Sprint"]
+	var opts: Array[String] = ["Play"]
 	opts.append("Settings")
 	opts.append("Quit")
 	return opts
@@ -7230,8 +7241,6 @@ func menu_input(kc: int) -> void:
 				"Play":
 					menu_sel = 0
 					game_state = ST_SLOTS
-				"Sprint":
-					begin_sprint()
 				"Settings":
 					menu_sel = 0
 					game_state = ST_SETTINGS
@@ -7346,39 +7355,17 @@ func start_slot(i: int) -> void:
 	sprint_active = false
 	sprint_failed = false
 	save_slot = i
-	# THE DEBUG BUILD HAS ONE SAVE, NOT THREE, and it must never be reset. save_file()
-	# returns SAVE_PATH_DEBUG whenever debug_mode is on, so the per-slot file this screen
-	# shows is not what actually gets loaded - and measuring `fresh` against slot_path(i)
-	# would send a stocked sandbox through reset_new_game() and into the basics tutorial,
-	# wiping every maxed stat the moment Louis clicked a slot. load_progress() stocks the
-	# debug save if it has not been (see debug_stock), so this always resumes a full one.
-	if debug_mode:
-		load_progress()
-		enter_day()
-		return
-	var fresh := not FileAccess.file_exists(slot_path(i))
-	if fresh:
-		# a brand new career picks its pace first (SLOTH/BEAR/OCTOPUS - see
-		# difficulty_input) and THEN opens straight into the hands-on basics; the pick
-		# has to land before reset_new_game, since Octopus's empty starting purse is
-		# read there.
-		diff_pick_sel = difficulty
-		game_state = ST_DIFFICULTY
-	else:
-		load_progress()
-		if post_lesson_show:
-			# The mandatory first show was booked before the previous session ended.
-			# Resume that onboarding beat instead of silently dropping the player in the hub.
-			begin_performance(num_balls)
-		else:
-			enter_day()   # an existing career resumes at its day, not mid-juggle
+	# Defer touching the selected save until AFTER difficulty and run type. Sprint owns a
+	# transient career and must never load or overwrite this slot. Debug's one stocked save
+	# is always existing; measuring a numbered path there would incorrectly reset it.
+	start_slot_fresh = false if debug_mode else not FileAccess.file_exists(slot_path(i))
+	diff_pick_sel = difficulty
+	game_state = ST_DIFFICULTY
 
 
 func difficulty_input(kc: int) -> void:
-	# three choices, Left/Right (or Up/Down - either reads naturally on three cards in
-	# a row) move the cursor, Enter commits it as the GLOBAL setting and starts the new
-	# career. There is no Back: a brand new slot has nothing to return TO but the slot
-	# screen it just came from, which Escape still reaches.
+	# Difficulty is the first choice inside Play for every run. Enter commits the global
+	# setting, then Normal Career / Sprint gets its own explicit screen.
 	match kc:
 		KEY_LEFT, KEY_UP, KEY_A, KEY_W:
 			diff_pick_sel = (diff_pick_sel + 2) % 3
@@ -7391,18 +7378,42 @@ func difficulty_input(kc: int) -> void:
 			sprint_active = false
 			sprint_failed = false
 			save_settings()
-			reset_new_game()
-			# a brand new career opens straight into the hands-on basics (one ball, then
-			# two, then the cascade); tut_finish drops into the day when they are done
-			seen_tuts.append("balls")
-			# reset_new_game() saved the newly-created slot before the lesson marker existed.
-			# Persist it now so closing the window mid-lesson cannot turn the slot into an
-			# "existing" career that resumes in the day hub and silently skips the basics.
-			save_progress()
-			begin_tutorial("balls")
+			play_mode_sel = 0
+			game_state = ST_PLAY_MODE
 			play_sfx("ui2", -11.0)
 		KEY_ESCAPE:
 			game_state = ST_SLOTS
+
+
+func play_mode_input(kc: int) -> void:
+	match kc:
+		KEY_LEFT, KEY_UP, KEY_A, KEY_W:
+			play_mode_sel = (play_mode_sel + 1) % 2
+			play_sfx("ui", -14.0)
+		KEY_RIGHT, KEY_DOWN, KEY_D, KEY_S:
+			play_mode_sel = (play_mode_sel + 1) % 2
+			play_sfx("ui", -14.0)
+		KEY_ENTER, KEY_KP_ENTER, KEY_SPACE:
+			play_sfx("ui2", -11.0)
+			if play_mode_sel == 1:
+				begin_sprint()
+				return
+			if debug_mode:
+				load_progress()
+				enter_day()
+			elif start_slot_fresh:
+				reset_new_game()
+				seen_tuts.append("balls")
+				save_progress()
+				begin_tutorial("balls")
+			else:
+				load_progress()
+				if post_lesson_show:
+					begin_performance(num_balls)
+				else:
+					enter_day()
+		KEY_ESCAPE:
+			game_state = ST_DIFFICULTY
 
 
 func reset_new_game() -> void:
@@ -13416,6 +13427,9 @@ func _draw_screen() -> void:
 			return
 		ST_DIFFICULTY:
 			draw_difficulty_screen(font, s)
+			return
+		ST_PLAY_MODE:
+			draw_play_mode_screen(font, s)
 			return
 		ST_ESTABLISH:
 			draw_establish(font, s)
@@ -25685,8 +25699,8 @@ func draw_difficulty_icon_fallback(d: int, box: Rect2) -> void:
 
 
 func draw_difficulty_screen(font: Font, s: Vector2) -> void:
-	# CHOSEN ONCE ON A BRAND NEW SLOT, before the basics tutorial - see start_slot and
-	# difficulty_input. Same visual family as draw_slots_cards (this screen is one step
+	# CHOSEN INSIDE PLAY before Normal Career / Sprint - see start_slot and difficulty_input.
+	# Same visual family as draw_slots_cards (this screen is one step
 	# further down the same "starting a new climb" path, so the backdrop and card
 	# language match rather than jumping to the Backyard exterior the POST-tutorial
 	# cards use - that beat belongs to finishing the lesson, not to starting one).
@@ -25724,7 +25738,60 @@ func draw_difficulty_screen(font: Font, s: Vector2) -> void:
 		if sel:
 			draw_string(font, Vector2(cx, cy0 + ch - 16.0), "< pick >", HORIZONTAL_ALIGNMENT_CENTER, cw, ps(13), Color(1.0, 0.88, 0.55, 0.6 + 0.3 * sin(float(atick()) * 0.05)))
 
-	var foot := "Left / Right    A to start    B to go back" if pad_active() else "Left / Right    Enter to start    Esc to go back"
+	var foot := "Left / Right    A to continue    B to go back" if pad_active() else "Left / Right    Enter to continue    Esc to go back"
+	draw_string(font, Vector2(0, s.y - 42.0), foot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
+	draw_vignette(s, 0.5)
+	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+
+
+func draw_play_mode_screen(font: Font, s: Vector2) -> void:
+	view_venue = 2
+	draw_backdrop(s)
+	view_venue = -1
+	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.68))
+	draw_string(title_font(), Vector2(0, s.y * 0.14), "CHOOSE YOUR RUN",
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(38), Color(1.0, 0.86, 0.5))
+	draw_ornament(s.x * 0.5, s.y * 0.14 + 42.0, 220.0, Color(0.82, 0.62, 0.34, 0.85))
+	draw_string(font, Vector2(0, s.y * 0.14 + 62.0), "%s difficulty" % DIFF_NAMES[difficulty],
+		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), difficulty_accent(difficulty))
+
+	var cards := [
+		{"title": "NORMAL CAREER", "tag": "YOUR SAVED CLIMB",
+		 "body": "Build a career, practise, shop, rest, and take each venue at your own pace.",
+		 "accent": Color(1.0, 0.78, 0.40)},
+		{"title": "SPRINT", "tag": "ONE DROP. EVERY STAGE.",
+		 "body": "A separate timed route. One drop ends the attempt; your career save stays untouched.",
+		 "accent": Color(0.48, 0.88, 1.0)},
+	]
+	var cw := 390.0
+	var ch := 290.0
+	var gap := 34.0
+	var left := s.x * 0.5 - cw - gap * 0.5
+	var top := s.y * 0.34
+	for i in cards.size():
+		var c: Dictionary = cards[i]
+		var selected := i == play_mode_sel
+		var x := left + float(i) * (cw + gap)
+		var y := top - (10.0 if selected else 0.0)
+		var ac: Color = c["accent"]
+		soft_card(Rect2(x, y, cw, ch), Color(ac.r * 0.13, ac.g * 0.13, ac.b * 0.14, 0.95),
+			Color(ac.r, ac.g, ac.b, 0.9 if selected else 0.3), 2.2 if selected else 1.0, 14.0, 16.0)
+		draw_glow(Vector2(x + cw * 0.5, y + 78.0), 56.0, Color(ac.r, ac.g, ac.b, 0.12))
+		if i == 0:
+			draw_coin_mark(Vector2(x + cw * 0.5, y + 78.0), 18.0, ac)
+		else:
+			draw_string(title_font(), Vector2(x, y + 96.0), "»", HORIZONTAL_ALIGNMENT_CENTER,
+				cw, ps(54), ac)
+		draw_string(title_font(), Vector2(x, y + 148.0), String(c["title"]),
+			HORIZONTAL_ALIGNMENT_CENTER, cw, ps(24), Color(1.0, 0.92, 0.66) if selected else ac)
+		draw_string(font, Vector2(x, y + 177.0), String(c["tag"]),
+			HORIZONTAL_ALIGNMENT_CENTER, cw, ps(12), Color(ac.r, ac.g, ac.b, 0.9))
+		draw_wrap_fit(font, String(c["body"]), Rect2(x + 34.0, y + 202.0, cw - 68.0, 48.0),
+			13, Color(0.88, 0.83, 0.74, 0.92), HORIZONTAL_ALIGNMENT_CENTER)
+		if selected:
+			draw_string(font, Vector2(x, y + ch - 16.0), "< choose >", HORIZONTAL_ALIGNMENT_CENTER,
+				cw, ps(13), Color(ac.r, ac.g, ac.b, 0.65 + 0.3 * sin(float(atick()) * 0.05)))
+	var foot := "Left / Right    A to play    B to go back" if pad_active() else "Left / Right    Enter to play    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), foot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
@@ -28377,6 +28444,7 @@ func shot_state_name() -> String:
 		ST_PURIST_LEGEND: return "legend"
 		ST_MENUTOUR: return "menutour"
 		ST_DIFFICULTY: return "difficulty"
+		ST_PLAY_MODE: return "playmode"
 	return "state%d" % game_state
 
 #endregion
