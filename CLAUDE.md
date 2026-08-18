@@ -51,6 +51,10 @@ Codex improvements:
   just before arrival. Free-practice tallies clamp and remain banked at their target. During basics,
   Esc offers Resume, Restart Step, and Quit Game; it never offers End Session/day hub, so quitting is
   allowed but skipping mandatory onboarding is not.
+- **Unlock lessons are selective and share one juggling grammar:** buying a new prop does not queue
+  another tutorial, and higher counts do not repeatedly re-teach the same controls. Four balls is the
+  sole count milestone. It and pattern lessons put every object up, then guide catch-and-throw on each
+  arrival for two complete cycles; old queued prop/count lessons are filtered when saves load.
 - **First-performance HUD tour is progressive:** it walks stage, stamina, score flower, crowd,
   routine, then stopping. The multiplier readout was removed; the flower stays hidden until its page
   and its completed bloom is yellow. Tutorial key names use yellow bracket styling consistently.

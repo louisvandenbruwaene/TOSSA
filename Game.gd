@@ -1977,6 +1977,7 @@ var _stick_dir := {}      # per-axis latch for left-stick menu steps (see _input
 
 # dev-only: headless auto-player + one-frame screenshot
 var _demo := false
+var _tutcheck := false    # dev: quit immediately once a --tutorial reaches tut_finish
 var _force_demo := false  # dev: --demowall makes in_demo_build() true without a real
 						   # export - a genuine "demo" custom_features export tag is the
 						   # only thing OS.has_feature("demo") ever sees, and that can't
@@ -2301,6 +2302,8 @@ func _ready() -> void:
 		# command line needed, same as passing --debug by hand.
 	if ua.has("--demowall"):   # dev: exercise the scoped-demo path without a real
 		_force_demo = true     # "demo"-tagged export - see in_demo_build()
+	if ua.has("--tutcheck"):
+		_tutcheck = true
 	if ua.has("--fps"):        # dev: the performance probe (see _fps above)
 		_fps = true
 	var si := ua.find("--shot")
@@ -4686,7 +4689,7 @@ func day_anim_step() -> void:
 			stamina = minf(stamina_max, stamina + EAT_STAM * stamina_max)
 			meals += 1
 			if meals % MEALS_PER_STR == 0 and strength < STR_CAP:
-				var prev_max := max_balls()
+				var prev_max := maxi(MIN_BALLS, max_count(PROP_BALLS))
 				strength += 1
 				check_ball_unlock(prev_max)   # a meal's Strength can cross a ball gate too
 				set_day_msg("the good food is paying off  -  Strength +1")
@@ -5064,14 +5067,11 @@ func try_buy(kind: int) -> void:
 	if money >= cost:
 		if not confirm_spend("prop%d" % kind, cost, true):
 			return
-		var was := available(kind)
 		money -= cost
 		prop_count[kind] += 1
 		shop_buy_ms = int(Time.get_ticks_msec())
 		save_progress()
 		play_sfx("money", -6.0)
-		if not was and available(kind):
-			offer_prop_tutorial(kind)   # first time you can juggle these: explain them
 
 
 func glow_cost(kind: int) -> int:
@@ -5129,7 +5129,6 @@ func try_top_up(kind: int) -> void:
 	# one confirmation for the whole basket, not one per item
 	if not confirm_spend("set%d" % kind, cost * can, true):
 		return
-	var was := available(kind)
 	money -= cost * can
 	prop_count[kind] += can
 	shop_buy_ms = int(Time.get_ticks_msec())
@@ -5140,15 +5139,6 @@ func try_top_up(kind: int) -> void:
 		shop_msg += "  (all the purse would take)"
 	shop_msg_ms = int(Time.get_ticks_msec())
 	shop_msg_warn = false
-	if not was and available(kind):
-		offer_prop_tutorial(kind)
-
-
-func offer_prop_tutorial(kind: int) -> void:
-	# the first time a new prop becomes juggle-able, queue its hands-on lesson. It is
-	# routed through the same queue every other unlock uses, so the hub's LEARN row
-	# offers it (rather than yanking the player out of the shop mid-purchase).
-	queue_lesson("prop_%d" % kind)
 
 
 # =============================================================================
@@ -5434,16 +5424,15 @@ func trick_lesson_steps(t: int) -> Array:
 		"toggle":
 			out.append(tut_beat("Switch it on.  [%s]" % kb, "trick_on", 1, 3,
 				{"trick": t, "prompt": "trick", "key": kb}))
-			out.append(tut_beat("Now catch four with it running - watch the weave change shape.",
-				"catch", 4, 3, {"trick": t, "prompt": "catch"}))
+			out.append(two_cycle_lesson_beat("Put all three up and hold the changed weave for two full cycles.",
+				3, {"trick": t, "trick_running": true}))
 			out.append(tut_beat("And switch it off again. One press on, one press off - that is the whole toggle.  [%s]" % kb,
 				"trick_off", 1, 3, {"trick": t, "prompt": "trick", "key": kb}))
 		"arm":
 			out.append(tut_beat("Arm it, then throw. Only that one next throw carries it, so it is a fresh press every time.  [%s]" % kb,
 				"trick_use", 2, 3, {"trick": t, "prompt": "trick", "key": kb}))
 		_:  # live (Spin): acts on the balls already airborne
-			out.append(tut_beat("Get all three weaving first - it acts on what is already in the air.",
-				"catch", 2, 3, {"prompt": "catch"}))
+			out.append(two_cycle_lesson_beat("Put all three up and hold two full cycles first - it acts on what is already in the air.", 3))
 			out.append(tut_beat("Now call it, and catch through the turn.  [%s]" % kb,
 				"trick_use", 2, 3, {"trick": t, "prompt": "trick", "key": kb}))
 	out.append(tut_say("%s swaps which trick %s carries, whenever you are juggling." % [kcy, kb]))
@@ -5451,15 +5440,22 @@ func trick_lesson_steps(t: int) -> Array:
 
 
 func count_lesson_steps(n: int) -> Array:
-	# a new ball count, spoken (see trick_lesson_steps for why the intro card and the three-pass
-	# ladder went). Whatever pattern is already running keeps running; Cascade reads either way
-	# (crossing odd, same-hand even), so a count change never strands it.
+	# Only four balls is taught as a count milestone. The guided beat opens with every ball
+	# in the air, then pauses at each arrival for catch-then-throw, for two complete cycles.
 	return [
 		tut_say("Your Strength carries another one. That makes %d." % n),
-		tut_say("More props climb higher and move faster. Throw a touch higher than feels right."),
-		tut_beat("Keep it going: ten clean catches.", "catch", 10, n, {"prompt": "catch"}),
+		tut_say("Put all four up first. Once your hands are empty, catch each arrival and throw it straight back."),
+		two_cycle_lesson_beat("Two full cycles: all four up, then catch and throw each one.", n),
 		tut_say("%s and %s step the count down and up whenever you are practising, so you can always drop back to a load you can hold." % [String(k_count()[0]), String(k_count()[1])]),
 	]
+
+
+func two_cycle_lesson_beat(line: String, n: int, extra: Dictionary = {}) -> Dictionary:
+	var rules := {"prompt": "catch", "guide": true, "juggle": true, "fresh": true,
+		"style": TUT_ADVANCED, "sequence": true}
+	for key in extra:
+		rules[key] = extra[key]
+	return tut_beat(line, "catch", n * 2, n, rules)
 
 
 func pattern_lesson_steps(p: int) -> Array:
@@ -5476,7 +5472,8 @@ func pattern_lesson_steps(p: int) -> Array:
 	return [
 		tut_say("%s. %s" % [nm, desc]),
 		tut_say("A pattern is the whole shape of the juggle, not a flourish: it needs no timing of its own, it just changes where every throw goes."),
-		tut_beat("Try it: eight clean catches.", "catch", 8, n, {"pattern": p, "prompt": "catch"}),
+		two_cycle_lesson_beat("Put all three up, then catch and throw each arrival for two full cycles.",
+			n, {"pattern": p}),
 		# the last beat TEACHES the key that owns patterns: one press visibly hands the routine
 		# back to the plain weave. The lesson never touches pattern_sel, so what the player chose
 		# before the lesson is exactly what they keep after it.
@@ -5556,7 +5553,8 @@ func tut_setup_step() -> void:
 	# clean, fully-held table rather than topping up mid-air (Louis): adding a ball to a
 	# hand that a live ball is already dropping into made the current one uncatchable -
 	# a forced drop right at "two balls now". Same count (a trick/pattern drill) flows on.
-	var fresh := balls.is_empty() or prop_type != want_prop or balls.size() != want_n
+	var fresh := bool(step.get("fresh", false)) or balls.is_empty() \
+		or prop_type != want_prop or balls.size() != want_n
 	# ...AND NOBODY IS HANDED THE CONTROLS MID-FLIGHT (2026-07-31, Louis: "there was also a
 	# rule about not giving control to the player while any balls are in the air"). A `free`
 	# beat is the one place the helping stops - no guard, no stopped world, a drop is real -
@@ -5590,7 +5588,8 @@ func tut_setup_step() -> void:
 	# otherwise the player's one press flips it back ON and the step cannot complete
 	if step.has("trick"):
 		trick_sel = int(step["trick"])
-		toggle_on = trick_sel if String(step["goal"]) == "trick_off" else -1
+		toggle_on = trick_sel if String(step["goal"]) == "trick_off" \
+			or bool(step.get("trick_running", false)) else -1
 		trick_primed = false
 		tennis_ball = null
 	if fresh:
@@ -6383,6 +6382,7 @@ func tut_maintain() -> void:
 		match String(tut_step_data().get("goal", "")):
 			"press_r": tut_demo_reset()
 			"press_p": tut_demo_pattern_off()
+			"trick_on", "trick_off": on_trick()
 			"hand":
 				# the autoplayer has no arrow keys either: it answers the dominant-hand
 				# question the same way it mimes R and P, through the state the real key
@@ -6422,6 +6422,9 @@ func tut_maintain() -> void:
 func tut_finish() -> void:
 	if _demo:
 		print("TUTTRACE finished id=%s tick=%d" % [tut_id, tick])
+	if _tutcheck:
+		get_tree().quit()
+		return
 	var was_basics := tut_id == "balls"
 	var was_prop_lesson := tut_id.begins_with("prop_")
 	tut_active = false
@@ -10886,11 +10889,11 @@ func queue_lesson(id: String) -> bool:
 
 
 func check_ball_unlock(prev_max: int) -> void:
-	# max_balls() grows silently at Strength 12/20/30; catch each crossing and queue the
-	# lesson that teaches the new, faster, higher count (a genuine content hole before)
-	var now := max_balls()
-	if now > prev_max:
-		queue_lesson("count_%d" % now)
+	# Four BALLS is the one count milestone that needs a lesson. Higher counts are the
+	# same grammar with a harder load, and buying a different prop does not re-teach it.
+	var now := maxi(MIN_BALLS, max_count(PROP_BALLS))
+	if prev_max < 4 and now >= 4:
+		queue_lesson("count_4")
 
 
 func lesson_title(id: String) -> String:
@@ -11794,7 +11797,7 @@ func prop_hit_scale(_kind: int) -> float:
 func invest(which: String, defer_save: bool = false) -> void:
 	if points <= 0:
 		return
-	var prev_max := max_balls()   # Strength may cross a ball-count gate; catch it below
+	var prev_max := maxi(MIN_BALLS, max_count(PROP_BALLS))
 	# a capped stat refuses the point instead of eating it (Speed always did; the
 	# others used to consume the point and change nothing)
 	match which:
@@ -11933,7 +11936,7 @@ func sheet_repeat(dt: float) -> void:
 
 
 func _adjust(which: String, delta: int) -> void:
-	var prev_max := max_balls()
+	var prev_max := maxi(MIN_BALLS, max_count(PROP_BALLS))
 	match which:
 		"acc":
 			accuracy = clampi(accuracy + delta, 1, ACC_CAP)
@@ -12058,7 +12061,12 @@ func load_progress() -> void:
 		if pt is Array:
 			pending_tuts.clear()
 			for v in (pt as Array):
-				pending_tuts.append(_migrate_lesson_id(String(v)))
+				var lesson_id := _migrate_lesson_id(String(v))
+				if lesson_id.begins_with("prop_"):
+					continue
+				if lesson_id.begins_with("count_") and lesson_id != "count_4":
+					continue
+				pending_tuts.append(lesson_id)
 		# the standing ante per venue (complete acts there): the raised bar the venue
 		# remembers between visits. The rest of the act is per-night and unsaved.
 		var an: Variant = cf.get_value("prog", "ante", [])
