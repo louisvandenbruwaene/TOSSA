@@ -4138,12 +4138,7 @@ func play_venue() -> int:
 
 func too_tired() -> bool:
 	# STAMINA is the day's limiter now (Louis: the day is spent when you have no
-	# strength left, not when a counter says so). Work as long as you can stand -
-	# or, with the Energy-Drink Helmet stocked, as long as the next dip has a
-	# real drink behind it: spend_stamina pours one the instant it's needed, so
-	# a stocked player is never actually stuck here, just reading a stale number.
-	if wearing("helmet") and energy_drinks > 0:
-		return false
+	# strength left, not when a counter says so). Work as long as you can stand.
 	return stamina < TIRED_FLOOR
 
 
@@ -4355,27 +4350,12 @@ func day_actions() -> Array[Dictionary]:
 		out.append({"id": "egg", "grp": "rest", "icon": "egg", "name": "EAT a raw egg",
 			"cost": "own %d" % have(PROP_EGGS), "ok": not full, "why": "not hungry yet" if full else "",
 			"sub": "no pay and no Strength tick: just +%d stamina, and one fewer egg to juggle." % int(EGG_EAT_STAM)})
-	if true:
-		# DRINKS BELONG WHERE THE RECOVERY IS (2026-07-28, Louis, describing them as
-		# bought "in the resting area"). They are stocked from the shop too and always
-		# were, but everything else that puts stamina back - the meal, the bed, the pie,
-		# the tomato, the egg - is on this drawer, and a restock is the same errand as a
-		# meal. It costs no day segment: it is a case of cans, not an evening out.
-		out.append({"id": "drinks", "grp": "rest", "icon": "drink", "name": "STOCK Energy Drinks",
-			"cost": commafy(ENERGY_DRINK_BATCH_COST), "currency": true,
-			"ok": money >= ENERGY_DRINK_BATCH_COST,
-			"why": "not enough in your purse" if money < ENERGY_DRINK_BATCH_COST else "",
-			"sub": "%d cans for the helmet, %d in reserve now. Each is +%d%% stamina, poured the moment you run dry." % [
-				ENERGY_DRINK_BATCH, energy_drinks, int(ENERGY_DRINK_STAMINA_PCT * 100.0)]})
 	out.append({"id": "shop", "grp": "prep", "icon": "shop", "name": "SHOP",
 		"cost": "", "ok": true, "why": "",
-		"sub": "props and gear. A new prop teaches itself when you buy it."})
+		"sub": "ordinary and glowing props for your next act."})
 	out.append({"id": "skills", "grp": "prep", "icon": "book", "name": "SKILLS",
 		"cost": "", "ok": true, "why": "",
 		"sub": "every trick and pattern you know, and the keys that pull it off."})
-	out.append({"id": "tailor", "grp": "prep", "icon": "hanger", "name": "TAILOR",
-		"cost": "", "ok": true, "why": "",
-		"sub": "dress for the stage: a suit from any house you have played, and every piece you own."})
 	# STATS, REACHABLE FROM THE HUB (2026-07-29, Louis: "i can't reach it at the moment
 	# without being in training or performance"). The character sheet (Tab) has always
 	# opened over a live act, which is exactly where it is least useful to read - you
@@ -4625,14 +4605,6 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 			try_buy_pie()
 			if shop_msg != "":
 				set_day_msg(shop_msg)
-		"drinks":
-			# a restock, not an errand: no vignette and no day segment, for the same
-			# reason the shop itself opens instantly. try_buy_drinks owns the whole
-			# transaction (price, cap, message, save), so the hub and the shop counter
-			# cannot end up charging differently for the same case of cans.
-			try_buy_drinks()
-			if shop_msg != "":
-				set_day_msg(shop_msg)
 		"pie", "egg", "tomato":
 			# EVERY thing you eat gets its beat of picture now (2026-07-27, Louis: only
 			# sleeping had one). Same contract as eat/inn above - the vignette plays, and
@@ -4644,14 +4616,6 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 		"skills":
 			skills_open = true          # a reference card, no cost, no vignette
 			skills_sel = 0
-			play_sfx("ui2", -13.0)
-		"tailor":
-			# same shape as SKILLS: a room you look at, not an errand you spend the day on.
-			# Dressing costs nothing and takes no segment - it would be a strange game that
-			# charged an evening for putting a hat on.
-			tailor_open = true
-			tailor_sel = 0
-			tailor_col = 0
 			play_sfx("ui2", -13.0)
 		"stats":
 			# same shape again: a reference screen, no cost, no vignette. `sheet_open` is
@@ -11024,16 +10988,8 @@ func energy_mult() -> float:
 
 
 func spend_stamina(amount: float) -> void:
-	# every throw and catch's stamina cost funnels through here (Louis,
-	# 2026-07-19): a well-stocked Energy-Drink Helmet auto-pours as many drinks
-	# as it takes the INSTANT stamina would actually hit empty, so a player who
-	# bought in bulk never sees the "hands cannot close" wall at all - that is
-	# the whole point of stocking up. Never fires without the helmet, and never
-	# invents stamina beyond what real owned drinks can cover.
+	# Every throw and catch's stamina cost funnels through here.
 	stamina = maxf(0.0, stamina - amount)
-	while stamina <= 0.0 and wearing("helmet") and energy_drinks > 0:
-		energy_drinks -= 1
-		stamina = minf(stamina_max, stamina + stamina_max * ENERGY_DRINK_STAMINA_PCT)
 
 
 #endregion
@@ -16077,6 +16033,10 @@ func wearing(id: String) -> bool:
 		# seam key is never reached and its art can never be derived. Hiding the winner is
 		# the only way to photograph it.
 		return id != _charhide
+	# Temporarily retired while the Tailor is redesigned. Keep the ownership data and
+	# authored sprites intact, but neither draw nor apply buffs from headwear or eyewear.
+	if id in ["hat", "glasses", "helmet"]:
+		return false
 	return worn_stage(id) >= 0
 
 
@@ -25731,7 +25691,7 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 		{"title": "YOUR DAY", "head": "THREE CHOICES, THEN NIGHT FALLS", "rows": [
 			["star", "TONIGHT", "perform for pay and reputation, practise safely, or play the daily"],
 			["moon", "REST", "food restores stamina; the inn ends the day and fully restores it"],
-			["bag", "PREPARE", "buy equipment, choose skills and patterns, tailor an outfit, spend points"],
+			["bag", "PREPARE", "buy props, browse skills and patterns, and spend stat points"],
 		], "foot": "Actions show their cost before you commit. Drawers are free to open and inspect."},
 		{"title": "HOW YOU GROW", "head": "EVERY SYSTEM SCALES FROM SOMETHING VISIBLE", "rows": [
 			["star", "REPUTATION", "opens larger venues; harder rooms pay more and ask for stronger acts"],

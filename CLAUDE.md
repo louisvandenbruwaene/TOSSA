@@ -761,9 +761,9 @@ review" for the accept/reject examples and why.
 - **Economy:** The flower mark is the currency unit in player-facing UI; never spell out a currency
   name or abbreviate it. The crowd throws
   them live during a good run; tomatoes are the failure-currency (stamina only, capped kept).
-- **Day loop:** TONIGHT (perform/practice/daily) / REST (meal/inn/pie/energy drinks) / PREPARE
-  (shop/tailor/skills) drawers. Tailor is a real loadout - wearing gates a per-house bonus,
-  8 pieces x 7 cuts, one piece per category enforced on load.
+- **Day loop:** TONIGHT (perform/practice/daily) / REST (meal/inn/pie) / PREPARE
+  (shop/skills/stats) drawers. Tailor, its wardrobe art/data, and energy-drink save data remain
+  dormant for a later redesign; hats, glasses, and the Energy Helmet must not draw or grant buffs.
 - **Venues:** Backyard→Street→Theatre→Circus→Championship→World Arena (the win, `TOP_VENUE`)→
   Midnight Show (bonus 7th, gated on having won + Reputation 6000).
 - **Records/pay/rep:** per-venue assisted + Purist boards; pay scales with surviving score; rep
