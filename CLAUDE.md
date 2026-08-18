@@ -61,6 +61,17 @@ Codex improvements:
   to smaller secondary lockups, but the title itself uses the shared ball/ring/club sources so an asset
   improvement cannot silently disappear behind an old bake. This includes the two A-crossbar balls;
   they go through `prop_big/ball`, exactly like both S letters, rather than `cap_ball`.
+- **Sprint records are deterministic without touching career saves:** the route owns a fixed seed,
+  freezes its clock at failure or the World Arena clear, and stores only the fastest completed route
+  in `tossa_sprint_best.json`. Playback is cyan accepted-input cues; it never drives the live juggler.
+- **A venue taste is a stated, deterministic patience reward:** each rival's establishing-card line
+  names the exact behavior its crowd rewards. It may warm the room slightly but never changes flight
+  physics, catch odds, or score. Pattern briefs must be ownership-gated so an impossible one cannot roll.
+- **Knife, torch, and chainsaw drops require recovery:** they end the act immediately and empty stamina,
+  forcing food or sleep. Their presentation stays non-graphic and Reduced Motion removes the pulse.
+  Flowers are not also confiscated; one consequence is enough.
+- **Save migrations have fixture-backed pure helpers:** migration logic belongs in
+  `scripts/TossaSaveSchema.gd`; `Game.gd` owns file IO and applies the translated values.
 
 ## PIXEL ART (read this before touching anything visual)
 
