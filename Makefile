@@ -1,4 +1,4 @@
-.PHONY: setup validate quick-validate test test-format test-catalog test-replay test-save-schema run editor scene screenshot profile format lint clean reimport export help
+.PHONY: setup validate quick-validate test test-format test-catalog test-replay test-save-schema test-geometry run editor scene screenshot profile format lint clean reimport export help
 
 help:
 	@echo "TOSSA dev commands:"
@@ -10,6 +10,7 @@ help:
 	@echo "  make test-catalog   run immutable catalog-contract tests"
 	@echo "  make test-replay    run ghost-replay recording-contract tests"
 	@echo "  make test-save-schema run save-migration fixture tests"
+	@echo "  make test-geometry  run flight/collision geometry contract tests"
 	@echo "  make run            launch TOSSA normally (windowed, real audio)"
 	@echo "  make editor         open the Godot editor"
 	@echo "  make scene ARGS='--day work'   launch windowed+muted at a specific dev-flag state"
@@ -43,6 +44,9 @@ test-replay:
 
 test-save-schema:
 	godot --headless --path . --script tests/test_save_schema.gd
+
+test-geometry:
+	godot --headless --path . --script tests/test_geometry.gd
 
 run:
 	scripts/run_game.sh
