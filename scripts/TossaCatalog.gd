@@ -56,6 +56,8 @@ const ENCORES := [
 	{"id": "scared", "name": "A Scared Audience", "desc": "Blades and flames frighten this room. Only balls, eggs and rings score."},
 	{"id": "fancy", "name": "A Fancy Audience", "desc": "A dress-circle crowd, and eggs are a busker's gag. Eggs score nothing tonight."},
 	{"id": "study", "name": "The Study", "desc": "The house booked a Cascade. Only Cascade routines score tonight."},
+	{"id": "lines", "name": "The Lines", "desc": "The house wants strict vertical control. Only Columns routines score tonight."},
+	{"id": "overhand", "name": "Over the Top", "desc": "This crowd wants an overhand pattern: Half Shower, Shower, Reverse Cascade, or Tennis."},
 	{"id": "critic", "name": "The Critic", "desc": "A late catch breaks the spell: your run starts over from nothing. It costs you nothing else."},
 	{"id": "critic_hard", "name": "The Critic, Twice", "desc": "Anything short of a Perfect breaks the spell and your run starts over from nothing."},
 	{"id": "purist_acc", "name": "Purist: Hands", "desc": "Your trained Accuracy counts for nothing tonight. Raw hands."},
@@ -65,3 +67,15 @@ const ENCORES := [
 ]
 
 const PURIST_IDS := ["purist_acc", "purist_str", "purist_end", "purist_spd"]
+
+
+# Named rivals advertise these exact deterministic applause preferences on the venue card.
+const VENUE_FLAVOUR := [
+	{"rival": "Mara Bell", "taste": "clean catches and a steady first show", "trigger": "perfect"},
+	{"rival": "The Lark", "taste": "bold height over safe little throws", "trigger": "height"},
+	{"rival": "Viktor Vale", "taste": "a composed Cascade under bright lights", "trigger": "cascade"},
+	{"rival": "Rosa Ribbons", "taste": "showmanship and dangerous props", "trigger": "danger"},
+	{"rival": "Kai Mercury", "taste": "clean patterns and nerve", "trigger": "pattern"},
+	{"rival": "Aurelia Voss", "taste": "a record-load routine worth travelling for", "trigger": "record"},
+	{"rival": "Nocturne", "taste": "control when the room goes dark", "trigger": "dark"},
+]
