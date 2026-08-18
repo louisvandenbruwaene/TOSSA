@@ -66,7 +66,10 @@ const ENCORES := [
 	{"id": "purist_spd", "name": "Purist: Nerve", "desc": "Your Speed counts for nothing tonight. No slow motion at all."},
 ]
 
-const PURIST_IDS := ["purist_acc", "purist_str", "purist_end", "purist_spd"]
+# Only hand timing and time assistance may be stripped. Strength gates what can be
+# fielded and Endurance gates how long an act can physically last, so neither belongs
+# in a booking condition.
+const PURIST_IDS := ["purist_acc", "purist_spd"]
 
 
 # Named rivals advertise these exact deterministic applause preferences on the venue card.
