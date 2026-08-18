@@ -1,4 +1,4 @@
-.PHONY: setup validate quick-validate test test-format test-catalog run editor scene screenshot profile format lint clean reimport export help
+.PHONY: setup validate quick-validate test test-format test-catalog test-replay run editor scene screenshot profile format lint clean reimport export help
 
 help:
 	@echo "TOSSA dev commands:"
@@ -8,6 +8,7 @@ help:
 	@echo "  make test           alias for validate (see scripts/test.sh for why)"
 	@echo "  make test-format    run pure formatting-contract tests"
 	@echo "  make test-catalog   run immutable catalog-contract tests"
+	@echo "  make test-replay    run ghost-replay recording-contract tests"
 	@echo "  make run            launch TOSSA normally (windowed, real audio)"
 	@echo "  make editor         open the Godot editor"
 	@echo "  make scene ARGS='--day work'   launch windowed+muted at a specific dev-flag state"
@@ -35,6 +36,9 @@ test-format:
 
 test-catalog:
 	godot --headless --path . --script tests/test_catalog.gd
+
+test-replay:
+	godot --headless --path . --script tests/test_replay.gd
 
 run:
 	scripts/run_game.sh

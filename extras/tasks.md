@@ -29,8 +29,8 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   unreadable random hazards.
 - [~] **Increase repeatable performance variety.** The Encore deck now includes The Study, a
   clear Cascade-only pattern brief alongside the existing prop-specific audiences. Add more
-  optional pattern briefs, then deterministic ghost replays once the recording contract is
-  specified.
+  optional pattern briefs. The future ghost format now has a versioned, tested pure recording
+  contract; wire accepted act actions into it before implementing playback.
 - [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
   behavior, documented collision combinations, save migrations, and focused screenshots.
 
