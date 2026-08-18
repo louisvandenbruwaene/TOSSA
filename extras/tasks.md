@@ -27,8 +27,10 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
   named rival and states what its crowd values. Build the first explicit, deterministic audience
   response on the existing Encore/venue structure; do not perturb flight physics or introduce
   unreadable random hazards.
-- [ ] **Increase repeatable performance variety.** Add prop- and pattern-specific challenges,
-  then deterministic ghost replays once the recording contract is specified.
+- [~] **Increase repeatable performance variety.** The Encore deck now includes The Study, a
+  clear Cascade-only pattern brief alongside the existing prop-specific audiences. Add more
+  optional pattern briefs, then deterministic ghost replays once the recording contract is
+  specified.
 - [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
   behavior, documented collision combinations, save migrations, and focused screenshots.
 
