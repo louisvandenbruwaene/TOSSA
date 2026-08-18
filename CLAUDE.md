@@ -58,9 +58,9 @@ Codex improvements:
 - **First-performance HUD tour is progressive:** it walks stage, stamina, score flower, crowd,
   routine, then stopping. The multiplier readout was removed; the flower stays hidden until its page
   and its completed bloom is yellow. Tutorial key names use yellow bracket styling consistently.
-- **Sprint lives inside Play:** the title menu has one Play entry. After choosing a save and
-  difficulty, a dedicated Normal Career / Sprint screen makes the run type explicit. Sprint stays
-  transient and never loads or overwrites the selected career slot.
+- **Difficulty and run type belong to the save file:** only a newly created slot asks for difficulty
+  and then Normal Career / Sprint. Existing slots launch directly, Settings cannot change difficulty,
+  and a Sprint slot keeps only its immutable identity while each timed attempt remains disposable.
 - **The controls screen is a complete two-device reference:** keyboard and gamepad live in parallel
   cards and remain readable regardless of which one has focus. Fixed gamepad hand controls are shown
   alongside the two remappable actions; secondary keyboard controls use keycaps rather than prose.
