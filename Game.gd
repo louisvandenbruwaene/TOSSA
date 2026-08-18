@@ -3953,8 +3953,9 @@ func encore_pool(venue: int) -> Array[int]:
 	#                     and owning a SINGLE club is not enough to field a routine with).
 	#   Scared Audience - the mirror image, and the mirror is free: everyone owns balls.
 	#   Blackout        - ordinary props are now genuinely INVISIBLE in it (2026-07-29), not
-	#                     merely dim, so it needs three glow-in-the-dark balls or torches or
-	#                     it is not hard, it is impossible. Same shape of gate, same reason.
+	#                     merely dim, so it starts at the Championship and needs three
+	#                     glow-in-the-dark balls or torches. Earlier rooms teach darkness;
+	#                     they do not spring a blind act on an unfinished collection.
 	var pool: Array[int] = []
 	if venue < 1:
 		return pool
@@ -3966,7 +3967,10 @@ func encore_pool(venue: int) -> Array[int]:
 			continue
 		if id == "fire" and (venue < 3 or not has_danger):
 			continue
-		if id == "blackout" and not can_juggle_glowing():
+		# Midnight already has this rule permanently, so rolling the named Encore there
+		# would spend the night's only challenge slot on no change at all.
+		if id == "blackout" and (venue < TOP_VENUE - 1 or venue >= MAX_VENUE \
+				or not can_juggle_glowing()):
 			continue
 		if id == "study" and venue < 2:
 			continue   # a first-stage pattern brief should arrive after the player has met P
@@ -10220,6 +10224,13 @@ func is_dark_context() -> bool:
 	return encore_on("blackout") or encore_on("fright") or run_venue == MAX_VENUE
 
 
+func full_dark_stage() -> bool:
+	# Blackout is a late optional challenge; the Midnight Show is this dark by identity.
+	# Keep this stricter than is_dark_context(): Stage Fright removes markers, but does not
+	# erase the house or ordinary props. Midnight and Blackout do both.
+	return encore_on("blackout") or run_venue == MAX_VENUE
+
+
 func is_picky_crowd() -> bool:
 	# a hard-to-please room: The Critic scores only Perfects, The Hecklers lose patience
 	# fast. A dangerous prop (knives) is what wins a crowd like this over.
@@ -13432,14 +13443,13 @@ func _draw_screen() -> void:
 	draw_balls_in_flight(true)   # Behind-the-Back balls still BEHIND the body
 	draw_juggler(s)
 	draw_tomato_stains()   # what the room landed on him, worn on top of the costume
-	# ...and in a Blackout the performer is in the same dark as his room. Drawn HERE, so
+	# ...and on a fully dark stage the performer is in the same dark as his room. Drawn HERE, so
 	# it dims the backdrop and the figure (and the props in his hands) but nothing after
-	# it - the airborne props keep every bit of the little glow they have. He stays
-	# readable rather than going black: the challenge is finding the PROPS, and a player
-	# who cannot see where the hands are is not being challenged, only blindfolded.
-	# Skipped entirely when the Glow Kit is worn, which is the whole point of owning it.
-	if encore_on("blackout") and not glow_props_lit():
-		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.42))
+	# it - airborne and held glow stock keeps its full phosphor. The figure remains barely
+	# readable for timing, while owning glowing props never turns the room lights back on.
+	if full_dark_stage():
+		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.58))
+		draw_dark_held_props()
 	draw_targets()
 	draw_balls_in_flight()
 	draw_thrown()          # what the crowd threw: flowers (or tomatoes) at the feet
@@ -13755,17 +13765,17 @@ func draw_backdrop(s: Vector2) -> void:
 	if game_state == ST_PLAY and tick - last_drop_tick < 26 and tick - last_drop_tick >= 0:
 		var da := 0.12 * (1.0 - float(tick - last_drop_tick) / 26.0)
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.35, 0.45, 0.65, da))
-	# BLACKOUT ACTUALLY CUTS THE LIGHTS (2026-07-27, Louis: the challenge "is too easy: i
-	# just see a different color ball"). He was right, and the reason is worse than a
+	# FULL DARKNESS ACTUALLY CUTS THE LIGHTS (2026-07-27, Louis on Blackout: "is too easy:
+	# i just see a different color ball"). He was right, and the reason is worse than a
 	# tuning miss: the Encore never darkened the house AT ALL. `spot` is read straight
-	# from venue_data with no override, so a Blackout at the Circus ran on the Circus's
+	# from venue_data with no override, so an old Blackout at the Circus ran on the Circus's
 	# full stage lighting and the only thing that changed was the colour of the props -
 	# which is exactly what he described. The room goes dark HERE, over the finished
 	# backdrop and everything in it, and the props are drawn afterwards, so their glow is
 	# genuinely the only light in the picture instead of a green repaint of a lit one.
-	# The performer is deliberately left legible enough to time a catch against: the
-	# challenge is finding the props, not guessing where his hands are.
-	if encore_on("blackout"):
+	# Midnight uses the same veil permanently. The performer is deliberately left legible
+	# enough to time a catch against: the challenge is finding props, not guessing hands.
+	if full_dark_stage():
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.012, 0.014, 0.022, 0.88))
 
 
@@ -16473,6 +16483,23 @@ func draw_hand(h: int) -> void:
 		draw_prop(st[i], bp + Vector2(0, -3 - float(i) * 6.0))
 
 
+func draw_dark_held_props() -> void:
+	# draw_juggler necessarily puts held props down with the hands, before the darkness veil.
+	# Repaint only their dark-stage representation afterwards so phosphor and fire stay as
+	# crisp in a palm as they are in flight; ordinary props still draw nothing here.
+	for h in [LEFT, RIGHT]:
+		var pos: Vector2 = fig_hand_pos(h)
+		var st: Array = stack(h)
+		for i in st.size():
+			var bp := pos
+			if i == st.size() - 1 and st.size() > 1:
+				var settle := clampf(float(tick - catch_flash[h]) / CATCH_SETTLE_TICKS, 0.0, 1.0)
+				if settle < 1.0:
+					bp = flight_pos(st[i]).lerp(pos,
+						1.0 - (1.0 - settle) * (1.0 - settle))
+			draw_prop(st[i], bp + Vector2(0, -3 - float(i) * 6.0))
+
+
 func draw_targets() -> void:
 	# a landing ring brightens as a catch nears, and its COLOUR teaches the timing,
 	# all within the game's warm gold family (Louis: no green on stage): faint gold
@@ -16564,7 +16591,7 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 			# the difference between a prop you can READ and one you can only find (see
 			# `lit`), which is a better thing to sell than a mercy on one Encore. A TORCH
 			# is still the exception the Encore is built around: it carries its own fire.
-			if encore_on("blackout"):
+			if full_dark_stage():
 				var dark_pos := flight_pos(b)
 				# **AND AN UNLIT PROP IS NOW SIMPLY NOT THERE** (2026-07-29, Louis: "make
 				# normal objects (not glow in the dark) completely invisible - so it is
@@ -16862,7 +16889,7 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	# fallen ones too - did not, so a ball turned green in the air and back to red the
 	# instant it was caught. Handled at the top, before any of the halo work below, since
 	# none of that applies when the house is dark.
-	if encore_on("blackout"):
+	if full_dark_stage():
 		var bsc := prop_scale(b.kind)
 		if b.kind == PROP_TORCHES:
 			draw_flame_in_dark(b, pos)   # fire is fire, in the hand as in the air

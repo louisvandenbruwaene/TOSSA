@@ -768,7 +768,9 @@ review" for the accept/reject examples and why.
   (shop/skills/stats) drawers. Tailor, its wardrobe art/data, and energy-drink save data remain
   dormant for a later redesign; hats, glasses, and the Energy Helmet must not draw or grant buffs.
 - **Venues:** Backyard→Street→Theatre→Circus→Championship→World Arena (the win, `TOP_VENUE`)→
-  Midnight Show (bonus 7th, gated on having won + Reputation 6000).
+  Midnight Show (bonus 7th, gated on having won + Reputation 6000). Midnight is permanently
+  near-black: scenery and performer stay barely visible while charged props read at full strength.
+  The optional Blackout Encore uses the same visual rule and cannot roll before Championship.
 - **Records/pay/rep:** per-venue assisted + Purist boards; pay scales with surviving score; rep
   swings on goals reached.
 - **Purist is one paired booking:** P binds Accuracy and Speed together. Individual binds do not
