@@ -18696,7 +18696,9 @@ func draw_results(font: Font, s: Vector2) -> void:
 	# card used to show only what was scored and left the player to guess the cause.
 	# The grade badge sits far right, so this line has the left of the card to itself.
 	var ft := fail_text()
-	if not complete and String(ft[0]) != "":
+	if sprint_active and complete:
+		draw_string(font, Vector2(lx, py + 96.0), "SPRINT TIME  " + sprint_clock_text(), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.72, 0.92, 1.0))
+	elif not complete and String(ft[0]) != "":
 		draw_string(font, Vector2(lx, py + 96.0), String(ft[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(1.0, 0.55, 0.42))
 	if age >= 64:
 		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
