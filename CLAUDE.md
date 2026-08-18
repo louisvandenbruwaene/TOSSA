@@ -735,6 +735,9 @@ review" for the accept/reject examples and why.
   winning a goal. `TossaBalance.gd` owns the tested ladder: Backyard final 1,920 at the expected
   build, rising to about 1.02E25 at the Midnight Show. `SCORE_CEIL` (1e300) keeps everything off
   `INF`; `score_text` switches to E-notation past a million.
+- **Starting stamina covers the opening house:** capacity is `200 + 8×Endurance`, still ending at
+  1,000 at Endurance 100. A perfect three-ball act can survive the Backyard's 30-second final clock;
+  old saves retain their stamina percentage when migrating from the former `100 + 9×` curve.
 - **Props:** balls/rings/clubs/knives/torches/eggs/chainsaw. Cost to throw = `PROP_STR_UNIT` x
   count (one rule); `PROP_SIG` is a score EXPONENT; `pwin` shifts all three catch bands together.
 - **Patterns:** Cascade, Columns, Half Shower, Shower, Reverse Cascade, Tennis. Arms reach exactly

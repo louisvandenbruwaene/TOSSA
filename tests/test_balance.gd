@@ -52,6 +52,20 @@ func _init() -> void:
 			or not TOSSA_BALANCE.goal_ready(1.0, 1.0, true, run_floor, first_goal):
 		push_error("A goal must require score, clock, and sustained run together.")
 		failed += 1
+	# Three tap-height balls produce 3 / (84 / 120) catches a second. Each complete
+	# exchange costs one stamina to throw plus 0.4 to catch. A fresh career must survive
+	# the Backyard's 30-second final clock without requiring gear or an imperfect act.
+	var backyard_perfect_cost := 30.0 * (3.0 / (84.0 / 120.0)) * 1.4
+	if TOSSA_BALANCE.stamina_capacity(0) < backyard_perfect_cost:
+		push_error("Starting stamina must cover a perfect Backyard final-goal act.")
+		failed += 1
+	if not is_equal_approx(TOSSA_BALANCE.stamina_capacity(100), 1000.0):
+		push_error("The stamina rebalance must preserve the Endurance-100 cap of 1,000.")
+		failed += 1
+	if not is_equal_approx(TOSSA_BALANCE.migrate_legacy_stamina(100.0, 0), 200.0) \
+			or not is_equal_approx(TOSSA_BALANCE.migrate_legacy_stamina(50.0, 0), 100.0):
+		push_error("Old saves must preserve their stamina percentage on the new curve.")
+		failed += 1
 	if failed == 0:
 		print("TossaBalance: venue curve and sustained-run goal gate verified")
 	quit(failed)
