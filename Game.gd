@@ -1360,6 +1360,7 @@ var exhausted := false        # the collapse was caused by empty stamina: on ret
 # target on purpose). fail_text() turns it into words. Reset per SET, so the reason the
 # card shows is the one that actually ended the night.
 var fail_reason := ""
+var injury_prop := -1       # knife / torch / chainsaw drop; reset with each act
 # THE ACT'S CHALLENGES, a LIST since 2026-07-29 and no longer one index. Louis asked for the
 # four Purists to be combinable ("4 at a time can happen in midnight stage, 3 at a time the
 # stage before that..."), and one integer cannot hold four things. Everything reads it
@@ -4030,6 +4031,12 @@ func dangerous_prop(kind: int = -1) -> bool:
 	# a prop with an edge, a flame or a motor on it: clubs and heavier. The one place the
 	# game asks "would this frighten somebody", asked once so three Encores cannot disagree.
 	return prop_weight(kind) >= 3
+
+
+func injury_prop_kind(kind: int) -> bool:
+	# Clubs are theatrical danger but not an injury prop. These three carry the explicit
+	# recovery consequence promised by their blade, flame, or running motor.
+	return kind in [PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW]
 
 
 func encore_scores_run() -> bool:
@@ -9032,6 +9039,7 @@ func start_run(n: int) -> void:
 	hand_parked = [false, false]   # ...and both hands can throw again
 	set_collapsed = false
 	fail_reason = ""   # a fresh act has not failed yet
+	injury_prop = -1
 	running = false
 	started = false
 	# a WIND PURIST plays on a beginner's lungs: the stat is stripped for this act only, so
@@ -11127,9 +11135,9 @@ func resolve_act() -> void:
 	if _demo:
 		# dev: report the whole-act outcome, so --demo --booking is a one-shot end-to-end
 		# check of the resolve path (goals, stripping, pay, rep)
-		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s score=%s pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s reason=%s score=%s pay=%d rep=%+d record=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
-			score_text(score), last_pay, last_rep_delta, str(results_record), tick, run_flowers,
+			fail_reason, score_text(score), last_pay, last_rep_delta, str(results_record), tick, run_flowers,
 			run_tomatoes, ovation_bonus, peak_applause])
 		if daily_active:
 			print(daily_share)
@@ -12247,6 +12255,8 @@ func still_dropping() -> bool:
 func drop_ball(b: Ball, why: String) -> void:
 	if not balls.has(b):
 		return
+	var drop_pos := flight_pos(b)
+	var causes_injury := not tut_active and injury_prop_kind(b.kind)
 	# A DROP CLOSES THE RUN, and that is now the most expensive thing in the game: whatever the
 	# tricks multiplied this run to is banked at that value, and the next one opens at x1.
 	# Done FIRST, before anything else about the drop, so nothing can score into a run that is
@@ -12270,9 +12280,9 @@ func drop_ball(b: Ball, why: String) -> void:
 		tut_hold_abort()
 	if set_shake and not reduce_motion:
 		shake = 5.0
-	freeze = 1 if reduce_motion else 8   # a short hit-stop so the loss registers before play rolls on
-	spawn_parts(flight_pos(b), Color(0.75, 0.5, 0.4), 10, 2.6, "spark")
-	spawn_falling(flight_pos(b), b.kind, b.color)
+	freeze = 1 if reduce_motion else (24 if causes_injury else 8)
+	spawn_parts(drop_pos, Color(1.0, 0.52, 0.34) if causes_injury else Color(0.75, 0.5, 0.4), 10, 2.6, "spark")
+	spawn_falling(drop_pos, b.kind, b.color)
 	if b.kind == PROP_EGGS:
 		# a dropped egg breaks for good, so it leaves your stock (ideas.rtf). A lesson
 		# is practice, so a broken egg there is free (the mess shows when it LANDS).
@@ -12286,7 +12296,15 @@ func drop_ball(b: Ball, why: String) -> void:
 	add_popup(b.to_pos + Vector2(0, -6), why, Color(1.0, 0.32, 0.3))
 	# the collapse now has TWO triggers: an emptied crowd (below) and, new in Phase 2,
 	# the drop limit. Both funnel through start_collapse(). Training plays on.
-	if mode == MODE_PERFORM and not tut_active:
+	if causes_injury and mode in [MODE_PERFORM, MODE_TRAIN]:
+		injury_prop = b.kind
+		stamina = 0.0
+		exhausted = true
+		var injury_reason := "knife_injury" if b.kind == PROP_KNIVES else ("torch_injury" if b.kind == PROP_TORCHES else "chainsaw_injury")
+		add_popup(drop_pos + Vector2(0, -30), "ACT ENDS  -  RECOVERY REQUIRED", Color(1.0, 0.56, 0.34))
+		start_collapse(injury_reason)
+		save_progress()
+	elif mode == MODE_PERFORM and not tut_active:
 		if stamina <= 0.0:
 			# collapsing because you are SPENT, not because the crowd walked: remember it,
 			# so the day steers you to eat or sleep the moment this comes down (Louis)
@@ -12342,6 +12360,15 @@ func fail_text() -> Array:
 		"drops":
 			return ["YOU DROPPED IT ALL",
 				"%d drops, and this house allows %d." % [dropped, drop_limit()]]
+		"knife_injury":
+			return ["CUT HAND  -  THE ACT IS OVER",
+				"The hand is wrapped and your stamina is empty. Eat or sleep before performing again."]
+		"torch_injury":
+			return ["SINGED  -  THE ACT IS OVER",
+				"The flame caught too close. Your stamina is empty; cool off, eat, or sleep before the next booking."]
+		"chainsaw_injury":
+			return ["ARM STRAIN  -  THE ACT IS OVER",
+				"Stopping the running saw took everything left. Your stamina is empty; recovery comes before another booking."]
 		"bow":
 			return ["YOU BOWED OUT UNDER THE TARGET",
 				"you chose the bow before the number fell, so the night ends here. The crowd went home happy."]
@@ -18409,6 +18436,12 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				draw_arc(gp, 13.0 + float(age) * 0.7, 0.0, TAU, 24, Color(0.45, 0.95, 1.0, ga), 2.0)
 				draw_string(font, Vector2(gp.x - 44.0, gp.y - 20.0), sprint_ghost_kind[gh],
 					HORIZONTAL_ALIGNMENT_CENTER, 88.0, ps(11), Color(0.55, 0.96, 1.0, ga))
+	if injury_prop >= 0 and collapsing:
+		# One restrained colour beat, with no wound drawing. Reduced Motion holds a
+		# constant low-alpha wash; otherwise it breathes once behind the collapse copy.
+		var ic := Color(0.92, 0.25, 0.30) if injury_prop == PROP_KNIVES else (Color(1.0, 0.48, 0.18) if injury_prop == PROP_TORCHES else Color(0.72, 0.88, 0.92))
+		var ia := 0.055 if reduce_motion else 0.055 + 0.025 * sin(float(cine_tick) * 0.08)
+		draw_rect(Rect2(Vector2.ZERO, s), Color(ic.r, ic.g, ic.b, ia))
 
 	# THE COLLAPSE, as it happens: the act is coming down and the player is told the one
 	# reason WHY while the props are still in the air, which is the moment it lands
