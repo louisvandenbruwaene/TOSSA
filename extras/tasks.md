@@ -20,8 +20,9 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 - [ ] **Make the stage legible at native 1280×720.** Continue the HUD pass: task-critical
   secondary text, controls, timing grades, and the slow-motion indicator must remain readable
   without covering the performer or flight paths.
-- [ ] **Make the next career goal obvious after onboarding.** Surface the nearest meaningful
-  unlock (prop, pattern, venue, or stat requirement) directly in the day hub.
+- [x] **Make the next career goal obvious after onboarding.** The selected performance card
+  now surfaces the nearest unowned trick or pattern using the player’s real missing
+  requirements, alongside the existing next-venue reputation goal.
 - [ ] **Give venues distinct audience taste and a named rival.** Build on the existing Encore/
   venue structure; do not perturb flight physics or introduce unreadable random hazards.
 - [ ] **Increase repeatable performance variety.** Add prop- and pattern-specific challenges,
