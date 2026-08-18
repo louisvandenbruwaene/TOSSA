@@ -25,6 +25,11 @@ func _init() -> void:
 	if TOSSA_CATALOG.PROP_SIG.size() != expected_props.size() or int(TOSSA_CATALOG.PROPS[3]["pwin"]) != 1 or int(TOSSA_CATALOG.PROPS[6]["pwin"]) != -1:
 		push_error("Prop timing/signature contract changed.")
 		failed += 1
+	var expected_tricks := ["btb", "high", "spin"]
+	for i in expected_tricks.size():
+		if i >= TOSSA_CATALOG.TRICKS.size() or TOSSA_CATALOG.TRICKS[i]["id"] != expected_tricks[i]:
+			push_error("Trick index %d must remain %s." % [i, expected_tricks[i]])
+			failed += 1
 	if failed == 0:
 		print("TossaCatalog: pattern order and values verified")
 	quit(failed)
