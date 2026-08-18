@@ -9,6 +9,27 @@ Status key: `[ ]` not started, `[~]` in progress, `[x]` done, `[?]` blocked on a
 
 ---
 
+## Current improvement roadmap (2026-08-18)
+
+- [~] **Make `Game.gd` safer for future AI-assisted edits without changing play.** Keep it as
+  the orchestrator and extract only independently testable pure seams. First seam: formatting
+  (`scripts/TossaFormat.gd` + `tests/test_format.gd`). Next candidates: immutable prop/pattern/
+  venue catalogs, then save-schema helpers with fixtures, then collision-covered geometry.
+  Do not split live juggling or rendering merely to reduce line count.
+- [ ] **Make the stage legible at native 1280×720.** Continue the HUD pass: task-critical
+  secondary text, controls, timing grades, and the slow-motion indicator must remain readable
+  without covering the performer or flight paths.
+- [ ] **Make the next career goal obvious after onboarding.** Surface the nearest meaningful
+  unlock (prop, pattern, venue, or stat requirement) directly in the day hub.
+- [ ] **Give venues distinct audience taste and a named rival.** Build on the existing Encore/
+  venue structure; do not perturb flight physics or introduce unreadable random hazards.
+- [ ] **Increase repeatable performance variety.** Add prop- and pattern-specific challenges,
+  then deterministic ghost replays once the recording contract is specified.
+- [ ] **Complete the behavioral smoke matrix.** Cover Daily Challenge completion, demo-wall
+  behavior, documented collision combinations, save migrations, and focused screenshots.
+
+---
+
 ## 1. The logo
 
 - [x] **The mark reads as props, not as the word TOSSA.** Louis: "it seems a bit
