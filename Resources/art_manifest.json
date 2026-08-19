@@ -331,19 +331,26 @@
       "the list. Built by scripts/install_plant_frames.py from PixelLab interpolations",
       "through four hand-made keyframes - see that file for the order they enforce and",
       "why two of them had to be DERIVED from frames the model drew rather than prompted.",
+      "`beats` is the frame index each of the three goals lands on, so the game maps its",
+      "own fill onto the painting piecewise rather than assuming the stretches are equal.",
       "stalk_dx / bloom_cx / bloom_cy are measured off the frames at install time: the",
       "stalk is not centred in its own canvas, and the aura belongs on the bloom rather",
       "than on the canvas's top edge. Delete this block and the stem goes back to",
       "assembling itself from a stalk rect, two lens leaves and the flower-head sprites."
     ],
-    "frames": 42,
+    "frames": 76,
     "cell": [
       72,
       88
     ],
-    "stalk_dx": -3.5,
+    "stalk_dx": -2.0,
     "bloom_cx": 34.2,
-    "bloom_cy": 26.7
+    "bloom_cy": 26.7,
+    "beats": [
+      27,
+      43,
+      75
+    ]
   },
   "stem/grow_00": {
     "path": "res://Assets/UI/flower/grow_00.png"
@@ -470,6 +477,108 @@
   },
   "stem/grow_41": {
     "path": "res://Assets/UI/flower/grow_41.png"
+  },
+  "stem/grow_42": {
+    "path": "res://Assets/UI/flower/grow_42.png"
+  },
+  "stem/grow_43": {
+    "path": "res://Assets/UI/flower/grow_43.png"
+  },
+  "stem/grow_44": {
+    "path": "res://Assets/UI/flower/grow_44.png"
+  },
+  "stem/grow_45": {
+    "path": "res://Assets/UI/flower/grow_45.png"
+  },
+  "stem/grow_46": {
+    "path": "res://Assets/UI/flower/grow_46.png"
+  },
+  "stem/grow_47": {
+    "path": "res://Assets/UI/flower/grow_47.png"
+  },
+  "stem/grow_48": {
+    "path": "res://Assets/UI/flower/grow_48.png"
+  },
+  "stem/grow_49": {
+    "path": "res://Assets/UI/flower/grow_49.png"
+  },
+  "stem/grow_50": {
+    "path": "res://Assets/UI/flower/grow_50.png"
+  },
+  "stem/grow_51": {
+    "path": "res://Assets/UI/flower/grow_51.png"
+  },
+  "stem/grow_52": {
+    "path": "res://Assets/UI/flower/grow_52.png"
+  },
+  "stem/grow_53": {
+    "path": "res://Assets/UI/flower/grow_53.png"
+  },
+  "stem/grow_54": {
+    "path": "res://Assets/UI/flower/grow_54.png"
+  },
+  "stem/grow_55": {
+    "path": "res://Assets/UI/flower/grow_55.png"
+  },
+  "stem/grow_56": {
+    "path": "res://Assets/UI/flower/grow_56.png"
+  },
+  "stem/grow_57": {
+    "path": "res://Assets/UI/flower/grow_57.png"
+  },
+  "stem/grow_58": {
+    "path": "res://Assets/UI/flower/grow_58.png"
+  },
+  "stem/grow_59": {
+    "path": "res://Assets/UI/flower/grow_59.png"
+  },
+  "stem/grow_60": {
+    "path": "res://Assets/UI/flower/grow_60.png"
+  },
+  "stem/grow_61": {
+    "path": "res://Assets/UI/flower/grow_61.png"
+  },
+  "stem/grow_62": {
+    "path": "res://Assets/UI/flower/grow_62.png"
+  },
+  "stem/grow_63": {
+    "path": "res://Assets/UI/flower/grow_63.png"
+  },
+  "stem/grow_64": {
+    "path": "res://Assets/UI/flower/grow_64.png"
+  },
+  "stem/grow_65": {
+    "path": "res://Assets/UI/flower/grow_65.png"
+  },
+  "stem/grow_66": {
+    "path": "res://Assets/UI/flower/grow_66.png"
+  },
+  "stem/grow_67": {
+    "path": "res://Assets/UI/flower/grow_67.png"
+  },
+  "stem/grow_68": {
+    "path": "res://Assets/UI/flower/grow_68.png"
+  },
+  "stem/grow_69": {
+    "path": "res://Assets/UI/flower/grow_69.png"
+  },
+  "stem/grow_70": {
+    "path": "res://Assets/UI/flower/grow_70.png"
+  },
+  "stem/grow_71": {
+    "path": "res://Assets/UI/flower/grow_71.png"
+  },
+  "stem/grow_72": {
+    "path": "res://Assets/UI/flower/grow_72.png"
+  },
+  "stem/grow_73": {
+    "path": "res://Assets/UI/flower/grow_73.png"
+  },
+  "stem/grow_74": {
+    "path": "res://Assets/UI/flower/grow_74.png"
+  },
+  "stem/grow_75": {
+    "path": "res://Assets/UI/flower/grow_75.png"
   },
   "stem/flower": {
     "path": "res://Assets/UI/flower/flower.png"

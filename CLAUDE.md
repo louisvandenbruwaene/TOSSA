@@ -191,6 +191,29 @@ Codex improvements:
    a screen-space snap means nothing: snap the transform's ORIGIN, publish `_cap_px` =
    `ART_PIXEL / k`, and use `cap_disc` / `cap_ell` / `cap_seg`.
 
+**THE GOAL STEM'S PAINTING KEEPS TIME WITH THE GOAL LADDER, AND THE MANIFEST IS WHERE THEY
+MEET (2026-08-19).** The growth cycle is 76 frames built in THREE STRETCHES, one per goal - a
+leafless sprout growing a stalk and two leaves and opening ONE side flower; the SECOND side
+flower; then the top bud and its bloom - and `_GROW.beats` publishes the frame index each goal
+lands on, so `stem_grow_key` maps the meter's fill onto the painting piecewise instead of
+dividing. **A flat index cannot hold that promise**, because the stretches are deliberately
+different lengths (a sprout has more to show than a second flower does). Measured on the cycle
+this replaced: the two subgoal flowers opened at fills 0.17 and 0.19 and the remaining four
+fifths of the meter was one long bud - because all four of its interpolations OVERSHOT (told to
+grow a seedling into a one-flowered plant, the model grows the whole plant to full height by
+frame 9 and snaps back at 16), so `drop_overshoot` threw away 23 of 65 frames and every one of
+them came out of the two stretches where the flowers grow.
+Three things follow from that and are worth keeping:
+- **A pinned last frame is a hint, not a contract.** Keep only the frames still ON the way to a
+  target and take the target from the keyframe file, never from the frame that claims to be it.
+- **Derive the keyframes an interpolation cannot be prompted into.** `plant_seed0` (the seedling
+  with its leaf masked off) and `plant_k0b` (the plant with its flower and shoot cleared) are cut
+  out of frames the model drew, which is the same rule K1/K2/K3 were already built on.
+- **The second subgoal is the first one MIRRORED** (`mirror_flower`, delta only, about the stalk
+  with a measured 3px/2px offset onto K2's painted flower). Its own generation came back as eight
+  identical frames, a pop, and eight more - a static middle third - and the two side flowers ARE
+  the same event twice, so they should look like it.
+
 **A DRAWING CAN HAVE TWO JOBS AT TWO RESOLUTIONS, AND THE GRID IS NOT ALWAYS THE ANSWER**
 (2026-08-19, `draw_flower`). One function draws the flower as an OBJECT - the bloom on the goal
 stem, the flowers the crowd throws - and as a GLYPH: the currency mark inline with text at
