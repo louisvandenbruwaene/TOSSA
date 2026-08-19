@@ -1522,8 +1522,11 @@ var best_scores: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # best scor
 # juggler's, no glasses, no Focus window, no Strength steadying), so its records
 # are pure skill. Separate per-venue bests, toggled per booking in the day hub.
 var purist := false
-# Legacy four-slot shape retained for save compatibility. Player-facing Purist is now one
-# indivisible pair: Accuracy and Speed. Strength and Endurance are never bound.
+# THE BOOKED BINDS LIVE IN SLOTS 0 AND 3 of this legacy four-slot array (acc, str, end, spd),
+# which is also its save shape - so splitting the pair into two independently bookable
+# limiters (2026-08-19) cost no migration at all. `purist` is DERIVED from the two and means
+# "both bound", which is what the Purist record board and PURIST_BONUS have always meant.
+# Strength and Endurance are never bound: they are structural (see purist_stat).
 var purist_picks: Array[bool] = [false, false, false, false]
 var best_scores_purist: Array[float] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # --- the career ledger (persisted per slot): lifetime numbers behind the record
@@ -1850,6 +1853,9 @@ const DAY_GROUPS := [
 	{"id": "prep", "name": "PREPARE", "icon": "bag", "col": Color(0.84, 0.68, 0.96),
 	 "sub": "spend what you earned, and read up on what you know"},
 ]
+const PURIST_COL := Color(0.84, 0.72, 0.90)   # the one violet the stripped-stat ladder is
+											   # drawn in - the two limiter rows in the hub,
+											   # the perform card's badge, the boards
 var day_msg := ""         # transient hub feedback ("the day is spent, sleep")
 var day_msg_tick := -999  # cine_tick the message appeared
 var day_anim := ""        # a short hub vignette playing: "eat", "inn" or "shop"
@@ -2551,6 +2557,16 @@ func _ready() -> void:
 			assist_speed = want
 			assist_slow = want
 			_assists_pinned = true   # ...and the settings file must not learn about it
+		# dev: --binds acc | spd | both | off pins TONIGHT'S LIMITERS for one run. Same
+		# reasoning as --assists directly above: the two rows in the hub's TONIGHT drawer
+		# need a cursor and an Enter to set, which no capture can press, so the ON state of
+		# the day card, the establishing card's line and the HUD's own row had no capture
+		# path at all. Unlike --assists this one DOES belong to the save (a booking is
+		# saved), so it goes through set_binds and is written back like any other choice.
+		var bdi := ua.find("--binds")
+		if bdi != -1 and bdi + 1 < ua.size():
+			var wb := ua[bdi + 1]
+			set_binds(wb == "acc" or wb == "both", wb == "spd" or wb == "both")
 		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
 		if pi != -1 and pi + 1 < ua.size():
 			for pj in PATTERNS.size():
@@ -3760,9 +3776,16 @@ func begin_performance(n: int) -> void:
 	# rolled with the global randi (never the sim rng, so the deterministic catch
 	# sequence is untouched). The Backyard stays pure: no conditions on stage one.
 	encores = roll_encore(play_venue())
-	# A player-booked Purist act always binds the approved pair together.
-	if purist:
-		encores = [encore_index("purist_acc"), encore_index("purist_spd")]
+	# THE BOOKED LIMITERS REPLACE THE HOUSE'S OWN ROLL, one entry each. Booking either one
+	# is a deliberate handicap and the act should be about that, not about it plus whatever
+	# the room happened to ask for.
+	var booked: Array[int] = []
+	if bind_acc():
+		booked.append(encore_index("purist_acc"))
+	if bind_spd():
+		booked.append(encore_index("purist_spd"))
+	if not booked.is_empty():
+		encores = booked
 	game_state = ST_ESTABLISH
 	cine_tick = 0
 
@@ -4160,13 +4183,6 @@ func encore_pool(venue: int) -> Array[int]:
 	return pool
 
 
-func encores_have_purist() -> bool:
-	for e in encores:
-		if e >= 0 and e < ENCORES.size() and PURIST_IDS.has(String(ENCORES[e]["id"])):
-			return true
-	return false
-
-
 func encore_in_stack(e: int) -> bool:
 	# Does this Encore get its own card in the live HUD's left rail? Everything does except
 	# the two Purist binds, which are one line on the top-right card instead - see draw_hud's
@@ -4475,6 +4491,26 @@ func day_actions() -> Array[Dictionary]:
 	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
 		"sub": ""})
+	# THE TWO LIMITERS SIT UNDER THE STAGE PICKER AND ARE WALKED TO LIKE ANYTHING ELSE
+	# (2026-08-19, Louis: "the limiters (accuracy and slowmo) should be toggleable in the
+	# choosing menu, below the stage toggle - moving down, then hitting enter to select or
+	# deselect"). They were one hidden keypress (P) that bound both at once, announced only
+	# by a hint in the footer and a small badge on the perform card: a whole scoring ladder
+	# reachable only by a key nobody is told about while looking at the row it changes.
+	#
+	# THEY ARE INDEPENDENT NOW, and the economy was already priced for that - resolve_act
+	# counts how many of PURIST_IDS are stripped and pays `1 + 0.4 * n/2`, so one bind has
+	# always been worth half the bonus. What did not exist was any way for a PLAYER to book
+	# one; only a house-rolled Encore could. The PURIST BOARD still asks for both, because
+	# that board is the pure-skill ladder and half a booking is not a Purist act.
+	var bind_row := func(id: String, on: bool, icon: String, name: String, sub: String) -> void:
+		out.append({"id": id, "grp": "work", "icon": icon, "name": name,
+			"cost": "BOUND" if on else "off", "ok": true, "why": "", "toggle": true,
+			"col": PURIST_COL, "sub": sub})
+	bind_row.call("bind_acc", bind_acc(), "eye", "BIND ACCURACY",
+		"play on a beginner's hands: your Accuracy is read as 5 for the whole act, gear included. Pays more, and the board remembers.")
+	bind_row.call("bind_spd", bind_spd(), "watch", "BIND SLOW MOTION",
+		"no slow motion from anywhere: not the Speed stat, not the difficulty, not a pie, not an earned burst. Pays more, and the board remembers.")
 	if not sprint_active:
 		out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
 			"cost": "", "ok": not tired, "why": tired_why if tired else "",
@@ -4566,6 +4602,8 @@ func day_rows() -> Array[Dictionary]:
 			for a in acts:
 				if String(a["grp"]) != gid:
 					continue
+				if bool(a.get("toggle", false)):
+					continue   # a switch is not an errand: the tally counts things you DO
 				total += 1
 				if bool(a["ok"]):
 					open_n += 1
@@ -4673,10 +4711,9 @@ func day_input(kc: int) -> void:
 			elif kc == KEY_RIGHT and String(rows[day_sel]["id"]).begins_with("grp:"):
 				day_activate(String(rows[day_sel]["id"]), true, "")   # right opens one
 		KEY_P:
-			# One indivisible Purist booking: raw Accuracy and absolutely no slow motion.
-			# Strength and Endurance remain untouched, and there are no individual binds.
-			purist = not purist
-			purist_picks = [purist, false, false, purist]
+			# the whole PURIST booking in one key: both limiters on, or both off. The two
+			# rows in the TONIGHT drawer are where either one is set on its own.
+			set_binds(not purist, not purist)
 			set_day_msg("PURIST  -  Accuracy and all slow motion bound" if purist else "back to the assisted board")
 			save_progress()
 			play_sfx("ui2", -13.0)
@@ -4727,6 +4764,19 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 		play_sfx("whiff", -10.0)
 		return
 	match id:
+		"bind_acc", "bind_spd":
+			# a limiter row is a SWITCH, not an errand: Enter flips it, the day does not
+			# move, and the card's own right-hand readout is the confirmation
+			var acc := bind_acc()
+			var spd := bind_spd()
+			if id == "bind_acc":
+				acc = not acc
+			else:
+				spd = not spd
+			set_binds(acc, spd)
+			set_day_msg(bind_msg())
+			save_progress()
+			play_sfx("ui2", -13.0)
 		"perform":
 			seg_used += 1
 			save_progress()
@@ -7683,8 +7733,7 @@ func reset_new_game() -> void:
 	best_scores = [0, 0, 0, 0, 0, 0, 0]
 	best_scores_purist = [0, 0, 0, 0, 0, 0, 0]
 	pattern_sel = CASCADE
-	purist = false
-	purist_picks = [false, false, false, false]
+	set_binds(false, false)
 	career = {"perfs": 0, "practices": 0, "catches": 0, "drops": 0,
 		"best_streak": 0, "gold_earned": 0, "tricks": 0, "days": 1, "best_score": 0,
 		"mastery": 0}
@@ -12037,6 +12086,37 @@ func slow_amount() -> float:
 	return _slow_cur   # the live value, always easing linearly (see SLOW_RAMP)
 
 
+func bind_msg() -> String:
+	# what the hub says after a limiter moves. Names the BOARD, because that is the part a
+	# player cannot see from the row itself: one bind is a handicap that pays, both is the
+	# Purist ladder with records of its own.
+	if purist:
+		return "PURIST  -  Accuracy and all slow motion bound, on the Purist board"
+	if bind_acc():
+		return "Accuracy bound  -  a beginner's hands, and better pay for it"
+	if bind_spd():
+		return "slow motion bound  -  the act runs at full speed, and pays for it"
+	return "back to the assisted board"
+
+
+func bind_acc() -> bool:
+	# is the ACCURACY limiter booked for tonight? Slot 0 of purist_picks - see that var.
+	return purist_picks.size() > 0 and purist_picks[0]
+
+
+func bind_spd() -> bool:
+	# ...and the SLOW MOTION limiter. Slot 3, the legacy Speed slot.
+	return purist_picks.size() > 3 and purist_picks[3]
+
+
+func set_binds(acc: bool, spd: bool) -> void:
+	# THE ONLY WAY THE BOOKED LIMITERS MOVE, so `purist` can never disagree with the two
+	# switches it is derived from. Every caller - the two hub rows, the P shortcut, a new
+	# career, a loaded save - goes through here.
+	purist_picks = [acc, false, false, spd]
+	purist = acc and spd
+
+
 func purist_all() -> bool:
 	# The player-booked Accuracy + Speed pair and its own record board. Training is never
 	# Purist (practice is practice).
@@ -12848,15 +12928,16 @@ func load_progress() -> void:
 		perfs_since_unlock = int(cf.get_value("prog", "perfs_since_unlock", 0))
 		aid_pie_day = int(cf.get_value("prog", "aid_pie_day", -1))
 		aid_meal_used = bool(cf.get_value("prog", "aid_meal_used", false))
-		purist = bool(cf.get_value("day", "purist", false))
+		var was_pair := bool(cf.get_value("day", "purist", false))
 		# an OLD save has no per-stat picks at all - default them to match the one flag
-		# it does have, so a save from before this existed still reads as consistent
-		var pp: Variant = cf.get_value("day", "purist_picks", [purist, false, false, purist])
+		# it does have, so a save from before this existed still reads as consistent.
+		# A save from the PAIRED era (2026-07 to 2026-08-19) carries both slots set or
+		# both clear, so reading them one at a time restores exactly what it stored.
+		var pp: Variant = cf.get_value("day", "purist_picks", [was_pair, false, false, was_pair])
 		if pp is Array and (pp as Array).size() == 4:
-			# Collapse legacy individual Accuracy/Speed choices into the one supported pair;
-			# old Strength/Endurance-only choices are discarded.
-			purist = purist or bool(pp[0]) or bool(pp[3])
-			purist_picks = [purist, false, false, purist]
+			set_binds(was_pair or bool(pp[0]), was_pair or bool(pp[3]))
+		else:
+			set_binds(was_pair, was_pair)
 		day = int(cf.get_value("day", "day", 1))
 		seg_used = int(cf.get_value("day", "seg_used", 0))
 		venue_pick = int(cf.get_value("day", "venue_pick", -1))
@@ -19868,7 +19949,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# hub, while the HOUSE can roll purist_acc / purist_spd as Encores. Filtering the
 		# Encores out of the left stack without covering that second path would delete the
 		# only statement of a bind the player is actually playing under.
-		var pur_row := purist or encores_have_purist()
+		var pur_row := purist_run()
 		# THE TWO ASSIST SWITCHES ARE ALWAYS ON THIS CARD, on or off, in or out of a booking.
 		# Every other row here appears only when it has something to say, and that is right
 		# for a status; these are CONTROLS. A control the player cannot see is a control they
@@ -19908,7 +19989,15 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				Color(0.68, 0.92, 1.0, 0.96))
 			status_y += 18.0
 		if pur_row:
-			draw_fit_string(font, Vector2(sx, status_y), "PURIST  -  Accuracy + Speed bound",
+			# ...and it names WHICH binds are live. The pair is bookable one at a time now
+			# (see the two limiter rows in the day hub), so a flat "PURIST" would be wrong
+			# about two of the three states it can be in.
+			var ptxt := "PURIST  -  Accuracy + Speed bound"
+			if not purist_stat("acc"):
+				ptxt = "SLOW MOTION BOUND  -  full speed"
+			elif not purist_stat("spd"):
+				ptxt = "ACCURACY BOUND  -  a beginner's hands"
+			draw_fit_string(font, Vector2(sx, status_y), ptxt,
 				HORIZONTAL_ALIGNMENT_LEFT, sw, 12, Color(0.86, 0.76, 1.0, 0.96))
 			status_y += 18.0
 		if pts_row:
@@ -23965,13 +24054,16 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# "out of this drawer" rather than "leave the day" whenever one is open.
 	var selid := String(rows[day_sel]["id"])
 	var esc_note := "back" if day_group != "" else "menu"
+	# a SWITCH row says "toggle" rather than "do it": Enter does not spend the evening
+	# there, and a row that reads like an errand invites the player not to touch it
+	var doing := "open" if selid.begins_with("grp:") else ("toggle" if bool(rows[day_sel].get("toggle", false)) else "do it")
 	if pad_active():
-		var hints := [[["Stick"], "choose"], [k_finish(), "open" if selid.begins_with("grp:") else "do it"], [k_sheet(), "sheet"], [k_pause(), esc_note]]
+		var hints := [[["Stick"], "choose"], [k_finish(), doing], [k_sheet(), "sheet"], [k_pause(), esc_note]]
 		if selid == "perform":
 			hints.insert(1, [["Dpad"], "stage"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 	else:
-		var hints := [[["Up", "Down"], "choose"], [["Enter"], "open" if selid.begins_with("grp:") else "do it"], [["Tab"], "sheet"], [["Esc"], esc_note]]
+		var hints := [[["Up", "Down"], "choose"], [["Enter"], doing], [["Tab"], "sheet"], [["Esc"], esc_note]]
 		if selid == "perform":
 			hints.insert(1, [["Left", "Right"], "stage"])
 			hints.insert(2, [["P"], "release purist" if purist else "purist"])
@@ -24067,9 +24159,19 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		var pv := play_venue()
 		var pick := "%s%s%s" % ["<   " if pv > 0 else "", String(venue_data(pv)["name"]), "   >" if pv < venue_index() else ""]
 		draw_string(font, Vector2(tx, y + 18.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(18), Color(1.0, 0.88, 0.52))
+		# ...and the badge says WHICH limiters are booked, not merely that some are. With
+		# the two of them independently bookable, "PURIST" alone would have been silent on
+		# the two states that are not it.
+		var badge := ""
 		if purist:
-			draw_string(font, Vector2(box.position.x + box.size.x - 110.0, y + 18.0), "PURIST",
-				HORIZONTAL_ALIGNMENT_RIGHT, 96.0, ps(11), Color(0.84, 0.72, 0.90))
+			badge = "PURIST"
+		elif bind_acc():
+			badge = "ACCURACY BOUND"
+		elif bind_spd():
+			badge = "SLOW-MO BOUND"
+		if badge != "":
+			draw_string(font, Vector2(box.position.x + box.size.x - 130.0, y + 18.0), badge,
+				HORIZONTAL_ALIGNMENT_RIGHT, 116.0, ps(11), PURIST_COL)
 		y += 32.0
 	# an EMPTY sub costs no line. get_multiline_string_size("") still returns one line's
 	# height, so simply blanking the string would have moved everything below it down by
@@ -24346,6 +24448,24 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 			draw_line(Vector2(c.x - 9.5, c.y - 5.4), Vector2(c.x + 9.5, c.y - 5.4), col, 1.6)
 			draw_line(Vector2(c.x - 8.0, c.y + 7.0), Vector2(c.x - 8.0, c.y + 9.0), Color(col.r * 0.7, col.g * 0.7, col.b * 0.7), 1.5)
 			draw_line(Vector2(c.x + 8.0, c.y + 7.0), Vector2(c.x + 8.0, c.y + 9.0), Color(col.r * 0.7, col.g * 0.7, col.b * 0.7), 1.5)
+		"eye":
+			# THE ACCURACY LIMITER: a bullseye with the ring BROKEN across the middle. A
+			# plain target would say "accuracy"; the cut says the stat has been taken away,
+			# which is what the row actually does. It shares the crossed-out language with
+			# the stopwatch beside it, so the pair reads as one kind of switch.
+			draw_arc(c, 8.0, 0.0, TAU, 22, col, 2.0, true)
+			draw_arc(c, 4.2, 0.0, TAU, 16, Color(col.r, col.g, col.b, 0.8), 1.8, true)
+			draw_circle(c, 1.6, col)
+			draw_line(c + Vector2(-7.5, 7.5), c + Vector2(7.5, -7.5), Color(1.0, 0.55, 0.48, 0.95), 2.0)
+		"watch":
+			# THE SLOW-MOTION LIMITER: the same stopwatch the stage card wears for the
+			# stopwatch assist (assist_icon), so the object means one thing everywhere -
+			# with the same bar through it.
+			draw_arc(c + Vector2(0.0, 1.0), 7.0, 0.0, TAU, 22, col, 2.0, true)
+			draw_rect(Rect2(c.x - 1.6, c.y - 9.0, 3.2, 2.4), col)
+			draw_line(c + Vector2(0.0, 1.0), c + Vector2(0.0, -3.6), col, 1.8)
+			draw_line(c + Vector2(0.0, 1.0), c + Vector2(3.4, 2.4), Color(col.r, col.g, col.b, 0.8), 1.6)
+			draw_line(c + Vector2(-7.5, 7.5), c + Vector2(7.5, -7.5), Color(1.0, 0.55, 0.48, 0.95), 2.0)
 		"spark":
 			# LEARN SOMETHING NEW: a lit lamp, not a plus sign. Four equal crossed lines
 			# is the sparkle trap draw_star4 exists to avoid, and it read as "add".
@@ -27663,7 +27783,7 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# painting. A gradient darkens a picture uniformly; an outline follows the letters.
 	var rw := 330.0
 	# ...and the block grew a line: the unaided mark sits under the record and under Purist
-	var rh := 118.0 if purist else 98.0
+	var rh := 118.0 if purist_run() else 98.0
 	var rx := 18.0
 	var ry := s.y - 88.0 - rh
 	var has_enc := booking_active and not encores.is_empty()
@@ -27678,8 +27798,14 @@ func draw_establish(font: Font, s: Vector2) -> void:
 		draw_fit_string(font, Vector2(rx + 16.0, ry + 54.0), score_text(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, rw - 32.0, 24, Color(0.96, 0.83, 0.52, tagA), true)
 	else:
 		draw_text_shout(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.82, 0.6, 0.85 * tagA))
-	if purist:
-		draw_text_shout(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
+	if purist_run():
+		# ...and it says which limiter is on. Only the full pair plays on the Purist board,
+		# so a single bind must not claim one (see set_binds and rec_table).
+		var pline := "PURIST  -  no stat help, its own board"
+		if not purist:
+			pline = ("ACCURACY BOUND  -  a beginner's hands" if purist_stat("acc")
+				else "SLOW MOTION BOUND  -  the act runs at full speed")
+		draw_text_shout(font, Vector2(rx + 16.0, ry + 80.0), pline, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
 	# THE UNAIDED MARK, WHERE THE CHASE IS ALREADY BEING READ. This block is the one place a
 	# player looks at what this house still owes them, so the second thing it can owe them
 	# belongs here rather than on a board they would have to go and find. Standing marks say
