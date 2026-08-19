@@ -4521,14 +4521,30 @@ func day_actions() -> Array[Dictionary]:
 	# always been worth half the bonus. What did not exist was any way for a PLAYER to book
 	# one; only a house-rolled Encore could. The PURIST BOARD still asks for both, because
 	# that board is the pure-skill ladder and half a booking is not a Purist act.
+	#
+	# ...AND THEY ARE A PANEL INSIDE THE PERFORM CARD, NOT TWO CARDS BESIDE IT (2026-08-19,
+	# Louis: "binding accuracy and slowmo should be a small subwindow of the perform window,
+	# not separate ones"). Walking to them worked and cost too much: they were full-height
+	# cards with their own icon discs and 17pt titles, i.e. the same visual weight as PERFORM
+	# and PRACTICE, so a drawer of three THINGS TO DO read as a list of five. They are
+	# settings for the act on the row above them - they book nothing and spend no segment -
+	# and a setting belongs inside the thing it modifies.
+	#
+	# `inset` IS A DRAWING FLAG AND NOTHING ELSE, which is the whole reason this is a small
+	# change. The rows stay in the list, in this order, so the cursor still walks onto them,
+	# Enter still toggles them through day_activate, the footer still says "toggle", and the
+	# --binds capture still works. day_card_height gives them zero height and the perform
+	# card draws them in its own box - see day_bind_panel_h.
 	var bind_row := func(id: String, on: bool, icon: String, name: String, sub: String) -> void:
-		out.append({"id": id, "grp": "work", "icon": icon, "name": name,
+		out.append({"id": id, "grp": "work", "icon": icon, "name": name, "inset": true,
 			"cost": "BOUND" if on else "off", "ok": true, "why": "", "toggle": true,
 			"col": PURIST_COL, "sub": sub})
-	bind_row.call("bind_acc", bind_acc(), "eye", "BIND ACCURACY",
-		"play on a beginner's hands: your Accuracy is read as 5 for the whole act, gear included. Pays more, and the board remembers.")
-	bind_row.call("bind_spd", bind_spd(), "watch", "BIND SLOW MOTION",
-		"no slow motion from anywhere: not the Speed stat, not the difficulty, not a pie, not an earned burst. Pays more, and the board remembers.")
+	# the subs are SHORT now: they are read inside a 300px panel rather than across a card,
+	# and the long versions repeated "Pays more, and the board remembers" twice on one screen
+	bind_row.call("bind_acc", bind_acc(), "eye", "ACCURACY",
+		"a beginner's hands: Accuracy reads 5 all act, gear included. Pays more.")
+	bind_row.call("bind_spd", bind_spd(), "watch", "SLOW MOTION",
+		"no slow motion at all: not the stat, not the difficulty, not a pie, not a burst. Pays more.")
 	if not sprint_active:
 		out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
 			"cost": "", "ok": not tired, "why": tired_why if tired else "",
@@ -4718,7 +4734,7 @@ func day_input(kc: int) -> void:
 		KEY_LEFT, KEY_RIGHT:
 			# choosing tonight's stage is free, any venue reputation has unlocked.
 			# The picker STOPS at both ends (Louis: left to right, never wrapping).
-			if String(rows[day_sel]["id"]) == "perform":
+			if day_perform_focus(rows):
 				var dir := 1 if kc == KEY_RIGHT else -1
 				var np := clampi(play_venue() + dir, 0, venue_index())
 				if np != play_venue():
@@ -4750,6 +4766,18 @@ func day_input(kc: int) -> void:
 			game_state = ST_MENU
 			menu_sel = 0
 			play_sfx("ui", -12.0)
+
+
+func day_perform_focus(rows: Array[Dictionary]) -> bool:
+	# is the cursor ON the perform row, or INSIDE it? The limiter switches are drawn in the
+	# perform card's own box and the card stays open behind them, so the stage picker is on
+	# screen and lit the whole time the cursor is down there. Left/Right has to keep moving
+	# it, or the arrows either side of the venue name are a control that stopped working for
+	# no reason the player can see.
+	if rows.is_empty():
+		return false
+	var r: Dictionary = rows[clampi(day_sel, 0, rows.size() - 1)]
+	return String(r["id"]) == "perform" or bool(r.get("inset", false))
 
 
 func day_close_drawer() -> void:
@@ -24409,10 +24437,20 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# two-card drawer does not sit stranded at the top of a ten-card space
 	var heights := PackedFloat32Array()
 	var total_h := 0.0
+	# the selected row's id, measured once: the perform card's limiter panel needs it (which
+	# switch the cursor is on decides whether the panel carries an explanation, and therefore
+	# how tall it is), and the footer hints below read it too
+	var selid := String(rows[clampi(day_sel, 0, rows.size() - 1)]["id"])
+	# ...and whether the cursor is inside the perform card rather than on it, which is what
+	# keeps that card open while its limiters are being set
+	var in_panel := bool((rows[clampi(day_sel, 0, rows.size() - 1)] as Dictionary).get("inset", false))
+	var is_open := func(i: int) -> bool:
+		return i == day_sel or (in_panel and String(rows[i]["id"]) == "perform")
 	for i in rows.size():
-		var h := day_card_height(font, rows[i], i == day_sel, sub_w)
+		var h := day_card_height(font, rows[i], is_open.call(i), sub_w, selid)
 		heights.append(h)
-		total_h += h + 8.0
+		# an INSET row is drawn inside another card and has no box and no gap of its own
+		total_h += h + (8.0 if h > 0.0 else 0.0)
 	# centre the column in the space between the header and the footer hints, so a
 	# two-card drawer is not left stranded at the top of a ten-card-tall gap
 	var band_top := s.y * 0.21
@@ -24426,7 +24464,10 @@ func draw_day(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(ax, ay - 13.0), "Esc  back", HORIZONTAL_ALIGNMENT_RIGHT, aw - 4.0, ps(12), Color(0.72, 0.66, 0.6, 0.8))
 	var cy := ay
 	for i in rows.size():
-		day_draw_card(font, rows[i], Rect2(ax, cy, aw, heights[i]), i == day_sel, sub_w)
+		if heights[i] <= 0.0:
+			continue
+		day_draw_card(font, rows[i], Rect2(ax, cy, aw, heights[i]), i == day_sel,
+			is_open.call(i), sub_w, selid)
 		cy += heights[i] + 8.0
 
 	# transient feedback (a meal eaten, a spent day) fades after a few seconds
@@ -24438,19 +24479,19 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# PERFORM (without this hint the < > around the venue name was the only cue a whole
 	# venue ladder was there to walk), opens a drawer on a drawer card, and Escape means
 	# "out of this drawer" rather than "leave the day" whenever one is open.
-	var selid := String(rows[day_sel]["id"])
 	var esc_note := "back" if day_group != "" else "menu"
 	# a SWITCH row says "toggle" rather than "do it": Enter does not spend the evening
 	# there, and a row that reads like an errand invites the player not to touch it
 	var doing := "open" if selid.begins_with("grp:") else ("toggle" if bool(rows[day_sel].get("toggle", false)) else "do it")
+	var perf_focus := day_perform_focus(rows)
 	if pad_active():
 		var hints := [[["Stick"], "choose"], [k_finish(), doing], [k_sheet(), "sheet"], [k_pause(), esc_note]]
-		if selid == "perform":
+		if perf_focus:
 			hints.insert(1, [["Dpad"], "stage"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 	else:
 		var hints := [[["Up", "Down"], "choose"], [["Enter"], doing], [["Tab"], "sheet"], [["Esc"], esc_note]]
-		if selid == "perform":
+		if perf_focus:
 			hints.insert(1, [["Left", "Right"], "stage"])
 			hints.insert(2, [["P"], "release purist" if purist else "purist"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
@@ -24465,14 +24506,26 @@ const CARD_PAD_BOT := 14.0    # the floor under a grown day card's LAST line. A 
 							   # border - see day_card_height.
 
 
-func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> float:
-	# a card is one title line until it is SELECTED, then it grows to fit exactly what
-	# it has to say. Measured with max_lines -1, the same as day_draw_card draws it, so
-	# a long explanation can never run past the bottom of its own card.
-	if not sel:
-		return 46.0
-	var h := 42.0
+func day_card_height(font: Font, r: Dictionary, open_c: bool, sub_w: float, sel_id: String = "") -> float:
+	# a card is one title line until it is OPEN, then it grows to fit exactly what it has to
+	# say. Measured with max_lines -1, the same as day_draw_card draws it, so a long
+	# explanation can never run past the bottom of its own card.
+	#
+	# OPEN IS NOT THE SAME AS SELECTED, and the difference is one card: the perform row stays
+	# open while the cursor is inside its limiter panel. Collapsing it there would take the
+	# venue name, the record to beat and the next-stage gate off the screen at the exact
+	# moment the player is setting up that act - a subwindow that shuts its own window.
+	#
+	# AN INSET ROW HAS NO CARD OF ITS OWN. It is drawn inside the perform card's box (see
+	# day_bind_panel_h), so it takes no height and, in the layout loop, no gap either - a
+	# zero-height card with an 8px gap under it would open a hole in the column.
+	if bool(r.get("inset", false)):
+		return 0.0
 	var perf := String(r["id"]) == "perform"
+	var binds := day_bind_panel_h(font, sub_w, sel_id) if perf else 0.0
+	if not open_c:
+		return 46.0 + binds
+	var h := 42.0
 	if perf:
 		h += 32.0                                   # the stage picker line
 	# MEASURED THE SAME WAY IT IS DRAWN, empty sub included - this function and
@@ -24495,10 +24548,58 @@ func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> floa
 	# two pixels, in a box whose own bottom edge curves through those two pixels.
 	# CARD_PAD_BOT is that floor, and it is applied to every grown card rather than to the
 	# perform row alone - any card that ever grows a last line has the same edge under it.
-	return h + CARD_PAD_BOT
+	return h + CARD_PAD_BOT + binds
 
 
-func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: float) -> void:
+const BIND_ROW_H := 21.0        # one limiter row inside the panel
+const BIND_PANEL_TOP := 19.0    # its own small heading
+const BIND_PANEL_PAD := 9.0     # floor under the last thing in it
+
+
+func day_bind_panel_h(font: Font, sub_w: float, sel_id: String) -> float:
+	# THE LIMITER PANEL, measured exactly as day_draw_bind_panel draws it - the same
+	# contract day_card_height has with day_draw_card, and for the same reason: this height
+	# is what reserves the space at the BOTTOM of the perform card, so a panel that measures
+	# short would be drawn over the unlock hint above it.
+	#
+	# It is not conditional on the perform row being selected. The two switches have to be
+	# visible while the cursor is ON one of them, and at that moment the selected card is a
+	# bind row, not perform.
+	var rows := day_bind_defs()
+	if rows.is_empty():
+		return 0.0
+	var h := BIND_PANEL_TOP + float(rows.size()) * BIND_ROW_H + BIND_PANEL_PAD
+	var hint := day_bind_hint(sel_id)
+	if hint != "":
+		h += font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, sub_w - 12.0,
+			ps(11), -1).y + 5.0
+	return h
+
+
+func day_bind_defs() -> Array[Dictionary]:
+	# the two switches, read back out of day_actions() rather than written out a second
+	# time here: their labels, their state and their explanations already live there, and a
+	# panel with its own copy of them is a panel that goes stale.
+	var out: Array[Dictionary] = []
+	for a in day_actions():
+		if bool(a.get("inset", false)):
+			out.append(a)
+	return out
+
+
+func day_bind_hint(sel_id: String) -> String:
+	# only the switch the cursor is on explains itself. Both at once is four lines of small
+	# violet type inside a card whose job is to say which stage you are playing.
+	for a in day_bind_defs():
+		if String(a["id"]) == sel_id:
+			return String(a["sub"])
+	return ""
+
+
+func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, open_c: bool, sub_w: float,
+		sel_id: String = "") -> void:
+	if bool(r.get("inset", false)):
+		return   # drawn inside the perform card - see day_draw_bind_panel
 	var ok := bool(r["ok"])
 	var ac: Color = r.get("col", Color(0.95, 0.7, 0.4))
 	if not ok:
@@ -24536,7 +24637,20 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 			HORIZONTAL_ALIGNMENT_RIGHT, cost_w - mark_w, ps(12), cost_col)
 	draw_fit_string(font, Vector2(tx, box.position.y + 29.0), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT,
 		right - cost_w - tx - 8.0, 17, title_c)
-	if not sel:
+	# THE LIMITER PANEL IS PINNED TO THE BOTTOM OF THE BOX, not laid after the last line.
+	# day_card_height reserved exactly this much room for it, so measuring from the foot up
+	# is the one placement that cannot drift as the lines above it come and go - and it has
+	# to be drawn whether the card is selected or not, because when the cursor is on a switch
+	# the SELECTED card is that switch's row, not this one.
+	if String(r["id"]) == "perform":
+		# measured only for the row that has one: day_bind_panel_h reads day_actions() back,
+		# and asking every card in the drawer for a panel it cannot have rebuilt that list
+		# six times a frame for nothing
+		var bind_h := day_bind_panel_h(font, sub_w, sel_id)
+		if bind_h > 0.0:
+			day_draw_bind_panel(font, Rect2(box.position.x + 14.0,
+				box.position.y + box.size.y - bind_h - 4.0, box.size.x - 28.0, bind_h), sel_id)
+	if not open_c:
 		return
 	var y := box.position.y + 42.0
 	if String(r["id"]) == "perform":
@@ -24584,6 +24698,58 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 			y += 20.0
 		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1,
 			Color(0.72, 0.92, 0.70, 0.94))
+
+
+func day_draw_bind_panel(font: Font, box: Rect2, sel_id: String) -> void:
+	# TONIGHT'S LIMITERS, inside the card they change (2026-08-19 - see day_actions for why
+	# they stopped being cards of their own).
+	#
+	# Everything here is deliberately a size DOWN from the card around it: 10 and 12pt
+	# against the card's 17, a 4px checkbox instead of a 15px icon disc, one violet instead
+	# of the row's own accent. That is what makes it read as a panel inside a card rather
+	# than as three cards in a stack, which is the whole complaint this answers.
+	var pc := PURIST_COL
+	var any_on := bind_acc() or bind_spd()
+	soft_card(box, Color(pc.r * 0.12, pc.g * 0.10, pc.b * 0.16, 0.80),
+		Color(pc.r, pc.g, pc.b, 0.42 if any_on else 0.22), 1.0, 8.0, 0.0)
+	draw_string(font, Vector2(box.position.x + 10.0, box.position.y + 13.0), "TONIGHT'S LIMITERS",
+		HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 20.0, ps(10), Color(pc.r, pc.g, pc.b, 0.72))
+	var y := box.position.y + BIND_PANEL_TOP
+	for a in day_bind_defs():
+		var on := String(a["cost"]) == "BOUND"
+		var cur := String(a["id"]) == sel_id
+		var rowr := Rect2(box.position.x + 4.0, y, box.size.x - 8.0, BIND_ROW_H - 2.0)
+		if cur:
+			# the cursor mark is a FILL plus a bar, not a border: a second rounded outline
+			# 4px inside the panel's own rounded outline is two rims chasing each other
+			draw_rect(rowr, Color(pc.r * 0.30, pc.g * 0.26, pc.b * 0.34, 0.95))
+			draw_rect(Rect2(rowr.position.x, rowr.position.y, 2.0, rowr.size.y),
+				Color(pc.r, pc.g, pc.b, 0.95))
+		var cx := box.position.x + 16.0
+		var cy := y + BIND_ROW_H * 0.5 - 1.0
+		# the switch itself: an open box that fills when the limiter is booked
+		draw_rect(Rect2(cx - 5.0, cy - 5.0, 10.0, 10.0), Color(pc.r, pc.g, pc.b, 0.55), false, 1.0)
+		if on:
+			draw_rect(Rect2(cx - 3.0, cy - 3.0, 6.0, 6.0), Color(pc.r, pc.g, pc.b, 0.95))
+		# NO ICON IN HERE, and it is not an oversight. Each row kept the mark it wore as a
+		# card - the broken bullseye and the crossed stopwatch - and both are 16px shapes
+		# with 2px strokes, drawn for a 30px icon disc. In a 21px row they overflow the row,
+		# and at that size the only thing either one still reads as is "a circle with a red
+		# line through it", twice. The checkbox already carries the state and the label
+		# already carries the name; the icons were carrying nothing but weight.
+		var namec := Color(1.0, 0.96, 1.0) if cur else (Color(pc.r, pc.g, pc.b, 0.95) if on
+			else Color(0.74, 0.70, 0.76))
+		draw_fit_string(font, Vector2(cx + 14.0, cy + 4.0), String(a["name"]),
+			HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 110.0, 12, namec)
+		draw_string(font, Vector2(box.position.x + box.size.x - 76.0, cy + 4.0),
+			"BOUND" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 66.0, ps(11),
+			Color(pc.r, pc.g, pc.b, 0.95) if on else Color(0.62, 0.58, 0.62))
+		y += BIND_ROW_H
+	var hint := day_bind_hint(sel_id)
+	if hint != "":
+		draw_multiline_string(font, Vector2(box.position.x + 10.0, y + 2.0 + font.get_ascent(ps(11))),
+			hint, HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 20.0, ps(11), -1,
+			Color(0.80, 0.74, 0.84))
 
 
 func crescent_points(c: Vector2, r: float, off: Vector2, ir: float) -> PackedVector2Array:
