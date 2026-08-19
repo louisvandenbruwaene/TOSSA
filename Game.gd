@@ -1109,8 +1109,6 @@ const ANTE_CATCH_CAP := 2.0
 # computed from the load in hand. The lesson the old table taught the hard way still holds
 # and is the reason the new one is shaped this way: **calibrate against what a real player
 # can do, not against a ceiling** - and `--ladder` still exists to check it.
-const GOAL_BAR_GAMMA := 0.62          # goal-meter fill exponent (<1 = concave): spreads a
-									   # streak-accelerated score evenly along the bar. See goal_bar_pos
 # the crowd's patience bleeds this much per tick, per venue (120 ticks a second),
 # draining from the 0.7 an act starts at. At the Backyard a still juggler (no
 # catches, pure decay) loses the room in ~17s; at the World Arena in ~6. Every
@@ -4100,14 +4098,19 @@ func next_goal() -> float:
 
 
 func goal_bar_pos(v: float, final: float) -> float:
-	# where a score value sits on the goal METER, 0..1. NOT linear in score: the streak
-	# multiplier makes score accelerate (slow while the streak builds, fast once it is up),
-	# so a linear fill crawls early then rockets late. A concave (log-like) mapping,
-	# GOAL_BAR_GAMMA < 1, amplifies the low end so the bar advances more evenly over TIME
-	# (Louis, 2026-07-26). Fill AND the goal notches share it, so a notch still marks its
-	# real score - only the spacing is remapped.
-	var x := clampf(v / maxf(1.0, final), 0.0, 1.0)
-	return pow(x, GOAL_BAR_GAMMA)
+	# where a score value sits on the goal METER, 0..1. This used to raise the fraction to
+	# GOAL_BAR_GAMMA (0.62), a concave remap added 2026-07-26 because "the streak multiplier
+	# makes score accelerate, so a linear fill crawls early then rockets late".
+	# IT IS LINEAR AGAIN AS OF 2026-08-19, which is the same change as GOAL_STEPS and
+	# for the same reason. The concave remap was calibrated on 2026-07-26 against a score
+	# whose STREAK sat in the exponent, so score really did crawl and then rocket. The
+	# 2026-08-19 rebalance made the streak LINEAR - the object count is the only exponent
+	# now - so score is linear in weighted catches, and a gamma of 0.62 was warping a bar
+	# that no longer needed it: at goal 1 (a third of the act) it read 0.51, so the first
+	# flower would have opened half way up a stalk whose goals are evenly spread. One more
+	# weighted catch now advances the stem by the same amount wherever it is, which is
+	# exactly what seg_per_catch already promises on the rail beside it.
+	return clampf(v / maxf(1.0, final), 0.0, 1.0)
 
 
 func encore_pool(venue: int) -> Array[int]:

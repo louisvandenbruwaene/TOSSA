@@ -911,6 +911,17 @@ review" for the accept/reject examples and why.
   pattern cannot carry, and say so. High Toss x Shower joins the refusals: it was allowed with
   "expect clashes" printed under it, which is the game watching props pass through each other and
   describing it. `trick_pattern_warning` is deleted - there is nothing left to warn about.
+- **THE THREE GOALS ARE EVEN THIRDS, AND THE METER IS LINEAR AGAIN (2026-08-19, Louis: "the
+  subgoals should be linearly spread: one at 1/3, 2/3 and 3/3 of the final goal - the last one
+  being the big flower of course").** `GOAL_STEPS` is `[1/3, 2/3, 1]` (was `[0.50, 0.72, 1.0]`,
+  which put the first goal half way up the act and crowded the other two into the top quarter),
+  and `goal_bar_pos` no longer raises the fill to `GOAL_BAR_GAMMA`. **That constant was
+  calibrated on 2026-07-26 against a score whose STREAK sat in the exponent**; the 2026-08-19
+  rebalance made the streak linear, so score is linear in weighted catches and the concave remap
+  was warping a bar that no longer needed it (at goal 1 it read 0.51). One more weighted catch
+  now advances the stem by the same amount wherever it is - which is what `seg_per_catch`
+  already promises on the rail beside it. `TossaBalance`'s ladder tests are untouched: only
+  goal indices 0 and 1 moved, and the final goal is still 1.0.
 - **The act:** one continuous run per venue, three goals (+ante multiplier, capped 1.25^n→6x).
   Cash in anytime past goal 1; a collapse strips back to the last goal banked. One optional Encore
   challenge may color the act (never at the Backyard).

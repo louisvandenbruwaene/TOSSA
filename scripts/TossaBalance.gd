@@ -5,7 +5,15 @@ extends RefCounted
 
 const SCORE_CEIL := 1.0e300
 const PERFECT_CATCHES := [80.0, 120.0, 160.0, 200.0, 260.0, 330.0, 400.0]
-const GOAL_STEPS := [0.50, 0.72, 1.0]
+# THE THREE GOALS ARE EVEN THIRDS OF THE ACT (2026-08-19, Louis: "the subgoals should be
+# linearly spread: one at 1/3, 2/3 and 3/3 of the final goal - the last one being the big
+# flower of course"). Score is LINEAR in weighted catches (see score_for: the count is the
+# only exponent and it applies to the base, not to the catches), so thirds of the catch
+# target are thirds of the score target, and the goal stem's three flowers sit at even
+# intervals up the stalk. The old 0.50 / 0.72 put the first goal half way up the whole act
+# and then crowded the second and third into the top quarter, which is why the meter's two
+# subgoal flowers were bunched near the bottom and the last stretch had nothing in it.
+const GOAL_STEPS := [1.0 / 3.0, 2.0 / 3.0, 1.0]
 const RUN_SHARE := 0.75
 const BASE_STAMINA := 200.0
 const STAMINA_PER_ENDURANCE := 8.0
