@@ -135,8 +135,14 @@ Codex improvements:
    ARE painted in the bake, plus a slightly stronger halo behind the wordmark); the TAILOR's
    mirror kept a hard `draw_colored_polygon` triangle that the skills preview had already
    dropped on 2026-08-13, in a dressing room with an unbroken card above him. The remaining
-   `draw_spotlight_cone` call sites are all STORE CAPSULE art, where a dramatic beam is the
-   point and no room is being described.
+   `draw_spotlight_cone` call sites are STORE CAPSULE art, where a dramatic beam is the
+   point and no room is being described - **and one live screen, the victory roll, which
+   passes the rule rather than escaping it** (checked 2026-08-19; this line used to claim
+   "all", which was simply wrong and would have got the cone deleted by someone trusting
+   it). `ui/victory` paints a gilt chandelier with four burning candles at the top centre,
+   directly above the cone's apex, so the beam names a source the picture contains. It also
+   runs at strength 0.08 against the title screen's old 0.30. **Check the painting before
+   deleting a beam: the rule is about a source, not about the shape.**
    **A SOFT BEAM OVER A STRIPED SURFACE DOES NOT STAY ONE BEAM**, and this is the general trap
    worth remembering: a low-alpha wedge laid over vertical folds is brightened by the fold
    pattern underneath, so lit cloth reads as beam and a dark fold down the middle reads as the
