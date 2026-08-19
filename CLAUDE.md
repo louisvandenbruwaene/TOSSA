@@ -207,6 +207,26 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   the centre"), and the rule that asymmetric outdoor venues could not be generated at all. All
   seven backdrops and all seven exteriors are single paintings; `scripts/pixelise_paint.py`
   reduces them and `scripts/fetch_paint.sh` downloads them.
+  **THE TITLE SCREEN IS THE ONE EXEMPTION, AND IT WAS LOST WHEN THE MIRROR WAS RETIRED**
+  (2026-08-19, Louis: the title "is not centered: the edges of the curtain are missing and
+  the bows aren't symmetric"). The retirement above is about the seven VENUES, whose problem
+  was a focal seam down the middle; `ui/menu_backdrop`'s middle is deliberately an empty
+  stage, which is the exemption `pixelise_menu.py`'s own `--from-half` block was written for.
+  Regenerating it full-frame silently dropped that. Measured on the 2026-08-13 painting:
+  **46.9% of pixels differed from their own mirror by more than 20 levels**, the swag gathers
+  sat at x 26/122/253/355/565 - spans of 96, 131, 102, then a 210-wide swag drooping 20px
+  lower than its neighbours - and each frame edge cut a different fraction of a different
+  swag. **A proscenium is architecture, so its asymmetry is not character, it is an error**,
+  and no amount of re-rolling gets a model to draw evenly spaced swags. `--mirror` on any
+  source is the fix and the bake is now made with it.
+  **AND THE AXIS IS NOT A FREE CHOICE: IT MUST LAND ON A SWAG'S LOW POINT.** The mirror meets
+  itself carrying the source's slope at that column, so an axis on a rising arc joins the two
+  halves into a sharp inverted-V spike. Louis's words point at the outer edges, so the obvious
+  window is the one that lands a gather on x=0 and x=640 - and measured, that puts the axis on
+  a rising arc and draws a spike dead centre, while the plain left half lands on the bottom of
+  the 253..387 swag and joins invisibly. **Symmetric and smooth beat symmetric and
+  edge-aligned**, and the outer swags stay part-cut on both sides, which is what a valance
+  running behind a proscenium actually does.
 - **Pixen cannot force a palette, so the reducer does it** in Oklab with serpentine
   Floyd-Steinberg. **Judge whether a painting will survive that by the TAIL, not the mean**: a
   good picture and a badly broken one measured 0.028 against 0.034 mean distance, a 1.2x spread
