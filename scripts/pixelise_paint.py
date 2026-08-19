@@ -190,6 +190,24 @@ GAMUT_MAX = 0.10
 # curtain were both mid-luminance, well above this floor.
 GAMUT_DARK = 26.0   # mean RGB below this is night, and its snap is unobservable
 
+# WHERE THE SNAP ACTUALLY BREAKS, AND WHY IT NEEDS ITS OWN READING (2026-08-19, re-rolling
+# the Circus, the Championship and the World Arena).
+#
+# A backdrop's floor is one large, evenly lit area of one continuous tone - by far the
+# biggest single surface in the picture, and the one the performer stands on. If that tone
+# sits between palette entries there is no "least wrong" neighbour to fall back on, so
+# serpentine error diffusion does the only thing it can and sprays a regular 2px
+# CHECKERBOARD across the whole thing. It is invisible in a 640x360 thumbnail and
+# unmistakable at 2x on screen.
+#
+# THE WHOLE-FRAME MEAN HIDES IT, exactly as the mean-vs-tail note above says a mean will.
+# Measured on two rolls that scored an unremarkable 0.066 and 0.144 overall, the floor band
+# alone read 0.087 and 0.198. Same statistic, same threshold, a smaller window - and that
+# is what separated a shippable floor from a checkerboard. Author the floor DARK and warm
+# ("dim ochre brown and dark umber, falling away into shadow toward the front, few colours,
+# flat areas of solid colour, no dithering") and this drops to 0.003.
+FLOOR_BAND = 280    # first row of the band a backdrop's floor lives in (of 360)
+
 
 def gamut_fit(rgb: np.ndarray) -> float:
 	"""Fraction of ALL pixels that are both LIT and further than GAMUT_FAR from the palette.
@@ -233,6 +251,12 @@ def build(fam: str, name: str, write: bool, force: bool) -> str:
 	if fam == "bg":
 		# only a backdrop has a performer standing in front of it
 		tag += f", spine {spine_busyness(out, STAND[name]):.2f}"
+		# ...and the FLOOR IS MEASURED ON ITS OWN, because the whole-frame number hides the
+		# one failure that is always in this band. See FLOOR_BAND.
+		floor = gamut_fit(src_rgb[FLOOR_BAND:])
+		tag += f", floor {floor:.3f}"
+		if floor > GAMUT_MAX:
+			tag += "  <-- LOOK AT THE FLOOR"
 	if fit > GAMUT_MAX:
 		tag += "  <-- LOOK AT IT"
 	if not write:
