@@ -12393,8 +12393,22 @@ func run_clean() -> float:
 func run_grade() -> String:
 	# a single letter that reads the whole set: cleanliness carries it, the crowd's
 	# high point and a long streak lift it. Skill first, so clean play dominates.
+	#
+	# ...BUT S IS THE FINAL GOAL, NOT A QUALITY SCORE (2026-08-19, Louis: "S score should
+	# only be for the final goal, not a failed performance").
+	#
+	# The three inputs are all about HOW the act was played and none of them is about
+	# whether it worked. A short, flawless, unbroken opening that then falls apart - or
+	# simply a night that never reached the number - could carry q past 0.90 and stamp the
+	# top grade on a card whose own header two lines above reads "1 of 3 goals". The badge
+	# and the outcome were describing different nights.
+	#
+	# So the whole ladder still measures craft, and the top rung additionally requires the
+	# act to have been finished: all three goals, which is the same `complete` the results
+	# card headlines and what the venue asked for. Everything below S is untouched, so a
+	# clean failed night still reads A and still says so.
 	var q := 0.55 * run_clean() + 0.28 * peak_applause + 0.17 * clampf(float(best_streak) / 25.0, 0.0, 1.0)
-	if q >= 0.90:
+	if q >= 0.90 and goals_hit >= NUM_GOALS:
 		return "S"
 	if q >= 0.78:
 		return "A"

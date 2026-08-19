@@ -1062,6 +1062,12 @@ review" for the accept/reject examples and why.
   alpha now and the flicker only breathes), and the dark torch's fire, which was still placed from
   `TORCH_WICK` while the lit one has been placed from the painting's own measurements since the
   torch became a sprite. Nobody could see that while the dark handle was a vector line.
+- **S IS THE FINAL GOAL, NOT A QUALITY SCORE (2026-08-19, Louis: "S score should only be for the
+  final goal, not a failed performance").** `run_grade`'s three inputs - cleanliness, peak crowd,
+  best streak - are all about HOW the act was played and none of them about whether it worked, so
+  a short flawless opening that then fell apart could stamp the top grade on a card whose own
+  header two lines above read "1 of 3 goals". The ladder still measures craft; the top rung now
+  additionally requires `goals_hit >= NUM_GOALS`. Everything below S is untouched.
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
 The distilled rulebook (text rendering, drawing, performance, persistence, testing) now lives in
