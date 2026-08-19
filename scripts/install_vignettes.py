@@ -87,6 +87,20 @@ SPECS: dict[str, dict] = {
 	# bright on pale is the one combination that cannot be read. The centre is a plaque
 	# to write on, not a face, so it is darkened to the card's own ground.
 	"rosette": {"src": "vig_rosette", "out": "", "half": True, "plaque": True},
+	# THE GOAL STEM'S TWO FLOWER HEADS (2026-08-19, Louis: "smaller topflower and longer
+	# green, more natural looking from pixellab"). Procedural petal ellipses read as a
+	# geometric rosette however well they are rasterised; these are paintings.
+	# `stalk` trims the stub of stem the model insists on drawing under a flower head - the
+	# game grows its own stalk to meet them, and two stalks meeting at an angle is worse
+	# than none.
+	# ONLY THE HEADS ARE GENERATED. The BUD stayed procedural after three rolls came back
+	# muddy: the locked 48 has five greens and all of them are light-to-mid, with no dark
+	# green at all, so the model reaches for BROWN to shade with and a fresh green bud comes
+	# out a dead one. That is the palette's warm bias biting exactly where CLAUDE.md says it
+	# will, and at 24x28 art px the bud is also under the "derive, do not generate, anything
+	# small" line. Two overlapping ellipses already read as a clean green bud; they stay.
+	"bloom": {"src": "stem_bloom2", "out": "flower", "half": True, "stalk": True},
+	"flower": {"src": "stem_small2", "out": "flower", "half": True, "stalk": True},
 }
 
 # A cast shadow is WIDE and FLAT. The meal's is w/h 3.38; the spoon that shares its colour
@@ -106,6 +120,10 @@ SPECK_MAX = 20
 # Color(0.12, 0.07, 0.08), a shade under it, so the plaque reads as inset rather than
 # painted on.
 PLAQUE = (0x17, 0x0f, 0x12)
+# A flower head's own petals span most of the canvas; the stem stub under it is a few
+# pixels wide. A quarter of the widest row separates them with room to spare, and the scan
+# runs bottom-up so it stops at the first real row rather than eating into the petals.
+STALK_FRAC = 0.25
 
 
 def components(mask: np.ndarray) -> list[np.ndarray]:
@@ -210,6 +228,26 @@ def snap_palette(rgba: np.ndarray) -> np.ndarray:
 	return out
 
 
+def trim_stalk(rgba: np.ndarray) -> tuple[np.ndarray, str]:
+	"""Drop the stub of stem under a flower head, by row width from the bottom up."""
+	a = rgba.copy()
+	op = a[..., 3] > 0
+	if not op.any():
+		return a, "no ink"
+	widths = op.sum(1)
+	peak = int(widths.max())
+	ys = np.where(widths > 0)[0]
+	cut = ys.max() + 1
+	for y in range(ys.max(), ys.min(), -1):
+		if widths[y] > peak * STALK_FRAC:
+			break
+		cut = y
+	if cut > ys.max():
+		return a, "no stalk stub"
+	a[cut:, :, 3] = 0
+	return a, f"trimmed {ys.max() + 1 - cut} stalk rows"
+
+
 def darken_plaque(rgba: np.ndarray) -> tuple[np.ndarray, str]:
 	"""Sink the pale centre disc to the card's ground so a bright letter can sit on it."""
 	a = rgba.copy()
@@ -251,6 +289,9 @@ def build(name: str, write: bool, force: bool) -> str:
 		note += "  " + n
 	if spec.get("plaque"):
 		a, n = darken_plaque(a)
+		note += "  " + n
+	if spec.get("stalk"):
+		a, n = trim_stalk(a)
 		note += "  " + n
 	soft = int(((a[..., 3] > 0) & (a[..., 3] < 255)).sum())
 	left = off_palette(a)
