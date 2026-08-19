@@ -9348,6 +9348,11 @@ func start_run(n: int) -> void:
 	trick_primed = false
 	if toggle_on >= 0 and not trick_unlocked(toggle_on):
 		toggle_on = -1
+	# ...and a toggle this pattern cannot draw. `pattern` was just set above, so a saved
+	# pattern, a Skills-screen override and a count re-deal all pass through the same rule
+	# the trick key and the pattern key answer to.
+	if toggle_on >= 0 and not trick_pattern_ok(toggle_on, pattern):
+		toggle_on = -1
 	toggle_scored = false
 	tennis_ball = null
 	col_air_ref = -1.0
@@ -10843,6 +10848,11 @@ func cycle_pattern() -> void:
 	set_trick_msg("%s  -  %s" % [String(PATTERNS[pattern_sel]["name"]).to_upper(), String(PATTERNS[pattern_sel]["desc"])])
 	play_sfx("ui2", -13.0)
 	start_run(num_balls)
+	# ...and a flourish the new pattern cannot carry goes with it. AFTER start_run, which is
+	# what actually moves `pattern`: asking before would test the combination the player is
+	# leaving. The message replaces the pattern line above only when something really was
+	# switched off, which is the case worth reading.
+	drop_illegal_toggle()
 
 
 func trick_unlocked(i: int) -> bool:
@@ -10908,36 +10918,76 @@ func set_trick_msg(m: String) -> void:
 	trick_msg_tick = tick
 
 
-func trick_pattern_warning(tr: int, pat: int) -> String:
-	# WHICH COMBINATIONS FIGHT, measured rather than guessed (2026-07-28 evening, Louis:
-	# "i want you to dissect the possibilities of patterns and tricks, since multiple can be
-	# active at the same time. are all of these valid states?"). Every one of the eighteen
-	# pattern x toggle states was run through --collcheck at five clubs with realistic
-	# timing; fifteen are clean and these three are not, each for a reason that is about
-	# GEOMETRY and not about tuning:
+func trick_pattern_ok(tr: int, pat: int) -> bool:
+	# **THE ONE AUTHORITY ON WHETHER A TRICK AND A PATTERN MAY RUN TOGETHER** (2026-08-19,
+	# Louis: "make sure that only animated patterns (valid patterns and tricks combos) are
+	# playable"). Every question about a combination - may Space switch this on, may P leave
+	# this running, what does the HUD say - goes through here, so the answer cannot differ
+	# between the three of them, which is exactly how the bug below survived.
 	#
-	#   Behind the Back x COLUMNS      -13.6px. A column is DEFINED by going straight up and
-	#                                  coming down where it left; Behind the Back is DEFINED
-	#                                  by releasing from across the body. The two rules
-	#                                  cannot both hold, and no constant reconciles them.
-	#   Behind the Back x REV CASCADE  -9.8px. Every throw already goes over the top; adding
-	#                                  a release from behind the far hip compounds two
-	#                                  crossings on one road.
-	#   High Toss x SHOWER             -4.4px. The shower's high hand throws every prop; at
-	#                                  1.35-1.8 height they crowd a single road that already
-	#                                  carries count-1 objects.
+	# THE BUG IT CLOSES: the cascade-only gate lived inside on_trick and nowhere else, so it
+	# only ever asked "may I switch this ON right now". Behind the Back switched on in a
+	# Cascade and then P to Columns kept running - cycle_pattern re-deals the hands through
+	# start_run, which clears a toggle the player has not UNLOCKED and no other kind - and
+	# the act then ran a shaped throw through a pattern with no shape for it, scoring its
+	# multiplier off an animation that does not exist.
 	#
-	# (Two more were broken and are now FIXED rather than warned about - see the armed_trick
-	# note in do_throw. Half Shower x High Toss went 4.2 -> 38.1px, Shower x Behind the Back
-	# -7.5 -> +2.5. Those were a guard misfiring, which is a bug; these three are the shapes
-	# genuinely disagreeing, which is not.)
-	if tr == TR_BTB and pat == COLUMNS:
-		return "columns want to come straight back down. Expect clashes."
-	if tr == TR_BTB and pat == RCASC:
-		return "both go over the top at once. Expect clashes."
+	# WHAT IS REFUSED, and each is a SHAPE disagreeing rather than a difficulty:
+	#   * a `cascade_only` trick outside a Cascade. Every other pattern IS a fixed geometry
+	#     and a trick that reshapes every throw contradicts it; Cascade is the only pattern
+	#     with no shape of its own to protect.
+	#   * HIGH TOSS x SHOWER. Measured at -4.4px by --collcheck: the shower's high hand
+	#     throws every prop, and at 1.35-1.8 height they crowd a single road that already
+	#     carries count-1 objects. This one used to be allowed with a warning printed
+	#     underneath it, which is the case Louis's note is really about - the props pass
+	#     through each other and the game says "expect clashes" instead of not doing it.
+	# Spin rides anything, because it changes nothing about a throw: it is a lockout.
+	#
+	# THE MEASUREMENTS THIS INHERITS, from the 2026-07-28 combination audit that ran all
+	# eighteen pattern x toggle states through --collcheck at five clubs: Behind the Back x
+	# Columns -13.6px (a column is DEFINED by coming straight back down and Behind the Back
+	# by releasing from across the body - no constant reconciles two definitions), Behind
+	# the Back x Reverse Cascade -9.8px (two crossings compounded on one road), High Toss x
+	# Shower -4.4px. Fifteen are clean. Two more were broken and were FIXED rather than
+	# refused - see the armed_trick note in do_throw, Half Shower x High Toss 4.2 -> 38.1px
+	# and Shower x Behind the Back -7.5 -> +2.5 - because those were a guard misfiring,
+	# which is a bug. These three are the shapes genuinely disagreeing, which is not, and
+	# the honest answer to a shape that cannot exist is to not offer it.
+	if tr < 0 or tr >= TRICKS.size() or pat < 0 or pat >= PATTERNS.size():
+		return false
+	if bool(TRICKS[tr].get("cascade_only", false)) and pat != CASCADE:
+		return false
 	if tr == TR_HIGH and pat == SHOWER:
-		return "the shower's high road is already full. Expect clashes."
-	return ""
+		return false
+	return true
+
+
+func trick_pattern_refusal(tr: int, pat: int) -> String:
+	# ...and WHY, in the player's own terms. A refusal that does not say what to press
+	# instead is just a dead key.
+	if trick_pattern_ok(tr, pat):
+		return ""
+	var name := String(TRICKS[tr]["name"]).to_upper()
+	if bool(TRICKS[tr].get("cascade_only", false)):
+		return "%s only works in a Cascade  -  %s to switch pattern" % [name, k_pattern()[0]]
+	return "%s and the Shower share one high road  -  %s to switch pattern" % [name, k_pattern()[0]]
+
+
+func drop_illegal_toggle() -> void:
+	# THE PATTERN JUST CHANGED UNDER A RUNNING TOGGLE. Called from every place the pattern
+	# can move (cycle_pattern, and start_run for the Skills-screen override and for a saved
+	# pattern that no longer matches), so no route into a new pattern can leave a flourish
+	# running that the new pattern cannot draw.
+	#
+	# It is switched OFF rather than the pattern change being refused: the player pressed P,
+	# and a pattern is the bigger choice. Saying so out loud matters - a toggle going quiet
+	# with no message is indistinguishable from the key having failed.
+	if toggle_on < 0 or trick_pattern_ok(toggle_on, pattern):
+		return
+	var name := String(TRICKS[toggle_on]["name"]).to_upper()
+	toggle_on = -1
+	set_trick_msg("%s OFF  -  it does not run in a %s" % [name, String(PATTERNS[pattern]["name"])])
+	play_sfx("ui", -16.0)
 
 
 func on_trick() -> void:
@@ -10966,14 +11016,14 @@ func on_trick() -> void:
 	elif trick_sel < 0 or not trick_unlocked(trick_sel):
 		trick_sel = int(unlocked_tricks()[0])
 	var t: Dictionary = TRICKS[trick_sel]
-	# CASCADE ONLY, FOR EVERY TRICK BUT HIGH TOSS AND SPIN (2026-07-29, Louis). This is the
-	# combination audit's finding turned into a rule rather than a warning: every pattern
-	# except Cascade IS a fixed geometry, and a trick that reshapes every throw is in direct
-	# conflict with one. Cascade is the only pattern with no shape of its own to protect, so it
-	# is the only one with room for a shaping trick. High Toss changes height and Spin changes
-	# nothing about the throw at all, so both ride anything.
-	if bool(t.get("cascade_only", false)) and pattern != CASCADE:
-		set_trick_msg("%s only works in a Cascade  -  press P to switch" % String(t["name"]).to_upper())
+	# A COMBINATION THE GAME CANNOT DRAW IS NOT OFFERED. The rule itself lives in
+	# trick_pattern_ok - one authority shared with the pattern key and the HUD - because
+	# this gate used to be the ONLY place that asked, which is how a toggle switched on in a
+	# Cascade survived a switch to Columns. High Toss x Shower joins the cascade-only tricks
+	# here: it was previously allowed with "expect clashes" printed under it, which is the
+	# game watching props pass through each other and describing it rather than not doing it.
+	if not trick_pattern_ok(trick_sel, pattern):
+		set_trick_msg(trick_pattern_refusal(trick_sel, pattern))
 		play_sfx("whiff", -12.0)
 		return
 	match String(t["kind"]):
@@ -11021,19 +11071,14 @@ func on_trick() -> void:
 				# so the score inside a run stays linear in time.
 				if not tut_active:
 					seg_add_trick(trick_sel)
-				# ...AND IT SAYS SO WHEN THE COMBINATION FIGHTS ITSELF. Three of the
-				# eighteen pattern x toggle states are geometrically contradictory rather
-				# than merely hard - see trick_pattern_warning - and the player is TOLD
-				# rather than blocked. Blocking would be the wrong call twice over: it is
-				# their press, and "Behind the Back during Columns" is a perfectly
-				# reasonable thing to want to try. But props visibly passing through each
-				# other with no explanation reads as a broken game, and the one thing that
-				# turns that into a deliberate stunt is a line of text.
-				var warn := trick_pattern_warning(trick_sel, pattern)
-				if warn == "":
-					set_trick_msg("%s ON" % String(t["name"]).to_upper())
-				else:
-					set_trick_msg("%s ON  -  %s" % [String(t["name"]).to_upper(), warn])
+				# NO WARNING LINE ANY MORE, BECAUSE THERE IS NOTHING LEFT TO WARN ABOUT.
+				# The three contradictory pattern x toggle states used to be allowed with
+				# "expect clashes" printed under them - the reasoning being that it is the
+				# player's press and the alternative is props passing through each other
+				# with no explanation. The gate at the top of this function refuses all
+				# three now (trick_pattern_ok), which is the third option that note missed:
+				# not doing it. A combination that is on is a combination that is drawn.
+				set_trick_msg("%s ON" % String(t["name"]).to_upper())
 				play_sfx("ui2", -13.0)
 		_:
 			if trick_primed:
@@ -21038,7 +21083,15 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 			use = "switch off" if toggle_on == sel else "switch on"
 		_:
 			use = "wave off" if trick_primed else "one throw"
+	# NOT IN THIS PATTERN. The card used to read "Space switch on" for Behind the Back while
+	# the player was juggling Columns - an offer the trick key was always going to refuse.
+	# Say what the trick needs and name the key that leads there, which is the pattern key.
+	var blocked := toggle_on != sel and not trick_pattern_ok(sel, pattern)
+	if blocked:
+		use = "not in a %s" % String(PATTERNS[pattern]["name"])
 	items.append([k_trick(), use])
+	if blocked:
+		items.append([k_pattern(), "change pattern"])
 	if un.size() > 1:
 		items.append([k_cycle(), "switch trick"])
 	draw_hints_row(font, cx, s.y - 38.0, items)
