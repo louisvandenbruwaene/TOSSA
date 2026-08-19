@@ -1036,6 +1036,20 @@ review" for the accept/reject examples and why.
   `--assists on|off` pins both for one run so the state can be photographed, and deliberately never
   writes back to the SHARED settings file.
 
+- **A CHARGED PROP IS THE PROP, NOT A DRAWING OF ONE (2026-08-19, Louis: "the glow in the dark
+  objects render completely wrong").** `glow_silhouette` painted the phosphor shape with
+  `draw_circle` and hand-written polygons that predate the art seam, so the one object a player
+  has to read on the darkest stage in the game was an antialiased vector disc stepping at one
+  screen pixel beside a coat stepping at two - measured (109,145,97), a dull olive smudge.
+  `art_glow_mask` DERIVES the silhouette from the prop's own sprite (every opaque pixel to white,
+  hard threshold, cached in the bank beside its source and rebuilt free on an F9 variant swap) and
+  blits it through the normal path with the phosphor as its tint. Pixel-exact, same pivot, same
+  zoom, and it can never disagree with the lit shape again because it IS the lit shape. The old
+  branches stay as the procedural fallback. Two things went with it: the alpha (0.85 x a flicker
+  bottoming at 0.85, over a room measured at RGB (7,8,9) - phosphor EMITS, so it holds near-full
+  alpha now and the flicker only breathes), and the dark torch's fire, which was still placed from
+  `TORCH_WICK` while the lit one has been placed from the painting's own measurements since the
+  torch became a sprite. Nobody could see that while the dark handle was a vector line.
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
 The distilled rulebook (text rendering, drawing, performance, persistence, testing) now lives in

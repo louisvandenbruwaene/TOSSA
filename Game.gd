@@ -14101,8 +14101,7 @@ func art_blit_prop(kind: int, pos: Vector2, sc: float, ang: float, tint: Color) 
 	# caller passes prop_scale itself, so zoom is 1 and a source pixel is 4 screen px. In
 	# the shop draw_prop_icon passes PROP_ICON_MAG (3.0 for balls), so zoom is 3 and the
 	# icon is a clean 3x magnification - which is how pixel art shows an item close up.
-	var base := prop_scale(kind)
-	var zoom := maxi(1, int(roundf(sc / maxf(base, 0.001))))
+	var zoom := art_prop_zoom(kind, sc)
 	var key := art_key_prop(kind)
 	if not art_blit(key, pos, float(zoom), ang, tint):
 		return false
@@ -14169,6 +14168,80 @@ func draw_sprite_torch_flame(key: String, which: String, pos: Vector2, ang: floa
 	if dk > 0.02 and not blue:
 		draw_glow(pos + Vector2(0.0, base_y - fh * 0.5).rotated(ang) * sc, 42.0 * sc,
 			Color(1.0, 0.60, 0.22, 0.34 * dk))
+
+
+func art_prop_zoom(kind: int, sc: float) -> int:
+	# `sc` EXPRESSED AS A WHOLE MAGNIFICATION, which is the only thing a prop sprite may be
+	# drawn at - see art_blit_prop for the rule and why prop_scale itself can never be it.
+	# Split out so the phosphor mask below magnifies exactly as the lit prop does: a charged
+	# club that came out one zoom step off its own body would be a different club.
+	return maxi(1, int(roundf(sc / maxf(prop_scale(kind), 0.001))))
+
+
+func art_glow_mask(key: String) -> String:
+	# A CHARGED PROP IS THE PROP, NOT A DRAWING OF ONE (2026-08-19, Louis, on the Midnight
+	# Show: "the glow in the dark objects render completely wrong").
+	#
+	# glow_silhouette painted the phosphor shape with the game's own vector calls -
+	# draw_circle for a ball, a line and a triangle for a club - and those predate the art
+	# seam by months. On a stage where every other object is a sprite the result is exactly
+	# what it sounds like: an antialiased vector disc, stepping at one screen pixel while
+	# the coat behind it steps at two, in a colour that has to be alpha-blended over the
+	# room. Measured on a Midnight Show capture, a charged ball came back (109,145,97) with
+	# a soft rim - a dull olive smudge, and the one object on that screen the player has to
+	# read.
+	#
+	# So the silhouette is DERIVED from the prop's own sprite, the same way everything else
+	# in this game is derived rather than redrawn: every opaque source pixel becomes white,
+	# every transparent one stays transparent, and the result is blitted through the normal
+	# path with the phosphor as its TINT. That makes it pixel-exact, on the art grid, at the
+	# same pivot and the same zoom as the lit prop - and it can never disagree with the lit
+	# shape again, because it IS the lit shape.
+	#
+	# WHITE, NOT PHOSPHOR, in the texture: the round props are already authored white and
+	# tinted (see the manifest's _AUTHORING note), so a white mask is the same contract and
+	# leaves the colour where the caller can still flicker it.
+	#
+	# Built once per prop per art_boot and cached in the bank beside its source, so an F9
+	# variant swap regenerates it for free (art_boot clears the bank). A prop sprite is at
+	# most 21x48, so the per-pixel loop is a few thousand reads, once.
+	var gk := key + "@glow"
+	if art_bank.has(gk):
+		return gk
+	if not art_on or not art_bank.has(key):
+		return ""   # procedural source: the caller falls back to its own drawing
+	var e: Dictionary = art_bank[key]
+	var src: Image = (e["tex"] as Texture2D).get_image()
+	if src == null:
+		return ""
+	if src.is_compressed():
+		src.decompress()
+	var w := src.get_width()
+	var h := src.get_height()
+	if w <= 0 or h <= 0:
+		return ""
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	# A HARD THRESHOLD, not the source alpha carried through. These sprites are reduced with
+	# a hard alpha cut already, so the only half-transparent pixels a mask could inherit are
+	# rounding - and a phosphor edge that fades out is the soft rim this whole function
+	# exists to delete.
+	for y in h:
+		for x in w:
+			if src.get_pixel(x, y).a >= 0.5:
+				img.set_pixel(x, y, Color(1.0, 1.0, 1.0, 1.0))
+	art_bank[gk] = {"tex": ImageTexture.create_from_image(img), "pivot": e["pivot"],
+		"scale": e["scale"]}
+	return gk
+
+
+func art_blit_prop_glow(kind: int, pos: Vector2, sc: float, ang: float, tint: Color) -> bool:
+	# the phosphor half of art_blit_prop: same key, same zoom, same pivot, the mask instead
+	# of the painting. The torch's live fire is deliberately NOT drawn here - a charged torch
+	# burns blue and its caller owns that, exactly as the lit path owns the orange one.
+	var gk := art_glow_mask(art_key_prop(kind))
+	if gk == "":
+		return false
+	return art_blit(gk, pos, float(art_prop_zoom(kind, sc)), ang, tint)
 
 
 func art_key_prop(kind: int) -> String:
@@ -17858,10 +17931,18 @@ func draw_glow_in_dark(pos: Vector2, col: Color, kind: int = -1, sc: float = 1.0
 	# froze there for the rest of the fall. `lit` is how strongly the prop is charged:
 	# the Glow Kit is the difference between a prop you can read and one you can only
 	# find, which is what 60,000 buys now that the shape itself never goes away.
-	var fl := (0.85 + 0.15 * sin(float(tick) * 0.4 + pos.x * 0.05)) * lit
-	var phos := Color(lerpf(GLOW_PHOS.r, col.r, 0.25), lerpf(GLOW_PHOS.g, col.g, 0.25), lerpf(GLOW_PHOS.b, col.b, 0.25))
+	#
+	# AND IT IS CHARGED, NOT TRANSLUCENT (2026-08-19). The alpha was 0.85 x a flicker that
+	# bottoms out at 0.85, so the shape sat at about 0.72 over a room measured at RGB
+	# (7,8,9): the phosphor lost a quarter of itself to a floor with nothing in it, and the
+	# 0.25 lerp toward a red ball's own colour took most of the green out of what was left.
+	# Together they made (109,145,97), a dull olive. Phosphor is the thing EMITTING here, so
+	# it holds near-full alpha and the flicker only breathes over the top; the tint lerp
+	# stays, at 0.18, purely so four balls in one cascade remain four distinguishable balls.
+	var fl := (0.93 + 0.07 * sin(float(tick) * 0.4 + pos.x * 0.05)) * lit
+	var phos := Color(lerpf(GLOW_PHOS.r, col.r, 0.18), lerpf(GLOW_PHOS.g, col.g, 0.18), lerpf(GLOW_PHOS.b, col.b, 0.18))
 	if kind >= 0:
-		glow_silhouette(pos, kind, sc, ang, Color(phos.r, phos.g, phos.b, 0.85 * fl))
+		glow_silhouette(pos, kind, sc, ang, Color(phos.r, phos.g, phos.b, fl))
 
 
 func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color) -> void:
@@ -17869,6 +17950,14 @@ func glow_silhouette(pos: Vector2, kind: int, sc: float, ang: float, col: Color)
 	# those paint their own reds and steels, and a charged club coming out crimson kills
 	# the whole illusion the Kit is selling. What matters here is the outline, because
 	# that is what lets a player tell a club from a ring in the dark.
+	#
+	# THE SPRITE'S OWN MASK FIRST (2026-08-19) - see art_glow_mask for what the hand-drawn
+	# branches below were doing to a pixel-art stage, and why a derived silhouette is the
+	# only version that cannot drift from the lit prop. Everything under the match is now
+	# the PROCEDURAL FALLBACK, reached only when that prop has no sprite (--procart, or a
+	# prop added before its art), and it stays for exactly that reason.
+	if art_blit_prop_glow(kind, pos, sc, ang, col):
+		return
 	match kind:
 		PROP_RINGS:
 			draw_ring_prop(pos, col, sc)
