@@ -1068,6 +1068,13 @@ review" for the accept/reject examples and why.
   a short flawless opening that then fell apart could stamp the top grade on a card whose own
   header two lines above read "1 of 3 goals". The ladder still measures craft; the top rung now
   additionally requires `goals_hit >= NUM_GOALS`. Everything below S is untouched.
+- **THE INJURY RULE IS OFF (2026-08-19, Louis: "disable the lose all stamina when hit by a
+  dangerous object for now, it's irritating").** One constant, `INJURY_ENDS_ACT`, read by
+  `injury_prop_kind`. Every other piece stays wired up and reachable - `injury_prop`, the three
+  `*_injury` collapse reasons and their fail cards, the red drop flash - so turning it back on (or
+  giving it a gentler cost than "all of it") is one line plus a decision. **`validate.sh`'s step 3d
+  moved with it** and now asserts the opposite: a chainsaw drop must NOT end the act on injury.
+  Test the behaviour, not the machinery, or the suite stays green describing a game that is gone.
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
 The distilled rulebook (text rendering, drawing, performance, persistence, testing) now lives in
