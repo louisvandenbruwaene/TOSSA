@@ -57,17 +57,30 @@ OUT = ROOT / "Assets" / "UI" / "flower"
 
 # The three densifying segments, in growth order, as (job-stem, drop-first-frame).
 # Each segment's first frame IS the previous segment's last, so all but the first drop it.
-# GROWTH ORDER: the SIDE FLOWERS (the subgoals) open before the top bloom does (2026-08-19,
-# Louis: "the subflowers / subgoals should grow first"). That is the order the meter means -
-# a subgoal falls before the goal does - and the first cycle had it backwards, opening the
-# big flower first and popping the two side ones in at the very end.
-# It could not be fixed by reordering frames, because a frame carries the whole plant. It
-# needed a new MIDPOINT to interpolate through: leaves and open side flowers, top still a
-# closed bud. Asking for that by prompt failed - img2img at strength 300 kept the top flower
-# open, and that is the generator being sensibly conservative about an init image. So the
-# midpoint is COMPOSITED from two frames the model already drew: the closed-bud frame, with
-# the side flowers pasted in from the finished plant, both on the same canvas from the same
-# design. See artifacts/paint/plant_mid2.png.
+# GROWTH ORDER, AND IT IS THE WHOLE POINT (2026-08-19, Louis: "small flower grows a
+# subflower, grows another subflower, continues growing stalk, grows top bud, blooms top
+# bud; i wouldn't want a top bud, when the subflowers still have to grow").
+# That is the order the meter MEANS - a subgoal falls before the goal does - and it cannot
+# be got by reordering frames, because a frame carries the whole plant. It needs KEYFRAMES
+# to interpolate through, one per beat, and two of them do not exist as generations:
+#   K1  one side flower open, no top bud
+#   K2  both side flowers open, no top bud
+#   K3  taller stalk, closed top bud            (artifacts/paint/plant_mid2.png)
+#   K4  full bloom                              (artifacts/paint/plant_full2.png)
+# K3 IS ITSELF A COMPOSITE and K1/K2 ARE CUT FROM IT. Prompting for "the same plant but the
+# top is still a bud" failed - img2img at strength 300 kept the flower open, which is the
+# generator being sensibly conservative about an init image. So K3 is the closed-bud frame
+# with the side flowers pasted in from the finished plant, and K1/K2 are K3 with the bud
+# rows cleared (the bud spans rows 9..33; the stalk resumes 3px wide at row 34) and, for
+# K1, the right-hand flower cleared too. Every pixel therefore comes from a frame the model
+# drew, on one canvas, so the interpolations have nothing to reconcile.
+#
+# THE INTERPOLATIONS OVERSHOOT BADLY HERE and drop_overshoot is what makes them usable:
+# told to grow from a seedling to K1, the model grows the WHOLE plant to full height by
+# frame 9 and then snaps back to the pinned target at frame 16. Measured heights across the
+# raw 65: 14, 19, 24, 34, 41, 44, 49, 55, 64, 71, 71, 72, 72, 72, 72, 72, then 46. Twenty-
+# three frames are dropped, against three on the previous cycle - a pinned last frame is a
+# hint, not a contract, and the further the target is from "keep going", the less it holds.
 SEGMENTS = [("s1", False), ("s2", True), ("s3", True), ("s4", True)]
 
 

@@ -320,16 +320,15 @@
     "_README": [
       "THE GOAL STEM'S GROWTH CYCLE: one painted frame per step of the plant's life, in",
       "growth order, so stem_grow_key does nothing but round the meter's own fill onto",
-      "the list. Built by scripts/install_plant_frames.py from PixelLab interpolations -",
-      "see that file for why it takes six calls to get this many frames, why the seedling",
-      "is derived from the finished plant, and why the midpoint (side flowers open, top",
-      "still a bud) had to be COMPOSITED rather than prompted for.",
+      "the list. Built by scripts/install_plant_frames.py from PixelLab interpolations",
+      "through four hand-made keyframes - see that file for the order they enforce and",
+      "why two of them had to be DERIVED from frames the model drew rather than prompted.",
       "stalk_dx / bloom_cx / bloom_cy are measured off the frames at install time: the",
       "stalk is not centred in its own canvas, and the aura belongs on the bloom rather",
       "than on the canvas's top edge. Delete this block and the stem goes back to",
       "assembling itself from a stalk rect, two lens leaves and the flower-head sprites."
     ],
-    "frames": 57,
+    "frames": 42,
     "cell": [72, 88],
     "stalk_dx": -3.5,
     "bloom_cx": 34.2,
@@ -460,51 +459,6 @@
   },
   "stem/grow_41": {
     "path": "res://Assets/UI/flower/grow_41.png"
-  },
-  "stem/grow_42": {
-    "path": "res://Assets/UI/flower/grow_42.png"
-  },
-  "stem/grow_43": {
-    "path": "res://Assets/UI/flower/grow_43.png"
-  },
-  "stem/grow_44": {
-    "path": "res://Assets/UI/flower/grow_44.png"
-  },
-  "stem/grow_45": {
-    "path": "res://Assets/UI/flower/grow_45.png"
-  },
-  "stem/grow_46": {
-    "path": "res://Assets/UI/flower/grow_46.png"
-  },
-  "stem/grow_47": {
-    "path": "res://Assets/UI/flower/grow_47.png"
-  },
-  "stem/grow_48": {
-    "path": "res://Assets/UI/flower/grow_48.png"
-  },
-  "stem/grow_49": {
-    "path": "res://Assets/UI/flower/grow_49.png"
-  },
-  "stem/grow_50": {
-    "path": "res://Assets/UI/flower/grow_50.png"
-  },
-  "stem/grow_51": {
-    "path": "res://Assets/UI/flower/grow_51.png"
-  },
-  "stem/grow_52": {
-    "path": "res://Assets/UI/flower/grow_52.png"
-  },
-  "stem/grow_53": {
-    "path": "res://Assets/UI/flower/grow_53.png"
-  },
-  "stem/grow_54": {
-    "path": "res://Assets/UI/flower/grow_54.png"
-  },
-  "stem/grow_55": {
-    "path": "res://Assets/UI/flower/grow_55.png"
-  },
-  "stem/grow_56": {
-    "path": "res://Assets/UI/flower/grow_56.png"
   },
   "stem/flower": {
     "path": "res://Assets/UI/flower/flower.png"
