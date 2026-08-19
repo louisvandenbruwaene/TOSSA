@@ -4043,6 +4043,24 @@ func encore_pool(venue: int) -> Array[int]:
 	return pool
 
 
+func encores_have_purist() -> bool:
+	for e in encores:
+		if e >= 0 and e < ENCORES.size() and PURIST_IDS.has(String(ENCORES[e]["id"])):
+			return true
+	return false
+
+
+func encore_in_stack(e: int) -> bool:
+	# Does this Encore get its own card in the live HUD's left rail? Everything does except
+	# the two Purist binds, which are one line on the top-right card instead - see draw_hud's
+	# `pur_row`. Written as a shared predicate rather than an inline test because the stack
+	# is measured in one loop and drawn in another, and a filter applied to only one of them
+	# leaves a card-sized hole (or an overflow) that nothing else would report.
+	if e < 0 or e >= ENCORES.size():
+		return false
+	return not PURIST_IDS.has(String(ENCORES[e]["id"]))
+
+
 func purist_slots(venue: int) -> int:
 	# Purist begins late and can only draw from the two approved conditions.
 	return mini(PURIST_IDS.size(), maxi(0, 4 - (MAX_VENUE - venue)))
@@ -18943,10 +18961,14 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# challenges are on, not what they mean again. One box per challenge survives either
 			# way, which was the whole point of splitting them up in the first place.
 			var e_floor := s.y - 88.0 - 8.0    # draw_routine_hud's panel top, less a gap
+			# ...AND THE PURIST PAIR IS NOT IN THIS STACK. It is stated once, in one line, on
+			# the top-right card (see `pur_row`), because it is one indivisible booking
+			# rather than two of tonight's challenges. Both loops filter through the same
+			# helper so the heights and the cards can never disagree about what is shown.
 			var e_hi: Array[float] = []
 			var e_tot := 0.0
 			for e in encores:
-				if e < 0 or e >= ENCORES.size():
+				if not encore_in_stack(e):
 					continue
 				var eln := _wrap_lines(font, String(ENCORES[e]["desc"]), LW - 28, 12).size()
 				e_hi.append(36.0 + 16.0 * float(maxi(eln, 2)))
@@ -18954,7 +18976,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var e_tight := eay + e_tot > e_floor
 			var ei := 0
 			for e in encores:
-				if e < 0 or e >= ENCORES.size():
+				if not encore_in_stack(e):
 					continue
 				var edesc := String(ENCORES[e]["desc"])
 				var ehh := 32.0 if e_tight else e_hi[ei]
@@ -18990,7 +19012,20 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# day hub, the sheet, and the results card instead of being repeated here.
 		var pts_row := points > 0
 		var slow_row := slow > 0.005
-		var status_rows := int(pts_row) + int(slow_row)
+		# PURIST IS ONE LINE UP HERE, NOT TWO CARDS DOWN THERE (2026-08-19, Louis: "put p
+		# binds accuracy + speed on the top right to save space for the rest of the text").
+		# A Purist night rolls purist_acc and purist_spd, and the encore stack drew each as
+		# its own 76px card in the LEFT rail - 152px, a quarter of the column, spent saying
+		# one thing twice. It is one indivisible pair by design ("Individual binds do not
+		# exist"), so it is one line, and it belongs with the other things that are true of
+		# the whole act rather than in the list of what the house asked for tonight.
+		# ...and it must answer for BOTH paths to a Purist night, which are separate systems
+		# that happen to share the name: `purist` is the player's own P toggle in the day
+		# hub, while the HOUSE can roll purist_acc / purist_spd as Encores. Filtering the
+		# Encores out of the left stack without covering that second path would delete the
+		# only statement of a bind the player is actually playing under.
+		var pur_row := purist or encores_have_purist()
+		var status_rows := int(pts_row) + int(slow_row) + int(pur_row)
 		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows)), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
 		var sx := RX + 14.0
 		var sw := RW - 28.0
@@ -19017,6 +19052,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 				stext += "  ·  %ds" % int(ceil(float(perfect_burst_until - _frames) / 120.0))
 			draw_fit_string(font, Vector2(sx, status_y), stext, HORIZONTAL_ALIGNMENT_LEFT, sw, 12,
 				Color(0.68, 0.92, 1.0, 0.96))
+			status_y += 18.0
+		if pur_row:
+			draw_fit_string(font, Vector2(sx, status_y), "PURIST  -  Accuracy + Speed bound",
+				HORIZONTAL_ALIGNMENT_LEFT, sw, 12, Color(0.86, 0.76, 1.0, 0.96))
 			status_y += 18.0
 		if pts_row:
 			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
@@ -27990,15 +28029,13 @@ func draw_popups(font: Font) -> void:
 		var size := 18
 		if big:
 			size = 23 + maxi(0, 6 - int(age))
-		# Longer stage notices retain a high-contrast plate. PERFECT and AMAZING return
-		# to their original outline-only treatment: they are rapid catch feedback, not
-		# floating cards, and only one of them can exist for a given catch.
-		if txt not in ["PERFECT", "AMAZING!"]:
-			var text_w := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(size)).x
-			var plate := Rect2(pos.x - text_w * 0.5 - 10.0, pos.y - float(ps(size)) - 7.0,
-				text_w + 20.0, float(ps(size)) + 12.0)
-			draw_rect(plate, Color(0.035, 0.02, 0.035, a * 0.78))
-			draw_line(plate.position, Vector2(plate.end.x, plate.position.y), Color(c.r, c.g, c.b, a * 0.45), 1.0)
+		# NO PLATE, ON ANY OF THEM (2026-08-19, Louis: "make sure all the text looks the
+		# same: none should have that black background"). PERFECT and AMAZING lost theirs
+		# earlier and the rest kept it, so the same stream of stage feedback came in two
+		# different treatments a few frames apart - a bare outlined PERFECT, then NEW
+		# RECORD! on a near-black card. The plate was there for contrast over a lit stage
+		# and draw_text_shout's 8-way outline is already doing that job for the same text,
+		# which is why the two that dropped it did not become unreadable.
 		# the box is 240 wide, so its LEFT edge sits half that from the anchor: the
 		# old -60 offset centred every popup 60px right of the hand it belonged to
 		draw_text_shout(font, pos - Vector2(120.0, 0), txt, HORIZONTAL_ALIGNMENT_CENTER, 240, size, c)
