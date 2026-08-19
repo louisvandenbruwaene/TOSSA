@@ -10280,6 +10280,15 @@ func do_throw(h: int, hold: int) -> void:
 		trick_primed = false
 	elif toggle_on == TR_HIGH or toggle_on == TR_BTB:
 		this_trick = toggle_on
+		# ...AND A SHOWER'S LOW FEED IS NOT LOOPED BEHIND THE BACK (see btb_hand). This one
+		# line is the whole of the Shower / Half Shower flourish: the hand that throws the
+		# high road gets the trick and the other hand throws exactly the pass it always did,
+		# which keeps both the pattern's two-road shape and the trick's own read. It has to
+		# be here rather than at the release, because `this_trick` is what sets the height
+		# bump, the 1.8 ceiling, `b.trick` and therefore the score - a throw that is not
+		# shaped must not be paid as one either.
+		if toggle_on == TR_BTB and not btb_hand(h, pattern):
+			this_trick = -1
 	if this_trick == TR_HIGH or this_trick == TR_BTB:
 		var tfrac := clampf(float(air - BASE_AIR) / (HOLD_GAIN * float(HOLD_MAX)), 0.0, 1.4)
 		if this_trick == TR_HIGH:
@@ -11310,10 +11319,36 @@ func trick_pattern_ok(tr: int, pat: int) -> bool:
 	# the honest answer to a shape that cannot exist is to not offer it.
 	if tr < 0 or tr >= TRICKS.size() or pat < 0 or pat >= PATTERNS.size():
 		return false
-	if bool(TRICKS[tr].get("cascade_only", false)) and pat != CASCADE:
+	if bool(TRICKS[tr].get("cascade_only", false)) and pat != CASCADE and not btb_shower(tr, pat):
 		return false
 	if tr == TR_HIGH and pat == SHOWER:
 		return false
+	return true
+
+
+func btb_shower(tr: int, pat: int) -> bool:
+	# BEHIND THE BACK RIDES A SHOWER AND A HALF SHOWER, ON THE HIGH HAND ONLY (2026-08-19,
+	# Louis: "half shower and shower should be able to toggle behind the back with the high
+	# throwing hand throwing them behind the back and the other hand not - low throws just
+	# in front, because that should not be much work").
+	#
+	# WHY THIS IS NOT A HOLE IN THE cascade_only RULE. That rule says a trick which reshapes
+	# EVERY throw contradicts a pattern that is itself a fixed geometry, and it is right -
+	# the 2026-07-28 audit measured Behind the Back x Columns at -13.6px and x Reverse
+	# Cascade at -9.8, because a column is defined by coming straight back down and a
+	# reverse cascade already crosses twice. A shower is the one shape where the trick does
+	# NOT have to touch every throw: it has two roads by construction, a high one and a low
+	# feed, and only the high one is looped behind the back. The low pass stays exactly the
+	# throw it was. See do_throw's `btb_hand`, which is the half of this that does the work.
+	return tr == TR_BTB and (pat == SHOWER or pat == HALFSHOWER)
+
+
+func btb_hand(h: int, pat: int) -> bool:
+	# ...and WHICH hand loops behind the back under a running Behind the Back. Everything in
+	# a Cascade; in a shower only the hand that throws the high road, which is the same
+	# `dominant_hand` test the pattern's own over_top branch uses in do_throw.
+	if pat == SHOWER or pat == HALFSHOWER:
+		return h == dominant_hand
 	return true
 
 
@@ -12605,12 +12640,19 @@ func _coll_pair(pa: Vector2, pb: Vector2, a: Ball, b: Ball) -> String:
 	# one line naming WHERE the closest pass happened and what each prop was doing:
 	# `ot` is the over-the-top road (so a Shower/Half Shower report says which of the two
 	# roads each prop was on), `h` the height fraction it was thrown at, `p` how far
-	# through its flight it was. Shared by both the hitbox and the drawn-size minimum.
+	# through its flight it was, and `t` the trick that SHAPED it. Shared by both the
+	# hitbox and the drawn-size minimum.
+	# `t` earns its place because a flourish can now shape one hand's throws and not the
+	# other's (Behind the Back under a shower, see btb_hand): without it the audit cannot
+	# tell a pattern's own two roads apart from a trick riding one of them, and a run where
+	# the toggle silently failed to switch on reads identically to one where it worked.
 	var prog := func(x: Ball) -> float:
 		return clampf(float(tick - x.launch_tick) / float(maxi(1, x.land_tick - x.launch_tick)), 0.0, 1.0)
-	return "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f)" % [
-		tick, pa.x, pa.y, str(a.over_top), a.height, prog.call(a),
-		pb.x, pb.y, str(b.over_top), b.height, prog.call(b)]
+	var tname := func(x: Ball) -> String:
+		return String(TRICKS[x.trick]["id"]) if x.trick >= 0 and x.trick < TRICKS.size() else "-"
+	return "tick %d  a=(%.0f,%.0f ot=%s h=%.2f p=%.2f t=%s)  b=(%.0f,%.0f ot=%s h=%.2f p=%.2f t=%s)" % [
+		tick, pa.x, pa.y, str(a.over_top), a.height, prog.call(a), tname.call(a),
+		pb.x, pb.y, str(b.over_top), b.height, prog.call(b), tname.call(b)]
 
 
 func prop_hit_scale(_kind: int) -> float:

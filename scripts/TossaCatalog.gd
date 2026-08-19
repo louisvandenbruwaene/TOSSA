@@ -36,7 +36,7 @@ const PROP_SIG := [1.0, 1.2, 1.4, 1.6, 2.0, 3.0, 5.0]
 
 
 const TRICKS := [
-	{"id": "btb", "name": "Behind the Back", "kind": "toggle", "lvl": 3, "acc": 25, "perf": 5, "min_air": 0, "diff": 1.20, "cascade_only": true, "shout": "BEHIND THE BACK!", "desc": "Toggle: every throw loops behind the back. Cascade only - no other pattern survives it. Every catch under it multiplies the run."},
+	{"id": "btb", "name": "Behind the Back", "kind": "toggle", "lvl": 3, "acc": 25, "perf": 5, "min_air": 0, "diff": 1.20, "cascade_only": true, "shout": "BEHIND THE BACK!", "desc": "Toggle: every throw loops behind the back. Cascade, Shower or Half Shower only - and in the two showers it is the high hand alone that goes behind, the low pass staying in front. Every catch under it multiplies the run."},
 	{"id": "high", "name": "High Toss", "kind": "toggle", "lvl": 5, "str": 75, "perf": 10, "min_air": 0, "diff": 1.10, "cascade_only": false, "shout": "HIGH TOSS!", "desc": "Toggle: every throw flies sky high - hold it and it climbs clean out of the frame. Easy, so it pays least - but the airtime it buys is what makes a Spin survivable."},
 	{"id": "spin", "name": "Spin", "kind": "live", "lvl": 8, "spd": 75, "perf": 18, "min_air": 1, "diff": 2.00, "cascade_only": false, "shout": "SPIN!", "desc": "You turn on the spot - and while you turn you can neither throw nor catch. The biggest multiplier in the game, paid for in airtime you have to buy first."},
 ]
