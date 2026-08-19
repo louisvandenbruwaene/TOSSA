@@ -39,7 +39,15 @@ declare -a TARGETS=(
   # --- the screens a player sees every run --------------------------------
   "title:60:menu:--menu"
   "practice_boot:30:play:"
-  "day_hub_work:40:day:--day work"
+  # `--binds off` IS NOT REDUNDANT, and leaving it out cost this script's duplicate-frame
+  # guard a false alarm (2026-08-20). `--binds` deliberately writes back to the save - it
+  # books a real limiter, unlike `--assists`, which pins for one run precisely so it cannot
+  # - and a --shot run saves to pixeltossa_demo.cfg. So the FIRST time day_hub_binds runs,
+  # every later plain `--day work` capture inherits BOUND from it, the two targets become
+  # byte-identical, and the guard reports two screens that "cannot legitimately be the same
+  # picture". They were the same picture, and the state was right; the target was underspecified.
+  # Any capture of a saved toggle has to state the value it wants, not assume the default.
+  "day_hub_work:40:day:--day work --binds off"
   "day_hub_rest:40:day:--day rest"
   "day_hub_prep:40:day:--day prep"
   # TONIGHT'S TWO LIMITERS, ON. They are set by walking the hub's cursor onto a row and
