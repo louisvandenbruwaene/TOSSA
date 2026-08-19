@@ -58,6 +58,15 @@ declare -a TARGETS=(
   "sheet:40:sheet:--sheet"
   "pause:60:pause:--pause"
   "in_act_stage:700:play:--demo --booking --venue 4"
+  # THE GOAL STEM AT FOUR STAGES OF GROWTH. Like the vignettes, the meter had no target
+  # and could not have had one: its fill is score against a venue's FINAL goal, so a bloom
+  # needs a whole winning act to photograph and the four subgoal flowers appear at fills a
+  # demo run may never sit on. `--stem <frac> [over]` pins it. Overflow only exists at full
+  # fill, so only the last of these carries one.
+  "stem_bud:700:play:--demo --booking --venue 2 --stem 0.05 0"
+  "stem_sprout:700:play:--demo --booking --venue 2 --stem 0.35 0"
+  "stem_grown:700:play:--demo --booking --venue 2 --stem 0.75 0"
+  "stem_bloom:700:play:--demo --booking --venue 2 --stem 1.0 0.9"
   "results:60:results:--results"
   "credits:60:credits:--credits"
   # --- menus and meta screens ----------------------------------------------

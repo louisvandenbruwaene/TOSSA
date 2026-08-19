@@ -1161,15 +1161,38 @@ const FLOWER_PILE_MAX := 90       # props on the floor at once; older ones fade 
 # see STEM_BLOOM_REACH, which is the whole reason the rail's takings column sits where
 # it does. Anything that changes draw_flower's petal geometry must change this too.
 const FLOWER_REACH := 1.24
-# the goal stem's bud opens past the final goal, and it is deliberately much bigger than
-# its own 34px box (Louis: the cleared goal has to be an event). These are the numbers
-# draw_goal_stem draws it at, kept here so the reach below is derived from the real
-# shape rather than measured off a screenshot.
-const STEM_BLOOM_SC := 3.2        # the bloom at the moment the final goal falls...
-const STEM_BLOOM_GROW := 1.2      # ...plus this much again at full overflow
-const STEM_SHED_R := 26.0         # the ring of shed petals orbits at this...
+# THE PLANT WAS SMALLER THAN THE ART GRID COULD DESCRIBE, AND THAT IS WHY IT READ AS A
+# STICK (2026-08-19, Louis asked for the score meter to be an animated flower and picked
+# the full rebuild). The stem lived in a 34 x 148 slot with a 10px bud, 20 x 9 leaves and
+# subgoal heads 11px across. Put on the art grid at ART_PIXEL 2 those are 5 x 8, 10 x 4 and
+# 5 art pixels - measured, an ellipse rounded into ten columns is a rounded RECTANGLE, so
+# the leaves came out green bricks and the bud a lump. Nothing about the drawing was wrong;
+# there were not enough pixels in the box for a flower to exist in.
+# So the box grew instead. `STEM_BOX` is 142 x 112 - the takings column that used to sit
+# beside the stalk moved UNDER it, which costs nothing (it is three short lines) and buys
+# four times the area. Every size below is scaled to that box, and the shapes are unchanged.
+const STEM_BOX_W := 142.0         # the stalk's whole column, out to the card's right margin
+# 110, not 124: the bud sits 8px above the stalk's base and is 16px tall, so a taller box
+# put its bottom two pixels off the cash-in line along the card's foot.
+const STEM_BOX_H := 110.0
+const STEM_BOX_TOP := 50.0        # ...inset this far down the card, to leave the bloom room
+const STEM_BLOOM_SC := 5.0        # the bloom at the moment the final goal falls...
+const STEM_BLOOM_GROW := 1.8      # ...plus this much again at full overflow
+# THE CELEBRATION HAS A CEILING, AND IT IS THE CARD ABOVE. The bloom is meant to overflow
+# its own box - that is the point of it - but measured at full overflow it reached 57px
+# above the stalk's tip and buried the act header: the venue's name, the word THE ACT and
+# the goal dots all vanished behind a golden flower at the exact moment they matter most.
+# The stalk's box is inset far enough down the card that a full bloom lands just inside the
+# card's own top edge, and the shed ring is sized to stop there too - it orbits WIDER than
+# the bloom, so it, not the bloom, is what sets the real ceiling.
+const STEM_SHED_R := 40.0         # the ring of shed petals orbits at this...
 const STEM_SHED_GROW := 8.0       # ...widening by this much as the overflow grows
-const STEM_SHED_SC := 0.7         # each shed petal's own scale
+const STEM_SHED_SC := 1.1         # each shed petal's own scale
+const STEM_TRACK_W := 6.0         # the stalk's width in ART pixels (so 12 screen px)
+const STEM_LEAF_LEN := 44.0       # a leaf's reach off the stalk...
+const STEM_LEAF_W := 9.5          # ...and its half-thickness at the widest point
+const STEM_BUD_RX := 11.0         # the unopened bud
+const STEM_BUD_RY := 16.0
 # HOW FAR PAST THE FINAL GOAL BEFORE THE BLOOM TURNS GOLD (2026-07-31, Louis: the colour
 # change "should take a bit longer" - it used to be immediate, the instant score crossed
 # the line). Purple (posy) holds through the first third of the overflow; gold (rose)
@@ -1181,8 +1204,10 @@ const STEM_OVER_GOLD_AT := 0.35
 # 7.0 * 1.25 * FLOWER_REACH = 10.9px of petal, which still clears the takings column (that
 # column is placed off STEM_BLOOM_REACH, 38px, so there is room) and clears the SCORE figure
 # on the other side by a comfortable margin.
-const STEM_FLOWER_SC := 1.25
-const STEM_FLOWER_OUT := 15.0     # how far the head sits off the stalk's centre line
+# ...both scaled with the box (see STEM_BOX_W): a head is 7.0 * 2.4 * FLOWER_REACH = 20.8px
+# of petal sitting 34px off the centre line, so it reaches 54.8 of the 71 the half-box has.
+const STEM_FLOWER_SC := 2.4
+const STEM_FLOWER_OUT := 34.0     # how far the head sits off the stalk's centre line
 const GUIDE_STEM_RAMP := 70.0     # fast fill and equally fast drain
 const GUIDE_STEM_HOLD := 120.0    # one full second with the final yellow bloom visible
 const GUIDE_STEM_CYCLE := GUIDE_STEM_RAMP * 2.0 + GUIDE_STEM_HOLD
@@ -2024,6 +2049,12 @@ var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effe
 # moment every run and two captures of the same picture can never be compared.
 var _vign := ""
 var _vign_t := -1.0
+# dev (--stem <frac> [over]): force the goal stem to a fill, so the plant can be looked at
+# at any point of its growth. The meter is otherwise almost unreachable on purpose - it
+# depends on score against a venue's final goal, so a bloom needs a whole winning act to
+# photograph and the four subgoal flowers appear at fills a demo run may never sit on.
+var _stem_frac := -1.0
+var _stem_over := 0.0
 var _shot := false
 var _shot_path := ""
 var _boo := false      # dev (--boo): hold the crowd in the red so tomatoes actually fly
@@ -2607,6 +2638,10 @@ func _ready() -> void:
 		_vign_t = float(ua[vgi + 2]) if vgi + 2 < ua.size() and not ua[vgi + 2].begins_with("--") else 0.5
 		day_anim = _vign
 		day_anim_start = cine_tick
+	var sti := ua.find("--stem")      # dev: pin the goal stem's fill (and its overflow), so
+	if sti != -1:                     # every stage of the plant can be captured and compared
+		_stem_frac = float(ua[sti + 1]) if sti + 1 < ua.size() and not ua[sti + 1].begins_with("--") else 1.0
+		_stem_over = float(ua[sti + 2]) if sti + 2 < ua.size() and not ua[sti + 2].begins_with("--") else 0.0
 	var ssi := ua.find("--skills")    # dev: open the Skills reference for a screenshot,
 	if ssi != -1:                     # optionally --skills <N> to select entry N directly
 		level = maxi(level, 7)        # enough unlocked that both ready and locked show
@@ -18074,6 +18109,10 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# 6px rect at a half-pixel x with a ONE-pixel border rect over it (a 1px outline cannot
 	# exist at ART_PIXEL 2 - it is half an art pixel by construction), the leaves were
 	# nine-point polygons and the bud two smooth ellipses.
+	if _stem_frac >= 0.0:
+		frac = _stem_frac      # dev (--stem)
+		over = _stem_over
+		live = false           # ...and it must never pay a waypoint's warm_room()
 	var ap := float(ART_PIXEL)
 	var x := snappedf(box.position.x + box.size.x * 0.5, ap)
 	var base := snappedf(box.position.y + box.size.y, ap)
@@ -18086,11 +18125,12 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# rather than a `false` outline, because draw_rect's outline straddles the edge and so
 	# lands half in each of two art pixels however the rect itself is snapped.
 	var trk_h := base - top
-	draw_rect(Rect2(x - 2.0 * ap, top, 4.0 * ap, trk_h), Color(0.20, 0.17, 0.18, 0.85))
-	draw_rect(Rect2(x - 2.0 * ap, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
-	draw_rect(Rect2(x + ap, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
+	var hw := STEM_TRACK_W * 0.5 * ap
+	draw_rect(Rect2(x - hw, top, hw * 2.0, trk_h), Color(0.20, 0.17, 0.18, 0.85))
+	draw_rect(Rect2(x - hw, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
+	draw_rect(Rect2(x + hw - ap, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
 	if h >= ap:
-		draw_rect(Rect2(x - 2.0 * ap, base - h, 4.0 * ap, h), stem)
+		draw_rect(Rect2(x - hw, base - h, hw * 2.0, h), stem)
 	# TWO FLOWERS AND TWO LEAVES ON EACH SIDE, ALTERNATING (2026-07-31, Louis, exactly
 	# that). Both are laid out from ONE ladder so the alternation cannot drift: going up
 	# the stalk it reads leaf, flower, leaf, flower, leaf, flower, leaf, flower, with every
@@ -18138,16 +18178,16 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 			# tips: two quadratic arcs meeting at a point at each end, which costs the same
 			# fill and reads correctly at four pixels tall.
 			var lroot := Vector2(x, ly)
-			var ltip := Vector2(x - fdir * 20.0, ly - 4.0)
+			var ltip := Vector2(x - fdir * STEM_LEAF_LEN, ly - STEM_LEAF_LEN * 0.2)
 			var lax := ltip - lroot
 			var lnr := Vector2(-lax.y, lax.x).normalized()
 			var lv := PackedVector2Array()
 			for k in 9:
 				var u := float(k) / 8.0
-				lv.append(lroot + lax * u + lnr * sin(u * PI) * 4.4)
+				lv.append(lroot + lax * u + lnr * sin(u * PI) * STEM_LEAF_W)
 			for k in 9:
 				var u := 1.0 - float(k) / 8.0
-				lv.append(lroot + lax * u - lnr * sin(u * PI) * 4.4)
+				lv.append(lroot + lax * u - lnr * sin(u * PI) * STEM_LEAF_W)
 			fill_poly_pix(lv, Color(stem.r, stem.g, stem.b, 0.9))
 		if frac < m:
 			continue
@@ -18158,7 +18198,7 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		# he said the flower should "have a small stem, like a thin leaf". draw_flower puts
 		# a little leaf halfway along it for free.
 		var my := base - box.size.y * clampf(m, 0.0, 1.0)
-		var fp := Vector2(x + fdir * STEM_FLOWER_OUT, my - 5.0)
+		var fp := Vector2(x + fdir * STEM_FLOWER_OUT, my - 10.0)
 		var back := Vector2(x, my) - fp
 		draw_flower(fp, 2, STEM_FLOWER_SC, back.angle() - PI * 0.5, 0.95, back.length() / STEM_FLOWER_SC)
 		if live and not is_goal[fi] and (stem_way_given & (1 << fi)) == 0:
@@ -18170,7 +18210,7 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# at 8px is not an event; tripling it, lighting it, and putting a ring of petals out
 	# past the stem's own width is. Past the FINAL goal it opens again, gold, and keeps
 	# growing with the overflow - so the rail says "cleared" and then "still climbing".
-	var bud := Vector2(x, base - maxf(h, 4.0))
+	var bud := Vector2(x, base - maxf(h, 8.0))
 	# A STANDING-OVATION TRACK GETS A VISIBLY BETTER FLOWER (Louis: "give the flower a
 	# beautiful look if they should get a standing ovation, because they made no drops").
 	# `dropped` is live during the act - the same counter the results card's own ovation
@@ -18220,9 +18260,9 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		# and says the plant is alive and waiting, the same job the title screen's dust does.
 		var swell := 1.0 + 0.45 * clampf(frac, 0.0, 1.0)
 		swell += 0.06 * sin(atick() * 0.05)
-		fill_ellipse_pix(bud, 5.0 * swell, 7.5 * swell, 0.0, Color(0.55, 0.72, 0.45))
-		fill_ellipse_pix(bud + Vector2(-1.4, -1.6) * swell, 2.0 * swell, 3.0 * swell, 0.0,
-			Color(0.72, 0.86, 0.58, 0.8))
+		fill_ellipse_pix(bud, STEM_BUD_RX * swell, STEM_BUD_RY * swell, 0.0, Color(0.55, 0.72, 0.45))
+		fill_ellipse_pix(bud + Vector2(-3.0, -3.4) * swell, STEM_BUD_RX * 0.4 * swell,
+			STEM_BUD_RY * 0.4 * swell, 0.0, Color(0.72, 0.86, 0.58, 0.8))
 
 
 func draw_star4(c: Vector2, r: float, col: Color, grid: float = 0.0) -> void:
@@ -18699,57 +18739,21 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# run out again at the same speed; that shows how the meter is supposed to fill up
 		# repeatedly"). `live` is false for the demo so the waypoint and gold bonuses cannot
 		# fire off an animation.
+		# THE STALK'S COLUMN RUNS TO THE CARD'S RIGHT MARGIN NOW (2026-08-19). It used to be
+		# a 34px slot with the takings column beside it; the takings moved UNDER it (three
+		# short lines, see below) and the plant took the width. Anchored off LW rather than
+		# a literal, so the card and the plant cannot drift apart.
+		# INSET DOWN THE CARD, not hung from its top: the tip is where the bloom opens, so
+		# the inset IS the headroom the celebration needs (see STEM_SHED_R).
+		var stem_box := Rect2(LX + LW - 8.0 - STEM_BOX_W, tcard_y + STEM_BOX_TOP, STEM_BOX_W, STEM_BOX_H)
 		if show_guide_step < 0 or show_guide_step >= 2:
 			var gdemo := guide_stem_demo()
 			if gdemo >= 0.0:
-				draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), gdemo, 0.0, marks,
+				draw_goal_stem(stem_box, gdemo, 0.0, marks,
 					Color(venue_data(run_venue)["glow"]), false)
 			else:
-				draw_goal_stem(Rect2(LX + 152.0, tcard_y + 12.0, 34.0, 148.0), tfrac, over, marks,
+				draw_goal_stem(stem_box, tfrac, over, marks,
 					Color(venue_data(run_venue)["glow"]))
-		# THE TAKINGS COLUMN STARTS CLEAR OF THE BLOOM (2026-07-27, Louis: the flower
-		# overlapped the word TONIGHT). The stem's bud sits on the centre line of the
-		# box above (its x + half its 34px width), and past the final goal it opens
-		# into a flower whose petals reach STEM_BLOOM_REACH - deliberately out past
-		# that box - so anything drawn nearer than that is inside the celebration
-		# rather than beside it. The column is anchored off the reach itself, not a
-		# hand-picked x, so growing the bloom later moves the text out of its way.
-		var col_x := LX + 152.0 + 17.0 + STEM_BLOOM_REACH + 7.0
-		var col_w := LW - 8.0 - (col_x - LX)     # to the card's own right margin
-		var fc := Color(0.98, 0.60, 0.72)
-		draw_string(font, Vector2(col_x, tcard_y + 30.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, ps(11), Color(0.85, 0.72, 0.66))
-		draw_flower(Vector2(col_x + 9.0, tcard_y + 58.0), 0, 1.7, -PI * 0.5, 0.95)
-		# the night's take SHRINKS to fit, never trims: fit_text would render a good
-		# night's 12,400 as "12,4...", and a truncated number is not a number
-		var take := commafy(run_flowers)
-		var take_x := col_x + 23.0
-		draw_string(title_font(), Vector2(take_x, tcard_y + 66.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
-			ps(fit_size(title_font(), take, LX + LW - 8.0 - take_x, 24, 14)), fc)
-		# and how the room is FEELING, in the one word the pile is saying
-		# ...in the SAME bands the crowd dial is coloured in, so the word and the
-		# needle can never disagree about whether flowers are coming
-		var mood := "waiting"
-		var mc := Color(0.70, 0.66, 0.62)
-		if applause <= TOMATO_RED:
-			mood = "turning on you"
-			mc = Color(1.0, 0.45, 0.38)
-		elif applause >= 0.92:
-			mood = "on their feet"
-			mc = Color(0.75, 0.95, 0.72)
-		elif applause >= FLOWER_GREEN:
-			mood = "throwing flowers"
-			mc = Color(0.65, 0.92, 0.62)
-		elif applause >= 0.50:
-			mood = "with you"
-			mc = Color(0.96, 0.86, 0.42)
-		elif applause >= FLOWER_FLOOR:
-			mood = "restless"
-			mc = Color(0.96, 0.62, 0.30)
-		# the mood is a phrase, and the longest of them ("throwing flowers") is wider
-		# than the column the bloom leaves - so it steps down a size or two rather
-		# than losing the word that carries the meaning
-		draw_string(font, Vector2(col_x, tcard_y + 90.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
-			ps(fit_size(font, mood, col_w, 13, 11)), mc)
 		# the ask, and the gamble, in the card's left column beside the hat
 		var goal_head := "FIRST GOAL"
 		if goals_hit >= NUM_GOALS:
@@ -18805,7 +18809,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# crossing by several pixels whenever the act had a peak worth marking. The
 		# dial is a little smaller and sits lower, and the card grew to keep the
 		# readout under the hub off its own bottom border.
-		var ccard_h := 116.0
+		# 116 -> 152: the card took on TONIGHT's takings and the mood word (see below).
+		var ccard_h := 152.0
 		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35), show_guide_step == 3)
 		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.9, 0.72, 0.62))
 		# the DIAL on the left, the drops you have left on the right
@@ -18813,6 +18818,47 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			"%d%%" % int(round(applause * 100.0)), font)
 		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(1.0, 0.72, 0.64, 0.92))
 		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
+		# TONIGHT'S TAKINGS AND THE ROOM'S MOOD LIVE WITH THE CROWD NOW (2026-08-19).
+		# They used to be a column beside the goal stem, and that column is what kept the
+		# stalk down to 34px: the bloom is deliberately wider than its own box, so anything
+		# level with it had to start clear of STEM_BLOOM_REACH and the two shared 140px
+		# badly. Moving them is not just room-making - it is where they belonged. The pile
+		# of flowers IS the crowd's answer, and the mood word was already documented as
+		# being coloured "in the SAME bands the crowd dial is coloured in, so the word and
+		# the needle can never disagree". They are one instrument; now they are one card.
+		var col_x := LX + 164.0
+		var col_w := LW - 14.0 - (col_x - LX)
+		var fc := Color(0.98, 0.60, 0.72)
+		draw_string(font, Vector2(col_x, ccard_y + 96.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, ps(11), Color(0.85, 0.72, 0.66))
+		draw_flower(Vector2(col_x + 9.0, ccard_y + 118.0), 0, 1.7, -PI * 0.5, 0.95)
+		# the night's take SHRINKS to fit, never trims: fit_text would render a good
+		# night's 12,400 as "12,4...", and a truncated number is not a number
+		var take := commafy(run_flowers)
+		var take_x := col_x + 23.0
+		draw_string(title_font(), Vector2(take_x, ccard_y + 124.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			ps(fit_size(title_font(), take, LX + LW - 14.0 - take_x, 24, 14)), fc)
+		# and how the room is FEELING, in the one word the pile is saying
+		var mood := "waiting"
+		var mc := Color(0.70, 0.66, 0.62)
+		if applause <= TOMATO_RED:
+			mood = "turning on you"
+			mc = Color(1.0, 0.45, 0.38)
+		elif applause >= 0.92:
+			mood = "on their feet"
+			mc = Color(0.75, 0.95, 0.72)
+		elif applause >= FLOWER_GREEN:
+			mood = "throwing flowers"
+			mc = Color(0.65, 0.92, 0.62)
+		elif applause >= 0.50:
+			mood = "with you"
+			mc = Color(0.96, 0.86, 0.42)
+		elif applause >= FLOWER_FLOOR:
+			mood = "restless"
+			mc = Color(0.96, 0.62, 0.30)
+		# the longest of them ("throwing flowers") is wider than the column, so it steps
+		# down a size or two rather than losing the word that carries the meaning
+		draw_string(font, Vector2(col_x, ccard_y + 140.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
+			ps(fit_size(font, mood, col_w, 13, 11)), mc)
 
 		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
 		if not encores.is_empty():

@@ -168,6 +168,39 @@ Codex improvements:
    a screen-space snap means nothing: snap the transform's ORIGIN, publish `_cap_px` =
    `ART_PIXEL / k`, and use `cap_disc` / `cap_ell` / `cap_seg`.
 
+**A DRAWING CAN HAVE TWO JOBS AT TWO RESOLUTIONS, AND THE GRID IS NOT ALWAYS THE ANSWER**
+(2026-08-19, `draw_flower`). One function draws the flower as an OBJECT - the bloom on the goal
+stem, the flowers the crowd throws - and as a GLYPH: the currency mark inline with text at
+eleven call sites, since the flower mark IS the currency unit. Converting the glyph to the art
+grid measured **10.0% -> 3.7% off-grid, exactly as intended, and looked worse**: at r 6.5..9 a
+petal is a 3.6 x 2.4 SCREEN-pixel ellipse, so on a 2px grid five of them round outward into one
+blob and the mark becomes a berry with a yellow middle. That is not a defect in the rasteriser,
+it is the mark being **smaller than the grid can describe** - and decision 2 above already
+covers things that small. The mark is set at text size, on a text baseline, and reads as a
+symbol; it follows text. So the flower rasterisers take a `grid` argument (the pattern
+`fill_disc_pix` already had for previews) and `draw_coin_mark` passes 1.0. **Measure the number
+AND look at the picture; a better number is not the goal.**
+**AND WHEN A SHAPE IS TOO SMALL FOR THE GRID, THE HONEST FIX IS A BIGGER BOX, NOT A SOFTER
+RASTERISER.** The goal stem lost the same argument and won it the other way: its plant lived in
+a 34 x 148 slot with a 10px bud, 20 x 9 leaves and 11px subgoal heads - 5 x 8, 10 x 4 and 5 ART
+pixels, where an ellipse rounds into a rounded RECTANGLE and a leaf comes out a green brick.
+Nothing about the drawing was wrong; there were not enough pixels in the box for a flower to
+exist in. The takings column beside it moved into the CROWD card - where it belonged anyway,
+since a pile of flowers is the crowd's answer and the mood word was already documented as being
+coloured in the dial's own bands - and the plant took the width. Four times the area, same
+shapes, and it reads as a plant that grows.
+**A LEAF IS A POINTED LENS AND A PETAL IS AN ELLIPSE, and both only start mattering on the
+grid.** `fill_ellipse_pix` solves a rotated ellipse per art row instead of approximating it with
+a nine-point polygon and then scanline-filling that - two approximations where one will do - and
+guarantees any row the shape genuinely covers at least one art pixel, because `fill_poly_pix`
+rounds a sub-pixel span DOWN to nothing (right for a flame's soot fringe, fatal for a petal).
+**THE CELEBRATION HAS A CEILING AND IT IS THE CARD ABOVE.** The bloom is meant to overflow its
+own box, but at full overflow it reached 57px above the stalk's tip and buried the act header -
+venue name, THE ACT, and the goal dots, all gone behind a golden flower at the moment they
+matter most. The stalk's box is INSET down the card so a full bloom lands just inside the card's
+own top edge, and the shed-petal ring (which orbits wider than the bloom) is what actually sets
+that ceiling.
+
 **THE SEAM IS THE WHOLE ARCHITECTURE.** `Game.gd` never names a PNG. `art_blit` /
 `art_blit_size` / `art_blit_rect` / `art_blit_regions` take a key like `prop/club`, and
 `Resources/art_manifest.json` ALONE decides sprite versus procedural. Delete a line from the
@@ -815,6 +848,20 @@ clearance (prints `min clearance` = hitbox gate, `min drawn gap` = visual, infor
 Half Shower/Tennis are DOCUMENTED to run near-zero/negative by geometry, not a bug); `--ladder`
 prints every venue's expected build/pacing from the live constants; `--fps` prints the perf probe
 (trust `draws/s` over `engine fps` unless the window has focus - see `docs/coding_guidelines.md`).
+**TWO FLAGS EXIST BECAUSE THE SCREEN THEY SHOW CANNOT OTHERWISE BE PHOTOGRAPHED** (2026-08-19),
+and that is the general lesson, not a detail about either of them: **a screen with no capture
+target is a screen nobody has looked at since the art density changed**, and both of these were
+still smooth vector drawing long after everything around them became sprites.
+`--vign <id> [t]` holds one of the five day-hub vignettes (eat/inn/pie/egg/tomato) at a FIXED
+phase - they play for 0.8-1.8s in the middle of a hub action and then the ledger moves, so no
+capture could land on one, and an unfrozen phase photographs a different moment every run. Its
+effect can never land, so a capture cannot spend ten flowers.
+`--stem <frac> [over]` pins the goal stem's fill: the meter is score against a venue's FINAL
+goal, so a bloom needs a whole winning act to photograph and the subgoal flowers appear at fills
+a demo run may never sit on. Overflow only exists at full fill.
+Both have `screenshot.sh` targets now, with the phase/fill written into the target - a frame
+captured at an unpinned phase is not comparable run to run.
+
 `godot --check-only` is a fast filter, not a reliable one (has missed a real parse error before) -
 always also run a real windowed/headless pass and grep for `SCRIPT ERROR`/`Parse Error`.
 Always `--audio-driver Dummy` for any run Louis isn't actively playing.
