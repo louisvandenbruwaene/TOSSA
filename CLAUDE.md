@@ -789,7 +789,8 @@ review" for the accept/reject examples and why.
 ## Current state (as of 2026-08-16)
 
 - **Input:** per-hand THROW/CATCH, Space=trick, C=switch trick, P=pattern, O=object, 1/2=step
-  count, R=restart (practice), S=shop, Tab=sheet, Esc=menu, Enter=finish/cash in. Gamepad layout
+  count, B=Speed assist, T=slow-motion assist, R=restart (practice), S=shop, Tab=sheet, Esc=menu,
+  Enter=finish/cash in. Gamepad layout
   and remapping: see `Game.gd`'s input section, unchanged shape since 2026-07-18.
 - **Throw:** tap=lowest/snappiest, holding lifts continuously toward 1.4 (1.8 held High Toss).
   Strength is a hard wall now (`PROP_STR_UNIT` x count) - no under-Strength throw exists.
@@ -809,14 +810,34 @@ review" for the accept/reject examples and why.
   `--diffnewgame <name>` (pair
   with `--debug` so it never touches a real save) prints what `reset_new_game()` actually hands
   out at a given difficulty.
-- **Scoring:** exponential, Balatro-shaped. A *run* is the stretch since the last drop; catches
-  accumulate linearly while each distinct trick multiplies and raises the act through the formula
-  documented beside `score_log10()`. A drop banks the segment. Goals require all three of score,
-  the venue clock (`GOAL_MIN_S_LOW/HIGH`), and 75% of the target catch credit in one drop-free run;
-  this last gate is visible in the HUD and prevents one multiplier-heavy trick from instantly
-  winning a goal. `TossaBalance.gd` owns the tested ladder: Backyard final 1,920 at the expected
-  build, rising to about 1.02E25 at the Midnight Show. `SCORE_CEIL` (1e300) keeps everything off
-  `INF`; `score_text` switches to E-notation past a million.
+- **Scoring (rebalanced 2026-08-19):** `SUM over streaks i of x_i * (o*p*s + 1)^n_i`, all times
+  `F`, the act's ONE trick factor. Three factors that cannot compound into each other: the streak
+  is LINEAR, the object COUNT is the only exponent, and tricks MULTIPLY.
+  **The outer power of `(T + 1)` is gone and it had to go rather than be tuned.** It raised the
+  whole sum - streak included - to one-plus-the-number-of-distinct-tricks, and the product over
+  tricks repeated `x` once per trick, so a streak carried a total exponent of `T*(T+1)`: two
+  tricks made it a sixth power, three a twelfth. Measured on the live constants, twenty Perfect
+  catches with three balls at the BACKYARD scored 480 trickless, 1.38e6 with one trick, and
+  **1.26e34 with three - seven orders of magnitude above the Midnight Show's own final goal**,
+  reached in the opening venue by pressing Space. Every rung above the first was unreachable and
+  irrelevant at once. No constant could fix that; the damage was in the shape of the exponent.
+  `F = PROD over tricks j of t_j ^ (TRICK_GAIN * (1 + log10(1 + m_j)))`, capped at
+  `TRICK_FACTOR_CAP`. **Both numbers are set by the ladder, not by taste**: the cap is 4.0
+  because the narrowest step between two houses is 4.39x (Backyard 1,920 to Street 8,433), so a
+  flourish is worth about two of an act's three goal steps and never a venue - taking more
+  objects up stays the only way up. The gain is 0.6 so the cap is a backstop rather than the
+  balance (one Spin 1.7x, ten 2.3x, all three tricks ten times each 3.3x; at gain 1.0 an extreme
+  act reached 13.9x and the cap would have been doing all the work).
+  `seg_per_catch` (the HUD rail) was a THIRD formula - `s` in the exponent and missing from the
+  base, i.e. the shape abandoned on 2026-07-30 - and is now exact, because one more weighted
+  catch adds exactly `(o*p*s+1)^n * F`.
+  A drop banks the segment. Goals require all three of score, the venue clock
+  (`GOAL_MIN_S_LOW/HIGH`), and 75% of the target catch credit in one drop-free run.
+  `TossaBalance.gd` owns the tested ladder AND the trick factor, so the contract test holds the
+  two against each other: Backyard final 1,920 at the expected build, rising to about 1.02E25 at
+  the Midnight Show, unchanged by the rewrite (goal_for and a trickless act share one
+  expression). `SCORE_CEIL` (1e300) keeps everything off `INF`; `score_text` switches to
+  E-notation past a million.
 - **Starting stamina covers the opening house:** capacity is `200 + 8×Endurance`, still ending at
   1,000 at Endurance 100. A perfect three-ball act can survive the Backyard's 30-second final clock;
   old saves retain their stamina percentage when migrating from the former `100 + 9×` curve.
@@ -825,9 +846,44 @@ review" for the accept/reject examples and why.
 - **Patterns:** Cascade, Columns, Half Shower, Shower, Reverse Cascade, Tennis. Arms reach exactly
   two points (`inner_pos`/`outer_pos`) with no exceptions - Mills Mess would need this to change,
   which is why it's an architecture change, not "one more pattern."
+- **COLUMNS LANES ARE BOUNDED BY THE PAINTED ARM, not by the stance (2026-08-19, Louis: "fix the
+  hands for columns").** Two separate faults, both making the same picture - a prop and a catch
+  ring floating over the coat with the sleeve left behind:
+  1. `COL_LANE_IN` was 44 screen px against an arm bank that covers reach 26..51 ART px, i.e.
+     52..102 screen. **Every columns lane was inside the bank's floor**, so `fig_arm_pick`
+     returned the innermost arm it had and `fig_hand_pos`'s `FIG_PALM_MAX` guard then rejected
+     that arm's palm. `col_lane_in()` reads the bank at runtime now; the constant is only the
+     no-bank fallback.
+  2. The odd count's spare prop ran up the MIDDLE LINE, asking for reach 0. **A two-bone arm
+     with a pinned shoulder cannot reach its own root** (its minimum is `|l1-l2|`, about 13 art
+     px), so no regeneration and no constant fixes that - it is geometry. The spare is an
+     ordinary column on the DOMINANT hand's inner edge now (`columns_lane_count`), and the
+     "either hand may scoop it" exception went with it: the off hand catching it stood under a
+     column on the far side of the body, and `fig_arm_pick` reads reach as `|x - centre|` and
+     cannot see the sign, so the painted arm went one way while its hand went the other.
+  3. `hand_carry_y` - a columns hand took `inner_pos`'s full dip at EVERY lane, while its lane's
+     props launched and landed on the flat catch line. So a held prop was drawn 26px above its
+     own hand, and the bank (whose dip runs 27 screen px at reach 26 down to 0 at reach 51) was
+     disagreed with by up to 26px at the outer lanes. The hand, the prop and the painting share
+     one carry now.
+  Measured with `--handlog` at five balls: the guard rejected **70% of columns frames at a mean
+  residual of 109 screen px** before, and **7% at a mean of 3.8** after - better than cascade's
+  own 8% / 4.3. `--collcheck` hitbox clearance stays positive at every count; the paintable band
+  is narrower than the old one, so lanes are 16-24px apart at seven objects rather than 28, and
+  the DRAWN gap goes negative from five up, exactly as Half Shower and Tennis already do.
 - **Tricks:** Behind the Back, High Toss (toggles), Spin (live, no cooldown, full catch/throw
   lockout while spinning - a cost paid in airtime, not a timer). Cascade-only except High Toss
   and Spin, since every other pattern is a fixed geometry a shaping trick would contradict.
+- **ONLY COMBINATIONS THE GAME CAN DRAW ARE PLAYABLE (2026-08-19, Louis: "make sure that only
+  animated patterns (valid patterns and tricks combos) are playable").** `trick_pattern_ok` is the
+  single authority, shared by the trick key, the pattern key and the HUD - the cascade-only gate
+  used to live inside `on_trick` and nowhere else, so it only ever asked "may I switch this ON
+  right now", and a toggle switched on in a Cascade **survived a P to Columns** (`start_run` clears
+  a toggle the player has not unlocked, and no other kind) and scored its multiplier off an
+  animation that does not exist. `cycle_pattern` and `start_run` now drop a flourish the new
+  pattern cannot carry, and say so. High Toss x Shower joins the refusals: it was allowed with
+  "expect clashes" printed under it, which is the game watching props pass through each other and
+  describing it. `trick_pattern_warning` is deleted - there is nothing left to warn about.
 - **The act:** one continuous run per venue, three goals (+ante multiplier, capped 1.25^n→6x).
   Cash in anytime past goal 1; a collapse strips back to the last goal banked. One optional Encore
   challenge may color the act (never at the Backyard).
@@ -849,6 +905,22 @@ review" for the accept/reject examples and why.
   swings on goals reached.
 - **Purist is one paired booking:** P binds Accuracy and Speed together. Individual binds do not
   exist; Strength and Endurance are never stripped, and a Speed bind disables every slow-mo source.
+- **THE TWO ASSIST SWITCHES AND THE UNAIDED CLEAR (2026-08-19, Louis: "two small icons (a boot for
+  speed, and a stopwatch for slowmo) ... when both are off and you beat the final goal of the
+  stage, you get a reward").** Every slow-motion source falls into exactly one of two buckets and
+  the icons ARE the buckets: the **BOOT** is the Speed stat (permanent, invested, worn) and the
+  **STOPWATCH** is everything temporary (the difficulty base, Uncle Dan's Pie, the Amazing! and
+  fifty-Perfect bursts). `B` and `T`, legal any time, persisted in settings, always on the stage
+  card whether on or off because they are CONTROLS and not a status. A lesson refuses them - a
+  tutorial step pins its own pace, so they would appear to do nothing.
+  The reward is the **UNAIDED clear**: hit a venue's FINAL goal with neither assist having run at
+  any point (`act_assisted`, judged where the world is actually slowed - reading the switches at
+  the goal would sell the mark for one keypress) and the room throws a volley of gold roses and
+  bouquets (real money: the pile IS the purse), the venue keeps a permanent UNAIDED mark shown on
+  its record chase, and the FIRST clear at each house pays one stat point and 300 Reputation. Seven
+  stat points exist in a career and none of them is farmable, because the mark is what gates them.
+  `--assists on|off` pins both for one run so the state can be photographed, and deliberately never
+  writes back to the SHARED settings file.
 
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
@@ -877,6 +949,9 @@ still smooth vector drawing long after everything around them became sprites.
 phase - they play for 0.8-1.8s in the middle of a hub action and then the ledger moves, so no
 capture could land on one, and an unfrozen phase photographs a different moment every run. Its
 effect can never land, so a capture cannot spend ten flowers.
+`--assists on|off` pins BOTH assist switches for one run: the two dark icons and the UNAIDED row
+need two keypresses inside a live act, which no capture can make, and the flag never writes its
+pin back to the shared settings file.
 `--stem <frac> [over]` pins the goal stem's fill: the meter is score against a venue's FINAL
 goal, so a bloom needs a whole winning act to photograph and the subgoal flowers appear at fills
 a demo run may never sit on. Overflow only exists at full fill.
