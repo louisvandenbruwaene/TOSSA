@@ -8601,16 +8601,45 @@ func stem_grow_frames() -> int:
 	return int(stem_grow.get("frames", 0))
 
 
-func stem_grow_key(frac: float) -> String:
+func stem_grow_key(frac: float, marks: PackedFloat32Array) -> String:
 	# WHICH FRAME OF THE PLANT'S LIFE THIS FILL IS. `frac` is 0..1 across the whole act and
-	# the frames are in growth order, so this is a rounded index and nothing more.
+	# the frames are in growth order.
+	#
+	# THE PAINTING'S OWN MILESTONES SIT ON THE GAME'S OWN GOALS (2026-08-19, Louis: "the
+	# subgoals should be linearly spread: one at 1/3, 2/3 and 3/3 of the final goal - the
+	# last one being the big flower of course"). The manifest publishes `beats`, the frame
+	# index at which each of the three goals is reached in the painting - the first side
+	# flower open, the second open, the top bloom finished - and the fill is mapped onto
+	# them piecewise. That is the only way to keep the promise: the three stretches are
+	# deliberately different LENGTHS (a sprout has more to show than a second flower does,
+	# and a bloom opening has most of all), so a flat index would put a flower wherever the
+	# frame count happened to land. Measured on the cycle this replaces, the two subgoal
+	# flowers opened at fills 0.17 and 0.19 and the remaining four fifths of the meter was
+	# one long bud.
+	# It reads `marks` rather than assuming thirds, so the flower and the goal cannot drift
+	# apart if the ladder is ever re-spaced again.
+	#
 	# ROUND, DO NOT TRUNCATE, the same reason fig_spin_frame gives: a floor() holds each
 	# frame from the instant it is reached until the next one, so the plant is always a
 	# whole step BEHIND the score that grew it.
 	var n := stem_grow_frames()
 	if n <= 0:
 		return ""
-	return "stem/grow_%02d" % clampi(int(round(frac * float(n - 1))), 0, n - 1)
+	var f := clampf(frac, 0.0, 1.0)
+	var beats: Array = stem_grow.get("beats", [])
+	var i := int(round(f * float(n - 1)))
+	if beats.size() == NUM_GOALS:
+		var lo := 0.0            # the fill this stretch starts at...
+		var flo := 0.0           # ...and the frame standing there
+		for gi in NUM_GOALS:
+			var hi := float(marks[gi]) if gi < marks.size() else 1.0
+			var fhi := float(beats[gi])
+			if f <= hi or gi == NUM_GOALS - 1:
+				i = int(round(lerpf(flo, fhi, clampf((f - lo) / maxf(0.0001, hi - lo), 0.0, 1.0))))
+				break
+			lo = hi
+			flo = fhi
+	return "stem/grow_%02d" % clampi(i, 0, n - 1)
 
 
 func fig_spin_key(dir_name: String) -> String:
@@ -18955,7 +18984,7 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# left the empty groove standing beside the plant instead of behind it. `stalk_dx` is
 	# measured by the installer and published in _GROW, because it is a property of the art
 	# and a re-roll will move it.
-	var gkey := stem_grow_key(frac)
+	var gkey := stem_grow_key(frac, marks)
 	if gkey != "" and art_bank.has(gkey):
 		var gt: Texture2D = (art_bank[gkey] as Dictionary)["tex"]
 		var gh := gt.get_size().y * float(ART_PIXEL)

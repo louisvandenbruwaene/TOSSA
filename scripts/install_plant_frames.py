@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the goal stem's growth animation from artifacts/plant/.
+"""Install the goal stem's growth animation from artifacts/plant/ and artifacts/plant_v2/.
 
 WHAT THIS IS (2026-08-19, Louis: "the entire flower and its growing animation should be
 animated by pixellab, you then just take frames from it ... try to get as many frames as you
@@ -12,21 +12,40 @@ part popped into existence at its own threshold, so the plant advanced in five v
 across a whole act. What replaces it is one painted growth cycle: the plant is a single
 sprite per frame and the meter picks the frame from its own fill.
 
-HOW THE FRAMES WERE MADE, because the count matters and one call cannot give it.
-`animate_image` caps at 16 frames, so a single pass over the whole growth is a 6% step per
-frame - visibly steppy on a bar the player watches for a full act. The cycle is therefore
-built in two passes:
+THE CYCLE IS BUILT IN THREE STRETCHES, ONE PER GOAL (rebuilt 2026-08-19 evening, Louis: "the
+flower meter should start without that leaf, and the subgoals should be linearly spread: one
+at 1/3, 2/3 and 3/3 of the final goal - the last one being the big flower of course").
 
-  1. one interpolation, seedling -> full plant, 16 frames. That establishes the WHOLE arc:
-     what grows when, where the leaves land, when the bud rises and opens.
-  2. three more interpolations between frames taken OUT of that first pass (0->6, 6->11,
-     11->16), each 16 frames. Because every endpoint is a frame the model itself drew, the
-     three segments cannot drift apart the way three independent generations would.
+That sentence is a TIMING contract and the old cycle broke it badly. Its four interpolations
+all overshot - told to grow a seedling into a one-flowered plant, the model grows the WHOLE
+plant to full height by frame 9 and snaps back to the pinned target at 16 - so
+`drop_overshoot` threw away 23 of 65 frames, and every one of them came out of the two
+stretches where the side flowers grow. Measured on the shipped cycle: the first flower opened
+at frame 7 of 41 (fill 0.17), the second at frame 8 (0.19), and the remaining 33 frames were
+all top bud. Two subgoals inside a fifth of the meter, then four fifths of nothing.
+
+So the frames are now CURATED per stretch rather than concatenated and filtered, and the
+manifest publishes `beats` - the frame index each goal lands on - so the game can map its fill
+onto them piecewise (see stem_grow_key). What each stretch is:
+
+  1. 0 -> 1/3   a bare sprout with NO LEAF (plant_seed0, the seedling with its leaf masked
+                off) grows a stalk, unfurls two leaves, and opens ONE side flower.
+                a_00..a_04 + l_01..l_06 + c_01..c_16, ending exactly on plant_k1.
+  2. 1/3 -> 2/3 the SECOND side flower opens, and it is stretch 1's own flower MIRRORED.
+                The generated interpolation for this beat (artifacts/plant_v2/b_*) came back
+                a hard pop - eight identical frames, the flower, eight more identical frames -
+                which is a static middle third of the meter. Mirroring the left flower's
+                measured opening gives a real, gradual bloom AND makes the two subgoals behave
+                identically, which is what they mean. Ends exactly on plant_k2.
+  3. 2/3 -> 1   the stalk rises, the top bud forms and blooms: the two segments from the
+                original build (s3, s4), which came out clean and are unchanged.
 
 THE SEEDLING IS DERIVED FROM THE FULL PLANT, NOT GENERATED. Both ends of an interpolation
 have to be the same plant or the model spends its frames morphing one design into another
 instead of growing one. Masking everything above the lowest 14 rows of the finished plant
-gives a start frame that shares its stalk, its width and its exact palette.
+gives a start frame that shares its stalk, its width and its exact palette. plant_k0b (the
+flowerless plant, used as the middle keyframe of stretch 1) is derived the same way, by
+clearing plant_k1's flower head and the shoot it stands on.
 
 AND THE PALETTE IS WHY THE STALK IS A RE-ROLL. The locked 48 has five greens, all
 light-to-mid, and no dark green at all - so asked to shade a stalk the model reaches for
@@ -55,38 +74,79 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "artifacts" / "plant"
 OUT = ROOT / "Assets" / "UI" / "flower"
 
-# The three densifying segments, in growth order, as (job-stem, drop-first-frame).
-# Each segment's first frame IS the previous segment's last, so all but the first drop it.
-# GROWTH ORDER, AND IT IS THE WHOLE POINT (2026-08-19, Louis: "small flower grows a
-# subflower, grows another subflower, continues growing stalk, grows top bud, blooms top
-# bud; i wouldn't want a top bud, when the subflowers still have to grow").
-# That is the order the meter MEANS - a subgoal falls before the goal does - and it cannot
-# be got by reordering frames, because a frame carries the whole plant. It needs KEYFRAMES
-# to interpolate through, one per beat, and two of them do not exist as generations:
-#   K1  one side flower open, no top bud
-#   K2  both side flowers open, no top bud
-#   K3  taller stalk, closed top bud            (artifacts/paint/plant_mid2.png)
-#   K4  full bloom                              (artifacts/paint/plant_full2.png)
+# WHICH RAW FRAMES EACH STRETCH IS MADE OF, as (directory, job-stem, first, last) with both
+# ends INCLUSIVE. Curated rather than concatenated: see the module docstring for why the
+# previous "take every frame and filter the overshoot out" build could not hold the timing.
+#
+# THE KEYFRAMES the interpolations run between, and where each came from:
+#   K0   a bare sprout, no leaf       (artifacts/paint/plant_seed0.png - plant_seed masked)
+#   K0b  stalk and leaves, no flower  (artifacts/paint/plant_k0b.png   - plant_k1 masked)
+#   K1   one side flower open         (artifacts/paint/plant_k1.png)
+#   K2   both side flowers open       (artifacts/paint/plant_k2.png)
+#   K3   taller stalk, closed top bud (artifacts/paint/plant_mid2.png)
+#   K4   full bloom                   (artifacts/paint/plant_full2.png)
 # K3 IS ITSELF A COMPOSITE and K1/K2 ARE CUT FROM IT. Prompting for "the same plant but the
 # top is still a bud" failed - img2img at strength 300 kept the flower open, which is the
 # generator being sensibly conservative about an init image. So K3 is the closed-bud frame
 # with the side flowers pasted in from the finished plant, and K1/K2 are K3 with the bud
-# rows cleared (the bud spans rows 9..33; the stalk resumes 3px wide at row 34) and, for
-# K1, the right-hand flower cleared too. Every pixel therefore comes from a frame the model
-# drew, on one canvas, so the interpolations have nothing to reconcile.
+# rows cleared and, for K1, the right-hand flower cleared too. Every pixel therefore comes
+# from a frame the model drew, on one canvas, so the interpolations have nothing to
+# reconcile - and the two masked keyframes above extend that same rule downward.
 #
-# THE INTERPOLATIONS OVERSHOOT BADLY HERE and drop_overshoot is what makes them usable:
-# told to grow from a seedling to K1, the model grows the WHOLE plant to full height by
-# frame 9 and then snaps back to the pinned target at frame 16. Measured heights across the
-# raw 65: 14, 19, 24, 34, 41, 44, 49, 55, 64, 71, 71, 72, 72, 72, 72, 72, then 46. Twenty-
-# three frames are dropped, against three on the previous cycle - a pinned last frame is a
-# hint, not a contract, and the further the target is from "keep going", the less it holds.
-SEGMENTS = [("s1", False), ("s2", True), ("s3", True), ("s4", True)]
+# WHY EACH SPAN STOPS WHERE IT DOES. An interpolation is pinned to its last frame and
+# overshoots anyway: `a` and `l` both grow the plant to the full canvas height by frame 15
+# and snap back to the target at 16. A pinned last frame is a hint, not a contract. So each
+# span keeps only the frames that are still ON the way to their target - `a` up to the
+# height `l` starts at, `l` up to the height K0b stands at - and the target is then taken
+# from the keyframe file itself rather than from the frame that claims to be it.
+STRETCH1 = [("plant_v2", "a", 0, 4), ("plant_v2", "l", 1, 6), ("plant_v2", "c", 1, 16)]
+STRETCH3 = [("plant", "s3", 1, 16), ("plant", "s4", 1, 16)]
+# stretch 2 is not a span: it is stretch 1's own flower, mirrored (see mirror_flower).
+MIRROR_SRC = ("plant_v2", "c", 1, 15)
+STALK_X = 35.0     # the column the stalk stands on, in canvas pixels - the mirror axis
+MIRROR_DX = -3     # ...and the shift that lands the mirrored flower on K2's painted one.
+MIRROR_DY = -2     # Measured: K1's flower occupies rows 41..48 / cols 22..27, K2's right
+                   # flower rows 39..46 / cols 40..46, and a bare mirror about the stalk
+                   # gives cols 43..48. The plant is not symmetric about its own stalk, so
+                   # the mirror needs the offset or the last frame of the stretch jumps.
 
 
-def load_segment(stem: str) -> list[np.ndarray]:
-	fs = sorted(SRC.glob(f"{stem}_*.png"))
-	return [np.asarray(Image.open(f).convert("RGBA")).copy() for f in fs]
+def load_frame(path: Path) -> np.ndarray:
+	return np.asarray(Image.open(path).convert("RGBA")).copy()
+
+
+def load_span(spans: list[tuple[str, str, int, int]]) -> list[np.ndarray]:
+	"""The frames a stretch names, in order, from artifacts/<dir>/<stem>_NN.png."""
+	out: list[np.ndarray] = []
+	for folder, stem, lo, hi in spans:
+		for i in range(lo, hi + 1):
+			f = ROOT / "artifacts" / folder / f"{stem}_{i:02d}.png"
+			if not f.exists():
+				raise FileNotFoundError(f)
+			out.append(load_frame(f))
+	return out
+
+
+def mirror_flower(base: np.ndarray, seed: np.ndarray, frame: np.ndarray) -> np.ndarray:
+	"""`base` plus the mirror image of whatever `frame` grew on top of `seed`.
+
+	THE SECOND SUBGOAL IS THE FIRST ONE, REFLECTED, and that is a deliberate choice rather
+	than a shortcut. Two things pushed it: the generated interpolation for this beat came
+	back as eight identical frames, a pop, and eight more identical frames - a third of the
+	meter with nothing happening in it - and the two side flowers ARE the same event twice,
+	so they should look like it. Only the DELTA is mirrored: the leaves and the stalk keep
+	the asymmetry the painting gave them, and only the flower and its shoot cross the axis.
+	"""
+	grew = (frame[..., 3] > 0) & (np.abs(frame.astype(int) - seed.astype(int)).sum(2) > 24)
+	out = base.copy()
+	h, w = grew.shape
+	ys, xs = np.nonzero(grew)
+	for y, x in zip(ys, xs):
+		mx = int(round(2.0 * STALK_X - x)) + MIRROR_DX
+		my = int(y) + MIRROR_DY
+		if 0 <= mx < w and 0 <= my < h:
+			out[my, mx] = frame[y, x]
+	return out
 
 
 # How much taller than the frame AFTER it a frame may be before it is treated as an
@@ -130,16 +190,35 @@ def drop_overshoot(frames: list[np.ndarray]) -> list[np.ndarray]:
 
 
 def build(write: bool, force: bool) -> int:
-	frames: list[np.ndarray] = []
-	for stem, drop in SEGMENTS:
-		seg = load_segment(stem)
-		if not seg:
-			print(f"  missing artifacts/plant/{stem}_*.png")
-			return 1
-		frames.extend(seg[1:] if drop else seg)
-		print(f"  {stem}: {len(seg)} frames" + ("  (first dropped, shared with previous)" if drop else ""))
+	paint = ROOT / "artifacts" / "paint"
+	k1 = load_frame(paint / "plant_k1.png")
+	k2 = load_frame(paint / "plant_k2.png")
 
-	frames = drop_overshoot(frames)
+	frames: list[np.ndarray] = list(load_span(STRETCH1)) + [k1]
+	beats = [len(frames) - 1]
+	print(f"  stretch 1 (sprout to first flower): {len(frames)} frames, goal 1 at {beats[0]}")
+
+	folder, stem, lo, hi = MIRROR_SRC
+	seed = load_frame(ROOT / "artifacts" / folder / f"{stem}_00.png")
+	for i in range(lo, hi + 1):
+		frames.append(mirror_flower(k1, seed, load_frame(ROOT / "artifacts" / folder / f"{stem}_{i:02d}.png")))
+	frames.append(k2)
+	beats.append(len(frames) - 1)
+	print(f"  stretch 2 (second flower, mirrored): {beats[1] - beats[0]} frames, goal 2 at {beats[1]}")
+
+	frames.extend(load_span(STRETCH3))
+	beats.append(len(frames) - 1)
+	print(f"  stretch 3 (bud and bloom): {beats[2] - beats[1]} frames, goal 3 at {beats[2]}")
+	# THE SAFETY NET, NOT THE BUILD. The stretches above are curated, so nothing should be
+	# dropped here - and if something is, the span it came from is wrong and wants looking
+	# at rather than filtering. Beats are re-derived afterwards so a drop cannot silently
+	# leave a goal pointing at the wrong picture.
+	before = len(frames)
+	kept = drop_overshoot(frames)
+	if len(kept) != before:
+		print(f"  WARNING: {before - len(kept)} curated frame(s) tripped the overshoot filter")
+		beats = [kept.index(frames[b]) for b in beats]
+	frames = kept
 	# every frame is a 2:1-free generation, so the only correction needed is the hard alpha
 	# and palette contract every other sprite in this game holds to
 	bad_in = sum(off_palette(f) for f in frames)
@@ -185,8 +264,14 @@ def build(write: bool, force: bool) -> int:
 	print(f"  bloom centre at ({bcx}, {bcy}) art px of the canvas")
 	print(f"  wrote {len(keys)} frames to {OUT.relative_to(ROOT)}")
 	print("  manifest keys: " + " ".join("stem/" + k for k in keys[:3]) + " ...")
+	# WHICH FRAME EACH GOAL LANDS ON. The stretches are different lengths on purpose (the
+	# sprout has more to show than the second flower does), so the game cannot get this by
+	# dividing - it reads the beats and maps its own fill onto them piecewise. Published
+	# here because it is a property of the ART: a re-roll moves it.
+	print(f"  goal beats at frames {beats} of {len(keys)}")
 	(SRC / "keys.json").write_text(json.dumps(
-		{"frames": len(keys), "stalk_dx": dx, "bloom_cx": bcx, "bloom_cy": bcy}, indent=1))
+		{"frames": len(keys), "stalk_dx": dx, "bloom_cx": bcx, "bloom_cy": bcy,
+		 "beats": beats}, indent=1))
 	return 0
 
 

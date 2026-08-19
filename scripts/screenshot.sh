@@ -63,9 +63,13 @@ declare -a TARGETS=(
   # needs a whole winning act to photograph and the four subgoal flowers appear at fills a
   # demo run may never sit on. `--stem <frac> [over]` pins it. Overflow only exists at full
   # fill, so only the last of these carries one.
+  # THE FILLS ARE THE GOALS THEMSELVES (2026-08-19). The three goals are even thirds of
+  # the act now and the painting's own milestones are mapped onto them, so 1/3 and 2/3 are
+  # the two frames worth comparing run to run: one side flower open, then both. A fill
+  # picked for looking sprouty says nothing about whether the plant and the ladder agree.
   "stem_bud:700:play:--demo --booking --venue 2 --stem 0.05 0"
-  "stem_sprout:700:play:--demo --booking --venue 2 --stem 0.35 0"
-  "stem_grown:700:play:--demo --booking --venue 2 --stem 0.75 0"
+  "stem_goal1:700:play:--demo --booking --venue 2 --stem 0.333 0"
+  "stem_goal2:700:play:--demo --booking --venue 2 --stem 0.667 0"
   "stem_bloom:700:play:--demo --booking --venue 2 --stem 1.0 0.9"
   "results:60:results:--results"
   "credits:60:credits:--credits"
