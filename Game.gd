@@ -1531,7 +1531,42 @@ var toggle_on := -1       # the flourish toggle currently running (TR_HIGH / TR_
 var toggle_scored := false   # this activation has already counted toward tricks_landed
 var tennis_ball: Ball = null # the marked ball that sails over the top while Tennis runs
 var col_air_ref := -1.0  # Columns: running reference airtime, so lanes bounce in sync
-var col_mid_ball: Ball = null # Columns (odd counts): the one ball fed across the middle
+# =============================================================================
+# THE TWO ASSISTS, AND THE UNAIDED CLEAR (2026-08-19, Louis: "there should be two small icons
+# (a boot for speed, and a stopwatch for slowmo) that can be toggled on and off ... when both
+# are off and you beat the final goal of the stage, you get a reward").
+#
+# Every source of slow motion in the game falls into exactly one of two buckets, and the two
+# icons are those buckets:
+#   * THE BOOT is the SPEED STAT - the permanent, invested, always-on share. Up to 20%.
+#   * THE STOPWATCH is everything TEMPORARY: the difficulty's own base slowdown, Uncle Dan's
+#     Pie, and the two earned bursts (an Amazing! catch, fifty Perfects in one run).
+# Switching one off removes its whole bucket for as long as it is off. Nothing else changes -
+# no stat is refunded, no window moves, no score is touched. It is a handicap the player
+# chooses, and the point of it is the clear at the other end.
+#
+# WHY THIS IS NOT JUST PURIST AGAIN. Purist is a BOOKING: chosen in the day hub, binding
+# Accuracy and Speed together for a whole night, and playing on its own record board. These
+# are two switches on the stage, flipped mid-act if you like, with one thing at stake - the
+# UNAIDED mark on the venue that only lands if neither assist ran at ANY point in the act
+# (act_assisted, which is why it is a separate flag and not a read of the two toggles at the
+# moment the goal falls: turning the pie back on for the hard bit and off again before the
+# final catch would otherwise buy the mark).
+# =============================================================================
+const UNAIDED_REP := 300      # what a house's first unaided clear is worth in standing. It is
+							   # a whole venue's worth of goals (rep swings on goals reached),
+							   # because clearing a house without help IS the house again.
+var assist_speed := true      # the BOOT: is the Speed stat's slow motion running
+var assist_slow := true       # the STOPWATCH: is every other slow-motion source running
+var act_assisted := false     # did EITHER actually slow the world at any point this act
+var _assists_pinned := false  # dev (--assists): this run's switches came from the command
+							   # line, so they are never written back to the settings file
+var unaided_venues: Array[bool] = [false, false, false, false, false, false, false]
+
+var col_mid_ball: Ball = null # Columns (odd counts): the SPARE prop - the one the odd count
+							   # cannot pair. It belongs to the dominant hand, never crosses,
+							   # and stands in that hand's innermost column (columns_mid_slot).
+							   # It used to run up the middle LINE, which no arm can reach
 var trick_ready := -999   # tick a LIVE trick may fire again (cooldown)
 var spin_until := -999    # tick the current Spin ends; catches until then score double
 var spin_scored := false  # this Spin has already been credited as landed
@@ -2468,6 +2503,17 @@ func _ready() -> void:
 			speed = SPEED_CAP
 			stamina_max = TOSSA_BALANCE.stamina_capacity(endurance)
 			stamina = stamina_max
+		# dev: `--assists off` / `--assists on` pins BOTH switches for one run, without
+		# touching the settings file. The UNAIDED row and the two dark icons cannot otherwise
+		# be photographed - they need two keypresses in a live act, which no capture makes -
+		# and this file's own rule is that a screen with no capture target is a screen nobody
+		# has looked at since the art density changed.
+		var ai := ua.find("--assists")
+		if ai != -1 and ai + 1 < ua.size():
+			var want := ua[ai + 1] != "off"
+			assist_speed = want
+			assist_slow = want
+			_assists_pinned = true   # ...and the settings file must not learn about it
 		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
 		if pi != -1 and pi + 1 < ua.size():
 			for pj in PATTERNS.size():
@@ -2929,6 +2975,14 @@ func _physics_process(delta: float) -> void:
 	if not _demo:
 		_read_inputs()
 	_slow_cur = move_toward(_slow_cur, slow_target(), SLOW_RAMP)
+	# THE UNAIDED MARK IS EARNED BY THE WHOLE ACT, so it is judged HERE - where the world is
+	# actually slowed - rather than by reading the two switches when the final goal lands.
+	# Reading them at the goal would sell the mark for one keypress: leave the pie running
+	# through the hard middle of the act, switch it off before the last catch, collect. What
+	# matters is whether the player ever got the help, and this line is the only place that
+	# question has a truthful answer.
+	if _slow_cur > 0.001 and mode == MODE_PERFORM and running and not tut_active:
+		act_assisted = true
 	if _slow_cur > 0.001:
 		_tick_acc += maxf(1.0 - _slow_cur, 0.12)
 		if _tick_acc < 1.0:
@@ -3408,6 +3462,10 @@ func _input(event: InputEvent) -> void:
 			if not juggling: start_run(num_balls - 1)
 		KEY_2:
 			if not juggling: start_run(num_balls + 1)
+		KEY_B:
+			toggle_assist("speed")   # the BOOT: the Speed stat's own slow motion
+		KEY_T:
+			toggle_assist("slow")    # the STOPWATCH: the pie, the bursts, the difficulty base
 		KEY_O:
 			if not juggling: cycle_prop(1)
 		KEY_P:
@@ -7708,6 +7766,10 @@ func load_settings() -> void:
 		reduce_motion = bool(cf.get_value("opt", "reduce_motion", false))
 		set_catch_full = bool(cf.get_value("opt", "catch_full", false))
 		dominant_hand = int(cf.get_value("opt", "dominant_hand", RIGHT))
+		# the two assist switches: a standing preference, on by default, so nothing changes
+		# for a player who never touches them
+		assist_speed = bool(cf.get_value("opt", "assist_speed", true))
+		assist_slow = bool(cf.get_value("opt", "assist_slow", true))
 		# Legacy migration default only: old careers predate per-slot difficulty. The first
 		# time one is loaded, save_progress writes this value into that slot's metadata.
 		legacy_difficulty = clampi(int(cf.get_value("opt", "difficulty", DIFF_BEAR)), DIFF_SLOTH, DIFF_OCTOPUS)
@@ -7750,6 +7812,18 @@ func save_settings() -> void:
 	cf.set_value("opt", "reduce_motion", reduce_motion)
 	cf.set_value("opt", "catch_full", set_catch_full)
 	cf.set_value("opt", "dominant_hand", dominant_hand)
+	# A PINNED RUN MAY NOT WRITE ITS PIN BACK. `--assists` exists to photograph a state, and
+	# the settings file is SHARED with the real game - so a capture that later saved settings
+	# for any other reason would hand Louis a career with his own assists switched off. The
+	# stored values are left exactly as they were loaded.
+	if _assists_pinned:
+		var prev := ConfigFile.new()
+		if prev.load(SETTINGS_PATH) == OK:
+			cf.set_value("opt", "assist_speed", bool(prev.get_value("opt", "assist_speed", true)))
+			cf.set_value("opt", "assist_slow", bool(prev.get_value("opt", "assist_slow", true)))
+	else:
+		cf.set_value("opt", "assist_speed", assist_speed)
+		cf.set_value("opt", "assist_slow", assist_slow)
 	# Preserve the old global value only until every old career has loaded once and written
 	# immutable per-slot metadata. It is not exposed or changed by Settings.
 	cf.set_value("opt", "difficulty", legacy_difficulty)
@@ -7968,7 +8042,7 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	# The fixed reference is a real card with keycaps, not two compressed prose lines.
 	# It is deliberately device-neutral: these are the keyboard names players see in
 	# tutorials, while the gamepad's fixed navigation buttons remain visible contextually.
-	var ref_card := Rect2(left_x, 506.0, card_w * 2.0 + gap, 136.0)
+	var ref_card := Rect2(left_x, 506.0, card_w * 2.0 + gap, 172.0)
 	hud_panel(ref_card)
 	draw_string(font, Vector2(ref_card.position.x, ref_card.position.y + 28.0), "OTHER KEYS",
 		HORIZONTAL_ALIGNMENT_CENTER, ref_card.size.x, ps(15), Color(0.95, 0.82, 0.55, 0.95))
@@ -7980,6 +8054,16 @@ func draw_remap(font: Font, s: Vector2) -> void:
 		[["R"], "restart practice"], [["1", "2"], "ball count"],
 		[["O"], "change prop"], [["P"], "change pattern"],
 	])
+	# THE TWO ASSIST SWITCHES BELONG IN A COMPLETE REFERENCE, not only on the stage card
+	# that carries them. This screen is documented as "a complete two-device reference", and
+	# a control the player only ever meets as two lit icons in the corner of a live act is
+	# one they will never think to press.
+	draw_hints_row(font, s.x * 0.5, ref_card.position.y + 116.0, [
+		[["B"], "Speed assist on / off"], [["T"], "slow motion on / off"],
+	])
+	draw_string(font, Vector2(ref_card.position.x, ref_card.position.y + 148.0),
+		"clear a stage with both off and the house remembers it",
+		HORIZONTAL_ALIGNMENT_CENTER, ref_card.size.x, ps(12), Color(0.72, 0.90, 0.96, 0.85))
 	draw_string(font, Vector2(0, s.y - 42.0),
 		"Up / Down select     Enter rebind     Tab switch device     Esc back",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.78, 0.71, 0.63))
@@ -9288,6 +9372,7 @@ func start_run(n: int) -> void:
 	# per-ACT state re-arms every run (the challenge roll is owned by
 	# begin_performance, so practice and a dev autoplay never carry one)
 	goals_hit = 0
+	act_assisted = false           # the unaided mark is judged over the whole run
 	hand_parked = [false, false]   # ...and both hands can throw again
 	set_collapsed = false
 	fail_reason = ""   # a fresh act has not failed yet
@@ -9816,6 +9901,54 @@ func check_goals() -> void:
 		throw_from_crowd("flower", 0, 1.0)
 		play_sfx("record", -8.0)
 		spawn_parts(Vector2(s.x * 0.5, s.y * 0.16), Color(1.0, 0.85, 0.45), 22, 2.5, "confetti")
+		if goals_hit >= NUM_GOALS:
+			unaided_salute(s)
+
+
+func unaided_salute(s: Vector2) -> void:
+	# THE REWARD FOR CLEARING A HOUSE WITH BOTH ASSISTS OFF (2026-08-19, Louis: "when both
+	# are off and you beat the final goal of the stage, you get a reward (think of
+	# something)"). Three parts, and each one answers a different span of the game:
+	#
+	#   * TONIGHT: the room throws GOLD ROSES AND BOUQUETS, a real volley rather than the
+	#     goal's own two plain stems. This is money in the only currency the game has - the
+	#     pile IS the purse - so an unaided clear pays for itself the same evening, in front
+	#     of the player, one flower at a time. It scales with the house, because a volley
+	#     that reads as generous at the Backyard is loose change at the World Arena.
+	#   * THE CAREER: the venue keeps an UNAIDED mark, permanently, shown on its record
+	#     chase. That is the part with no expiry and nothing to spend - the reason to go
+	#     back to a house you have already beaten, which the record board alone never quite
+	#     gave (a record can be beaten by simply taking more objects up next time).
+	#   * THE FIRST TIME ONLY: one stat point. It is real progression rather than a trophy,
+	#     and it is not farmable - the mark is what gates it, so seven exist in a career and
+	#     every one of them costs a house cleared without help. A repeat clear still gets the
+	#     volley and the shout, because the room does not stop being impressed.
+	if not unaided_clear():
+		return
+	var vi := clampi(run_venue, 0, unaided_venues.size() - 1)
+	var first := not unaided_venues[vi]
+	# the volley: gold roses from both wings, with bouquets at the bigger houses
+	var roses := 6 + 2 * clampi(run_venue, 0, MAX_VENUE)
+	for i in roses:
+		throw_from_crowd("flower", 2, -1.0 if i % 2 == 0 else 1.0)
+		run_flowers += int(FLOWER_TIERS[2]["val"])
+	var bouquets := clampi(run_venue, 0, 4)
+	for i in bouquets:
+		throw_from_crowd("flower", 3, -1.0 if i % 2 == 0 else 1.0)
+		run_flowers += int(FLOWER_TIERS[3]["val"])
+	applause = 1.0                     # the room is on its feet, and the gauge has to agree
+	warm_room(0.2)
+	play_sfx("streak", -3.0)
+	add_popup(Vector2(s.x * 0.5, s.y * 0.31),
+		"UNAIDED  -  no boots, no clock", Color(0.72, 0.96, 1.0))
+	spawn_parts(Vector2(s.x * 0.5, s.y * 0.20), Color(0.72, 0.96, 1.0), 30, 3.0, "confetti")
+	if first:
+		unaided_venues[vi] = true
+		points += 1
+		reputation += UNAIDED_REP
+		add_popup(Vector2(s.x * 0.5, s.y * 0.37),
+			"first unaided clear here  -  +1 stat point", Color(1.0, 0.88, 0.52))
+		save_progress()
 
 
 # -----------------------------------------------------------------------------
@@ -11553,6 +11686,125 @@ func stamina_mult() -> float:
 	return lerpf(STAM_MIN_MULT, 1.0, clampf(f / STAM_LOW, 0.0, 1.0))
 
 
+func toggle_assist(which: String) -> void:
+	# B and T, the two switches on the stage. They are the player's standing preference, so
+	# they persist - a player who juggles unaided should not have to switch it off every
+	# night - and they are legal at any time, in an act or in practice, because a handicap
+	# you cannot take on mid-act is a handicap you have to plan a whole evening around.
+	#
+	# A LESSON MAY NOT TOUCH THEM. Tutorial steps pin their own pace (tut_slow is a FLOOR
+	# outside both buckets), so the switches would appear to do nothing there, and a control
+	# that visibly does nothing the first time it is pressed is a control the player writes
+	# off for good.
+	if tut_active:
+		set_trick_msg("not during a lesson  -  the pace here belongs to the step")
+		return
+	var on := false
+	if which == "speed":
+		assist_speed = not assist_speed
+		on = assist_speed
+		set_trick_msg("SPEED  %s  -  your Speed stat %s slowing the world" % [
+			"ON" if on else "OFF", "is" if on else "is NOT"])
+	else:
+		assist_slow = not assist_slow
+		on = assist_slow
+		set_trick_msg("SLOW MOTION  %s  -  the pie and earned bursts %s" % [
+			"ON" if on else "OFF", "count" if on else "do nothing"])
+	play_sfx("ui2" if on else "ui", -14.0)
+	save_settings()
+
+
+func unaided_now() -> bool:
+	# both switches off: the world is running at true speed. What the ICONS say.
+	return not assist_speed and not assist_slow
+
+
+func unaided_clear() -> bool:
+	# ...and what the REWARD asks, which is the stronger question: no assist ran at any
+	# point tonight. See act_assisted.
+	return unaided_now() and not act_assisted
+
+
+func draw_assist_row(font: Font, x: float, y: float, w: float) -> void:
+	# THE TWO SWITCHES, as two icons and their keys. A BOOT for the Speed stat and a
+	# STOPWATCH for every other slow-motion source - Louis's own choice of mark for each, and
+	# they are good ones: a boot is a thing you WEAR, which is what a permanent invested stat
+	# is, and a stopwatch is a thing that RUNS OUT, which is what a pie and a burst are.
+	#
+	# LIT MEANS RUNNING. An icon at full strength with a warm ring is help that is switched
+	# on; a dimmed icon with no ring is help given up. That is the right way round for this
+	# game - the reward is for the DARK pair - but the alternative (lighting the ones you
+	# have refused) would make an ordinary player's HUD read as two warnings on a night where
+	# nothing is wrong.
+	# 30px apart, which is the mark's own width plus its lamp: any tighter and the two rings
+	# touch and read as one wide pill rather than as two switches
+	var bx := x + 14.0
+	var wx := bx + 30.0
+	assist_icon("boot", Vector2(bx, y - 5.0), assist_speed)
+	assist_icon("watch", Vector2(wx, y - 5.0), assist_slow)
+	var tx := wx + 22.0
+	if unaided_now():
+		# NAME THE PRIZE WHILE IT IS STILL WINNABLE, and say plainly when it has already been
+		# lost tonight. A reward the player only hears about after the fact cannot be aimed
+		# at, and "you had it and spent it" is the single most useful thing this row can say.
+		var clean := unaided_clear()
+		var pulse := 0.75 + 0.25 * sin(float(tick) * 0.06)
+		draw_fit_string(font, Vector2(tx, y), "UNAIDED" if clean else "unaided  -  lost tonight",
+			HORIZONTAL_ALIGNMENT_LEFT, w - (tx - x), 12,
+			Color(0.72, 0.96, 1.0, pulse) if clean else Color(0.78, 0.74, 0.70, 0.8))
+	else:
+		draw_fit_string(font, Vector2(tx, y), "B / T  assists", HORIZONTAL_ALIGNMENT_LEFT,
+			w - (tx - x), 12, Color(0.78, 0.76, 0.72, 0.78))
+
+
+func assist_icon(kind: String, c: Vector2, on: bool) -> void:
+	# One assist mark: a BOOT for the Speed stat, a STOPWATCH for everything temporary.
+	#
+	# GENERATED, THEN DERIVED - `scripts/install_assist_icons.py`, 40x40 from PixelLab reduced
+	# 2:1 to a 20x20 greyscale sprite and blitted through the manifest at `scale` 0.5, so one
+	# authored pixel lands on exactly one screen pixel and the mark is 20px wide. That route
+	# exists because 20x20 is four hundred pixels against PixelLab's 1024-pixel AREA floor:
+	# the size cannot be asked for directly, only derived, the same as every stage prop.
+	#
+	# THE SPRITE IS GREYSCALE BECAUSE THE TINT IS THE STATE. `art_blit_size` multiplies, and a
+	# multiply can only darken, so the file stores a luminance ratio normalised to its own
+	# brightest pixel - warm cyan at full strength when the assist is running, dim grey when
+	# the player has given it up. Colour painted into the file could express neither.
+	#
+	# The procedural pair below is the seam's fallback and is what a build with no manifest
+	# draws. Keep it honest: it is also the reason the shapes are what they are - at eight art
+	# pixels a boot built from two rectangles is the letter L, and the notch that makes it a
+	# boot IS the silhouette, which is what sent these to PixelLab in the first place.
+	var col := Color(0.72, 0.96, 1.0, 0.95) if on else Color(0.62, 0.58, 0.56, 0.55)
+	var p := ART_PIXEL
+	if on:
+		# the ring is the "running" signal, and it is the only part that is allowed to be
+		# soft: it reads as a lamp behind the mark rather than as part of the mark
+		draw_ring_pix(c, 11.0, 2.0, Color(col.r, col.g, col.b, 0.30))
+	# `art_blit`, NOT `art_blit_size`: the second FITS a texture to a box, and the only boxes
+	# these sprites can be fitted to without resampling are their own size and double it. At
+	# 20x20 authored, the manifest's 0.5 already puts one authored pixel on one screen pixel,
+	# so the natural blit is the correct one and the size is not a layout decision to make.
+	if art_blit("ui/assist_boot" if kind == "boot" else "ui/assist_watch", c, 1.0, 0.0, col):
+		return
+	if kind == "boot":
+		# A BOOT IN PROFILE IS AN L, and at eight art pixels it has to be exactly an L. The
+		# first version added an ankle block bridging the shaft and the foot, which is what a
+		# boot really looks like and which at this size simply filled the notch in - the mark
+		# came back a solid blob. **The notch IS the boot**; everything else is a rectangle.
+		var s := art_snap(c - Vector2(p * 2.5, p * 4.0))
+		draw_rect(Rect2(s, Vector2(p * 2.0, p * 6.0)), col)                          # the leg
+		draw_rect(Rect2(s + Vector2(0.0, p * 5.0), Vector2(p * 5.0, p * 2.0)), col)  # the foot
+		draw_rect(Rect2(s - Vector2(p, 0.0), Vector2(p * 3.0, p)), col)              # the cuff
+	else:
+		# a stopwatch: a dial, the crown on top, and one hand standing up out of the middle
+		var d := art_snap(c + Vector2(0.0, p * 0.5))
+		fill_disc_pix(d, p * 3.5, col)
+		fill_disc_pix(d, p * 2.0, Color(0.10, 0.09, 0.12, 0.92))
+		draw_rect(Rect2(art_snap(d - Vector2(p, p * 5.5)), Vector2(p * 2.0, p * 2.0)), col)  # crown
+		draw_rect(Rect2(art_snap(d - Vector2(p * 0.5, p * 2.0)), Vector2(p, p * 2.0)), col)  # hand
+
+
 func slow_target() -> float:
 	# where the slow amount is HEADING, 0..1. All sources stack linearly
 	# (ideas.rtf): the Speed stat, Uncle Dan's Pie (all day), an Amazing!
@@ -11562,17 +11814,26 @@ func slow_target() -> float:
 	# Amazing catch, or fifty-Perfect reward.
 	if purist_stat("spd"):
 		return 0.0
-	var a := float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
-	# SLOTH begins with the most readable assist in the game: the whole simulation runs
-	# 20% slower before any Speed investment. Purist strips it like other bought help.
-	if difficulty == DIFF_SLOTH and not purist_all():
-		a += SLOTH_BASE_SLOW
-	if pie_active and not purist_all():
-		a += PIE_SLOW
-	if _frames < amazing_until:
-		a += BURST_SLOW
-	if _frames < perfect_burst_until:
-		a += BURST_SLOW
+	# THE TWO ASSIST SWITCHES SPLIT THIS FUNCTION IN HALF, and that split is the whole
+	# feature (see their declarations). The BOOT owns the permanent invested share; the
+	# STOPWATCH owns everything temporary - the difficulty's base, the pie, the two earned
+	# bursts. A lesson's floor at the bottom of this function is deliberately outside both:
+	# a tutorial that runs at full speed because the player left an assist off is a tutorial
+	# that cannot teach its own step.
+	var a := 0.0
+	if assist_speed:
+		a += float(mini(speed, SPEED_CAP)) / float(SPEED_PER_PCT) / 100.0
+	if assist_slow:
+		# SLOTH begins with the most readable assist in the game: the whole simulation runs
+		# 20% slower before any Speed investment. Purist strips it like other bought help.
+		if difficulty == DIFF_SLOTH and not purist_all():
+			a += SLOTH_BASE_SLOW
+		if pie_active and not purist_all():
+			a += PIE_SLOW
+		if _frames < amazing_until:
+			a += BURST_SLOW
+		if _frames < perfect_burst_until:
+			a += BURST_SLOW
 	if tut_active:
 		a = maxf(a, tut_slow())   # a lesson sets a FLOOR on slowness, never a sum: it
 								  # must not stack with a Pie into a frozen world. The
@@ -12400,6 +12661,11 @@ func load_progress() -> void:
 		if an is Array:
 			for i in mini((an as Array).size(), ante.size()):
 				ante[i] = int((an as Array)[i])
+		# which venues have been cleared with both assists off, ever
+		var ua: Variant = cf.get_value("prog", "unaided", [])
+		if ua is Array:
+			for i in mini((ua as Array).size(), unaided_venues.size()):
+				unaided_venues[i] = bool((ua as Array)[i])
 		# the reward director's memory: gifts stay given, the drought clock survives
 		var gf: Variant = cf.get_value("prog", "gifted", [])
 		if gf is Array:
@@ -12605,6 +12871,7 @@ func save_progress() -> void:
 	cf.set_value("prog", "seen_tuts", seen_tuts)       # so a lesson fires once, ever
 	cf.set_value("prog", "pending_tuts", pending_tuts)  # a queued lesson survives quitting
 	cf.set_value("prog", "ante", ante)                  # each venue's standing raised bar
+	cf.set_value("prog", "unaided", unaided_venues)     # ...and where an unaided clear stands
 	cf.set_value("prog", "gifted", gifted)              # pity unlocks stay unlocked
 	cf.set_value("prog", "perfs_since_unlock", perfs_since_unlock)
 	cf.set_value("prog", "aid_pie_day", aid_pie_day)
@@ -19407,8 +19674,16 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# Encores out of the left stack without covering that second path would delete the
 		# only statement of a bind the player is actually playing under.
 		var pur_row := purist or encores_have_purist()
+		# THE TWO ASSIST SWITCHES ARE ALWAYS ON THIS CARD, on or off, in or out of a booking.
+		# Every other row here appears only when it has something to say, and that is right
+		# for a status; these are CONTROLS. A control the player cannot see is a control they
+		# do not know they have, and the whole point of the pair is that the player chooses
+		# to give the help up - which they can only do if the offer is in front of them.
 		var status_rows := int(pts_row) + int(slow_row) + int(pur_row)
-		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows)), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
+		# ...plus the assist row, which is TALLER than a text row because it carries two 20px
+		# marks rather than a line of type
+		var extra_h := 26.0
+		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows) + extra_h), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
@@ -19426,6 +19701,8 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 		draw_meter(sx, 44, sw, 11.0, sfrac, stcol)
 		var status_y := 74.0
+		draw_assist_row(font, sx, status_y + 4.0, sw)
+		status_y += 26.0
 		if slow_row:
 			var stext := "SLOW  %d%%" % int(round(slow * 100.0))
 			if pie_active:
@@ -27175,7 +27452,8 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# frame, and the one place the bottom gradient cannot help because the light is IN the
 	# painting. A gradient darkens a picture uniformly; an outline follows the letters.
 	var rw := 330.0
-	var rh := 96.0 if purist else 76.0
+	# ...and the block grew a line: the unaided mark sits under the record and under Purist
+	var rh := 118.0 if purist else 98.0
 	var rx := 18.0
 	var ry := s.y - 88.0 - rh
 	var has_enc := booking_active and not encores.is_empty()
@@ -27192,6 +27470,19 @@ func draw_establish(font: Font, s: Vector2) -> void:
 		draw_text_shout(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.82, 0.6, 0.85 * tagA))
 	if purist:
 		draw_text_shout(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
+	# THE UNAIDED MARK, WHERE THE CHASE IS ALREADY BEING READ. This block is the one place a
+	# player looks at what this house still owes them, so the second thing it can owe them
+	# belongs here rather than on a board they would have to go and find. Standing marks say
+	# so; an unmarked house names the two keys, because the reward is worthless if the first
+	# time you hear about it is the night you already used a pie.
+	var uy := ry + (100.0 if purist else 78.0)
+	if establish_venue >= 0 and establish_venue < unaided_venues.size():
+		if unaided_venues[establish_venue]:
+			draw_text_shout(font, Vector2(rx + 16.0, uy), "UNAIDED  -  cleared with no boots, no clock",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.72, 0.96, 1.0, 0.95 * tagA))
+		else:
+			draw_text_shout(font, Vector2(rx + 16.0, uy), "unaided clear still open  -  B and T",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.78, 0.82, 0.86, 0.75 * tagA))
 
 	# bottom-RIGHT: the act's ask - the three goals to chase, and the whole-act
 	# challenge when one was rolled. Cash in from the first number on; each further
