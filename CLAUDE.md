@@ -201,6 +201,21 @@ matter most. The stalk's box is INSET down the card so a full bloom lands just i
 own top edge, and the shed-petal ring (which orbits wider than the bloom) is what actually sets
 that ceiling.
 
+**A SCRIM DARKENS A PICTURE; AN OUTLINE FOLLOWS THE LETTERS** (2026-08-19, and this is the
+third time the same argument has been lost). Every screen that puts text over a PAINTING
+rather than over a panel has reached for a band of darkness first - the establishing card's
+marquee scrim, its bottom gradient, the victory roll's `draw_read_column` - and every one of
+them fails in the same place: where the painting is lit from INSIDE. The Circus's tent
+doorway is a bright arch ringed with bulbs in the lower third, exactly where the goals block
+sits; the victory painting's boards carry footlights along the lip and thrown bouquets
+catching them, exactly where the roll's opening lines cross. A uniform darkening cannot win
+against light that is part of the picture, and turning it up far enough to try is how the
+"windows of info" got there in the first place - which Louis then had deleted ("i want the
+image only"). `draw_text_shout`'s 8-way outline costs nine draw_string calls, needs no
+rectangle, and works wherever the text happens to be - which on a scrolling roll is every
+part of the picture in turn. `draw_fit_string` and `draw_wrap_fit` take an opt-in `shout`
+for the same reason. **Reach for the outline first and the scrim only for a whole block.**
+
 **THE SEAM IS THE WHOLE ARCHITECTURE.** `Game.gd` never names a PNG. `art_blit` /
 `art_blit_size` / `art_blit_rect` / `art_blit_regions` take a key like `prop/club`, and
 `Resources/art_manifest.json` ALONE decides sprite versus procedural. Delete a line from the
