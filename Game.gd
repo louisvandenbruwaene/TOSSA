@@ -15703,7 +15703,7 @@ func draw_spoke_pix(c: Vector2, ang: float, r0: float, r1: float, w: float, col:
 			draw_rect(Rect2(art_snap(at + perp * off), Vector2(ap, ap)), col)
 
 
-func fill_poly_pix(pts: PackedVector2Array, col: Color) -> void:
+func fill_poly_pix(pts: PackedVector2Array, col: Color, grid: float = 0.0) -> void:
 	"""Any polygon, filled on the art grid: one draw_rect per art row, even-odd rule.
 
 	THE POINTS ARE IN SCREEN SPACE, and that is the whole reason this exists rather than a
@@ -15713,7 +15713,7 @@ func fill_poly_pix(pts: PackedVector2Array, col: Color) -> void:
 	So the caller transforms its shape itself and this fills the result where the pixels are."""
 	if pts.size() < 3:
 		return
-	var ap := float(ART_PIXEL)
+	var ap := grid if grid > 0.0 else float(ART_PIXEL)
 	var ymin := INF
 	var ymax := -INF
 	for p: Vector2 in pts:
@@ -15754,6 +15754,57 @@ func fill_flame_pix(pos: Vector2, ang: float, sc: float, base: Vector2, h: float
 	for i in local.size():
 		out[i] = pos + local[i].rotated(ang) * sc
 	fill_poly_pix(out, col)
+
+
+func fill_ellipse_pix(c: Vector2, rx: float, ry: float, rot: float, col: Color,
+		grid: float = 0.0) -> void:
+	"""A ROTATED ellipse on the art grid, solved per row rather than approximated.
+
+	WHY THIS EXISTS RATHER THAN fill_poly_pix(an ellipse's points). Every petal, leaf and
+	blob in `draw_flower` was a nine-point polygon standing in for an ellipse, then filled.
+	That is two approximations where one will do, and at the size the CURRENCY MARK is drawn
+	the first one is not free: nine points around a 2.6 x 1.7 px petal is a lumpy heptagon
+	before the grid ever sees it.
+
+	AND THE MINIMUM SPAN IS THE WHOLE POINT. fill_poly_pix drops any row whose span is under
+	one art pixel, which is right for a flame (a soot fringe should vanish) and fatal here:
+	the flower mark sits beside every price in the game at radii where a petal is barely two
+	screen pixels wide, so "round down to nothing" deletes the petals and leaves the naked
+	centre disc - a berry, not a flower. Any row the ellipse genuinely covers gets at least
+	one art pixel.
+
+	The solve: in the ellipse's own frame a point is (u cos + v sin, -u sin + v cos), so for
+	a fixed v the condition (a/rx)^2 + (b/ry)^2 <= 1 is a quadratic in u. One sqrt per row.
+	"""
+	if rx <= 0.0 or ry <= 0.0:
+		return
+	var ap := grid if grid > 0.0 else float(ART_PIXEL)
+	var cs := cos(rot)
+	var sn := sin(rot)
+	# the rotated ellipse's half-height, exactly: sqrt((rx sin)^2 + (ry cos)^2)
+	var hy := sqrt(rx * rx * sn * sn + ry * ry * cs * cs)
+	var inv_x := 1.0 / (rx * rx)
+	var inv_y := 1.0 / (ry * ry)
+	var qa := cs * cs * inv_x + sn * sn * inv_y
+	if qa <= 0.0:
+		return
+	var y0 := snappedf(c.y - hy, ap)
+	for i in int(ceil(hy * 2.0 / ap)) + 2:
+		var y := y0 + float(i) * ap
+		var v := (y + ap * 0.5) - c.y      # sample at the row's CENTRE, as every pix helper does
+		if absf(v) > hy:
+			continue
+		var qb := 2.0 * v * cs * sn * (inv_x - inv_y)
+		var qc := v * v * (sn * sn * inv_x + cs * cs * inv_y) - 1.0
+		var disc := qb * qb - 4.0 * qa * qc
+		if disc < 0.0:
+			continue
+		var root := sqrt(disc)
+		var u0 := (-qb - root) / (2.0 * qa)
+		var u1 := (-qb + root) / (2.0 * qa)
+		var xa := snappedf(c.x + u0, ap)
+		var xb := snappedf(c.x + u1, ap)
+		draw_rect(Rect2(xa, y, maxf(xb - xa, ap), ap), col)
 
 
 func draw_ring_pix(c: Vector2, r: float, w: float, col: Color, grid: float = 0.0) -> void:
@@ -18017,16 +18068,29 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	#     warm_room() the moment it does (stem_gold_bonus_given) - "take a bit longer"
 	#     read as a real staged transition, not an instant colour swap the moment score
 	#     crosses the line.
-	var x := box.position.x + box.size.x * 0.5
-	var base := box.position.y + box.size.y
-	var h := box.size.y * clampf(frac, 0.0, 1.0)
+	# THE WHOLE PLANT IS SNAPPED TO THE ART GRID (2026-08-19). Measured with
+	# check_pixel_grid.py --map on a live act frame, this stem was one of the few solid
+	# blocks of off-grid drawing left on the busiest screen in the game: the track was a
+	# 6px rect at a half-pixel x with a ONE-pixel border rect over it (a 1px outline cannot
+	# exist at ART_PIXEL 2 - it is half an art pixel by construction), the leaves were
+	# nine-point polygons and the bud two smooth ellipses.
+	var ap := float(ART_PIXEL)
+	var x := snappedf(box.position.x + box.size.x * 0.5, ap)
+	var base := snappedf(box.position.y + box.size.y, ap)
+	var top := snappedf(box.position.y, ap)
+	var h := snappedf(box.size.y * clampf(frac, 0.0, 1.0), ap)
 	var stem := Color(0.45, 0.70, 0.40)
 	# the unclimbed part of the stem is a visible TRACK, not a hairline: the goal has to
-	# read as a distance still to go, the same job the hat's empty crown did
-	draw_rect(Rect2(x - 3.0, box.position.y, 6.0, box.size.y), Color(0.20, 0.17, 0.18, 0.85))
-	draw_rect(Rect2(x - 3.0, box.position.y, 6.0, box.size.y), Color(0.42, 0.36, 0.34, 0.5), false, 1.0)
-	if h > 1.0:
-		draw_rect(Rect2(x - 3.0, base - h, 6.0, h), stem)
+	# read as a distance still to go, the same job the hat's empty crown did.
+	# THE BORDER IS AN ART PIXEL WIDE, not a screen pixel - drawn as two flanking columns
+	# rather than a `false` outline, because draw_rect's outline straddles the edge and so
+	# lands half in each of two art pixels however the rect itself is snapped.
+	var trk_h := base - top
+	draw_rect(Rect2(x - 2.0 * ap, top, 4.0 * ap, trk_h), Color(0.20, 0.17, 0.18, 0.85))
+	draw_rect(Rect2(x - 2.0 * ap, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
+	draw_rect(Rect2(x + ap, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
+	if h >= ap:
+		draw_rect(Rect2(x - 2.0 * ap, base - h, 4.0 * ap, h), stem)
 	# TWO FLOWERS AND TWO LEAVES ON EACH SIDE, ALTERNATING (2026-07-31, Louis, exactly
 	# that). Both are laid out from ONE ladder so the alternation cannot drift: going up
 	# the stalk it reads leaf, flower, leaf, flower, leaf, flower, leaf, flower, with every
@@ -18066,12 +18130,25 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		var prev: float = fmarks[fi - 1] if fi > 0 else 0.0
 		var lm := (prev + m) * 0.5
 		if frac >= lm:
-			var ly := base - box.size.y * clampf(lm, 0.0, 1.0)
+			var ly := snappedf(base - box.size.y * clampf(lm, 0.0, 1.0), ap)
+			# A LEAF IS A POINTED LENS, NOT AN ELLIPSE, and the difference only shows once
+			# it is on the grid. At 20 x 8.8 screen px a leaf is 10 x 4 ART pixels, and an
+			# ellipse rounded into ten columns is a rounded RECTANGLE - it came out a green
+			# brick stuck to the stalk. The tips are what say "leaf", so they are drawn as
+			# tips: two quadratic arcs meeting at a point at each end, which costs the same
+			# fill and reads correctly at four pixels tall.
+			var lroot := Vector2(x, ly)
+			var ltip := Vector2(x - fdir * 20.0, ly - 4.0)
+			var lax := ltip - lroot
+			var lnr := Vector2(-lax.y, lax.x).normalized()
 			var lv := PackedVector2Array()
 			for k in 9:
-				var t := TAU * float(k) / 8.0
-				lv.append(Vector2(x - fdir * 10.0, ly) + Vector2(cos(t) * 10.0, sin(t) * 4.4).rotated(-fdir * -0.35))
-			draw_colored_polygon(lv, Color(stem.r, stem.g, stem.b, 0.9))
+				var u := float(k) / 8.0
+				lv.append(lroot + lax * u + lnr * sin(u * PI) * 4.4)
+			for k in 9:
+				var u := 1.0 - float(k) / 8.0
+				lv.append(lroot + lax * u - lnr * sin(u * PI) * 4.4)
+			fill_poly_pix(lv, Color(stem.r, stem.g, stem.b, 0.9))
 		if frac < m:
 			continue
 		# A SUBGOAL SPROUTS FROM THE STEM, NOT BESIDE IT: the flower head sits out at its
@@ -18136,22 +18213,27 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		draw_flower(bud, 2, 3.6, atick() * 0.008, 1.0)
 		draw_flower(bud, 0, 1.10, -atick() * 0.012, 0.98)
 	else:
-		# still a bud - and it swells as the goal nears, so the change is a growth and
-		# not a swap
+		# STILL A BUD - and it swells as the goal nears, so the change is a growth and
+		# not a swap. It also BREATHES, which is the one thing the rail was missing: for
+		# most of an act `frac` sits low and nothing on this stem moves at all, so a
+		# player glancing at it sees a dead stick. A slow one-pixel pulse costs nothing
+		# and says the plant is alive and waiting, the same job the title screen's dust does.
 		var swell := 1.0 + 0.45 * clampf(frac, 0.0, 1.0)
-		fill_ellipse(bud, 5.0 * swell, 7.5 * swell, Color(0.55, 0.72, 0.45))
-		fill_ellipse(bud + Vector2(-1.4, -1.6) * swell, 2.0 * swell, 3.0 * swell, Color(0.72, 0.86, 0.58, 0.8))
+		swell += 0.06 * sin(atick() * 0.05)
+		fill_ellipse_pix(bud, 5.0 * swell, 7.5 * swell, 0.0, Color(0.55, 0.72, 0.45))
+		fill_ellipse_pix(bud + Vector2(-1.4, -1.6) * swell, 2.0 * swell, 3.0 * swell, 0.0,
+			Color(0.72, 0.86, 0.58, 0.8))
 
 
-func draw_star4(c: Vector2, r: float, col: Color) -> void:
+func draw_star4(c: Vector2, r: float, col: Color, grid: float = 0.0) -> void:
 	# a four-point sparkle: a filled star, because two crossed LINES of equal length and
 	# width read as a plus sign, not a glint - which is exactly how the first attempt at
 	# a sparkling gold rose came out
 	var i := r * 0.26
-	draw_colored_polygon(PackedVector2Array([
+	fill_poly_pix(PackedVector2Array([
 		c + Vector2(0.0, -r), c + Vector2(i, -i), c + Vector2(r, 0.0), c + Vector2(i, i),
 		c + Vector2(0.0, r), c + Vector2(-i, i), c + Vector2(-r, 0.0), c + Vector2(-i, -i),
-	]), col)
+	]), col, grid)
 
 
 func draw_meter(x: float, y: float, w: float, h: float, frac: float, fill: Color, label := "") -> void:
@@ -27074,7 +27156,9 @@ func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> 
 	var rot := -PI * 0.5
 	if turning:
 		rot += atick() * 0.006 + c.x * 0.02
-	draw_flower(c, 0, r / 5.0, rot, col.a)
+	# GRID 1.0: this is the glyph case - see draw_flower's own note on why the currency
+	# mark follows text rather than the art grid.
+	draw_flower(c, 0, r / 5.0, rot, col.a, 0.0, 1.0)
 
 
 func stage_floor_y() -> float:
@@ -27267,7 +27351,23 @@ func throw_step() -> void:
 		_pile_dirty = true   # the oldest left the boards; the bake still has it
 
 
-func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: float = 0.0) -> void:
+func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: float = 0.0,
+		grid: float = 0.0) -> void:
+	# `grid` IS THE FLOWER'S TWO JOBS, AND THEY WANT DIFFERENT RESOLUTIONS (2026-08-19).
+	# This one function draws both an OBJECT - the bloom on the goal stem, the flowers the
+	# crowd throws onto the boards - and a GLYPH: the currency mark that sits inline with
+	# text beside every price, purse and payout in the game (draw_coin_mark, eleven sites).
+	# The object is art and belongs on the art grid. The glyph does not, and this was worth
+	# measuring rather than assuming: converted to ART_PIXEL 2 the mark went from 10.0% to
+	# 3.7% off-grid, exactly as intended, and looked WORSE - at r 6.5..9 a petal is a
+	# 3.6 x 2.4 SCREEN pixel ellipse, so on a 2px grid five of them round outward into one
+	# blob and the flower becomes a berry with a yellow middle.
+	# That is not a defect in the rasteriser, it is the mark being smaller than the grid can
+	# describe, and the game already has a locked decision for things that small: decision 2,
+	# TEXT STAYS AT SCREEN DENSITY, because a 640x360 HUD label turns to mush. The mark is
+	# set at text size, on the same baseline, and reads as a symbol rather than a picture -
+	# so it follows text, and `draw_coin_mark` passes grid 1.0. Everything drawn at object
+	# size takes the default and is genuinely pixel art.
 	# a flower drawn as a flower: petals round a lit centre, on the same "draw the
 	# object" rule the money hat and the coin follow. The petal COUNT and colour carry
 	# the tier, so a pile can be read at a glance without a single number on screen.
@@ -27277,14 +27377,18 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 	if stem > 0.0:
 		var dir := Vector2(cos(rot + PI * 0.5), sin(rot + PI * 0.5))
 		var tip := p + dir * stem * sc
-		draw_line(p, tip, Color(0.30, 0.56, 0.28, a), maxf(1.0, 1.6 * sc))
+		# ON THE GRID, AS A QUAD RATHER THAN A CAPSULE. draw_line antialiases, so the stalk
+		# was a soft grey-green smear. draw_capsule_pix would be the obvious replacement and
+		# is the wrong one: it carries limb_shade banding built for the performer's ARMS,
+		# which would light a flower stem across its own width like a sleeve.
+		var sw := maxf(1.0, 1.6 * sc) * 0.5
+		var nrm := Vector2(-dir.y, dir.x) * sw
+		fill_poly_pix(PackedVector2Array([p - nrm, p + nrm, tip + nrm, tip - nrm]),
+			Color(0.30, 0.56, 0.28, a), grid)
 		var mid := p.lerp(tip, 0.55)
 		var side := Vector2(-dir.y, dir.x)
-		var lv := PackedVector2Array()
-		for k in 9:
-			var t := TAU * float(k) / 8.0
-			lv.append(mid + side * 3.4 * sc + Vector2(cos(t) * 3.6 * sc, sin(t) * 1.6 * sc).rotated(dir.angle()))
-		draw_colored_polygon(lv, Color(0.34, 0.60, 0.30, a))
+		fill_ellipse_pix(mid + side * 3.4 * sc, 3.6 * sc, 1.6 * sc, dir.angle(),
+			Color(0.34, 0.60, 0.30, a), grid)
 	# SEAM, deliberately placed AFTER the stem: the stem is a DIRECTION (it points back
 	# along the way the flower is lying), not a picture, so it stays procedural and a
 	# bloom sprite drops on top of it. One key per TIER, because the tier is carried by
@@ -27300,16 +27404,16 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 		# with real petals rather than a decorative cluster that would drift out of step
 		# with draw_flower the first time the petal shape changes.
 		var br := float(FLOWER_TIERS[FLOWER_BOUQUET]["r"]) * sc
-		draw_colored_polygon(PackedVector2Array([
+		fill_poly_pix(PackedVector2Array([
 			p + Vector2(cos(rot + 2.30), sin(rot + 2.30)) * br * 1.30,
 			p + Vector2(cos(rot + 0.30), sin(rot + 0.30)) * br * 1.30,
 			p - Vector2(cos(rot + 1.30), sin(rot + 1.30)) * br * 0.45]),
-			Color(0.95, 0.91, 0.82, a * 0.42))
+			Color(0.95, 0.91, 0.82, a * 0.42), grid)
 		var spread: Array[float] = [-0.90, 0.0, 0.90]
 		var btier: Array[int] = [1, 2, 1]
 		for k in 3:
 			var ba := rot + spread[k]
-			draw_flower(p + Vector2(cos(ba), sin(ba)) * br * 0.52, btier[k], sc * 0.58, ba, a)
+			draw_flower(p + Vector2(cos(ba), sin(ba)) * br * 0.52, btier[k], sc * 0.58, ba, a, 0.0, grid)
 		return
 	var td: Dictionary = FLOWER_TIERS[clampi(tier, 0, FLOWER_TIERS.size() - 1)]
 	var col: Color = td["col"]
@@ -27322,14 +27426,10 @@ func draw_flower(p: Vector2, tier: int, sc: float, rot: float, a: float, stem: f
 		# each petal an ellipse pointing outward - two circles would read as a berry.
 		# 0.72 out plus 0.52 long is FLOWER_REACH: change either and change that too,
 		# or a layout placed clear of a flower stops being clear of it
-		var pv := PackedVector2Array()
-		for k in 9:
-			var t := TAU * float(k) / 8.0
-			pv.append(p + pc + Vector2(cos(t) * r * 0.52, sin(t) * r * 0.34).rotated(ang))
-		draw_colored_polygon(pv, Color(col.r, col.g, col.b, a))
-	draw_circle(p, r * 0.38, Color(mid.r, mid.g, mid.b, a))
+		fill_ellipse_pix(p + pc, r * 0.52, r * 0.34, ang, Color(col.r, col.g, col.b, a), grid)
+	fill_disc_pix(p, r * 0.38, Color(mid.r, mid.g, mid.b, a), grid)
 	if tier == 2:
-		draw_star4(p, r * 0.9, Color(1.0, 0.98, 0.85, 0.45 * a))   # a gold rose glints
+		draw_star4(p, r * 0.9, Color(1.0, 0.98, 0.85, 0.45 * a), grid)   # a gold rose glints
 
 
 func draw_tomato(p: Vector2, sc: float, rot: float, a: float) -> void:
