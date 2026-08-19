@@ -10859,6 +10859,24 @@ func full_dark_stage() -> bool:
 	return encore_on("blackout") or run_venue == MAX_VENUE
 
 
+func dark_props_hidden() -> bool:
+	# ...AND ONLY ONE OF THE TWO ERASES AN UNCHARGED PROP OUTRIGHT (2026-08-19, Louis, on
+	# the Midnight Show: "normal objects should be less visible, not invisible").
+	#
+	# This reverses HALF of the 2026-07-29 note quoted in the flight branch ("make normal
+	# objects completely invisible - so it is possible, but incredibly hard to juggle"), and
+	# the half it keeps is the half that instruction was actually about. BLACKOUT is an
+	# Encore: the house offers it, the player accepts it, and it cannot even be rolled until
+	# the save owns three glowing balls or torches, so invisibility there is a challenge
+	# taken on with the answer to it already in the bag. THE MIDNIGHT SHOW is a venue - the
+	# last one - and nobody opts into it. Handing mandatory content the same rule made a
+	# whole stage that is played by memory, which is what he is calling awful.
+	#
+	# So the Midnight Show goes dim (BLACKOUT_UNLIT) and Blackout stays black. If Blackout
+	# rolls AT the Midnight Show, the Encore wins: it was chosen.
+	return encore_on("blackout")
+
+
 func is_picky_crowd() -> bool:
 	# a hard-to-please room: The Critic scores only Perfects, The Hecklers lose patience
 	# fast. A dangerous prop (knives) is what wins a crowd like this over.
@@ -17721,26 +17739,26 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 			# is still the exception the Encore is built around: it carries its own fire.
 			if full_dark_stage():
 				var dark_pos := flight_pos(b)
-				# **AND AN UNLIT PROP IS NOW SIMPLY NOT THERE** (2026-07-29, Louis: "make
-				# normal objects (not glow in the dark) completely invisible - so it is
-				# possible, but incredibly hard to juggle"). It used to be drawn at
-				# BLACKOUT_UNLIT, a dim silhouette, which is the compromise this entry's
-				# earlier paragraphs argue for. He has overruled it, and the reason the
-				# overrule is safe is the new ownership gate: Blackout cannot roll at all
-				# until you own three glowing balls or torches (see encore_pool), so nobody
-				# meets this challenge without the answer to it already in the bag. What
-				# used to be a mercy is now the price of admission.
+				# **AN UNLIT PROP IS NOT THERE UNDER BLACKOUT, AND IS MERELY FAINT AT THE
+				# MIDNIGHT SHOW** - see dark_props_hidden, which is where the split and its
+				# reasoning live. Short version: the 2026-07-29 instruction ("make normal
+				# objects completely invisible - so it is possible, but incredibly hard to
+				# juggle") was safe because Blackout cannot roll until the save owns three
+				# glowing balls or torches, so the challenge always arrives with its answer
+				# in the bag. The Midnight Show has no such gate - it is simply the last
+				# venue - and it got the same rule by sharing full_dark_stage().
 				# A TORCH IS THE EXCEPTION AND ONLY HALF AN EXCEPTION: the flame and its
 				# glow are always visible, because fire is fire, but the HANDLE under it
 				# vanishes with everything else unless the torch itself is a glowing one.
-				if b.kind == PROP_TORCHES:
-					draw_flame_in_dark(b, dark_pos)
-					if prop_glows(b.kind):
-						draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind),
-							prop_spin_angle(b), 1.0)
-				elif prop_glows(b.kind):
+				if prop_glows(b.kind):
 					draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind),
 						prop_spin_angle(b), 1.0)
+				elif not dark_props_hidden():
+					draw_trail(b, BLACKOUT_UNLIT)
+					draw_prop_rich(b.kind, dark_pos, b.color, prop_spin_angle(b),
+						prop_scale(b.kind), false, BLACKOUT_UNLIT)
+				if b.kind == PROP_TORCHES:
+					draw_flame_in_dark(b.kind, dark_pos, prop_spin_angle(b))
 				continue
 			draw_trail(b)
 			var pos := flight_pos(b)
@@ -17761,14 +17779,21 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 				draw_rect(Rect2(mx - 1.0, 70.0, 2.0, 9.0), Color(mc.r, mc.g, mc.b, mc.a * 0.45))
 
 
-func draw_trail(b: Ball) -> void:
+func draw_trail(b: Ball, dim: float = 1.0) -> void:
 	# the comet tail behind a flying prop: longer for higher throws, its colour
 	# cooling toward a pale blue with height, so a risky throw is visibly risky
+	#
+	# `dim` is the same lighting knob draw_prop_rich takes, and the dark stage needs it for
+	# the same reason: a faint prop the eye has to hunt for is far easier to TRACK with a
+	# faint tail behind it, and this tail's own alphas top out at 0.20, so it fades to
+	# nothing long before the object it belongs to does.
 	var n := b.trail.size()
 	if n < 2:
 		return
 	var cool := clampf(b.height * 0.5, 0.0, 0.6)
 	var base := b.color.lerp(Color(0.72, 0.82, 1.0), cool)
+	if dim < 0.999:
+		base = Color(base.r * dim, base.g * dim, base.b * dim, base.a)
 	var sc := prop_scale(b.kind)
 	# A path that DOUBLES BACK cannot be one ribbon, and one pattern makes that the
 	# normal case: a Column goes straight up and straight down the same line, so the
@@ -17835,21 +17860,39 @@ func draw_charge_gauges() -> void:
 		draw_rect(Rect2(gx - 1.0, gy - gh * 0.78, 8.0, 1.5), Color(1.0, 0.9, 0.7, 0.7))
 
 
-func draw_flame_in_dark(b: Ball, pos: Vector2) -> void:
+func draw_flame_in_dark(kind: int, pos: Vector2, ang: float) -> void:
 	# Blackout's one concession: no blackout argues with fire. What goes dark on a
 	# torch is the WOOD - the handle and the comet trail - and what is left is the
 	# exact flame draw_torch renders in the light, at the torch's own scale and still
 	# tumbling at its own rate, so the cut reads as the handle being swallowed rather
 	# than the prop swapping to a different, smaller sprite. Bringing torches to a
 	# Blackout night is the game knowledge this is here to reward.
-	var sc := prop_scale(b.kind)
+	#
+	# AND IT IS FITTED TO THE SPRITE WHEREVER THE SPRITE EXISTS (2026-08-19). The lit stage
+	# has placed this fire from the PAINTING's own measurements since the torch became a
+	# sprite (see draw_sprite_torch_flame: the painted handle is shorter and its flame taller
+	# than the vector drawing's, by about seven art pixels), while this branch still placed
+	# it from TORCH_WICK. Nobody could see the difference while the dark handle was a vector
+	# line drawn by glow_silhouette - it was wrong in the same direction. Now that a charged
+	# torch shows its real sprite, a fire seven pixels adrift of its own wick would be the
+	# most obvious thing on the stage.
+	#
+	# IT TAKES A KIND AND AN ANGLE RATHER THAN A `Ball` (2026-08-19) because a torch on the
+	# BOARDS is a `falling` dictionary, not a Ball, and it burns just the same. Passing the
+	# two facts the fire actually needs is what let draw_falling reuse this instead of
+	# growing the game's third torch renderer.
+	var sc := prop_scale(kind)
 	# the pool of light the fire throws. It is centred on the prop's TRUE position
 	# (the flame itself rides out on the tumble), so the catch point stays legible.
-	var blue := prop_glows(b.kind)
+	var blue := prop_glows(kind)
 	if not blue:
 		draw_circle(pos, 30.0 * sc, Color(1.0, 0.52, 0.18, 0.07))
 		draw_circle(pos, 16.0 * sc, Color(1.0, 0.60, 0.24, 0.10))
-	draw_torch_flame(pos, prop_spin_angle(b), sc, false, blue)
+	if art_bank.has("prop/torch") and not (torch_flame.get("stage", {}) as Dictionary).is_empty():
+		draw_sprite_torch_flame("prop/torch", "stage", pos, ang, sc,
+			art_prop_zoom(kind, sc), blue)
+	else:
+		draw_torch_flame(pos, ang, sc, false, blue)
 
 
 const GLOW_PHOS := Color(0.62, 1.0, 0.72)   # charged material stays phosphor green;
@@ -18035,12 +18078,15 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 	# none of that applies when the house is dark.
 	if full_dark_stage():
 		var bsc := prop_scale(b.kind)
+		var bang := prop_spin_angle(b)
+		if prop_glows(b.kind):
+			draw_glow_in_dark(pos, b.color, b.kind, bsc, bang, 1.0)
+		elif not dark_props_hidden():
+			# faint, but there: the prop's own picture at BLACKOUT_UNLIT (see
+			# dark_props_hidden for which of the two dark houses gets this and why)
+			draw_prop_rich(b.kind, pos, b.color, bang, bsc, false, BLACKOUT_UNLIT)
 		if b.kind == PROP_TORCHES:
-			draw_flame_in_dark(b, pos)   # fire is fire, in the hand as in the air
-			if prop_glows(b.kind):
-				draw_glow_in_dark(pos, b.color, b.kind, bsc, prop_spin_angle(b), 1.0)
-		elif prop_glows(b.kind):
-			draw_glow_in_dark(pos, b.color, b.kind, bsc, prop_spin_angle(b), 1.0)
+			draw_flame_in_dark(b.kind, pos, bang)   # fire is fire, in the hand as in the air
 		return
 	var sc := prop_scale(b.kind)   # the prop's TRUE size, always: only the hitbox
 								   # (prop_hit_scale) ever shrinks - on a big load, or
@@ -26008,7 +26054,8 @@ func cap_ring(c: Vector2, col_in: Color, R: float) -> void:
 		draw_line(c + d * (R - w * 0.96), c + d * (R - w * 0.04), ca(Color(1, 1, 1, 0.10)), maxf(1.0, R * 0.030))
 
 
-func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, halo: bool = true) -> void:
+func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, halo: bool = true,
+		dim: float = 1.0) -> void:
 	# THE LUSH VERSION OF ANY PROP, in one place (2026-07-28, Louis: "you should use the
 	# better looking visuals for those props in the shop also, and test them with F9 in
 	# juggle sessions"). These were written for a single still capsule frame and are
@@ -26029,12 +26076,27 @@ func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, 
 	# the game colour them, author club/knife/torch/chainsaw in their own finished colours.
 	# stated as "everything EXCEPT the painted four", which is how the `_` fallthrough below
 	# behaves - a prop added later with no branch of its own lands on cap_ball and is tinted
+	#
+	# `dim` IS A LIGHTING KNOB AND IT RIDES THE TINT (2026-08-19), which is why it lives here
+	# rather than in a second, darker copy of each prop. A sprite is blitted through a tint
+	# already - the ball's own colour for the round three, plain white for the painted four -
+	# so multiplying that tint is a per-pixel darkening of the finished object, and it costs
+	# nothing. It is what lets the Midnight Show show an uncharged prop faintly instead of
+	# not at all (see draw_prop).
 	var tinted := not (kind in [PROP_CLUBS, PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW])
-	if art_blit_prop(kind, pos, sc, ang, col if tinted else Color.WHITE):
+	var base := col if tinted else Color.WHITE
+	var tint := base if dim >= 0.999 else Color(base.r * dim, base.g * dim, base.b * dim, base.a)
+	if art_blit_prop(kind, pos, sc, ang, tint):
 		return
+	# THE PROCEDURAL FALLBACK DIMS ONLY WHAT IT IS HANDED A COLOUR FOR, and that is honest
+	# rather than complete: the painted four own their palettes and take no tint, so under
+	# --procart (art off) a dim club draws at full brightness. There is no immediate-mode
+	# modulate to reach for, a second darkened palette per prop would be four more places
+	# to keep in step, and every shipped build has the sprites.
+	var dcol := col if dim >= 0.999 else Color(col.r * dim, col.g * dim, col.b * dim, col.a)
 	match kind:
-		PROP_EGGS:     cap_egg(pos, col, sc)
-		PROP_RINGS:    cap_ring(pos, col, 12.0 * sc)
+		PROP_EGGS:     cap_egg(pos, dcol, sc)
+		PROP_RINGS:    cap_ring(pos, dcol, 12.0 * sc)
 		PROP_CLUBS:    cap_club(pos, ang, sc)
 		PROP_KNIVES:   cap_knife(pos, ang, sc)
 		# THE STAGE TORCH IS THE SHOP TORCH WITHOUT ITS LIGHT (2026-07-28, Louis: "the
@@ -26046,7 +26108,7 @@ func draw_prop_rich(kind: int, pos: Vector2, col: Color, ang: float, sc: float, 
 		# only drops the two big glow quads, the widest aura layer and the embers.
 		PROP_TORCHES:  cap_torch(pos, ang, sc, halo)
 		PROP_CHAINSAW: draw_chainsaw(pos, ang, sc, true)
-		_:             cap_ball(pos, col, BALL_RADIUS_PX * sc)
+		_:             cap_ball(pos, dcol, BALL_RADIUS_PX * sc)
 
 
 func cap_egg(p: Vector2, col_in: Color, sc: float) -> void:
@@ -29307,9 +29369,27 @@ func draw_falling() -> void:
 			# the prop is legible on the boards and still gone before the next exchange.
 			var age := tick - int(d["rest"])
 			a = clampf(float(FALLEN_LINGER - age) / float(FALLEN_FADE), 0.0, 1.0)
-		var sc := prop_scale(int(d["kind"])) * 0.95   # a dropped prop keeps the size it flew at
+		var kind := int(d["kind"])
+		var sc := prop_scale(kind) * 0.95   # a dropped prop keeps the size it flew at
+		var ang := float(d["ang"])
+		# A DROPPED PROP IS ALSO IN THE SAME DARK ROOM (2026-08-19). It was drawn at full
+		# brightness on a stage where the airborne ones were phosphor or nearly gone, which
+		# made a mistake the best-lit object in the house - and a charged prop stopped
+		# glowing the instant it landed, which is not how phosphor works. Same three cases as
+		# draw_prop, and the fade rides through: `lit` carries it into the glow, `_cap_a`
+		# into everything else.
+		if full_dark_stage():
+			if prop_glows(kind):
+				draw_glow_in_dark(p, d["col"], kind, sc, ang, a)
+			elif not dark_props_hidden():
+				_cap_a = a
+				draw_prop_rich(kind, p, d["col"], ang, sc, false, BLACKOUT_UNLIT)
+				_cap_a = 1.0
+			if kind == PROP_TORCHES:
+				draw_flame_in_dark(kind, p, ang)
+			continue
 		_cap_a = a
-		draw_prop_rich(int(d["kind"]), p, d["col"], float(d["ang"]), sc, false)
+		draw_prop_rich(kind, p, d["col"], ang, sc, false)
 		_cap_a = 1.0   # always restored, exactly as the wordmark's own fade is
 
 

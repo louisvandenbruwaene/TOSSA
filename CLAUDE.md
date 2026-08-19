@@ -1036,6 +1036,18 @@ review" for the accept/reject examples and why.
   `--assists on|off` pins both for one run so the state can be photographed, and deliberately never
   writes back to the SHARED settings file.
 
+- **A DARK HOUSE DIMS PROPS; ONLY THE ENCORE ERASES THEM (2026-08-19, Louis, on the Midnight
+  Show: "normal objects should be less visible, not invisible").** `full_dark_stage()` covers two
+  things that are not the same, and they had one rule between them. **Blackout is chosen** and
+  cannot even roll until the save owns three glowing balls or torches, so invisible props there
+  are a challenge that always arrives with its answer in the bag - the 2026-07-29 instruction
+  stands, and `dark_props_hidden()` is now that instruction, Blackout only. **The Midnight Show is
+  a venue**, the last one, opted into by nobody, and it got invisibility by sharing a predicate.
+  It now draws the uncharged prop at `BLACKOUT_UNLIT` (0.34) through a new `dim` argument on
+  `draw_prop_rich`, which rides the sprite TINT and so darkens the finished object for free; the
+  comet trail takes the same argument so a faint prop is still trackable. Held, flying and FALLEN
+  props all obey it - `draw_falling` drew at full brightness in a dark room, which made a mistake
+  the best-lit object in the house.
 - **A CHARGED PROP IS THE PROP, NOT A DRAWING OF ONE (2026-08-19, Louis: "the glow in the dark
   objects render completely wrong").** `glow_silhouette` painted the phosphor shape with
   `draw_circle` and hand-written polygons that predate the art seam, so the one object a player
