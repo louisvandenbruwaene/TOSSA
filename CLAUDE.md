@@ -988,10 +988,37 @@ review" for the accept/reject examples and why.
   Midnight Show (bonus 7th, gated on having won + Reputation 6000). Midnight is permanently
   near-black: scenery and performer stay barely visible while charged props read at full strength.
   The optional Blackout Encore uses the same visual rule and cannot roll before Championship.
+- **THE TWO FOOT CARDS ARE ONE STRIP, AND A KEY GOES ON THE CARD IT BELONGS TO (2026-08-19,
+  Louis: "now there is SPACE: not in halfshower, but if it's not possible to do the trick, you
+  should simply not put that at all, because right now it doesn't all fit inside the window" and
+  "change pattern should be inside the pattern window on the bottom left").** Both cards are
+  `FOOT_CARD_H` tall on shared baselines: title, a readout, a hints row. `change pattern` and
+  `change prop` moved to the ROUTINE card, which had no hints row at all - the trick card was
+  carrying three hints in a 330px box that measured 344, so the first keycap started outside the
+  panel and the last label finished outside it. **A REFUSAL IS NOT A HINT**: `point_trick_at_pattern`
+  keeps the loaded trick on something Space can actually fire, and if a pattern can carry no
+  unlocked flourish at all the card says so in one line and offers no keys. The trick card's new
+  middle line is the act's live trick factor, which until now only appeared on the results card,
+  after it had finished mattering. The routine card's keys DIM (`draw_hints_row`'s new alpha)
+  rather than vanishing once `mode == MODE_PERFORM and started`, which is the same gate the keys
+  themselves answer to. **Anything on these cards is measured against `s.y - 18`**, not against
+  the row above it: a 22px keycap at the old baseline hung 14px below the card's own bottom edge,
+  and the previous 70px card did the same by 2px, which is small enough to have shipped unnoticed.
 - **Records/pay/rep:** per-venue assisted + Purist boards; pay scales with surviving score; rep
   swings on goals reached.
-- **Purist is one paired booking:** P binds Accuracy and Speed together. Individual binds do not
-  exist; Strength and Endurance are never stripped, and a Speed bind disables every slow-mo source.
+- **THE TWO LIMITERS ARE BOOKED SEPARATELY, IN THE HUB, ON THEIR OWN ROWS (2026-08-19, Louis:
+  "the limiters (accuracy and slowmo) should be toggleable in the choosing menu, below the stage
+  toggle - moving down, then hitting enter to select or deselect").** BIND ACCURACY and BIND SLOW
+  MOTION sit directly under PERFORM in the TONIGHT drawer, each an Enter toggle with its own
+  BOUND/off readout; `P` still flips both at once as a shortcut. They live in `purist_picks`
+  slots 0 and 3 - the legacy four-slot save shape - and `set_binds` is the ONLY writer, so
+  `purist` stays derived and means what it always meant: BOTH bound. Strength and Endurance are
+  never stripped, and a slow-motion bind disables every slow-mo source (stat, difficulty, pie,
+  bursts). The economy was already priced for a single bind (`resolve_act` pays
+  `1 + 0.4 * n / 2`); what did not exist was any way for a player to book one. **The PURIST
+  RECORD BOARD still asks for both** - half a booking is not a Purist act - so the perform card,
+  the establishing card and the live HUD each name which limiters are on rather than saying
+  "PURIST" for three different states. `--binds acc|spd|both|off` pins them for a capture.
 - **THE TWO ASSIST SWITCHES AND THE UNAIDED CLEAR (2026-08-19, Louis: "two small icons (a boot for
   speed, and a stopwatch for slowmo) ... when both are off and you beat the final goal of the
   stage, you get a reward").** Every slow-motion source falls into exactly one of two buckets and

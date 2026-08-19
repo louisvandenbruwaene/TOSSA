@@ -9666,6 +9666,7 @@ func start_run(n: int) -> void:
 	if trick_sel < 0 or not trick_unlocked(trick_sel):
 		var un := unlocked_tricks()
 		trick_sel = int(un[0]) if not un.is_empty() else -1
+	point_trick_at_pattern()   # ...and onto one this pattern can carry (see that function)
 	trick_ready = -999
 	spin_until = -999
 	spin_scored = false
@@ -11232,10 +11233,36 @@ func cycle_pattern() -> void:
 	# leaving. The message replaces the pattern line above only when something really was
 	# switched off, which is the case worth reading.
 	drop_illegal_toggle()
+	point_trick_at_pattern()
 
 
 func trick_unlocked(i: int) -> bool:
 	return skill_req_met(TRICKS[i])
+
+
+func playable_tricks(pat: int) -> Array:
+	# every unlocked trick this PATTERN can actually carry, in unlock order. A trick the
+	# pattern refuses is not a locked trick and not a dimmed one - it is a key that would
+	# do nothing, and the card is better off never mentioning it (2026-08-19, Louis: "if
+	# it's not possible to do the trick, you should simply not put that at all").
+	var out: Array = []
+	for i in unlocked_tricks():
+		if trick_pattern_ok(int(i), pat):
+			out.append(int(i))
+	return out
+
+
+func point_trick_at_pattern() -> void:
+	# KEEP THE LOADED TRICK ON SOMETHING SPACE CAN FIRE. Called wherever the pattern moves
+	# (cycle_pattern, start_run), alongside drop_illegal_toggle - that one switches a
+	# RUNNING flourish off, this one re-points the SELECTION, which is what the card shows
+	# and what the key would fire next. Silent on purpose: the toggle going off is news,
+	# the loaded slot quietly following the pattern is not.
+	var ok := playable_tricks(pattern)
+	if ok.is_empty() or ok.has(trick_sel):
+		return
+	trick_sel = int(ok[0])
+	trick_primed = false
 
 
 func unlocked_tricks() -> Array:
@@ -19634,22 +19661,30 @@ func k_count() -> Array[String]:
 	return ["1", "2"]
 
 
-func draw_keycap(font: Font, x: float, y: float, label: String) -> float:
-	# a small keyboard-key box; returns its width so hints can chain
+func draw_keycap(font: Font, x: float, y: float, label: String, a: float = 1.0) -> float:
+	# a small keyboard-key box; returns its width so hints can chain. `a` fades the whole
+	# cap for a key that exists but is refused right now - see draw_hints_row.
 	var w := maxf(23.0, font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13)).x + 12.0)
 	# SEAM: the CAP only. The width above and the label below are LAYOUT and must not move
 	# when art arrives - every hint row in the game chains off this return value, and a key
 	# hint whose text stopped fitting its box would be a legibility regression, not a
 	# restyle. So the sprite is stretched to the box the text asked for, never the reverse.
-	if not art_blit_rect("ui/keycap", Rect2(x, y, w, 22.0)):
-		draw_rect(Rect2(x, y, w, 22.0), Color(0.15, 0.10, 0.10, 0.92))
-		draw_rect(Rect2(x, y, w, 22.0), Color(0.85, 0.65, 0.4, 0.45), false, 1.0)
-	draw_string(font, Vector2(x, y + 16.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, ps(13), Color(1.0, 0.9, 0.7))
+	if not art_blit_rect("ui/keycap", Rect2(x, y, w, 22.0), Color(1, 1, 1, a)):
+		draw_rect(Rect2(x, y, w, 22.0), Color(0.15, 0.10, 0.10, 0.92 * a))
+		draw_rect(Rect2(x, y, w, 22.0), Color(0.85, 0.65, 0.4, 0.45 * a), false, 1.0)
+	draw_string(font, Vector2(x, y + 16.0), label, HORIZONTAL_ALIGNMENT_CENTER, w, ps(13), Color(1.0, 0.9, 0.7, a))
 	return w
 
 
-func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
-	# items: [[keys: Array, action: String], ...] drawn centred as keycaps + labels
+func draw_hints_row(font: Font, cx: float, y: float, items: Array, a: float = 1.0) -> void:
+	# items: [[keys: Array, action: String], ...] drawn centred as keycaps + labels.
+	#
+	# `a` FADES A ROW OF KEYS THAT ARE REAL BUT REFUSED RIGHT NOW (2026-08-19), which is a
+	# third state the row never had: a key is normally either offered or absent. The routine
+	# card's O and P are the case that needs it - they change the load, which a performance
+	# may do right up to its first throw and never after - and dropping the row entirely
+	# once the act starts would take the card's third line away mid-act and shuffle the
+	# layout, while leaving it bright would offer a key the game is about to refuse.
 	var total := 0.0
 	for it in items:
 		for k in it[0]:
@@ -19659,9 +19694,9 @@ func draw_hints_row(font: Font, cx: float, y: float, items: Array) -> void:
 	var x := cx - total * 0.5
 	for it in items:
 		for k in it[0]:
-			x += draw_keycap(font, x, y, String(k)) + 3.0
+			x += draw_keycap(font, x, y, String(k), a) + 3.0
 		x += 3.0
-		draw_string(font, Vector2(x, y + 16.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(0.88, 0.80, 0.68, 0.95))
+		draw_string(font, Vector2(x, y + 16.0), String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14), Color(0.88, 0.80, 0.68, 0.95 * a))
 		x += font.get_string_size(String(it[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(14)).x + 16.0
 
 
@@ -19942,7 +19977,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			# immediately before the act; what the live HUD owes the player mid-run is WHICH
 			# challenges are on, not what they mean again. One box per challenge survives either
 			# way, which was the whole point of splitting them up in the first place.
-			var e_floor := s.y - 88.0 - 8.0    # draw_routine_hud's panel top, less a gap
+			var e_floor := s.y - FOOT_CARD_TOP - 8.0   # draw_routine_hud's panel top, less a gap
 			# ...AND THE PURIST PAIR IS NOT IN THIS STACK. It is stated once, in one line, on
 			# the top-right card (see `pur_row`), because it is one indivisible booking
 			# rather than two of tonight's challenges. Both loops filter through the same
@@ -21643,18 +21678,59 @@ func draw_trick_unlock_banner(font: Font, s: Vector2) -> void:
 	draw_string(font, Vector2(bx, by + 33.0), "how to use it lives in  SKILLS", HORIZONTAL_ALIGNMENT_CENTER, bw, ps(11), Color(0.82, 0.76, 0.66, 0.85 * a))
 
 
+# THE TWO FOOT CARDS ARE ONE INSTRUMENT IN TWO HALVES (re-laid-out 2026-08-19, Louis: "now
+# there is SPACE: not in halfshower, but if it's not possible to do the trick, you should
+# simply not put that at all, because right now it doesn't all fit inside the window" and
+# "change pattern should be inside the pattern window on the bottom left").
+#
+# Both were 70px tall with a title and ONE more row, and the trick card was carrying three
+# key hints in that row - Space, P and C - which measured 344px inside a 330px card, so the
+# first keycap started left of the panel and "switch trick" finished right of it. Two things
+# fix it and both are the right change on their own merits:
+#   * A KEY GOES ON THE CARD IT BELONGS TO. `change pattern` is the ROUTINE's key and it now
+#     lives on the routine card, which had no hints row at all - so the trick card is down
+#     to its own two keys and the pattern card finally says how to change the pattern.
+#   * A REFUSAL IS NOT A HINT. "Space - not in a Shower" is a keycap offering a key that
+#     does nothing. The selection follows the pattern now (point_trick_at_pattern), so the
+#     loaded trick is one Space can fire; if a pattern can carry NO unlocked flourish at
+#     all, the card says so in a line of its own and offers no keys.
+# The shared 84px height gives both a title band, a readout line and a hints row on the same
+# baselines, so the foot of the stage reads as one strip rather than two unrelated boxes.
+const FOOT_CARD_H := 84.0
+const FOOT_CARD_TOP := 102.0   # ...measured up from the bottom of the viewport, so the card
+							   # runs s.y-102 .. s.y-18
+const FOOT_TITLE_Y := 80.0     # the three rows, likewise, so the two cards line up. The
+const FOOT_MID_Y := 54.0       # first two are TEXT BASELINES; the last is the TOP of a
+const FOOT_HINT_Y := 44.0      # 22px keycap, which is why it looks out of step with them.
+							   # A keycap at 26 hung 14px below the card's own bottom edge -
+							   # the old 70px card did it too, by 2px, which is small enough
+							   # to have shipped unnoticed. Anything drawn here has to be
+							   # measured against s.y-18, not against the row above it.
+
+
 func draw_trick_hud(font: Font, s: Vector2) -> void:
 	# the loaded one-shot: which trick Space is carrying, and whether it is primed.
 	# READY burns gold so the player always knows the next throw is the trick shot.
 	# Sits bottom-RIGHT, mirroring the venue/prop card bottom-left, so the two share
 	# the foot of the stage evenly instead of the trick card floating mid-screen.
+	var pw := 330.0
+	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
+	var cx := px + pw * 0.5
+	hud_panel(Rect2(px, s.y - FOOT_CARD_TOP, pw, FOOT_CARD_H))
 	var un := unlocked_tricks()
+	var ok := playable_tricks(pattern)
 	var sel := trick_sel
 	if tut_active and tut_id.begins_with("trick_"):
 		sel = trick_by_id(tut_id.substr(6))   # a lesson shows ITS trick, gate or no gate
 	elif sel < 0 or not trick_unlocked(sel):
-		sel = int(un[0])
-	if sel < 0:
+		sel = int(un[0]) if not un.is_empty() else -1
+	if sel < 0 or (ok.is_empty() and toggle_on < 0):
+		# NOTHING TO OFFER, so offer nothing. Either no trick is unlocked yet, or none of
+		# the ones that are can be drawn in this pattern - and in both cases a keycap would
+		# be a key that does nothing. One quiet line, no hints row.
+		var why := "no flourish yet" if un.is_empty() else "no flourish fits a %s" % String(PATTERNS[pattern]["name"])
+		draw_string(font, Vector2(px + 12.0, s.y - FOOT_MID_Y), why, HORIZONTAL_ALIGNMENT_CENTER,
+			pw - 24.0, ps(14), Color(0.66, 0.62, 0.70, 0.75))
 		return
 	var kind := String(TRICKS[sel]["kind"])
 	var label := String(TRICKS[sel]["name"]).to_upper()
@@ -21676,20 +21752,23 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 			String(TRICKS[sel]["name"])]
 		hot = true
 	var lc := Color(1.0, 0.86, 0.5) if hot else Color(0.72, 0.66, 0.78, 0.85)
-	var pw := 330.0
-	var px := s.x - 18.0 - pw    # mirror of the venue card's left margin
-	var cx := px + pw * 0.5
-	# The cards occupy the otherwise-unused strip above the frame.  Giving the
-	# controls another 10px lets their text use the first comfortably readable
-	# pixel-font rung rather than squeezing it into a 12px baseline.
-	hud_panel(Rect2(px, s.y - 88.0, pw, 70.0), false, show_guide_step == 4)
 	# no "TRICK -" prefix (the hints row already says trick, and the routine card
 	# opposite carries no prefix either), and the title shrinks to FIT the card -
 	# "BEHIND THE BACK - ON (High Toss next)" used to run off the right edge
-	var fs := 16
-	while fs > 11 and font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(fs)).x > pw - 24.0:
-		fs -= 1
-	draw_string(font, Vector2(px + 12.0, s.y - 62.0), label, HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, ps(fs), lc)
+	draw_string(font, Vector2(px + 12.0, s.y - FOOT_TITLE_Y), label, HORIZONTAL_ALIGNMENT_CENTER,
+		pw - 24.0, ps(fit_size(font, label, pw - 24.0, 16, 11)), lc)
+	# THE ACT'S ONE TRICK FACTOR, LIVE. Tricks MULTIPLY the whole act (see the scoring note
+	# in CLAUDE.md) and until now the only place that number appeared was the results card,
+	# after it had finished mattering. It is the reason to press the key, so it belongs on
+	# the key's own card - and it is exactly the readout the routine card's prop tally is
+	# opposite, so the two cards balance.
+	var tf := pow(10.0, trick_factor_log10())
+	if tf > 1.0005:
+		draw_string(font, Vector2(px + 12.0, s.y - FOOT_MID_Y), "flourish   x%.2f" % tf,
+			HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, ps(16), Color(1.0, 0.84, 0.46))
+	else:
+		draw_string(font, Vector2(px + 12.0, s.y - FOOT_MID_Y), "no flourish landed yet",
+			HORIZONTAL_ALIGNMENT_CENTER, pw - 24.0, ps(14), Color(0.72, 0.68, 0.62, 0.7))
 	var items: Array = []
 	var use := ""
 	match kind:
@@ -21701,29 +21780,29 @@ func draw_trick_hud(font: Font, s: Vector2) -> void:
 			use = "switch off" if toggle_on == sel else "switch on"
 		_:
 			use = "wave off" if trick_primed else "one throw"
-	# NOT IN THIS PATTERN. The card used to read "Space switch on" for Behind the Back while
-	# the player was juggling Columns - an offer the trick key was always going to refuse.
-	# Say what the trick needs and name the key that leads there, which is the pattern key.
-	var blocked := toggle_on != sel and not trick_pattern_ok(sel, pattern)
-	if blocked:
-		use = "not in a %s" % String(PATTERNS[pattern]["name"])
 	items.append([k_trick(), use])
-	if blocked:
-		items.append([k_pattern(), "change pattern"])
-	if un.size() > 1:
+	if ok.size() > 1:
 		items.append([k_cycle(), "switch trick"])
-	draw_hints_row(font, cx, s.y - 38.0, items)
+	draw_hints_row(font, cx, s.y - FOOT_HINT_Y, items)
 
 
 func draw_routine_hud(font: Font, s: Vector2) -> void:
-	# bottom-LEFT mirror of the trick readout: the OBJECT and PATTERN in play, and
-	# under them a LIVE count of where every prop is - left hand, in the air, right
-	# hand - updating throw by throw (Louis: that beats a row of key hints here; the
-	# O and P keys still work, and the lessons and Skills screen teach them).
+	# bottom-LEFT mirror of the trick readout: the OBJECT and PATTERN in play, under them a
+	# LIVE count of where every prop is - left hand, in the air, right hand - and under that
+	# the two keys that change either of them. The counts update throw by throw (Louis: that
+	# beats a row of key hints here); the keys are back because the row they cost is now the
+	# card's own third line rather than the counts' line, and because "change pattern" was
+	# homeless on the trick card opposite (see the note above draw_trick_hud).
 	var pw := 330.0
 	var px := 18.0
 	var cx := px + pw * 0.5
-	hud_panel(Rect2(px, s.y - 88.0, pw, 70.0))
+	# ...AND IT IS THE CARD THE FIRST SHOW'S TOUR IS TALKING ABOUT ON ITS FIFTH PAGE. That
+	# page reads "The bottom-left card names your pattern and objects. Their shortcuts
+	# appear there when you earn those choices" and the highlight was on the bottom-RIGHT
+	# card, which names neither - a line pointing at the wrong half of the screen, on the
+	# one walkthrough a player only ever sees once. (The line's promise about shortcuts is
+	# also finally true here: they moved onto this card on 2026-08-19.)
+	hud_panel(Rect2(px, s.y - FOOT_CARD_TOP, pw, FOOT_CARD_H), false, show_guide_step == 4)
 	var oname := String(cur_prop()["name"]).to_upper()
 	var pname := String(PATTERNS[pattern]["name"]).to_upper()
 	var ocol := ball_color(0) if prop_type == PROP_BALLS else prop_color(prop_type)
@@ -21735,14 +21814,29 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 	var ow := font.get_string_size(otext, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz)).x
 	var jw := ow + font.get_string_size(pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz)).x
 	var jx := cx - jw * 0.5
-	draw_string(font, Vector2(jx, s.y - 62.0), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), ocol)
-	draw_string(font, Vector2(jx + ow, s.y - 62.0), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), Color(0.86, 0.76, 0.62))
+	draw_string(font, Vector2(jx, s.y - FOOT_TITLE_Y), oname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), ocol)
+	draw_string(font, Vector2(jx + ow, s.y - FOOT_TITLE_Y), pname, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(tsz), Color(0.86, 0.76, 0.62))
 	var colw := pw / 3.0
-	var cy := s.y - 26.0
+	var cy := s.y - FOOT_MID_Y
 	var hand_c := Color(0.92, 0.84, 0.7)
 	draw_string(font, Vector2(px, cy), "left hand  %d" % _stack_l.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(16), hand_c)
 	draw_string(font, Vector2(px + colw, cy), "in the air  %d" % balls_airborne(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(16), Color(0.7, 0.85, 1.0))
 	draw_string(font, Vector2(px + colw * 2.0, cy), "right hand  %d" % _stack_r.size(), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(16), hand_c)
+	# ...and the two keys that change what this card is describing, DIMMED once they stop
+	# working - the same `performing and started` gate the keys themselves answer to (see
+	# day_input's note: a performance may still change its load right up to its first
+	# throw). Dropping the row instead would take the card's third line away mid-act, and
+	# leaving it bright would offer a key the game is about to refuse.
+	if not tut_active:
+		var items: Array = [[k_object(), "change prop"]]
+		var pats := 0
+		for i in pattern_order():
+			if pattern_unlocked(i):
+				pats += 1
+		if pats > 2:
+			items.append([k_pattern(), "change pattern"])
+		var live := not (mode == MODE_PERFORM and started)
+		draw_hints_row(font, cx, s.y - FOOT_HINT_Y, items, 1.0 if live else 0.34)
 
 
 #endregion
