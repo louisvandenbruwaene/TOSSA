@@ -15588,6 +15588,12 @@ func draw_glow(c: Vector2, r: float, col: Color) -> void:
 	draw_texture_rect(glow_texture(), Rect2(c.x - r, c.y - r, r * 2.0, r * 2.0), false, col)
 
 
+# THE BAND COUNT IS CALIBRATION, NOT TASTE, AND THAT IS WHY IT IS A CONSTANT (2026-08-19).
+# Each band is a full disc drawn over the one outside it, so the core's opacity is
+# 1-(1-a1)(1-a2)... - the step count sets the BRIGHTNESS as much as the stepping. Raised to
+# ten to smooth out the shop's 93px niche pool, the same 0.16 alpha came back a bright blue
+# wash filling the ring it was meant to sit behind. Changing this number is recalibrating
+# every glow in the game, not adjusting one.
 const GLOW_PIX_STEPS := 4     # concentric bands; more reads as a smooth blur again
 
 func draw_glow_pix(c: Vector2, r: float, col: Color, grid: float = 0.0) -> void:
@@ -17866,9 +17872,23 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 		ang = -0.34 + (0.34 * sin(atick() * 0.016) if live else 0.0)
 	var bob := (sin(atick() * 0.022) * 3.0) if live and not spins else 0.0
 	var at := pos + Vector2(0.0, bob) - Vector2(0.0, PROP_ICON_OFF[kind] * sc).rotated(ang)
-	# the niche: a soft pool of the prop's OWN colour behind it, and a contact shadow
+	# THE NICHE: a soft pool of the prop's OWN colour behind it, and a contact shadow.
+	#
+	# THE POOL STAYS SMOOTH AND THAT IS DELIBERATE (2026-08-19). This card is the screen
+	# check_pixel_grid measures worst in the game (12.64% off-grid) and the heatmap blames
+	# these seven pools for most of it - so they were converted to draw_glow_pix, which took
+	# it to 9.01%, and the picture got WORSE both ways it could: at four bands over a 93px
+	# radius the pool is a dartboard, and at ten it is a bright wash filling the ring it is
+	# meant to sit behind (the bands overpaint, so the count sets brightness too).
+	# **The off-grid number is a hint, not a target** - the same lesson the currency mark
+	# taught one commit earlier. draw_glow_pix's own note says draw_glow is "exactly right
+	# for a big stage wash", and a 93px pool at 0.16 alpha IS a wash; what that note is
+	# against is blur standing in for a small, defined light.
 	draw_glow(pos, 54.0 * mag, Color(col.r, col.g, col.b, 0.16))
-	fill_ellipse(pos + Vector2(0.0, 42.0 * mag), 26.0 * mag, 6.0 * mag, Color(0.0, 0.0, 0.0, 0.32))
+	# The contact shadow is the opposite case and did convert: it is a small shape with a
+	# DEFINED edge, so a soft rim on it was just a soft rim.
+	fill_ellipse_pix(pos + Vector2(0.0, 42.0 * mag), 26.0 * mag, 6.0 * mag, 0.0,
+		Color(0.0, 0.0, 0.0, 0.32))
 	if kind == PROP_TORCHES:
 		# fire lights its own corner of the shop
 		draw_glow(at + Vector2(0.0, -11.0 * sc), 44.0 * mag, Color(1.0, 0.62, 0.22, 0.30))
