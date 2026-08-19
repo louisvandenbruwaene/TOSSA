@@ -249,6 +249,14 @@
   "ui/gear_glow_suit": {
     "path": "res://Assets/UI/gear/glow_suit.png"
   },
+  "ui/assist_boot": {
+    "path": "res://Assets/UI/assist/boot.png",
+    "scale": 0.5
+  },
+  "ui/assist_watch": {
+    "path": "res://Assets/UI/assist/watch.png",
+    "scale": 0.5
+  },
   "ui/difficulty_sloth": {
     "path": "res://Assets/UI/difficulty/sloth.png"
   },
@@ -329,7 +337,10 @@
       "assembling itself from a stalk rect, two lens leaves and the flower-head sprites."
     ],
     "frames": 42,
-    "cell": [72, 88],
+    "cell": [
+      72,
+      88
+    ],
     "stalk_dx": -3.5,
     "bloom_cx": 34.2,
     "bloom_cy": 26.7
