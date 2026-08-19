@@ -68,14 +68,25 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "artifacts" / "paint"
 OUT = ROOT / "Assets" / "UI" / "vignette"
 
-# name -> (source stem in artifacts/paint, strip a ground shadow?)
-SPECS: dict[str, tuple[str, bool]] = {
-	"eat": ("vig_eat", True),
-	"inn": ("vig_inn2", False),
-	"pie": ("vig_pie", False),
-	"egg": ("vig_egg", False),
-	"tomato": ("vig_tomato", False),
-	"tomato_bit": ("vig_tomato_bit", False),
+# name -> {src: stem in artifacts/paint, shadow: strip a cast shadow?,
+#          out: destination folder, half: reduce 2:1, plaque: darken the centre disc}
+SPECS: dict[str, dict] = {
+	"eat": {"src": "vig_eat", "shadow": True},
+	"inn": {"src": "vig_inn2"},
+	"pie": {"src": "vig_pie"},
+	"egg": {"src": "vig_egg"},
+	"tomato": {"src": "vig_tomato"},
+	"tomato_bit": {"src": "vig_tomato_bit"},
+	# THE RESULTS CARD'S GRADE BADGE. Not a vignette, but the same pipeline exactly -
+	# generated large UI with no character in it, pixflux with the palette forced.
+	# `half` because the badge slot is 84 screen px and a 96x128 source blitted at
+	# ART_PIXEL 2 would be 192x256; reduced 2:1 first it lands at 96x128 on screen,
+	# which is the slot plus its ribbon tails.
+	# `plaque` because the model draws the rosette's centre as a PALE cream disc, and
+	# the grade letter that goes on it is a bright colour (gold / green / sky blue) -
+	# bright on pale is the one combination that cannot be read. The centre is a plaque
+	# to write on, not a face, so it is darkened to the card's own ground.
+	"rosette": {"src": "vig_rosette", "out": "", "half": True, "plaque": True},
 }
 
 # A cast shadow is WIDE and FLAT. The meal's is w/h 3.38; the spoon that shares its colour
@@ -89,6 +100,12 @@ SHADOW_FOOT = 0.875
 # each. Swept by SIZE inside the shadow's own rows, the rule strip_torch_flame already
 # learned: a fringe is single pixels, a real object is a block.
 SPECK_MAX = 20
+# The rosette's darkened centre. It MUST be a locked-palette entry - a hand-picked "dark
+# warm brown" is how 315 off-palette pixels get into the UI through the one step that
+# exists to keep them out. `#170f12` is the nearest entry to the results card's own ground
+# Color(0.12, 0.07, 0.08), a shade under it, so the plaque reads as inset rather than
+# painted on.
+PLAQUE = (0x17, 0x0f, 0x12)
 
 
 def components(mask: np.ndarray) -> list[np.ndarray]:
@@ -169,24 +186,83 @@ def off_palette(rgba: np.ndarray) -> int:
 	return sum(1 for c in map(tuple, rgba[..., :3][op]) if c not in pal)
 
 
+def snap_palette(rgba: np.ndarray) -> np.ndarray:
+	"""Nearest locked-palette colour per opaque pixel, in Oklab, no dither.
+
+	A REDUCTION UNDOES THE FORCED PALETTE, and that is the whole reason this exists. The
+	generator returns art already exactly on the 48 (checked by off_palette), so the
+	vignettes need no reducer at all - but a 2:1 box reduction AVERAGES four pixels, and the
+	mean of two palette entries is not a palette entry. Measured on the rosette: 615
+	off-palette pixels out of ~1900 straight after the resize.
+	No dithering, unlike pixelise_menu: Bayer over a 34x56 sprite is not invisible texture at
+	this size, it is speckle on an object the player looks straight at. Dither is for a
+	backdrop's slow wash.
+	"""
+	pal = load_palette()
+	op = rgba[..., 3] > 0
+	if not op.any():
+		return rgba
+	from pixelise_menu import srgb_to_oklab
+	px = rgba[..., :3][op].astype(float)
+	d = np.linalg.norm(srgb_to_oklab(px)[:, None, :] - srgb_to_oklab(pal)[None, :, :], axis=2)
+	out = rgba.copy()
+	out[..., :3][op] = pal[np.argmin(d, axis=1)]
+	return out
+
+
+def darken_plaque(rgba: np.ndarray) -> tuple[np.ndarray, str]:
+	"""Sink the pale centre disc to the card's ground so a bright letter can sit on it."""
+	a = rgba.copy()
+	h, w = a.shape[:2]
+	lum = a[..., :3].astype(int).mean(-1)
+	pale = (a[..., 3] > 0) & (lum > 150)
+	# the centre disc is the pale component containing the sprite's own middle
+	best = None
+	for comp in components(pale):
+		if comp[h // 3:h // 2, w // 2 - 2:w // 2 + 2].any():
+			if best is None or comp.sum() > best.sum():
+				best = comp
+	if best is None:
+		return a, "no plaque found"
+	a[best, 0], a[best, 1], a[best, 2] = PLAQUE
+	return a, f"darkened {int(best.sum())}px of plaque"
+
+
 def build(name: str, write: bool, force: bool) -> str:
-	stem, shadow = SPECS[name]
+	spec = SPECS[name]
+	stem = spec["src"]
 	src = SRC / f"{stem}.png"
 	if not src.exists():
 		return f"{name}: no art at artifacts/paint/{stem}.png"
-	a = np.asarray(Image.open(src).convert("RGBA")).copy()
-	bad = off_palette(a)
+	im = Image.open(src).convert("RGBA")
+	a = np.asarray(im).copy()
+	bad = off_palette(a)          # measured on the SOURCE, which is what the generator sent
 	note = ""
-	if shadow:
-		a, note = strip_ground_shadow(a)
-		note = "  " + note
+	if spec.get("half"):
+		im = im.resize((im.width // 2, im.height // 2), Image.BOX)
+		a = np.asarray(im).copy()
+		# hard alpha FIRST - the box filter averaged it, and every soft rim pixel would
+		# otherwise be snapped as if it were a real colour
+		a[..., 3] = np.where(a[..., 3] >= 128, 255, 0).astype(np.uint8)
+		a = snap_palette(a)
+		note += "  re-snapped after 2:1"
+	if spec.get("shadow"):
+		a, n = strip_ground_shadow(a)
+		note += "  " + n
+	if spec.get("plaque"):
+		a, n = darken_plaque(a)
+		note += "  " + n
 	soft = int(((a[..., 3] > 0) & (a[..., 3] < 255)).sum())
+	left = off_palette(a)
 	a = crop_to_ink(a)
+	note += f", {left} off-palette out"
+	dest = OUT if spec.get("out") is None else (OUT.parent / spec["out"] if spec.get("out") else OUT.parent)
 	tag = f"{name}: {a.shape[1]}x{a.shape[0]}  {bad} off-palette, {soft} soft-alpha{note}"
 	if not write:
 		return tag + "  (pass --write to apply)"
+	dest.mkdir(parents=True, exist_ok=True)
 	return tag + "  [" + artguard.save_guarded(
-		OUT / f"{name}.png", lambda q: Image.fromarray(a, "RGBA").save(q), force) + "]"
+		dest / f"{name}.png", lambda q: Image.fromarray(a, "RGBA").save(q), force) + "]"
 
 
 def main() -> int:
