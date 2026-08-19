@@ -10456,7 +10456,7 @@ func do_throw(h: int, hold: int) -> void:
 		land_slot = over_top_land_slot(b.to_hand)
 	elif lanes or mid_ball:
 		land_slot = HAND_INNER
-	elif pattern == SHOWER:
+	elif pattern == SHOWER or pattern == HALFSHOWER:
 		# A SHOWER'S FEED MUST NOT LAND ON THE HAND'S OWN LAUNCH POINT (2026-07-28). The
 		# rule is already stated for over-the-top throws just above - "a landing never
 		# sits on a launch" - and the feed was the one throw in the game breaking it: it
@@ -10468,7 +10468,22 @@ func do_throw(h: int, hold: int) -> void:
 		# every beat, so the two coincide constantly rather than occasionally. The feed
 		# lands INNER now and the hand carries it out to throw, which is the scoop a
 		# shower's throwing hand actually makes.
-		land_slot = HAND_INNER
+		#
+		# ...AND THE HALF SHOWER HAD EXACTLY THE SAME FAULT, uncaught for three weeks because
+		# the fix was written as a special case for one pattern rather than as the rule it
+		# states (2026-08-19). Its weave side lands in the HIGH hand, and the high hand
+		# launches from OUTER in both showers (`throw_slot`), so an arriving prop and a
+		# departing one occupied one point there too. Measured with --collcheck at five clubs:
+		# min clearance **-1.3px, with the two props at the identical pixel**, one at p=1.00 and
+		# one at p=0.00 - a catch and a throw sharing a slot. Same signature at three and six;
+		# only seven happened to miss it. Asking `over_top_land_slot` for the RECEIVING hand's
+		# complement states the rule once and answers for both patterns: a shower's feed still
+		# lands INNER (its high hand throws from OUTER) and nothing about the over-the-top road
+		# moves.
+		# Deliberately NOT applied to Tennis, whose `throw_slot` depends on which hand holds the
+		# marked prop RIGHT NOW - a landing decided at throw time must not read a value that can
+		# change before it arrives.
+		land_slot = over_top_land_slot(b.to_hand)
 	# always launch from wherever the ball is actually sitting: a lane or normal
 	# ball rests pulled in at inner_pos while held, the middle ball rests at
 	# stage center (see draw_hand) - EXCEPT on the very throw that first marks it

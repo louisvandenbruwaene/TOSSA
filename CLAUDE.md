@@ -896,6 +896,20 @@ review" for the accept/reject examples and why.
 - **Patterns:** Cascade, Columns, Half Shower, Shower, Reverse Cascade, Tennis. Arms reach exactly
   two points (`inner_pos`/`outer_pos`) with no exceptions - Mills Mess would need this to change,
   which is why it's an architecture change, not "one more pattern."
+- **A LANDING NEVER SITS ON A LAUNCH, AND THAT RULE HAS TO BE WRITTEN AS A RULE (2026-08-19).**
+  The Shower's feed was fixed on 2026-07-28 by hard-coding `land_slot = HAND_INNER` for that one
+  pattern, and the **Half Shower had the identical fault for three weeks**: its weave side lands
+  in the HIGH hand, and the high hand launches from OUTER in both showers, so an arriving prop
+  and a departing one occupied one point. Measured with `--collcheck` at five clubs, min
+  clearance **-1.3px with the two props on the identical pixel**, one at p=1.00 and one at
+  p=0.00 - a catch and a throw sharing a slot; the same signature at three and six, and only
+  seven happened to miss it. Asking `over_top_land_slot` for the RECEIVING hand's complement
+  states the rule once and answers for both patterns. Half Shower now measures +43 to +51 px of
+  hitbox clearance and a POSITIVE drawn gap at every count, so **the old note that Half Shower
+  "is DOCUMENTED to run near-zero/negative by geometry" is no longer true of it** - only Columns
+  and Tennis still do, and those are lane spacing, which is a different thing. Deliberately not
+  applied to Tennis: its `throw_slot` depends on which hand holds the marked prop right now, and
+  a landing decided at throw time must not read a value that can change before it arrives.
 - **COLUMNS LANES ARE BOUNDED BY THE PAINTED ARM, not by the stance (2026-08-19, Louis: "fix the
   hands for columns").** Two separate faults, both making the same picture - a prop and a catch
   ring floating over the coat with the sleeve left behind:
@@ -920,10 +934,22 @@ review" for the accept/reject examples and why.
   residual of 109 screen px** before, and **7% at a mean of 3.8** after - better than cascade's
   own 8% / 4.3. `--collcheck` hitbox clearance stays positive at every count; the paintable band
   is narrower than the old one, so lanes are 16-24px apart at seven objects rather than 28, and
-  the DRAWN gap goes negative from five up, exactly as Half Shower and Tennis already do.
+  the DRAWN gap goes negative from five up, exactly as Tennis does (Half Shower used to be the
+  third one named here, and its negatives turned out to be the landing-slot bug below, not
+  spacing - measured 2026-08-19).
 - **Tricks:** Behind the Back, High Toss (toggles), Spin (live, no cooldown, full catch/throw
   lockout while spinning - a cost paid in airtime, not a timer). Cascade-only except High Toss
-  and Spin, since every other pattern is a fixed geometry a shaping trick would contradict.
+  and Spin, since every other pattern is a fixed geometry a shaping trick would contradict...
+  **EXCEPT BEHIND THE BACK IN A SHOWER OR A HALF SHOWER (2026-08-19, Louis: "half shower and
+  shower should be able to toggle behind the back with the high throwing hand throwing them
+  behind the back and the other hand not - low throws just in front").** This is not a hole in
+  the cascade-only rule, it is the one shape the rule does not describe: a shower already HAS
+  two roads, so the flourish does not have to touch every throw - only the `dominant_hand`'s
+  high road loops behind (`btb_hand`), and the low feed stays exactly the pass it was.
+  `--collcheck` at 3/5/7 clubs: hitbox clearance 24.6 / 20.0 / 14.9 px, positive at every count
+  and BETTER than the trickless Half Shower's own -1.3 at five (a pre-existing overlap, not
+  caused by this). `_coll_pair` names the shaping trick (`t=btb`) now, because an audit where a
+  toggle silently failed to switch on reads identically to one where it worked.
 - **ONLY COMBINATIONS THE GAME CAN DRAW ARE PLAYABLE (2026-08-19, Louis: "make sure that only
   animated patterns (valid patterns and tricks combos) are playable").** `trick_pattern_ok` is the
   single authority, shared by the trick key, the pattern key and the HUD - the cascade-only gate
@@ -999,9 +1025,17 @@ flags if you need to drive the game directly: bare `--` is REQUIRED before dev a
 they're invisible and the game hangs at the menu - looks like a bug, isn't). `--demo` autoplays;
 `--booking`/`--daily` run a real act to resolution; `--collcheck --latecatch N` audits mid-air
 clearance (prints `min clearance` = hitbox gate, `min drawn gap` = visual, informational only -
-Half Shower/Tennis are DOCUMENTED to run near-zero/negative by geometry, not a bug); `--ladder`
+Columns/Tennis are DOCUMENTED to run near-zero/negative by geometry from about five objects up,
+not a bug; **Half Shower no longer is** - see the landing-slot rule above, which is what its
+negatives always were); `--ladder`
 prints every venue's expected build/pacing from the live constants; `--fps` prints the perf probe
 (trust `draws/s` over `engine fps` unless the window has focus - see `docs/coding_guidelines.md`).
+`--tutlog` prints every moment a LESSON STOPS THE WORLD - which of the three mechanisms did it,
+whether the line has finished, and how old every airborne prop is. **A freeze looks identical to
+a running frame in a screenshot**, so "the tutorials pause at the wrong time" had no evidence
+anybody could gather; a before/after of that log is what the 2026-08-19 pause fixes were measured
+on. Note `--demo`'s metronome satisfies most beats before a gate can open one, so the counts are
+a lower bound on what a human sees.
 **TWO FLAGS EXIST BECAUSE THE SCREEN THEY SHOW CANNOT OTHERWISE BE PHOTOGRAPHED** (2026-08-19),
 and that is the general lesson, not a detail about either of them: **a screen with no capture
 target is a screen nobody has looked at since the art density changed**, and both of these were
