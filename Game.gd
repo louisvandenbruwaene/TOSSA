@@ -10505,12 +10505,12 @@ func prop_thrill() -> float:
 # An act is a series of SEGMENTS. A segment is a stretch of consecutive catches with the
 # same load, and it ends when a prop hits the floor. Its worth is
 #
-#     s  x  PRODUCT over tricks i of (ti ^ mi)  x  x ^ (n * p)
+#     x  x  (o * p * s + 1) ^ n  x  F
 #
 # where x is the weighted count of catches in it (a Perfect counts 3, a Good 2, a Late 1),
-# n is the number of objects, p is the prop's signature (PROP_SIG), s is the pattern
-# multiplier, and mi is how many times trick i landed. The act's score is the sum over
-# segments, and there is nothing else in it.
+# n is the number of objects, o is the prop's signature (PROP_SIG), p the pattern
+# multiplier and s the prop's Strength cost per object. The act's score is the sum over
+# segments times F, the act's one bounded trick factor, and there is nothing else in it.
 #
 # WHAT THIS REPLACED, and why each piece had to go rather than be tuned:
 #   * per-catch points (CATCH_PTS) x a chain multiplier x a pattern multiplier x an object
@@ -10521,22 +10521,29 @@ func prop_thrill() -> float:
 #     Perfect is simply worth three catches to a Good's two. That is a far better trade
 #     than it looks. The old rule made one Good catch in fifty cost you the whole
 #     accumulated chain, which is a cliff; this makes it cost exactly one catch of credit.
-#   * `run_mult`, a running product of trick multipliers. Tricks still multiply, but they
-#     multiply THEIR OWN SEGMENT rather than a floating accumulator, so the exponent and
-#     the tricks are two factors of one expression instead of two systems meeting at a
-#     variable.
+#   * `run_mult`, a running product of trick multipliers that grew with time inside a run.
+#     Tricks still multiply, but through F - one factor built from the WHOLE act, with
+#     diminishing returns and a cap - so the exponent and the tricks are two factors of one
+#     expression instead of two systems meeting at a variable.
+#   * the OUTER POWER OF (T + 1), removed 2026-08-19. See score_log10 for the measured
+#     numbers; the short version is that it made a three-trick Backyard act outscore the
+#     last venue in the game by seven orders of magnitude.
 #
 # GOOD AND LATE CATCHES NO LONGER END A SEGMENT. Only a drop does, and only a challenge
 # that says so in as many words (the two Critics). That is Louis's rule and it is the one
 # that makes the number on screen mean "how long have I kept this up".
 #
-# ON THE SIZE OF THESE NUMBERS. The exponent is n * p, so three balls in a Cascade run at 3
-# and seven torches at 21; twenty Perfect catches is 216,000 for the first and about 10^37
-# for the second. That is deliberate and it is why goal_for computes a goal from the load
+# ON THE SIZE OF THESE NUMBERS. The exponent is n alone - the object COUNT and nothing
+# else - while everything about the prop and the pattern is a linear factor in the base. So
+# three balls in a Cascade run on a base of 2 and seven torches on a base of 25, and twenty
+# Perfect catches is 480 for the first and 3.7e11 for the second. That is deliberate and it
+# is why goal_for computes a goal from the load
 # in hand rather than from a flat number per venue - see it for the arithmetic. Nothing may
 # assume a score fits in an int, and everything that prints one goes through score_text.
 # =============================================================================
 const CATCH_WEIGHT := [3.0, 2.0, 1.0]   # what a Perfect, a Good and a Late are worth to `x`
+const TRICK_FACTOR_CAP := TOSSA_BALANCE.TRICK_FACTOR_CAP   # the act's trick factor tops out
+										# here - see trick_factor_log10 for why there is a cap
 
 
 func seg_open(reason: String = "") -> void:
@@ -10573,16 +10580,55 @@ func act_trick_ids() -> Array:
 
 
 func score_log10() -> float:
-	# LOUIS'S FORMULA, 2026-07-30 revision, in logs. In his notation:
+	# THE ACT'S SCORE, in logs:
 	#
-	#   ( SUM over streaks i  PROD over tricks j
-	#         (1 + m_j) * x_i * (o * t_j * p * s + 1) ^ (n_i / (T + 1))
-	#   ) ^ (T + 1)
+	#     ( SUM over streaks i  of  x_i * (o * p * s + 1) ^ n_i )  x  F
 	#
 	# x_i is the streak's weighted catch count, n_i the objects in it, o the prop's
-	# signature, p the pattern coefficient, s the prop's Strength cost per object, t_j a
-	# trick's multiplier, m_j how many times it landed, T how many DIFFERENT tricks the act
-	# used.
+	# signature, p the pattern coefficient, s the prop's Strength cost per object. F is
+	# the act's TRICK FACTOR, a single bounded multiplier built by trick_factor_log10().
+	#
+	# **THE OUTER POWER IS GONE (2026-08-19, Louis: "the scoring is out of whack"), AND IT
+	# HAD TO GO RATHER THAN BE TUNED.** The 2026-07-30 shape was
+	#
+	#     ( SUM over i  PROD over tricks j  (1 + m_j) * x_i * (o*t_j*p*s + 1) ^ (n_i/(T+1)) ) ^ (T+1)
+	#
+	# where T is the number of DISTINCT tricks the act used. Read what that does to x. The
+	# product over j repeats the whole factor once per trick, so x appears T times inside
+	# the brackets, and then the brackets are raised to (T + 1): **x carries a total
+	# exponent of T * (T + 1)**. One trick makes the streak quadratic, two make it a sixth
+	# power, three make it a twelfth. The trick multipliers themselves are raised to
+	# (T + 1) on top of that.
+	#
+	# Measured on the live constants before the rewrite, three balls in a Cascade at the
+	# BACKYARD - the first house in the game, final goal 1,920 - with twenty Perfect
+	# catches:
+	#
+	#     no tricks                480
+	#     Behind the Back x5       1.38e6      (2,875x)
+	#     + High Toss x5           2.15e17
+	#     + Spin x5                1.26e34     (2.6e31x)
+	#
+	# 1.26e34 is seven orders of magnitude ABOVE the Midnight Show's own final goal
+	# (1.02e25), reached in the opening venue by pressing Space three times. Every rung of
+	# the ladder above the Backyard was unreachable and irrelevant at the same time, which
+	# is what "out of whack" means precisely. No constant in that expression could have
+	# fixed it: the damage is in the SHAPE of the exponent, and any t_j small enough to
+	# tame three tricks would have made one trick worthless.
+	#
+	# So the three things the design actually asks for are now three separate factors that
+	# cannot compound into each other:
+	#   * THE STREAK IS LINEAR. x_i, once, exactly as the pillar note below always claimed.
+	#   * THE LOAD IS EXPONENTIAL. n_i is the exponent and nothing else ever joins it - how
+	#     many objects you are holding up is the skill axis the venue ladder is laid on.
+	#   * A TRICK MULTIPLIES. F is a plain outer multiplier with diminishing returns and a
+	#     hard cap; see trick_factor_log10.
+	#
+	# WHAT THIS BUYS, beyond the arithmetic being sane: goal_for computes a goal from ONE
+	# trickless streak of the target length, so a trickless act now reaches its goal at
+	# exactly the documented catch count and the whole `--ladder` table (Backyard 1,920 up
+	# to Midnight 1.02e25) is preserved to the digit. Tricks are pure upside - they are how
+	# you clear a goal EARLY, which is what goal_for's own note says they are for.
 	#
 	# **s MOVED OUT OF THE EXPONENT AND INTO THE BASE (2026-07-30, Louis: "move one of the
 	# two factors in the exponent down to the base, both makes it scale too much, one
@@ -10611,10 +10657,7 @@ func score_log10() -> float:
 	# stops at 1.8e308, so the honest version of this arithmetic overflows to INF and
 	# poisons every comparison downstream of it. Logs cannot overflow, and the one clamp at
 	# the end is the only place a ceiling is applied.
-	var tricks := act_trick_ids()
-	var T := tricks.size()
-	var outer := float(T + 1)
-	var terms: Array[float] = []          # log10 of each streak's product
+	var terms: Array[float] = []          # log10 of each streak's own worth
 	var all := segments.duplicate()
 	if seg_x > 0.0:
 		all.append({"x": seg_x, "n": seg_n, "o": seg_o, "pat": seg_pat, "str": seg_str})
@@ -10622,21 +10665,7 @@ func score_log10() -> float:
 		var x := float(sg["x"])
 		if x <= 0.0:
 			continue
-		var expo := float(sg["n"]) / outer
-		var lg := 0.0
-		if T == 0:
-			# NO TRICKS IS NOT AN EMPTY PRODUCT. Taken literally the formula would collapse
-			# to (number of streaks)^1 for a trickless act, which is plainly not the intent -
-			# it is one factor with t = 1 (no flourish) and m = 0 (landed none), which leaves
-			# exactly x * (o * p * s + 1) ^ n. Every trickless act in the game runs through
-			# this branch, so it is the shape most players will meet first.
-			lg = log_10(x) + expo * log_10(float(sg["o"]) * float(sg["pat"]) * float(sg["str"]) + 1.0)
-		else:
-			for t in tricks:
-				var m := float(act_tricks.get(t, 0))
-				lg += log_10(1.0 + m) + log_10(x) \
-					+ expo * log_10(float(sg["o"]) * trick_mult(int(t)) * float(sg["pat"]) * float(sg["str"]) + 1.0)
-		terms.append(lg)
+		terms.append(log_10(x) + float(sg["n"]) * seg_base_log10(sg))
 	if terms.is_empty():
 		return -1.0e30
 	# the sum, in logs (log-sum-exp): factor the largest term out so the rest can be added
@@ -10647,7 +10676,52 @@ func score_log10() -> float:
 	var acc := 0.0
 	for lg3 in terms:
 		acc += pow(10.0, minf(lg3 - top, 0.0))
-	return outer * (top + log_10(acc))
+	return top + log_10(acc) + trick_factor_log10()
+
+
+func seg_base_log10(sg: Dictionary) -> float:
+	# log10 of ONE streak's base, `o * p * s + 1` - what each of its objects is worth as a
+	# power. Everything the load is made of is a LINEAR factor in here (the prop's
+	# signature, the pattern, the prop's Strength cost per object) and only the object
+	# COUNT is ever an exponent. That split is the 2026-07-30 lesson kept: s used to sit in
+	# the exponent beside n, so a heavier prop and more of them compounded the same climb
+	# twice over.
+	return log_10(float(sg["o"]) * float(sg["pat"]) * float(sg["str"]) + 1.0)
+
+
+func trick_factor_log10() -> float:
+	# `F`, in logs: what the act's flourishes multiply the whole score by.
+	#
+	#     F = PRODUCT over tricks j of  t_j ^ (1 + log10(1 + m_j)),  capped at TRICK_FACTOR_CAP
+	#
+	# t_j is the trick's own difficulty (TRICKS' `diff`, so Spin's 2.0 pays nearly four
+	# times what High Toss's 1.10 does) and m_j is how many times it landed in this act.
+	#
+	# THREE PROPERTIES, EACH ONE ANSWERING A WAY THE OLD SHAPE BROKE:
+	#   * IT IS A MULTIPLIER, NOT AN EXPONENT. It multiplies the finished sum, so it can
+	#     never reach the streak or the object count and turn either of them into a power.
+	#     Tricks and load are two factors of one expression, and neither is inside the other.
+	#   * LANDING ONE MORE ALWAYS PAYS, AND ALWAYS PAYS LESS. The exponent grows with
+	#     log10(1 + m), so the first Spin of an act is worth far more than the fortieth -
+	#     which is what stops a long act from being a machine for repeating one trick, and
+	#     it does it without a cooldown or a per-activation rule to remember.
+	#   * IT CANNOT OUTRUN THE LADDER. One Spin is 1.7x, ten are 2.3x, all three tricks ten
+	#     times each is 3.3x, and TRICK_FACTOR_CAP stops the total dead at 4.0 - which is
+	#     inside the NARROWEST step between two houses (Backyard 1,920 to Street Corner
+	#     8,433, a ratio of 4.39). So a flourish is worth about two of an act's three goal
+	#     steps and never worth a venue: taking more objects up is still the only way up.
+	#
+	# The arithmetic itself lives in TossaBalance beside the goal ladder it has to stay in
+	# proportion to, so the contract test can hold both against each other. This end only
+	# translates the act's tally into the difficulties the pure helper takes.
+	var landings := {}
+	for t in act_trick_ids():
+		var m := float(act_tricks.get(t, 0))
+		if m <= 0.0:
+			continue
+		var diff := trick_mult(int(t))
+		landings[diff] = float(landings.get(diff, 0.0)) + m
+	return TOSSA_BALANCE.trick_factor_log10(landings)
 
 
 func log_10(v: float) -> float:
@@ -10715,20 +10789,19 @@ func close_run() -> void:
 
 
 func seg_per_catch() -> float:
-	# what ONE more weighted catch adds to the live streak's own term, for the rail. It is
-	# the streak's product with x factored out, which under a trickless act is simply
-	# (o * p + 1) ^ (s * n) - the number the whole formula is built around.
-	var tricks := act_trick_ids()
-	var outer := float(tricks.size() + 1)
-	var expo := float(seg_str) * float(seg_n) / outer
-	var lg := 0.0
-	if tricks.is_empty():
-		lg = expo * log_10(seg_o * seg_pat + 1.0)
-	else:
-		for t in tricks:
-			lg += log_10(1.0 + float(act_tricks.get(t, 0))) \
-				+ expo * log_10(seg_o * trick_mult(int(t)) * seg_pat + 1.0)
-	return from_log10(lg * outer)
+	# what ONE more weighted catch adds to the score, for the rail: `(o * p * s + 1) ^ n * F`.
+	#
+	# **IT IS NOW EXACT, AND IT USED TO BE A THIRD FORMULA.** Because the streak is linear
+	# and the trick factor is an outer multiplier, one more unit of x adds exactly this
+	# much - there is nothing to approximate. The version this replaces was neither the
+	# formula the game scored with nor the one its own comment described: it put `s` in the
+	# EXPONENT (`expo := seg_str * seg_n / outer`) and then left it out of the base
+	# entirely, which is the shape score_log10 abandoned on 2026-07-30. On five clubs -
+	# s = 3 - it read a number the score could not produce from any input. A rail that
+	# disagrees with the score is worse than no rail: it teaches the player a wrong model
+	# of the thing they are being asked to optimise.
+	return from_log10(float(seg_n) * seg_base_log10(
+		{"o": seg_o, "pat": seg_pat, "str": seg_str}) + trick_factor_log10())
 
 
 func recalc_score() -> void:

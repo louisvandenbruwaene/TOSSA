@@ -9,6 +9,50 @@ const GOAL_STEPS := [0.50, 0.72, 1.0]
 const RUN_SHARE := 0.75
 const BASE_STAMINA := 200.0
 const STAMINA_PER_ENDURANCE := 8.0
+# THE TRICK FACTOR'S TWO NUMBERS, AND WHY BOTH ARE SET BY THE LADDER RATHER THAN BY TASTE.
+#
+# The pillar the venue ladder is built on is that the SKILL AXIS IS THE LOAD - how many
+# objects you can hold up - and a flourish is upside on top of that. So the whole trick
+# factor has to be worth less than one step UP the ladder, or a player would be better off
+# staying in the room they can already juggle in and pressing the trick key.
+#
+# The tightest step in the game is the first one: the Backyard's final goal is 1,920 (three
+# balls) and the Street Corner's is 8,433 (four), a ratio of 4.39. Every step above it is
+# far wider. So 4.0 is the cap: comfortably inside the narrowest rung, and worth about two
+# of the three goal steps within one act (the goals sit at 0.50 / 0.72 / 1.0 of the target
+# catch count, and the streak is linear, so 2x of score is roughly a goal).
+const TRICK_FACTOR_CAP := 4.0
+# ...and the GAIN shapes the curve so the cap is a backstop rather than the balance. At gain
+# 1.0 every trick landed fifty times reaches 13.9x and the cap would be doing all the work -
+# a cap that is always hit is not a limit, it is the formula. At 0.6 the same extreme act
+# reaches 4.9 and only the very top of the range is clipped: one Spin is 1.7x, ten are 2.3x,
+# all three tricks ten times each is 3.3x.
+const TRICK_GAIN := 0.6
+
+
+static func trick_factor_log10(landings: Dictionary) -> float:
+	# log10 of `F`, the act's ONE trick multiplier. `landings` maps a trick's difficulty
+	# (TRICKS' `diff`) to how many times it landed in this act.
+	#
+	#     F = PRODUCT over tricks j of  t_j ^ (TRICK_GAIN * (1 + log10(1 + m_j))),  capped
+	#
+	# It is a MULTIPLIER on the finished score and never an exponent on anything, which is
+	# the whole correction of 2026-08-19: the shape it replaces raised the entire sum to the
+	# power of (1 + the number of distinct tricks), so three tricks turned a Backyard act
+	# into a bigger number than the last venue in the game. Landing one more of a trick
+	# always pays and always pays less; the cap stops the total dead however TRICKS grows.
+	var lg := 0.0
+	for diff in landings:
+		var m := float(landings[diff])
+		var t := float(diff)
+		if m <= 0.0 or t <= 1.0:
+			continue
+		lg += TRICK_GAIN * (1.0 + log(1.0 + m) / log(10.0)) * (log(t) / log(10.0))
+	return minf(lg, log(TRICK_FACTOR_CAP) / log(10.0))
+
+
+static func trick_factor(landings: Dictionary) -> float:
+	return pow(10.0, trick_factor_log10(landings))
 
 
 static func weighted_goal(venue: int, goal_index: int, perfect_weight: float,
