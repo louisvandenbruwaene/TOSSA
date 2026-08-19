@@ -2015,6 +2015,15 @@ var _handlog := false       # dev: --handlog prints each hand's x every tick dur
 							  # to tell a real jitter (oscillating x) from a hand that merely
 							  # sits still but far from the ball's lane (ROADMAP 12b)
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
+# dev (--vign <id> [t]): hold one hub vignette on screen at a FIXED phase.
+# The five of them (eat/inn/pie/egg/tomato) were the only screens in the game with no
+# way to look at them: they play for 0.8-1.8s in the middle of a hub action and then the
+# ledger moves, so screenshot.sh could not reach one and nobody had seen them since the
+# art density changed. A frozen phase is what a capture needs - `--shotat` counts physics
+# frames and a vignette advances on cine_tick, so an unfrozen one photographs a different
+# moment every run and two captures of the same picture can never be compared.
+var _vign := ""
+var _vign_t := -1.0
 var _shot := false
 var _shot_path := ""
 var _boo := false      # dev (--boo): hold the crowd in the red so tomatoes actually fly
@@ -2591,6 +2600,13 @@ func _ready() -> void:
 			day_sel = 0
 			if dyi + 2 < ua.size() and not ua[dyi + 2].begins_with("--"):
 				day_sel = int(ua[dyi + 2])
+	var vgi := ua.find("--vign")      # dev: hold one hub vignette at a fixed phase, so the
+	if vgi != -1:                     # five of them can be captured and compared at all
+		enter_day()
+		_vign = ua[vgi + 1] if vgi + 1 < ua.size() and not ua[vgi + 1].begins_with("--") else "eat"
+		_vign_t = float(ua[vgi + 2]) if vgi + 2 < ua.size() and not ua[vgi + 2].begins_with("--") else 0.5
+		day_anim = _vign
+		day_anim_start = cine_tick
 	var ssi := ua.find("--skills")    # dev: open the Skills reference for a screenshot,
 	if ssi != -1:                     # optionally --skills <N> to select entry N directly
 		level = maxi(level, 7)        # enough unlocked that both ready and locked show
@@ -4595,6 +4611,16 @@ func day_activate(id: String, ok: bool, why: String) -> void:
 				play_sfx("ui2", -11.0)
 
 
+# THE TWO MOVES A VIGNETTE SPRITE IS ALLOWED, both in WHOLE ART PIXELS. Everything the
+# vector vignettes did to sell motion - a spoon sliding 18px, a pie scaling to a quarter, a
+# bite growing from 0 to 17px, two shell halves parting by 26px - is a continuous offset or
+# a fractional scale, and a sprite drawn at either lands some rows two screen pixels tall
+# and some three. A bob of one art pixel and a drop of three are the whole vocabulary; a
+# state CHANGE (whole tomato -> bitten tomato) is a second picture, never a deformed first one.
+const VIG_BOB := 1.0     # art pixels, the meal's simmer
+const VIG_DROP := 3.0    # art pixels, how far the egg falls in
+
+
 func day_anim_len(id: String) -> int:
 	# how long each day-action vignette holds, in cine_ticks (120/s: inn's 220 is
 	# ~1.8s, eat's 150 ~1.25s, everything else 100 is ~0.8s) - inn runs longest
@@ -4610,6 +4636,9 @@ func day_anim_len(id: String) -> int:
 func day_anim_step() -> void:
 	# the little vignette has finished: NOW the action actually happens, so the
 	# picture always leads and the ledger follows
+	if _vign != "":
+		return   # dev (--vign): held open forever, and its effect must never land -
+				 # a capture of the eat vignette may not quietly spend ten flowers
 	if cine_tick - day_anim_start < day_anim_len(day_anim):
 		return
 	var id := day_anim
@@ -23206,33 +23235,78 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 	# eating, sleeping and shopping feel like moments instead of button presses
 	var t := float(cine_tick - day_anim_start) / float(day_anim_len(day_anim))
 	t = clampf(t, 0.0, 1.0)
+	if _vign_t >= 0.0:
+		t = _vign_t   # dev (--vign <id> <t>): a fixed phase, so two captures compare
 	var ease_in := minf(t * 5.0, 1.0)
 	match day_anim:
 		"eat":
 			var c := Vector2(s.x * 0.5, s.y * 0.52)
 			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
-			# the bowl, and a spoon that dips twice
-			fill_ellipse(c + Vector2(0, 30.0), 74.0, 30.0, Color(0.55, 0.34, 0.2))
-			fill_ellipse(c + Vector2(0, 22.0), 62.0, 18.0, Color(0.93, 0.72, 0.4))
-			var dip := absf(sin(t * TAU * 2.0)) * 18.0
-			draw_capsule(c + Vector2(44.0, -34.0 + dip), c + Vector2(58.0, -2.0 + dip), 5.0, 8.0, Color(0.8, 0.78, 0.75))
-			# steam: three slow wisps climbing off the soup
+			# SEAM. What this replaced was two stacked ellipses and a capsule - measured on a
+			# --vign capture, a flat amber disc that read as a pancake, with a white sliver
+			# of spoon dipping through it. The sprite is a wooden bowl of stew with its own
+			# spoon and a bread roll beside it, so the drawn spoon is gone with the drawn
+			# bowl: a sprite that already contains a spoon cannot also have one waved over it.
+			# THE BOB IS A WHOLE ART PIXEL OR NOTHING, which is the only motion a sprite may
+			# have here - `dip` used to be a continuous 0..18px slide, and a sprite slid by
+			# 7.4px draws some rows two screen pixels tall and some three.
+			if not art_blit("vig/eat", c + Vector2(0.0, -18.0 + VIG_BOB * float(ART_PIXEL)
+					* (1.0 if sin(t * TAU * 2.0) > 0.0 else 0.0))):
+				fill_ellipse(c + Vector2(0, 30.0), 74.0, 30.0, Color(0.55, 0.34, 0.2))
+				fill_ellipse(c + Vector2(0, 22.0), 62.0, 18.0, Color(0.93, 0.72, 0.4))
+				var dip := absf(sin(t * TAU * 2.0)) * 18.0
+				draw_capsule(c + Vector2(44.0, -34.0 + dip), c + Vector2(58.0, -2.0 + dip), 5.0, 8.0, Color(0.8, 0.78, 0.75))
+			# STEAM IS PUFFS, NOT A POLYLINE. Three wisps of draw_polyline were the one thing
+			# in this picture that could not be put on the grid at all - a 2.5px antialiased
+			# curve has no pixel-art form. A column of grid discs rising and thinning is what
+			# steam looks like in this idiom, and it reads at 2x where the hairline did not.
+			# THE ALPHA THE POLYLINE USED IS NOT THE ALPHA A PUFF NEEDS. Both were 0.35-ish,
+			# and measured on a capture the grid version came out at rgb (29,25,26) over a
+			# (8,5,8) panel - technically lighter, visually nothing. A 2.5px antialiased
+			# stroke smears its ink over a soft rim that catches the eye; a hard-edged disc
+			# puts the same alpha in fewer pixels and simply disappears. Ink does not
+			# transfer between rasterisers at equal alpha.
+			# AND A WISP IS A COLUMN, NOT A SPATTER. Four puffs spaced a quarter of the rise
+			# apart measured correctly pale - (87,82,79) over a (10,7,10) panel - and still
+			# read as specks, because at 5-8px across with a 14px gap between them there is
+			# nothing for the eye to join up. Six overlapping puffs per wisp over a shorter
+			# climb make one continuous body of steam that thins as it goes, which is what
+			# the polyline was drawing and the only part of it worth keeping.
+			# ...AND THE WOBBLE IS WHAT WAS BREAKING THE COLUMN. The puffs are spaced ~7px
+			# with radii of 4-10, so they overlap by arithmetic - but `f` drove BOTH the
+			# rise and an 18px sideways swing, so neighbouring puffs stepped further apart
+			# horizontally than they overlapped vertically and the plume came apart into
+			# specks with holes measured at (9,6,9) between (74,70,66) blobs. A wisp may
+			# lean; it may not stride.
 			for w in 3:
-				var wx := c.x - 30.0 + 30.0 * float(w)
-				var pts := PackedVector2Array()
-				for k in 9:
-					var f := float(k) / 8.0
-					pts.append(Vector2(wx + sin(f * 5.0 + t * 9.0 + float(w) * 2.0) * 7.0, c.y + 4.0 - f * (46.0 + 20.0 * t)))
-				draw_polyline(pts, Color(1.0, 0.97, 0.9, 0.35 * ease_in * (1.0 - t * 0.5)), 2.5)
+				var wx := c.x - 34.0 + 34.0 * float(w)
+				for k in 6:
+					var f := fposmod(float(k) / 6.0 + t * 0.9, 1.0)
+					fill_disc_pix(Vector2(wx + sin(f * 3.0 + float(w) * 2.1) * 4.0, c.y - 70.0 - f * 38.0),
+						5.0 + f * 4.0, Color(1.0, 0.97, 0.88, (1.0 - f * 0.85) * 0.5 * ease_in))
 			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "a hot meal", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(1.0, 0.9, 0.65, ease_in))
 		"inn":
 			# the world dims to sleep, a lit window and drifting z's carry it
 			draw_rect(Rect2(0, 0, s.x, s.y), Color(0.01, 0.01, 0.03, 0.55 + 0.4 * t))
 			var c := Vector2(s.x * 0.5, s.y * 0.46)
-			draw_rect(Rect2(c.x - 60.0, c.y - 70.0, 120.0, 130.0), Color(0.16, 0.11, 0.08))
-			draw_rect(Rect2(c.x - 48.0, c.y - 58.0, 96.0, 106.0), Color(1.0, 0.82, 0.45, 0.28 * (1.0 - t * 0.7)))
-			draw_rect(Rect2(c.x - 3.0, c.y - 58.0, 6.0, 106.0), Color(0.16, 0.11, 0.08))
-			draw_rect(Rect2(c.x - 48.0, c.y - 8.0, 96.0, 6.0), Color(0.16, 0.11, 0.08))
+			# SEAM. This was four draw_rects - a brown box with a cross through it, which is
+			# a WINDOW at best and reads as nothing at 2x. The sprite is the thing the row
+			# actually buys: an inn bed with a quilt, a pillow and a lit lantern on the
+			# nightstand beside it. The lantern is painted, so the fading warm light below
+			# is a wash over a source the picture contains, exactly the rule the spotlight
+			# cones were deleted for.
+			if not art_blit("vig/inn", c + Vector2(0.0, -6.0)):
+				draw_rect(Rect2(c.x - 60.0, c.y - 70.0, 120.0, 130.0), Color(0.16, 0.11, 0.08))
+				draw_rect(Rect2(c.x - 48.0, c.y - 58.0, 96.0, 106.0), Color(1.0, 0.82, 0.45, 0.28 * (1.0 - t * 0.7)))
+				draw_rect(Rect2(c.x - 3.0, c.y - 58.0, 6.0, 106.0), Color(0.16, 0.11, 0.08))
+				draw_rect(Rect2(c.x - 48.0, c.y - 8.0, 96.0, 6.0), Color(0.16, 0.11, 0.08))
+			else:
+				# THE LANTERN'S OWN GLOW, DYING AS THE DAY DOES - and its centre is MEASURED
+				# off the sprite, not guessed: the flame sits at sprite (98, 34) of 117x83,
+				# so (39.5, -7.5) from the sprite's centre, doubled by ART_PIXEL and shifted
+				# by the sprite's own -6 offset. A glow hung at a hand-picked point drifts
+				# off the lamp the first time the bed is regenerated at another size.
+				draw_glow_pix(c + Vector2(79.0, -21.0), 40.0, Color(1.0, 0.78, 0.38, 0.30 * (1.0 - t * 0.8)))
 			for z in 3:
 				var zt := fposmod(t * 2.2 + float(z) * 0.33, 1.0)
 				var zp := c + Vector2(70.0 + zt * 46.0 + float(z) * 8.0, -30.0 - zt * 70.0)
@@ -23243,33 +23317,54 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 			# whole reason to eat one is the slow motion, so the picture says so
 			var c := Vector2(s.x * 0.5, s.y * 0.52)
 			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
-			fill_ellipse(c + Vector2(0, 34.0), 78.0, 22.0, Color(0.80, 0.78, 0.75))
-			# the slice, shrinking as it is eaten
-			var eaten := clampf(t * 1.4, 0.0, 1.0)
-			var half := 62.0 * (1.0 - 0.75 * eaten)
-			draw_colored_polygon(PackedVector2Array([
-				c + Vector2(-half, 26.0), c + Vector2(half, 26.0), c + Vector2(0.0, -56.0 * (1.0 - 0.6 * eaten))]),
-				Color(0.92, 0.66, 0.30))
-			for pi in 6:
-				draw_circle(c + Vector2(-half + half * 2.0 * float(pi) / 5.0, 28.0), 5.0 * (1.0 - 0.5 * eaten), Color(0.98, 0.80, 0.46))
-			# the hum: slow rings widening out of the slice as it goes down
+			# SEAM. An orange TRIANGLE on a white ellipse, which at 2x reads as a traffic
+			# cone on a plate - the worst of the five. The sprite is a real slice with a
+			# lattice crust on its own plate.
+			# THE SLICE NO LONGER SHRINKS, and that is forced rather than chosen: `eaten`
+			# scaled the drawn triangle continuously from 1.00 to 0.25, and a sprite scaled
+			# by anything but a whole number is the one thing pixel art cannot survive. What
+			# the vignette is actually about survives intact - Uncle Dan's Pie is bought for
+			# the slow motion, and the hum is what says so.
+			if not art_blit("vig/pie", c + Vector2(0.0, -14.0)):
+				fill_ellipse(c + Vector2(0, 34.0), 78.0, 22.0, Color(0.80, 0.78, 0.75))
+				var eaten := clampf(t * 1.4, 0.0, 1.0)
+				var half := 62.0 * (1.0 - 0.75 * eaten)
+				draw_colored_polygon(PackedVector2Array([
+					c + Vector2(-half, 26.0), c + Vector2(half, 26.0), c + Vector2(0.0, -56.0 * (1.0 - 0.6 * eaten))]),
+					Color(0.92, 0.66, 0.30))
+				for pi in 6:
+					draw_circle(c + Vector2(-half + half * 2.0 * float(pi) / 5.0, 28.0), 5.0 * (1.0 - 0.5 * eaten), Color(0.98, 0.80, 0.46))
+			# THE HUM: slow rings widening out of the slice as it goes down, on the grid.
+			# `draw_ring_pix`, NOT `draw_arc_pix` - the latter documents its domain as
+			# PI <= b0 < b1 <= TAU (it exists for the crowd DIAL, which sweeps a half turn)
+			# and quietly drew the top half only when handed 0..TAU. On a picture that is
+			# already a dome of crust that half-ring is easy to mistake for a highlight,
+			# which is how it survived a look. A closed ring is one call and the right shape.
 			for ri in 3:
 				var rt := fposmod(t * 1.1 + float(ri) * 0.33, 1.0)
-				draw_arc(c, 30.0 + rt * 90.0, 0.0, TAU, 26, Color(0.75, 0.92, 1.0, (1.0 - rt) * 0.28 * ease_in), 2.0, true)
+				draw_ring_pix(c, 30.0 + rt * 90.0, 2.0, Color(0.75, 0.92, 1.0, (1.0 - rt) * 0.55 * ease_in))
 			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "the world slows down", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(0.82, 0.94, 1.0, ease_in))
 		"egg":
 			# A RAW EGG: cracked over the mouth in one go, which is the joke
 			var c := Vector2(s.x * 0.5, s.y * 0.52)
 			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
 			var tip := clampf(t * 2.0, 0.0, 1.0)
-			var gap := 26.0 * tip
-			# the two shell halves parting, the yolk sliding out between them
-			fill_ellipse(c + Vector2(-gap, -20.0), 26.0, 20.0, Color(0.95, 0.92, 0.86))
-			fill_ellipse(c + Vector2(gap, -20.0), 26.0, 20.0, Color(0.90, 0.87, 0.80))
-			if tip > 0.25:
-				var fall := (tip - 0.25) / 0.75
-				fill_ellipse(c + Vector2(0.0, -10.0 + fall * 46.0), 13.0, 15.0, Color(1.0, 0.78, 0.24))
-				fill_ellipse(c + Vector2(-3.0, -14.0 + fall * 46.0), 4.5, 5.0, Color(1.0, 0.92, 0.62, 0.8))
+			# SEAM. Three ellipses - two off-white blobs parting with a yellow blob between
+			# them. The sprite is the whole moment in one picture: two cracked shell halves
+			# and the yolk already falling between them, so the PARTING no longer has to be
+			# animated by sliding two shapes apart at a continuous offset (`gap`, 0..26px,
+			# which a sprite cannot take). What is left to animate is the arrival, and that
+			# is a whole-art-pixel drop plus a fade - both lossless.
+			if not art_blit("vig/egg", c + Vector2(0.0, -18.0
+					+ round((1.0 - tip) * VIG_DROP) * float(ART_PIXEL)),
+					1.0, 0.0, Color(1, 1, 1, ease_in)):
+				var gap := 26.0 * tip
+				fill_ellipse(c + Vector2(-gap, -20.0), 26.0, 20.0, Color(0.95, 0.92, 0.86))
+				fill_ellipse(c + Vector2(gap, -20.0), 26.0, 20.0, Color(0.90, 0.87, 0.80))
+				if tip > 0.25:
+					var fall := (tip - 0.25) / 0.75
+					fill_ellipse(c + Vector2(0.0, -10.0 + fall * 46.0), 13.0, 15.0, Color(1.0, 0.78, 0.24))
+					fill_ellipse(c + Vector2(-3.0, -14.0 + fall * 46.0), 4.5, 5.0, Color(1.0, 0.92, 0.62, 0.8))
 			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "down in one", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(1.0, 0.9, 0.65, ease_in))
 		"tomato":
 			# A THROWN TOMATO, eaten anyway. The bite is the picture, and the little
@@ -23277,13 +23372,19 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 			var c := Vector2(s.x * 0.5, s.y * 0.52)
 			hud_panel(Rect2(c.x - 170.0, c.y - 110.0, 340.0, 210.0))
 			var bite := clampf((t - 0.25) / 0.6, 0.0, 1.0)
-			draw_tomato(c + Vector2(0.0, -6.0), 6.5 * (1.0 - 0.35 * bite), 0.35, 1.0)
-			if bite > 0.0:
-				# the bite taken out of the top-right, in the panel's own colour
-				draw_circle(c + Vector2(30.0 * (1.0 - 0.35 * bite), -30.0 * (1.0 - 0.35 * bite)), 17.0 * bite, Color(0.10, 0.07, 0.09))
+			# SEAM, AND THIS ONE IS TWO SPRITES BECAUSE A BITE IS NOT A HOLE. The drawing
+			# punched the bite out with a disc of the PANEL's own colour - which only works
+			# while the panel is a flat fill, breaks the moment anything is behind it, and
+			# grew that disc continuously from 0 to 17px. A bitten tomato is a different
+			# object, so it is a different picture: whole until the teeth land, bitten after.
+			if not art_blit("vig/tomato_bit" if bite > 0.0 else "vig/tomato", c + Vector2(0.0, -14.0)):
+				draw_tomato(c + Vector2(0.0, -6.0), 6.5 * (1.0 - 0.35 * bite), 0.35, 1.0)
+				if bite > 0.0:
+					draw_circle(c + Vector2(30.0 * (1.0 - 0.35 * bite), -30.0 * (1.0 - 0.35 * bite)), 17.0 * bite, Color(0.10, 0.07, 0.09))
 			for si in 4:
 				var st2 := fposmod(t * 1.6 + float(si) * 0.27, 1.0)
-				draw_circle(c + Vector2(-46.0 + float(si) * 30.0, 44.0 + st2 * 16.0), 3.0 * (1.0 - st2), Color(0.82, 0.22, 0.20, (1.0 - st2) * 0.7 * ease_in))
+				fill_disc_pix(Vector2(c.x - 46.0 + float(si) * 30.0, c.y + 44.0 + st2 * 16.0),
+					3.0 * (1.0 - st2), Color(0.82, 0.22, 0.20, (1.0 - st2) * 0.7 * ease_in))
 			draw_string(font, Vector2(c.x - 170.0, c.y + 82.0), "still perfectly good", HORIZONTAL_ALIGNMENT_CENTER, 340.0, ps(16), Color(1.0, 0.82, 0.72, ease_in))
 
 

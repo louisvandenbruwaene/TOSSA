@@ -42,6 +42,17 @@ declare -a TARGETS=(
   "day_hub_work:40:day:--day work"
   "day_hub_rest:40:day:--day rest"
   "day_hub_prep:40:day:--day prep"
+  # THE FIVE HUB VIGNETTES. They had no target until 2026-08-19 and could not have had
+  # one: each plays for 0.8-1.8s in the middle of a hub action and then the ledger moves,
+  # so a capture could never land on one. That is exactly why they were still smooth
+  # vector shapes - two stacked ellipses for a hot meal, a triangle for a slice of pie -
+  # long after everything around them became sprites. `--vign <id> <t>` holds one at a
+  # fixed phase; the phase is part of the target, or the frame is not comparable run to run.
+  "vignette_eat:60:day:--vign eat 0.55"
+  "vignette_inn:60:day:--vign inn 0.55"
+  "vignette_pie:60:day:--vign pie 0.55"
+  "vignette_egg:60:day:--vign egg 0.75"
+  "vignette_tomato:60:day:--vign tomato 0.55"
   "shop:60:shop:--shop"
   "skills:40:skills:--skills"
   "sheet:40:sheet:--sheet"

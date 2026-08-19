@@ -279,6 +279,37 @@
   "ui/wordmark_52": {
     "path": "res://Assets/UI/wordmark_52.png"
   },
+  "_VIGNETTES": [
+    "The five day-hub vignettes (draw_day_anim), added 2026-08-19. They were the last",
+    "block of pure vector picture-drawing left in the game - stacked ellipses for a meal,",
+    "a triangle on an ellipse for a slice of pie, four rects for the inn - and nothing",
+    "could photograph them until Game.gd gained --vign, so no one had looked at them since",
+    "the density changed. PixelLab pixflux with the locked palette forced through",
+    "color_image_base64: all six came back with ZERO off-palette pixels and hard alpha, so",
+    "there is no reducer in the path. scripts/install_vignettes.py strips the generator's",
+    "cast shadow (a mid grey that reads as a smear on a near-black panel) and crops each",
+    "sprite to its own ink. Delete these lines and the vector drawings come back.",
+    "tomato and tomato_bit are TWO PICTURES on purpose: a bite is a different object, not",
+    "a hole punched in the first one with the panel's own colour."
+  ],
+  "vig/eat": {
+    "path": "res://Assets/UI/vignette/eat.png"
+  },
+  "vig/inn": {
+    "path": "res://Assets/UI/vignette/inn.png"
+  },
+  "vig/pie": {
+    "path": "res://Assets/UI/vignette/pie.png"
+  },
+  "vig/egg": {
+    "path": "res://Assets/UI/vignette/egg.png"
+  },
+  "vig/tomato": {
+    "path": "res://Assets/UI/vignette/tomato.png"
+  },
+  "vig/tomato_bit": {
+    "path": "res://Assets/UI/vignette/tomato_bit.png"
+  },
   "_FIGURE": {
     "height_art": 164,
     "width_art": 84,
