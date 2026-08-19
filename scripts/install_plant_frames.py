@@ -57,7 +57,18 @@ OUT = ROOT / "Assets" / "UI" / "flower"
 
 # The three densifying segments, in growth order, as (job-stem, drop-first-frame).
 # Each segment's first frame IS the previous segment's last, so all but the first drop it.
-SEGMENTS = [("s1", False), ("s2", True), ("s3", True)]
+# GROWTH ORDER: the SIDE FLOWERS (the subgoals) open before the top bloom does (2026-08-19,
+# Louis: "the subflowers / subgoals should grow first"). That is the order the meter means -
+# a subgoal falls before the goal does - and the first cycle had it backwards, opening the
+# big flower first and popping the two side ones in at the very end.
+# It could not be fixed by reordering frames, because a frame carries the whole plant. It
+# needed a new MIDPOINT to interpolate through: leaves and open side flowers, top still a
+# closed bud. Asking for that by prompt failed - img2img at strength 300 kept the top flower
+# open, and that is the generator being sensibly conservative about an init image. So the
+# midpoint is COMPOSITED from two frames the model already drew: the closed-bud frame, with
+# the side flowers pasted in from the finished plant, both on the same canvas from the same
+# design. See artifacts/paint/plant_mid2.png.
+SEGMENTS = [("s1", False), ("s2", True), ("s3", True), ("s4", True)]
 
 
 def load_segment(stem: str) -> list[np.ndarray]:
