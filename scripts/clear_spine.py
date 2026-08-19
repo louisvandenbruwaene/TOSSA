@@ -52,6 +52,10 @@ USAGE
   .venv/bin/python scripts/clear_spine.py the_midnight_show --patch 215:350 --donor 360:496
   .venv/bin/python scripts/clear_spine.py the_midnight_show --patch 215:350 --donor 360:496 --write
   ...then: .venv/bin/python scripts/pixelise_paint.py --bg the_midnight_show --write
+
+  # a THIN object on a smooth field, over the rows it actually shows in: no donor at all,
+  # just ramp across it (see lerp_fill - this is what the Circus rigging pole needed)
+  .venv/bin/python scripts/clear_spine.py the_circus --patch 314:322 --rows 24:150
 """
 
 from __future__ import annotations
@@ -114,7 +118,8 @@ def empty_runs(a: np.ndarray, y0: int = 150, y1: int = 300, minw: int = 12):
     return runs
 
 
-def clone(a: np.ndarray, patch: tuple[int, int], donors: list[tuple[int, int]]) -> np.ndarray:
+def clone(a: np.ndarray, patch: tuple[int, int], donors: list[tuple[int, int]],
+          mirror_first: bool = False) -> np.ndarray:
     """Fill `patch` by tiling `donors`, alternating mirrored, with cross-faded joins.
 
     TILING IS NEEDED BECAUSE THE CLEAN ROOM IS NARROWER THAN THE HOLE. The spine to clear is
@@ -122,10 +127,20 @@ def clone(a: np.ndarray, patch: tuple[int, int], donors: list[tuple[int, int]]) 
     are laid down in turn and every alternate one is mirrored, which is what keeps a drape's
     vertical folds from repeating at a fixed period - a regular repeat in a vertical texture
     is the single most obvious tell that something has been cloned.
+
+    `mirror_first` FLIPS WHICH WAY THE FIRST PIECE GOES IN, and it is what makes this usable
+    on a room with PERSPECTIVE, which the header above warns it is not (2026-08-19, the
+    Circus). That warning is about a straight COPY: a big top's stripes radiate from a point
+    at the top centre, so a strip lifted from the right of the centre line leans the wrong
+    way the moment it lands on the left of it, and the join reads as a kink in every stripe
+    it crosses. Mirrored, that same strip is the geometric partner of the column it is
+    replacing - the convergence, the lean and the stripe spacing all come out right - so the
+    only rule is that the donor must be near the axis and the patch must be its reflection.
+    Nothing about the tiling changes; this only decides the phase it starts on.
     """
     px0, px1 = patch
     width = px1 - px0
-    pieces, i, mirror = [], 0, False
+    pieces, i, mirror = [], 0, bool(mirror_first)
     while sum(p.shape[1] for p in pieces) < width + FADE:
         d0, d1 = donors[i % len(donors)]
         piece = a[:, d0:d1].copy()
@@ -149,6 +164,52 @@ def clone(a: np.ndarray, patch: tuple[int, int], donors: list[tuple[int, int]]) 
         cur = out[:, x:x + w]
         out[:, x:x + w] = cur * (1 - blend)[None, :, None] + seg * blend[None, :, None]
         x += w - n                                    # overlap successive tiles by the fade
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def lerp_fill(a: np.ndarray, patch: tuple[int, int], rows: tuple[int, int]) -> np.ndarray:
+    """Erase a THIN object by ramping across it, over a limited band of rows.
+
+    THE SECOND REPAIR, AND IT EXISTS BECAUSE THE FIRST ONE DUPLICATES THINGS (2026-08-19, the
+    Circus). `clone` lifts a strip of room and lays it down somewhere else, which is right
+    when the hole is wide and the donor is genuinely empty. The Circus offered neither: the
+    thing to remove is a 6 px rigging pole, and every 13 px donor column within reach of it
+    carries a bulb off one of the tent's light strings - so the clone traded one pole for a
+    pair of twin bulbs hanging side by side, which is a worse artefact because it is one the
+    eye is built to find. Both the mirrored and the plain donor did it.
+
+    A thin object over a smooth field does not need a donor at all. The field either side of
+    it is the answer: ramp from the column just outside one edge to the column just outside
+    the other, per row, and a 6 px pole standing on flat maroon canvas is simply gone. What
+    this CANNOT do is cross a hard edge - run it over a stripe boundary and you get a smear
+    where a crisp line should be - so it is for objects that stand on one continuous tone,
+    and the row range is how you say which part of the object that is.
+
+    `rows` IS THE OTHER HALF OF THE REPAIR. The Circus pole is only visible where the
+    performer is not: he is 86 art px wide and stands dead centre, so he covers it entirely
+    from his hat down, and the only rows that need touching are the ones above his head -
+    where, as it happens, the pole ends exactly at his hairline and reads as though it is
+    growing out of it. Patching the rows he covers as well would be work nobody can see, over
+    the part of the picture with the most detail in it. The band is cross-faded at both ends
+    (FADE rows) so the repair does not stop in a hard horizontal line of its own.
+    """
+    px0, px1 = patch
+    ry0, ry1 = rows
+    out = a.copy().astype(float)
+    left = a[:, max(0, px0 - 1)].astype(float)
+    right = a[:, min(a.shape[1] - 1, px1)].astype(float)
+    w = px1 - px0
+    for i in range(w):
+        t = (i + 1) / (w + 1)
+        col = left * (1.0 - t) + right * t
+        # vertical strength: full inside the band, fading out over FADE rows at each end
+        strength = np.zeros(a.shape[0])
+        strength[ry0:ry1] = 1.0
+        n = min(FADE, max(1, (ry1 - ry0) // 2))
+        strength[ry0:ry0 + n] = np.linspace(0.0, 1.0, n)
+        strength[ry1 - n:ry1] = np.linspace(1.0, 0.0, n)
+        out[:, px0 + i] = (out[:, px0 + i] * (1.0 - strength)[:, None]
+                           + col * strength[:, None])
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
@@ -181,18 +242,34 @@ def main() -> None:
     for s, e in found:
         print(f"   {s}:{e}   w {e - s}")
 
-    ps, ds = flag("--patch"), flag("--donor")
+    ps, ds, rs = flag("--patch"), flag("--donor"), flag("--rows")
+    if ps and rs and not ds:
+        # the thin-object repair: no donor, just ramp across it over the named rows
+        patch = parse_range(ps)
+        rows = parse_range(rs)
+        out = lerp_fill(a, patch, rows)
+        after = column_deviation(out)
+        print(f"\nramped across x{patch[0]}..{patch[1]} over rows {rows[0]}..{rows[1]}")
+        print(f"  spine deviation {dev[patch[0]:patch[1]].mean():.1f} -> "
+              f"{after[patch[0]:patch[1]].mean():.1f}")
+        _emit(im, out, src, name)
+        return
     if not (ps and ds):
-        print("\nPick a --patch a:b over the furniture and --donor a:b[,a:b] over empty room.")
+        print("\nPick a --patch a:b over the furniture and --donor a:b[,a:b] over empty room,")
+        print("or --patch a:b --rows y0:y1 to ramp across a thin object (see lerp_fill).")
         return
     patch = parse_range(ps)
     donors = [parse_range(part) for part in ds.split(",")]
-    out = clone(a, patch, donors)
+    out = clone(a, patch, donors, "--mirror-first" in sys.argv)
     after = column_deviation(out)
     print(f"\npatched x{patch[0]}..{patch[1]} from " + ds + " (alternately mirrored)")
     print(f"  spine deviation {dev[patch[0]:patch[1]].mean():.1f} -> "
           f"{after[patch[0]:patch[1]].mean():.1f}")
 
+    _emit(im, out, src, name)
+
+
+def _emit(im: Image.Image, out: np.ndarray, src: Path, name: str) -> None:
     # keep alpha if the painting had one, so a patched file is a drop-in for the original
     if im.mode == "RGBA":
         out = np.dstack([out, np.asarray(im)[..., 3]])

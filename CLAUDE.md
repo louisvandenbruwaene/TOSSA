@@ -390,6 +390,33 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   measured on the MEDIAN so the writing cannot hide the test from itself), and it is a repair
   you reach for after looking, **never a sweep**: on a cobbled street or a mown pitch that same
   small-detail-on-a-smooth-field IS the picture, and it would scrub 12-19% of it.
+- **A BACKDROP'S FLOOR NEEDS ITS OWN GAMUT READING** (2026-08-19, re-rolling three venues).
+  The floor is one large evenly lit area of one continuous tone and the biggest surface in the
+  picture, so a tone that sits between palette entries has no least-wrong neighbour and error
+  diffusion sprays a regular 2px CHECKERBOARD across the thing the performer is standing on -
+  invisible in a 640x360 thumbnail, unmistakable at 2x. **The whole-frame number hides it**, the
+  same way the mean hid the teal sky: two rolls scoring an unremarkable 0.066 and 0.144 overall
+  measured 0.087 and 0.198 over `img[280:]` alone. `pixelise_paint.py` now prints `floor` beside
+  `gamut` and `spine`. The fix is at the prompt and has two halves - the anti-dither clause
+  ("few colours, flat areas of solid colour, no dithering, no speckle, no noise") AND the tone
+  ("dim ochre brown and dark umber, falling away into shadow toward the front"), which took the
+  Circus's sawdust to 0.003. Steer the texture alone and a bright polished wood floor still
+  scores 0.198; over-steer the tone and you get a flat grey hall that no number complains about
+  and nobody wants to look at.
+- **PUT THE FURNITURE SOMEWHERE, DO NOT ONLY FORBID IT** (2026-08-19). "No tent pole, no mast, no
+  post, no column" produced a rigging pole six pixels wide at art x 317, ending exactly at the
+  performer's hairline. Naming where a thing SHOULD go works where forbidding it does not (crowd
+  "on the far left and the far right" landed first time, every time), but asking for the poles at
+  the edges just moved one to x 290 and made it thicker. What cleared the centre was changing the
+  CAMERA so the middle distance is a flat surface - a plain drawn curtain running across it. A
+  flat surface has nowhere to hang anything. **And do not try to paint the pole out**: both of
+  `clear_spine.py`'s repairs were tried and both are worse than the fault - a cloned donor strip
+  duplicates the light-string bulbs inside it, and the new `--rows` ramp smears every stripe
+  boundary it crosses. `clear_spine.py` grew `--mirror-first` (a donor is only geometrically
+  valid on a picture with perspective if it is the reflection of what it replaces) and `--rows`
+  (a thin object over a smooth field needs no donor, just a ramp across it, over the rows it
+  actually shows in) - both are right for the cases named in their own docstrings and neither is
+  right for a striped tent.
 - **Props are derived**: `--propref <name>` renders one prop isolated at x6 through the real
   drawing code, and `scripts/pixelise_prop.py` reduces it (premultiply before filtering, hard
   alpha threshold, Oklab palette snap). What comes out is the game's real silhouette, not a
