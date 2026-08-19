@@ -25143,6 +25143,7 @@ const MARK_BOX_Y := 1.09976   # ...above the props' baseline
 # their butts a third of a letter below it, and the rise grew because the apex is a merged
 # fire rather than two separate ones. Embers are deliberately allowed past the rise: they
 # are sparse sparks and leaving the frame is the point of them.
+const CREDITS_MARK := 84  # ...and the credits roll opens at exactly half of it
 const MENU_MARK := 168    # the title screen's letter height. The prop mark is far WIDER than the
 						   # word it replaced (five objects and their gaps against five glyphs), so
 						   # it is sized by the room it has to fill rather than by the point size
@@ -26788,8 +26789,16 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	var gold := Color(1.0, 0.88, 0.5)
 	var rows: Array[Dictionary] = []
 	var cur := 0.0
+	# THE MARK OPENS THE ROLL AT HALF THE TITLE SCREEN'S SIZE, NOT A THIRD (2026-08-19).
+	# MENU_MARK is 168 and this was 52 - so the payoff for finishing the game showed its own
+	# name smaller than the shop shows a price plate, sitting in the darkest part of a
+	# painting made for exactly this moment. CREDITS_MARK is half of MENU_MARK because a
+	# whole fraction of the title's own size is the one relationship worth keeping, and the
+	# gap under it is scaled by the same ratio - the row below is placed off the mark's
+	# height, so growing one without the other runs the win line through the A's clubs.
 	cur += 40.0;  rows.append({"y": cur, "kind": "title", "a": GAME_TITLE, "b": ""})
-	cur += 84.0;  rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
+	cur += 84.0 * float(CREDITS_MARK) / 52.0
+	rows.append({"y": cur, "kind": "win", "a": "WORLD'S GREATEST JUGGLER", "b": ""})
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	if sprint_active and sprint_finished_ms >= 0:
 		cur += 44.0; rows.append({"y": cur, "kind": "sub", "a": "SPRINT FINISH   %s" % sprint_clock_text(), "b": ""})
@@ -26835,22 +26844,30 @@ func draw_credits(font: Font, s: Vector2) -> void:
 				# minus the rise. It used to be a hand-picked 78, which happened to equal
 				# 52 * the MARK_RISE of the day and stopped being true the moment the A
 				# was rebuilt.
-				draw_wordmark(ry - 52.0 * MARK_RISE, 52, Color(gold.r, gold.g, gold.b, a), s)
+				draw_wordmark(ry - float(CREDITS_MARK) * MARK_RISE, CREDITS_MARK, Color(gold.r, gold.g, gold.b, a), s)
+			# EVERY ROW CARRIES THE OUTLINE (2026-08-19). draw_read_column already lays a
+			# reading scrim down the middle for exactly this reason - measured on the first
+			# capture, "every stage, conquered" landed on lit boards and all but disappeared
+			# - but a scrim is a uniform darkening and the boards it competes with are lit
+			# IN the painting, with footlights along the lip and thrown bouquets catching
+			# them. The establishing card lost the same argument on the Circus's tent
+			# doorway. An outline follows the letters, so it works wherever the row happens
+			# to have scrolled to, which on a roll is every part of the picture in turn.
 			"sub":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(24), Color(0.9, 0.8, 0.68, a))
+				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
 			"orn":
 				draw_ornament(cx, ry, 150.0, Color(0.82, 0.62, 0.34, 0.8 * a))
 			"role":
-				draw_string(font, Vector2(0, ry - 8.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(17), Color(0.82, 0.7, 0.52, 0.85 * a))
-				draw_string(font, Vector2(0, ry + 22.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(27), Color(gold.r, gold.g, gold.b, a))
+				draw_text_shout(font, Vector2(0, ry - 8.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.82, 0.7, 0.52, 0.85 * a))
+				draw_text_shout(font, Vector2(0, ry + 22.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 27, Color(gold.r, gold.g, gold.b, a))
 			"line":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(21), Color(0.92, 0.86, 0.76, a))
+				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
 				if btxt != "":
-					draw_string(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(21), Color(0.92, 0.86, 0.76, a))
+					draw_text_shout(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
 			"win":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(30), Color(1.0, 0.86, 0.42, a))
+				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.86, 0.42, a))
 			"thanks":
-				draw_string(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(30), Color(1.0, 0.9, 0.6, a))
+				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
 
 	# once the last line has climbed past centre the roll settles into a held final
 	# title card, which waits, unmoving, for any key. The scrolling text is above it
