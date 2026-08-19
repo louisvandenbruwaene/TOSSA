@@ -8353,6 +8353,22 @@ func fig_spin_on() -> bool:
 	return true
 
 
+func stem_grow_frames() -> int:
+	return int(stem_grow.get("frames", 0))
+
+
+func stem_grow_key(frac: float) -> String:
+	# WHICH FRAME OF THE PLANT'S LIFE THIS FILL IS. `frac` is 0..1 across the whole act and
+	# the frames are in growth order, so this is a rounded index and nothing more.
+	# ROUND, DO NOT TRUNCATE, the same reason fig_spin_frame gives: a floor() holds each
+	# frame from the instant it is reached until the next one, so the plant is always a
+	# whole step BEHIND the score that grew it.
+	var n := stem_grow_frames()
+	if n <= 0:
+		return ""
+	return "stem/grow_%02d" % clampi(int(round(frac * float(n - 1))), 0, n - 1)
+
+
 func fig_spin_key(dir_name: String) -> String:
 	return "char/spin_" + dir_name.replace("-", "_")
 
@@ -12827,6 +12843,9 @@ var fig_arms: Dictionary = {}     # the performer's ARM BANK, from a manifest's 
 var fig_design: Dictionary = {}   # the active character design's landmark geometry, from a
                                   # variant manifest's _FIGURE block. EMPTY means the traced
                                   # juggler, whose proportions live in fig_ys as constants.
+var stem_grow: Dictionary = {}    # the goal stem's GROWTH CYCLE, from the manifest's _GROW
+								   # block: how many painted frames there are, and nothing
+								   # else. The meter rounds its own fill onto that count.
 var fig_spin: Dictionary = {}     # the TURNAROUND, from a manifest's _SPIN block: an ordered
                                   # list of directions, one painted frame per eighth of a
                                   # turn. EMPTY means no turnaround shipped, and a live Spin
@@ -12920,6 +12939,11 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 		# art_blit_prop), so the game needs the painting's own idea of where the fire sits
 		# and how big it is - the card's proportions, not the vector drawing's.
 		torch_flame = (pd["_TORCH"] as Dictionary).duplicate(true)
+	if pd.has("_GROW") and typeof(pd["_GROW"]) == TYPE_DICTIONARY:
+		# THE GOAL STEM'S GROWTH: one painted frame per step of the plant's life, in growth
+		# order. Read rather than counted off the key names for the same reason _SPIN is -
+		# the number of frames is a property of the ART, and the meter must not guess it.
+		stem_grow = (pd["_GROW"] as Dictionary).duplicate(true)
 	if pd.has("_SPIN") and typeof(pd["_SPIN"]) == TYPE_DICTIONARY:
 		# THE TURNAROUND: eight painted frames, one per eighth of a live Spin. Read here
 		# rather than assumed from the key names, because the ORDER is the animation - the
@@ -18120,6 +18144,48 @@ func hud_card(r: Rect2, accent := Color(0.95, 0.66, 0.4, 0.30), tutorial_focus: 
 		3.0 if tutorial_focus else 1.0, 9.0, 12.0)
 
 
+func stem_pay_waypoints(frac: float, marks: PackedFloat32Array, live: bool) -> void:
+	# THE BONUSES ARE THE MECHANIC; THE PLANT IS THE PICTURE. The two visual waypoints each
+	# pay one small warm_room() the first time they are passed, and that has to keep
+	# happening whether the stem is a painted growth cycle or the drawn assembly behind it -
+	# a run must not be worth more or less depending on which branch of a seam drew it.
+	# Same ladder the drawn version walks: a waypoint sits half way up to each real goal.
+	if not live or marks.is_empty():
+		return
+	var fi := 0
+	var prev_m := 0.0
+	for m in marks:
+		var way := (prev_m + float(m)) * 0.5
+		if frac >= way and (stem_way_given & (1 << fi)) == 0:
+			stem_way_given |= 1 << fi
+			warm_room(0.03)
+		fi += 2                     # the odd slots are the real goals, which pay nothing
+		prev_m = float(m)
+
+
+func draw_goal_stem_bloom(tip: Vector2, frac: float, over: float, accent: Color, live: bool) -> void:
+	# THE CELEBRATION ONLY - the light, the shed petals and the sparkles. The bloom itself
+	# is in the painting now, so this draws what a painting cannot: light that answers the
+	# score, and petals that move. Split out because it is identical either side of the
+	# growth-cycle seam.
+	var flawless := dropped == 0
+	if over > 0.0:
+		draw_glow(tip, 40.0 + 22.0 * over, Color(accent.r, accent.g, accent.b, 0.28 + 0.24 * over))
+		for i in 6:
+			var sa := atick() * 0.02 + TAU * float(i) / 6.0
+			draw_flower(tip + Vector2(cos(sa), sin(sa)) * (STEM_SHED_R + STEM_SHED_GROW * over), 0, STEM_SHED_SC, sa, 0.5)
+		if live and not stem_gold_bonus_given:
+			stem_gold_bonus_given = true
+			warm_room(0.05)
+	elif frac >= 0.999:
+		draw_glow(tip, 32.0, Color(1.0, 0.86, 0.45, 0.26))
+	if flawless and frac >= 0.999:
+		for i in 5:
+			var ta := atick() * 0.015 + TAU * float(i) / 5.0
+			draw_star4(tip + Vector2(cos(ta), sin(ta)) * (18.0 + 4.0 * over),
+				2.4 + 0.6 * sin(atick() * 0.1 + float(i)), Color(1.0, 0.96, 0.72, 0.85))
+
+
 func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Array, accent: Color,
 		live: bool = true) -> void:
 	# THE GOAL, quietly, because the flowers on the boards are doing the loud work.
@@ -18169,6 +18235,44 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 	# lands half in each of two art pixels however the rect itself is snapped.
 	var trk_h := base - top
 	var hw := STEM_TRACK_W * 0.5 * ap
+
+	# THE PAINTED GROWTH CYCLE (2026-08-19, Louis: "the entire flower and its growing
+	# animation should be animated by pixellab, you then just take frames from it").
+	#
+	# THE TRACK STAYS AND THE ASSEMBLY GOES. What is above this is the empty groove - the
+	# distance still to go, which the plant cannot state because a plant only shows how far
+	# it HAS come; everything below was the game building a plant out of a fill rect, two
+	# lens leaves, two flower-head sprites at fixed offsets and a bud. That composes and it
+	# does not grow: each part appeared at its own threshold, so the stem advanced in five
+	# visible pops across a whole act however smooth `frac` was. One painted frame per step
+	# replaces all of it, and the frames were made as ONE interpolation so the leaves and
+	# the bud arrive when the painting says they do.
+	#
+	# BOTTOM-ANCHORED, NOT CENTRED. Every frame is the same canvas with the plant standing
+	# on its floor, so pinning the canvas's bottom edge to `base` is what keeps the roots
+	# still while the top climbs. art_blit centres on its position, hence the half-height.
+	#
+	# AND THE TRACK GOES WITH THE ASSEMBLY. The empty groove existed because the stalk was a
+	# FILL BAR - a bar has to show its own remainder or it reads as broken. A plant does
+	# not: how far it has come is its whole silhouette, and 46 frames of it is a finer
+	# readout than a groove ever was. Drawn behind the painting it also could not win - the
+	# painted stalk is a tapering organic shape and the track is a straight 12px column, so
+	# whatever the alignment, grey shows down one side or both. It is still drawn for the
+	# procedural fallback below, which IS a fill bar and still needs it.
+	# ...AND THE STALK, NOT THE CANVAS, GOES ON THE CENTRE LINE. The painted stalk sits 3.5
+	# art px left of its own canvas centre in every frame, so centring the CANVAS on `x`
+	# left the empty groove standing beside the plant instead of behind it. `stalk_dx` is
+	# measured by the installer and published in _GROW, because it is a property of the art
+	# and a re-roll will move it.
+	var gkey := stem_grow_key(frac)
+	if gkey != "" and art_bank.has(gkey):
+		var gt: Texture2D = (art_bank[gkey] as Dictionary)["tex"]
+		var gh := gt.get_size().y * float(ART_PIXEL)
+		var gdx := -float(stem_grow.get("stalk_dx", 0.0)) * float(ART_PIXEL)
+		if art_blit(gkey, Vector2(x + gdx, base - gh * 0.5)):
+			stem_pay_waypoints(frac, marks, live)
+			draw_goal_stem_bloom(Vector2(x, base - gh), frac, over, accent, live)
+			return
 	draw_rect(Rect2(x - hw, top, hw * 2.0, trk_h), Color(0.20, 0.17, 0.18, 0.85))
 	draw_rect(Rect2(x - hw, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
 	draw_rect(Rect2(x + hw - ap, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
