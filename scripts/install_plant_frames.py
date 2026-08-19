@@ -147,9 +147,22 @@ def build(write: bool, force: bool) -> int:
 	xs = np.where(band[ys.max() - 7:ys.max() + 1].any(0))[0]
 	dx = round(((xs.min() + xs.max()) / 2.0) - out[0].shape[1] / 2.0, 1)
 	print(f"  stalk sits {dx} art px from the canvas centre")
+	# WHERE THE OPEN BLOOM ACTUALLY IS, so the celebration glow can sit on it. The aura was
+	# hung at the sprite's own top edge, which is the top of the CANVAS - measured, 27 art
+	# px above the bloom's centre, i.e. a halo floating clear of the flower it belongs to.
+	# Measured on the LAST frame because that is the only one the aura is ever drawn over
+	# (it appears at frac >= 0.999), and the bloom's centre moves as it opens.
+	last = out[-1]
+	lop = last[..., 3] > 0
+	warm = lop & (last[..., 0].astype(int) > 180) & (last[..., 0].astype(int) > last[..., 2].astype(int) + 60)
+	wy, wx = np.where(warm)
+	bcx = round(float(wx.mean()), 1) if len(wx) else out[0].shape[1] / 2.0
+	bcy = round(float(wy.mean()), 1) if len(wy) else 0.0
+	print(f"  bloom centre at ({bcx}, {bcy}) art px of the canvas")
 	print(f"  wrote {len(keys)} frames to {OUT.relative_to(ROOT)}")
 	print("  manifest keys: " + " ".join("stem/" + k for k in keys[:3]) + " ...")
-	(SRC / "keys.json").write_text(json.dumps({"frames": len(keys), "stalk_dx": dx}, indent=1))
+	(SRC / "keys.json").write_text(json.dumps(
+		{"frames": len(keys), "stalk_dx": dx, "bloom_cx": bcx, "bloom_cy": bcy}, indent=1))
 	return 0
 
 
