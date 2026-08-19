@@ -66,6 +66,42 @@ func _init() -> void:
 			or not is_equal_approx(TOSSA_BALANCE.migrate_legacy_stamina(50.0, 0), 100.0):
 		push_error("Old saves must preserve their stamina percentage on the new curve.")
 		failed += 1
+	# THE TRICK FACTOR IS UPSIDE, NOT A LADDER OF ITS OWN. This is the contract the
+	# 2026-08-19 rewrite exists to hold: before it, three tricks at the BACKYARD scored
+	# 1.26e34 - seven orders of magnitude past the Midnight Show's own final goal - because
+	# the whole sum was raised to the power of one-plus-the-number-of-distinct-tricks.
+	var btb := float(TOSSA_CATALOG.TRICKS[0]["diff"])
+	var high := float(TOSSA_CATALOG.TRICKS[1]["diff"])
+	var spin := float(TOSSA_CATALOG.TRICKS[2]["diff"])
+	if not is_equal_approx(TOSSA_BALANCE.trick_factor({}), 1.0):
+		push_error("A trickless act must score exactly its streaks, with no trick factor.")
+		failed += 1
+	if TOSSA_BALANCE.trick_factor({spin: 1}) <= 1.0:
+		push_error("Landing a trick once must pay something.")
+		failed += 1
+	# diminishing returns: the tenth landing must be worth strictly less than the first
+	var first_gain := TOSSA_BALANCE.trick_factor({spin: 1}) - TOSSA_BALANCE.trick_factor({spin: 0})
+	var tenth_gain := TOSSA_BALANCE.trick_factor({spin: 10}) - TOSSA_BALANCE.trick_factor({spin: 9})
+	if tenth_gain >= first_gain:
+		push_error("Repeating one trick must pay less each time, not the same or more.")
+		failed += 1
+	# the harder trick pays more for the same number of landings
+	if TOSSA_BALANCE.trick_factor({spin: 5}) <= TOSSA_BALANCE.trick_factor({high: 5}):
+		push_error("A harder trick must be worth more than an easy one at equal landings.")
+		failed += 1
+	# ...and the whole factor stays upside rather than a venue of its own
+	var everything := {btb: 200, high: 200, spin: 200}
+	if TOSSA_BALANCE.trick_factor(everything) > TOSSA_BALANCE.TRICK_FACTOR_CAP + 0.001:
+		push_error("The trick factor must never exceed its cap.")
+		failed += 1
+	# A FULLY FLOURISHED BACKYARD ACT MUST NOT REACH THE NEXT HOUSE'S FINAL GOAL. The
+	# ladder's whole meaning is that a venue is climbed by taking more objects up, never by
+	# pressing the trick key more often in the room you are already in.
+	var backyard_final := finals[0]
+	var flourished: float = backyard_final * TOSSA_BALANCE.trick_factor({btb: 50, high: 50, spin: 50})
+	if flourished >= finals[1]:
+		push_error("Tricks at one venue must not reach the NEXT venue's final goal.")
+		failed += 1
 	if failed == 0:
-		print("TossaBalance: venue curve and sustained-run goal gate verified")
+		print("TossaBalance: venue curve, sustained-run gate and bounded trick factor verified")
 	quit(failed)
