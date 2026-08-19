@@ -23786,6 +23786,12 @@ func draw_day(font: Font, s: Vector2) -> void:
 		draw_day_anim(font, s)
 
 
+const CARD_PAD_BOT := 14.0    # the floor under a grown day card's LAST line. A rounded card
+							   # sweeps its corner radius inward, so a box measured to the exact
+							   # bottom of its final glyph clips that glyph against its own
+							   # border - see day_card_height.
+
+
 func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> float:
 	# a card is one title line until it is SELECTED, then it grows to fit exactly what
 	# it has to say. Measured with max_lines -1, the same as day_draw_card draws it, so
@@ -23795,7 +23801,7 @@ func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> floa
 	var h := 42.0
 	var perf := String(r["id"]) == "perform"
 	if perf:
-		h += 28.0                                   # the stage picker line
+		h += 32.0                                   # the stage picker line
 	# MEASURED THE SAME WAY IT IS DRAWN, empty sub included - this function and
 	# day_draw_card must agree line for line or a card is sized for text it never shows.
 	if String(r["sub"]) != "":
@@ -23803,11 +23809,20 @@ func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> floa
 	if not bool(r["ok"]) and String(r["why"]) != "":
 		h += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	if perf:
-		h += 20.0                                   # the record to chase
+		h += 22.0                                   # the record to chase
 		if next_venue_rep() > 0:
-			h += 18.0                               # ...and how the next stage opens
-		h += font.get_multiline_string_size(next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
-	return h
+			h += 20.0                               # ...and how the next stage opens
+		h += font.get_multiline_string_size(next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y
+	# THE LAST LINE NEEDS FLOOR UNDER IT (2026-08-19, Louis: "add more spacing below the
+	# 'record to beat' or whatever stands below it (the window cuts off the bottom text)").
+	# The card was measured to the exact bottom of its final glyph plus four pixels, which
+	# is not padding, it is a rounding allowance - and a rounded card draws its corner
+	# radius inward, so the unlock hint's descenders finished INSIDE the border sweep and
+	# the line read as clipped. It is not a measurement error: the text really did fit, by
+	# two pixels, in a box whose own bottom edge curves through those two pixels.
+	# CARD_PAD_BOT is that floor, and it is applied to every grown card rather than to the
+	# perform row alone - any card that ever grows a last line has the same edge under it.
+	return h + CARD_PAD_BOT
 
 
 func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: float) -> void:
@@ -23856,11 +23871,11 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		# still move (left to right, never wrapping), with the PURIST mark beside it
 		var pv := play_venue()
 		var pick := "%s%s%s" % ["<   " if pv > 0 else "", String(venue_data(pv)["name"]), "   >" if pv < venue_index() else ""]
-		draw_string(font, Vector2(tx, y + 16.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(18), Color(1.0, 0.88, 0.52))
+		draw_string(font, Vector2(tx, y + 18.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(18), Color(1.0, 0.88, 0.52))
 		if purist:
-			draw_string(font, Vector2(box.position.x + box.size.x - 110.0, y + 16.0), "PURIST",
+			draw_string(font, Vector2(box.position.x + box.size.x - 110.0, y + 18.0), "PURIST",
 				HORIZONTAL_ALIGNMENT_RIGHT, 96.0, ps(11), Color(0.84, 0.72, 0.90))
-		y += 28.0
+		y += 32.0
 	# an EMPTY sub costs no line. get_multiline_string_size("") still returns one line's
 	# height, so simply blanking the string would have moved everything below it down by
 	# exactly the row it was supposed to give back.
@@ -23878,13 +23893,13 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
 			chase = "record to beat   %s" % score_text(rec_table()[vi])
 		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.96, 0.83, 0.52, 0.92))
-		y += 20.0
+		y += 22.0
 		var nxt := next_venue_rep()
 		if nxt > 0:
 			draw_string(font, Vector2(tx, y + 14.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
 				HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.84, 0.74, 0.90, 0.92))
-			y += 18.0
-		draw_multiline_string(font, Vector2(tx, y + 14.0), next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1,
+			y += 20.0
+		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1,
 			Color(0.72, 0.92, 0.70, 0.94))
 
 
