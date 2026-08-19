@@ -19414,6 +19414,12 @@ func gauge_color(frac: float) -> Color:
 	return Color(GAUGE_ZONES[GAUGE_ZONES.size() - 1]["col"])
 
 
+const GAUGE_GAP := 0.016   # the angular hair of dark between two zones, in radians. The
+						   # divisions used to be dark SPOKES laid over the band, which is a
+						   # line drawn on top of an instrument; a gap is the instrument
+						   # being made of separate segments, which is what it is.
+
+
 func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, font: Font) -> void:
 	# A DIAL, not a bar (2026-07-27, Louis: "the public satisfaction should be a gaming
 	# meter, like a fuel meter: a half circle with green, yellow and red"). The crowd's
@@ -19421,6 +19427,24 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# it only ever falls unless you feed it - so it gets the instrument that means that.
 	# The band is coloured by ZONE (see GAUGE_ZONES) rather than by lerping one colour,
 	# because a driver reads "I am in the red" from where the needle IS, not from a hue.
+	#
+	# REBUILT AS AN INSTRUMENT, NOT AN ARC (2026-08-19, Louis: "I'd also like a prettier
+	# meter for the audience: same colors and division, just better looking"). Same four
+	# colours, same four thresholds, same needle-and-peak-pin reading - what changed is
+	# everything around them, and each piece answers something the old one did wrong:
+	#   * A BEZEL AND A FACE. The bands used to float on the card with nothing behind them
+	#     but a slightly darker arc of the same width, so the dial had no edge and no
+	#     depth - it read as four coloured strokes rather than as a thing set into a panel.
+	#   * DIVISIONS ARE GAPS, NOT SPOKES. Four dark radial lines were drawn OVER the bands,
+	#     which at ART_PIXEL 2 is a 2px stripe eating a 22px zone. Cutting the band instead
+	#     costs nothing and reads as segments.
+	#   * A GRADUATED SCALE. Minor ticks every tenth, inside the band, so the dial is a
+	#     scale being read rather than four blocks changing colour.
+	#   * A LIGHTER NEEDLE ON A PROPER HUB. The blade was 6px wide over a 10px dark
+	#     under-blade - a third of the dial's radius in ink - with a flat two-disc hub.
+	#   * THE PEAK PIN LEAVES THE BAND. It was a spoke through the coloured arc, i.e. the
+	#     same mistake as the divisions; it is a small marker outside the rim now, where a
+	#     memory mark belongs and where it cannot be mistaken for the live reading.
 	frac = clampf(frac, 0.0, 1.0)
 	var a0 := PI          # 180 degrees: empty, hard left
 	var a1 := TAU         # 360: full, hard right
@@ -19428,42 +19452,86 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# antialiased primitive - draw_arc for the bands, draw_line for the ticks, two smooth
 	# polygons for the needle, draw_circle for the hub - and it sat in the left rail beside
 	# crisp bitmap numbers looking like a screenshot of a different game. See draw_arc_pix
-	# and draw_spoke_pix; the shapes and the sizes are unchanged, only the rasteriser.
-	# the dial face, then each zone as one thick arc over it
-	draw_arc_pix(c, r, 13.0, a0, a1, Color(0.05, 0.04, 0.05, 0.85))
+	# and draw_spoke_pix; the rasteriser is unchanged, only what is asked of it.
+	var ap := float(ART_PIXEL)
+	# THE FACE IS A SOLID PLATE, NOT AN ANNULUS, and that is the single biggest thing
+	# separating "an instrument" from "four coloured strokes". The dial used to be a ring
+	# with the card showing through the middle, so the needle swept an empty hole and the
+	# hub had nothing to be mounted on - at ART_PIXEL 2 a thin blade over a busy backdrop
+	# also reads as a dashed diagonal, because that is what a one-pixel oblique line IS.
+	# draw_arc_pix spans centre-radius +/- half its thickness, so a thickness equal to the
+	# radius and a centre at half of it fills the whole upper half disc.
+	var plate := r - 3.0
+	draw_arc_pix(c, plate * 0.5, plate, a0, a1, Color(0.12, 0.095, 0.105, 0.96))
+	# the ring the zones are inlaid into, a touch wider than they are on both sides.
+	# DRAWN BEFORE THE BEZEL, and that ordering is the whole reason the bezel exists
+	# visibly: a face 15 art px thick reaches r+7.5, so a rim laid down first is painted
+	# over.
+	draw_arc_pix(c, r, 15.0, a0, a1, Color(0.09, 0.07, 0.08, 0.92))
+	# each zone as one segment, cut from its neighbours by a hair of the face showing
+	# through. Zones already passed burn bright, the rest are dim - a fuel gauge lights the
+	# part of the scale you have used up, so which band the needle is in reads twice.
 	var from := 0.0
 	for z in GAUGE_ZONES:
 		var to := float(z["to"])
 		var zc: Color = z["col"]
-		var lit := frac >= from - 0.001   # zones already passed burn bright, the rest are dim
-		draw_arc_pix(c, r, 11.0, lerpf(a0, a1, from), lerpf(a0, a1, to),
+		var lit := frac >= from - 0.001
+		draw_arc_pix(c, r + 1.0, 9.0,
+			lerpf(a0, a1, from) + (GAUGE_GAP if from > 0.0 else 0.0),
+			lerpf(a0, a1, to) - (GAUGE_GAP if to < 1.0 else 0.0),
 			Color(zc.r, zc.g, zc.b, GAUGE_LIT if lit else GAUGE_DIM))
 		from = to
-	# ticks at every zone edge, so the bands read as a scale and not as decoration
+	# GRADUATIONS, on the FACE INSIDE the band - never over it. The band runs r-3.5..r+5.5,
+	# so a tick that reaches past r-4 is back to being a stripe drawn across a coloured
+	# segment, which is the thing the gaps above just stopped doing.
+	#
+	# ONE TICK PER ZONE EDGE, NOT ONE PER TENTH. Tenths were tried and they SPECKLE: a
+	# one-art-pixel spoke at an oblique angle is a staircase of separated pixels, so eleven
+	# of them read as scattered dust on the face rather than as a scale. Five ticks, two art
+	# pixels wide, are the divisions the dial actually has - and they are the ones a player
+	# reads anyway, because the four bands are what the number means.
+	var edges := {0.0: true}
 	for z2 in GAUGE_ZONES:
-		draw_spoke_pix(c, lerpf(a0, a1, float(z2["to"])), r - 8.0, r + 8.0, 2.0,
-			Color(0.06, 0.05, 0.05, 0.9))
-	# the best the room ever got this act: a bright pin left standing on the dial
+		edges[snappedf(float(z2["to"]), 0.001)] = true
+	for e in edges:
+		draw_spoke_pix(c, lerpf(a0, a1, float(e)), r - 7.0, r - 4.0, ap * 2.0,
+			Color(0.86, 0.78, 0.70, 0.7))
+	draw_arc_pix(c, r - 7.5, 1.5, a0, a1, Color(0.40, 0.32, 0.30, 0.55))   # the face's inner lip
+	# the BEZEL, over the face's outer edge: a warm lip and a dark ring outside it, so the
+	# dial reads as an instrument set into the card rather than as four coloured strokes
+	# lying on it.
+	draw_arc_pix(c, r + 6.5, 1.5, a0, a1, Color(0.58, 0.45, 0.38, 0.85))
+	draw_arc_pix(c, r + 9.0, 4.0, a0, a1, Color(0.15, 0.11, 0.12, 0.95))
+	# THE BEST THE ROOM EVER GOT THIS ACT: a pin standing in the RIM, so a memory mark can
+	# never be read as the live needle - it used to be a spoke straight through the
+	# coloured band, which is the same mistake the divisions were making.
 	if peak > 0.0:
-		draw_spoke_pix(c, lerpf(a0, a1, clampf(peak, 0.0, 1.0)), r - 9.0, r + 9.0, 2.0,
-			Color(1.0, 0.97, 0.85, 0.75))
-	# THE NEEDLE: a tapered blade off a hub, with a counterweight behind the pivot
+		draw_spoke_pix(c, lerpf(a0, a1, clampf(peak, 0.0, 1.0)), r + 5.5, r + 10.5, ap * 1.5,
+			Color(1.0, 0.97, 0.85, 0.85))
+	# THE NEEDLE: a slim tapered blade off a hub, with a short counterweight behind the
+	# pivot. A dark under-blade first, so it reads against a lit zone too.
 	var na := lerpf(a0, a1, frac)
 	var tipc := gauge_color(frac)
-	# a dark under-blade first, so the white needle reads against a lit zone too
-	draw_spoke_pix(c, na, -7.0, r + 3.0, 10.0, Color(0.08, 0.06, 0.07, 0.85))
-	draw_spoke_pix(c, na, -6.0, r + 1.0, 6.0, Color(1.0, 0.96, 0.90))
-	fill_disc_pix(c, 5.6, Color(0.10, 0.08, 0.09))
-	fill_disc_pix(c, 3.2, tipc)
+	draw_spoke_pix(c, na, -9.0, r + 2.0, 11.0, Color(0.05, 0.04, 0.045, 0.95))
+	draw_spoke_pix(c, na, -7.0, r - 1.0, 8.0, Color(1.0, 0.96, 0.90))
+	# ...and a HUB big enough to be one. At three art pixels the old cap rounded into a
+	# four-pixel square sitting on the needle rather than a boss the needle turns on; the
+	# rings have to be a couple of art pixels apart each to read as rings at all.
+	fill_disc_pix(c, 9.5, Color(0.06, 0.05, 0.055))
+	fill_disc_pix(c, 7.5, Color(0.52, 0.42, 0.38))
+	fill_disc_pix(c, 4.0, Color(0.16, 0.13, 0.14))
+	fill_disc_pix(c, 2.5, tipc)
+	draw_rect(Rect2(art_snap(c - Vector2(ap * 2.0, ap * 2.0)), Vector2(ap, ap)),
+		Color(1.0, 0.95, 0.88, 0.6))   # one lit pixel: the hub cap catching the house lights
 	# the readout goes BELOW the hub: the needle sweeps the upper half only, so this is
 	# the one spot on the instrument it can never cross (it did, over the number)
 	if label != "":
-		draw_string(font, Vector2(c.x - r, c.y + 18.0), label, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, ps(14),
+		draw_string(font, Vector2(c.x - r, c.y + 20.0), label, HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, ps(16),
 			Color(tipc.r, tipc.g, tipc.b, 0.95))
 	# in the red, the band itself pulses: the one number in the game that kills a set
 	if frac <= float(GAUGE_ZONES[0]["to"]):
 		var warn := 0.35 + 0.35 * sin(float(tick) * 0.16)
-		draw_arc_pix(c, r, 11.0, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])),
+		draw_arc_pix(c, r + 1.0, 9.0, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])) - GAUGE_GAP,
 			Color(1.0, 0.35, 0.28, warn))
 
 
