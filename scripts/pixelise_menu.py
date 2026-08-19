@@ -20,6 +20,32 @@ THREE SOURCES, ONE OUTPUT:
                  1280x720 by `--menuref`, reduced by exactly 2. Guaranteed to match
                  TOSSA, and the fallback if generated art is ever rejected.
   --from <png>   any 640x360 image.
+  --mirror       modifier on any of the above: keep the source's LEFT half and mirror
+                 it. THIS IS WHAT THE SHIPPED BAKE USES (2026-08-19, Louis: the title
+                 "is not centered: the edges of the curtain are missing and the bows
+                 aren't symmetric"). The 2026-08-13 rewrite made this a single
+                 full-frame pixen painting, and a model asked for a proscenium does not
+                 draw one: measured on that painting, 46.9% of pixels differed from
+                 their own mirror by more than 20 levels, the swag gathers sat at x
+                 26/122/253/355/565 - spans of 96, 131, 102 and then a 210-wide swag
+                 drooping 20px lower than its neighbours - and both frame edges cut a
+                 different fraction of a different swag.
+                 **A PROSCENIUM IS ARCHITECTURE, SO ITS ASYMMETRY IS NOT CHARACTER, IT
+                 IS AN ERROR**, and this is the one picture in the game where the
+                 retired mirror is still right: the note that retired it (CLAUDE.md,
+                 "A FULL-FRAME PICTURE IS ONE GENERATION NOW") retired it for the seven
+                 VENUES, whose whole problem was a focal seam down the middle. This
+                 picture's middle is deliberately an empty stage, which is exactly the
+                 exemption the --from-half block below was written for.
+                 **THE AXIS IS NOT A FREE CHOICE - IT MUST LAND ON A SWAG'S LOW POINT.**
+                 The mirror meets itself with the source's own slope at that column, so
+                 an axis on a rising arc makes a sharp inverted-V spike where the two
+                 halves join. Measured on this painting: mirroring the left half puts
+                 the axis at the bottom of the 253..387 swag and the join is invisible,
+                 while shifting the window 26px right (to land a gather on each frame
+                 edge, which is the more literal reading of "the edges of the curtain")
+                 put the axis on a rising arc and drew a spike dead centre. Symmetric
+                 and smooth beat symmetric and edge-aligned.
 
 WHY NOT ONE 640x360 GENERATION. It was tried (create_image_pro, 40 generations) and the
 model returned a 516x360 picture padded with WHITE to fill the canvas. Stretching 516 to
@@ -131,8 +157,19 @@ def unsign(a: np.ndarray) -> np.ndarray:
 	return a
 
 
-def build(src: Path, write: bool, force: bool, half: bool = False) -> str:
+def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool = False) -> str:
 	im = Image.open(src).convert("RGB")
+	if mirror:
+		# --mirror: take a FULL-FRAME painting's left half and mirror it, which is
+		# --from-half's symmetry without --from-half's unsign() patch (that patch is
+		# aimed at a pixflux half's own bottom-right signature; a full-frame pixen
+		# painting signs the bottom-right of the FULL frame, in the half this throws
+		# away, so applying it here would scrub real picture instead).
+		a = np.asarray(im).astype(np.uint8)
+		if a.shape[1] != ART_W:
+			raise SystemExit(f"{src.name}: --mirror wants a {ART_W}-wide source, got {im.size}")
+		h = a[:, :ART_W // 2]
+		im = Image.fromarray(np.concatenate([h, h[:, ::-1]], axis=1), "RGB")
 	if half:
 		if im.size != (ART_W // 2, ART_H):
 			raise SystemExit(f"{src.name}: --from-half wants {ART_W//2}x{ART_H}, got {im.size}")
@@ -160,6 +197,7 @@ def main() -> int:
 	write = "--write" in sys.argv
 	force = "--force" in sys.argv
 	src, half = REF, False
+	mirror = "--mirror" in sys.argv
 	if "--from" in sys.argv:
 		src = Path(sys.argv[sys.argv.index("--from") + 1])
 	if "--from-half" in sys.argv:
@@ -168,7 +206,7 @@ def main() -> int:
 	if not src.exists():
 		raise SystemExit(f"missing {src} - capture it with:  godot --path . -- --menuref "
 						 f"--shot artifacts/menu_ref/menu.png --shotat 40")
-	print(build(src, write, force, half))
+	print(build(src, write, force, half, mirror))
 	if not write:
 		print("(pass --write to apply)")
 	return 0
