@@ -767,6 +767,9 @@ const PAD_ACTS := [
 # predicted, in-between spot - and moves to a DIFFERENT one only in direct response
 # to a throw or catch (Louis): no drifting ahead of the ball to meet it.
 const HAND_SMOOTH := 0.22  # per-tick lerp of hand toward its target position
+const HAND_FOLLOW := 14    # ticks a hand stays with the prop it just released before it
+						   # starts travelling - the follow-through. Was implicitly ZERO
+						   # (only the upward kick lasted this long), see hand_target.
 # hand_spring (F9 experiment): a critically-near-damped spring standing in for the plain
 # lerp above. Picked by simulation, not feel: at K/D below, a 100px reach hits 90% of the
 # way at tick 9 (the exact tick HAND_SMOOTH's own lerp does), then overshoots ~2.7% and
@@ -1357,6 +1360,10 @@ var hand_parked := [false, false]         # this hand caught while already holdi
                                           # a CATCHING hand now and may not throw again this
                                           # run - see catch_full_on / on_catch / on_throw_press
 var catch_flash := [-999, -999]
+var throw_from := [Vector2.ZERO, Vector2.ZERO]   # where each hand's last throw actually left
+												 # it - the release point, which is not always
+												 # a slot (a Behind the Back leaves from behind
+												 # the far hip). See hand_target's follow-through.
 var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
 var last_drop_tick := -999               # for the juggler's wince expression
 
@@ -9330,10 +9337,34 @@ func hand_target(h: int) -> Vector2:
 	# lane was on the middle line, so the clamp was gone AND there was nothing keeping the
 	# hands where an arm could be drawn. The band is now defined by the arm bank itself, so
 	# no clamp is needed and no lane can go where a clamp would have been the only rescue.
-	# a brief upward kick right after a throw sells the release
+	# THE HAND LEAVES WITH THE PROP IT THREW (2026-08-19, Louis, of the tutorial's pauses:
+	# "the hand has gone to the outside, while the ball is still in its inside position,
+	# which looks bad"). He is describing a freeze, and the freeze is what made it
+	# noticeable, but the mismatch is in the live animation and always was: HAND_SMOOTH 0.22
+	# puts the hand about 63% of the way to its next slot four ticks after a release, while
+	# the prop it just let go of is 5% along an 84-tick flight. So for a tenth of a second
+	# after every throw the arm is already somewhere else, and the object appears to have
+	# been abandoned rather than thrown.
+	#
+	# The fix is a FOLLOW-THROUGH, not a slower hand: the target blends out of the real
+	# release point (throw_from, which is the prop's own from_pos, so it is right for a lane,
+	# a shower's outer launch and a Behind the Back's far hip alike) over the same 14 ticks
+	# the upward kick below already runs for, so the two are one gesture. Nothing about
+	# where a hand ENDS up changes, and there is time to spare - the next arrival at this
+	# hand is 70-odd ticks away and the ease itself takes about ten.
+	#
+	# AND IT REPLACES THE UPWARD KICK RATHER THAN JOINING IT. There used to be a 22px lift
+	# here for the same 14 ticks, to "sell the release" - and a lift is the one thing this
+	# figure cannot do, because the painted arm bank is a curve of (reach -> dip) and a hand
+	# raised 22px off that curve has no pose anywhere in it. Measured with --handlog at
+	# three balls: the follow-through WITH the kick left the painted palm more than
+	# FIG_PALM_MAX from the simulated hand on 13% of frames at a mean of 5.4px, against 0%
+	# and 2.9 without it. A prop drawn at the sim hand beside an arm painted somewhere else
+	# is exactly what that guard exists to report. The follow-through sells the release
+	# better anyway: the hand goes WITH the object instead of flicking away from it.
 	var k := tick - int(throw_kick[h])
-	if k >= 0 and k < 14:
-		p.y -= 22.0 * (1.0 - float(k) / 14.0)
+	if k >= 0 and k < HAND_FOLLOW:
+		p = (throw_from[h] as Vector2).lerp(p, float(k) / float(HAND_FOLLOW))
 	return p
 
 
@@ -10424,6 +10455,7 @@ func do_throw(h: int, hold: int) -> void:
 		var bc := stage_center()
 		b.from_pos = Vector2(lerpf(bc.x, inner_pos(other(h)).x, 0.75), bc.y + 26.0)
 
+	throw_from[h] = b.from_pos   # ...and the hand leaves from there too (see hand_target)
 	throw_kick[h] = tick
 	charging[h] = false
 	if not started:
@@ -13296,6 +13328,28 @@ func update_sim() -> void:
 func update_hands() -> void:
 	for h in [LEFT, RIGHT]:
 		var cur: Vector2 = hpos[h]
+		# A HAND THAT HAS JUST LET GO STAYS WITH WHAT IT LET GO OF, WHILE THE WORLD IS
+		# STOPPED (2026-08-19, Louis: a lesson must not pause "when the balls have only just
+		# left the hand, else the hand has gone to the outside, while the ball is still in
+		# its inside position, which looks bad").
+		#
+		# THIS FUNCTION DELIBERATELY RUNS DURING A FREEZE and that is usually right: a
+		# guided catch stops the world 14 ticks before the arrival, and the hand easing on
+		# through means it is waiting under the prop by the time the player presses. But
+		# easing is paced by REAL frames while the freeze holds `tick`, so a hand that has
+		# just thrown completes its whole travel against a prop pinned two ticks up its arc.
+		# Held for as long as the player takes to read a line, that is an arm abandoning a
+		# ball in mid-air.
+		#
+		# Only the hand that threw, only while frozen, only for TUT_RELEASE_CLEAR of the
+		# sim's own ticks - so nothing about live play, the hit-stop, or a hand REACHING for
+		# an incoming prop changes. Together with HAND_FOLLOW (which is what puts the hand ON
+		# the release point in the first place) this is the whole fix: a freeze at age zero
+		# shows the hand where the prop is, and it stays there for as long as the freeze
+		# lasts. See the note above tut_quiet_fx for the version of this that tried to
+		# SUPPRESS the pause instead, and what that broke.
+		if tut_active and tut_frozen() and tick - int(throw_kick[h]) < TUT_RELEASE_CLEAR:
+			continue
 		var target := hand_target(h)
 		if exp_on("hand_spring"):
 			var accel := (target - cur) * HAND_SPRING_K - hvel[h] * HAND_SPRING_D

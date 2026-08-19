@@ -814,6 +814,16 @@ review" for the accept/reject examples and why.
 - **Catch:** Perfect always secures; Good/Late are a rising-with-Accuracy, falling-with-height
   chance (90%/70% at Accuracy 100, no gear, no extra height). Accuracy 101-150 = Focus (stamina);
   151-200 buys 5 catch frames.
+- **THE HAND LEAVES WITH THE PROP IT THREW (2026-08-19).** `HAND_FOLLOW` blends the hand's target
+  out of the release point (`throw_from`, the prop's own `from_pos`) over 14 ticks. It was
+  implicitly zero: HAND_SMOOTH 0.22 puts a hand 63% of the way to its next slot four ticks after
+  a release while the prop is 5% along an 84-tick flight, so for a tenth of a second after every
+  throw the arm is already somewhere else. **It REPLACES the old 22px upward kick rather than
+  joining it**, and that is the measured part: a lift is the one thing this figure cannot do,
+  because the painted arm bank is a curve of (reach -> dip) and a hand 22px off that curve has no
+  pose in it. `--handlog` at three balls: follow-through WITH the kick left the painted palm past
+  `FIG_PALM_MAX` on 13% of frames at a mean 5.4px; without it, 0% and 2.5px, against a 2.9px
+  baseline with no follow-through at all. Every pattern at 3 and 5 measures 0% / 1.5-3.1px.
 - **Difficulty (added 2026-08-16):** SLOTH / BEAR / OCTOPUS, picked once on a brand new career
   (`ST_DIFFICULTY`, between the slot screen and the basics tutorial - three PixelLab mascot
   cards) and changeable any time after from Settings. A single shared seam each:
