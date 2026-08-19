@@ -49,7 +49,24 @@ Codex improvements:
   across four short pages. The goal-stem demo holds its finished yellow bloom for one full second.
 - **Tutorial actions stop at teachable moments:** a held high toss must be released and caught, then
   waits for Enter; guided throws pause with the preceding ball near its apex and guided catches pause
-  just before arrival. Free-practice tallies clamp and remain banked at their target. During basics,
+  just before arrival. **A LESSON MAY NOT STOP THE WORLD MID-SENTENCE OR MID-RELEASE (2026-08-19,
+  Louis: the tutorials "pause at the wrong time, they should only pause when an input is
+  expected ... make sure they don't pause when the balls have only just left the hand").** Three
+  rules, all measured with the new `--tutlog`, which prints every freeze with each airborne prop's
+  age and time-to-landing (a stopped world is the one state a screenshot cannot judge):
+  ALL 26 of the basics lesson's freezes opened while the line was still typing at
+  TUT_SPEECH_CPS - `tut_hold_update` has gated on `tut_speech_done` since 2026-08-08 and the
+  basics' own `do` beats never got it; a plain throw beat now waits for its line, while a PEAK
+  and a CATCH beat are exempt because both are timed on a prop already flying (an apex arrives 42
+  ticks after a launch and a line takes 150+), and `tut_snap_speech` finishes the line for them.
+  After the fix: 30 freezes, none mid-sentence, lesson completing in 32s of the harness's 60.
+  **AND THE RELEASE HALF OF IT IS FIXED IN THE DRAWING, NOT BY REFUSING TO PAUSE** - see the
+  note above `tut_quiet_fx`. A gate that held freezes out of the release window worked and
+  desynchronised the scripted hand order: delaying one beat 36 ticks let the CATCH GUARD fire
+  inside the gap, the autoplayer caught into a hand the advanced style needs empty, and the
+  lesson stalled at 46 of 59 steps. **A scripted lesson is a sequence; anything that moves a
+  beat can let another mechanism take it out of order** - which is CLAUDE.md's own warning about
+  hand-written choreography arriving from a direction nobody had thought of. Free-practice tallies clamp and remain banked at their target. During basics,
   Esc offers Resume, Restart Step, and Quit Game; it never offers End Session/day hub, so quitting is
   allowed but skipping mandatory onboarding is not.
 - **Unlock lessons are selective and share one juggling grammar:** buying a new prop does not queue

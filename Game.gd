@@ -966,6 +966,29 @@ const TUT_CATCH_GUARD := 14    # THE CATCH GUARD (2026-07-30, Louis: "it should 
 const TUT_HOLD_GAP := 8        # ticks of real motion after a satisfied beat before the
 								# next one may stop the world - so the throw and the catch
 								# the player just made are actually SEEN happening
+const TUT_RELEASE_CLEAR := 20  # ...AND NO BEAT MAY FREEZE A PROP THAT HAS ONLY JUST LEFT A HAND
+								# (2026-08-19, Louis: "make sure they don't pause when the balls
+								# have only just left the hand, else the hand has gone to the
+								# outside, while the ball is still in its inside position, which
+								# looks bad").
+								#
+								# THE PICTURE, AND WHY IT IS THE PAUSE'S FAULT RATHER THAN THE
+								# ART'S. A frozen beat stops `tick` but deliberately keeps
+								# update_hands() running (see _physics_process), so during a
+								# hold the PROP is pinned where the sim left it while the HAND
+								# goes on easing toward its target. That is exactly right for a
+								# catch - the hand arrives under the incoming prop while the
+								# world waits - and exactly wrong in the first few ticks after a
+								# release: the ball is still sitting on inner_pos, and the hand
+								# that just emptied is already sliding out to outer_pos. Held
+								# there for as long as the player takes to read, it is a ball
+								# hanging in mid-air beside an arm that has left it behind.
+								# 20 ticks covers both halves of the tell: the follow-through runs
+								# 14 (HAND_FOLLOW) and a HAND_SMOOTH ease is ~90% done in 10.
+								# READ AS "HOW LONG A RELEASE TAKES TO READ", and used by the
+								# freeze-hold in update_hands. It is NOT a gate on when a
+								# lesson may pause - that was tried and broke the scripted
+								# hand order; see the note above tut_quiet_fx.
 const TUT_STEP_READ := 30      # ...and a longer breath at the top of each step, to read it
 const PROMPT_LEAD := 90        # ticks before a catch that its key prompt begins to glow
 							   # and brighten (at the 50% slow cap, SLOW_TOTAL_CAP, that
@@ -2091,6 +2114,13 @@ var _late_catch_n := -1     # dev: --latecatch N makes the auto-player catch N t
 var _handlog := false       # dev: --handlog prints each hand's x every tick during play,
 							  # to tell a real jitter (oscillating x) from a hand that merely
 							  # sits still but far from the ball's lane (ROADMAP 12b)
+var _tutlog := false        # dev: --tutlog prints every moment a LESSON STOPS THE WORLD -
+							  # which of the three mechanisms did it, what it is waiting for,
+							  # and how old every airborne prop is. A freeze is the one state
+							  # in this game a screenshot cannot judge (it looks identical to
+							  # a running frame), so "the tutorials pause at the wrong time"
+							  # had no evidence anyone could gather. See tut_log_hold.
+var _tut_logged := -1       # ...the tick the open beat was reported at, so one hold logs once
 var _eggdemo := false     # dev: repeatedly break an egg, to screenshot the effect
 # dev (--vign <id> [t]): hold one hub vignette on screen at a FIXED phase.
 # The five of them (eat/inn/pie/egg/tomato) were the only screens in the game with no
@@ -2427,6 +2457,8 @@ func _ready() -> void:
 		_late_catch_n = int(ua[lci + 1])
 	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
 		_handlog = true
+	if ua.has("--tutlog"):      # dev: log every tutorial freeze (see _tutlog)
+		_tutlog = true
 	# debug_mode is NOT in this list (2026-08-05, Louis: the debug build should open the
 	# title screen, not a practice tool). It used to be, so /Applications/PIXELTOSSA
 	# Debug.app dropped straight into Practice and the menu, slots, settings and credits
@@ -2933,6 +2965,7 @@ func _physics_process(delta: float) -> void:
 	if tut_active:
 		tut_hold_update()
 		if not tut_hold.is_empty():
+			tut_log_hold("beat")
 			cine_tick += 1
 			if _demo:
 				tut_hold_autoplay()
@@ -2943,6 +2976,8 @@ func _physics_process(delta: float) -> void:
 		# THE BASICS' OWN "do" BEATS (see the region comment above tut_do_step): the
 		# same stopped-world trick, for the conversational script's single-key steps.
 		if tut_do_step() and tut_do_ready():
+			tut_snap_speech()
+			tut_log_hold("do")
 			cine_tick += 1
 			if _demo:
 				tut_do_autoplay()
@@ -2957,6 +2992,8 @@ func _physics_process(delta: float) -> void:
 		# - a `free` beat is left running, because trying it out and dropping it is what a free
 		# beat is for.
 		if tut_catch_hold():
+			tut_snap_speech()
+			tut_log_hold("guard")
 			cine_tick += 1
 			if _demo:
 				on_catch(tut_guard_hand())   # the autoplayer has no hands either
@@ -6129,9 +6166,25 @@ func tut_do_ready() -> bool:
 		# the second ball UNDER the first, and the first has only just left the hand. So they
 		# were taught to fire both at once, which is not a cascade, and the line telling them
 		# to wait was contradicted by the game stopping and demanding a key.
+		# ...AND IT IS TIMED ON A PROP IN THE AIR, so it is exempt from the speech gate
+		# below for exactly the reason a catch beat is: an apex arrives 42 ticks after a
+		# launch and an ordinary line takes 150 or more to type, so waiting for the words
+		# would mean this beat never fired at all. tut_snap_speech finishes the line
+		# instead, which is what tut_hold_update has always done for a beat that had to
+		# open early.
 		if bool(step.get("peak", false)):
 			return tut_at_peak()
-		return true
+		# NOBODY IS ASKED FOR A KEY BEFORE THE LINE NAMING IT HAS ARRIVED (2026-08-19,
+		# Louis: the tutorials "should only pause when an input is expected"). The note
+		# above has always SAID a throw beat "holds from the moment the line finishes", and
+		# nothing implemented it: `tut_do_ready` returned true on the step's very first
+		# frame, so the world stopped dead and demanded a key while the sentence naming that
+		# key was still typing itself out at TUT_SPEECH_CPS. Measured with --tutlog, all 26
+		# of the basics lesson's freezes opened mid-sentence. This is the older lessons' own
+		# rule (tut_hold_update has gated on tut_speech_done since 2026-08-08) finally
+		# applied to the basics - and only to the beats that CAN wait: a plain throw has no
+		# timing of its own, while a peak and a catch are both about a prop already flying.
+		return tut_speech_done()
 	# A CATCH BEAT HOLDS AS THE PROP COMES IN, not once it has arrived. It used to be
 	# `tick >= b.land_tick`: the world ran at full speed for the whole flight and only stopped
 	# at the arrival tick itself, so every press a beginner made on the way in was read as a
@@ -6222,6 +6275,62 @@ func tut_at_peak() -> bool:
 		if absi(tick - apex) <= TUT_PEAK_WINDOW:
 			return true
 	return false
+
+
+func tut_snap_speech() -> void:
+	# THE SENTENCE FINISHES THE MOMENT THE WORLD STOPS FOR IT (2026-08-19). tut_hold_update
+	# has done this since 2026-08-08 for the older lessons' beats - "if the game is stopping
+	# to ask for a key, the sentence naming that key is finished being coy about it" - and
+	# the basics' own `do` beats and the catch guard never got it. Measured with --tutlog on
+	# the basics lesson: ALL 26 of its freezes opened with the line still typing, because a
+	# beat opens about 35 ticks after its step does and a line takes 150 or more to arrive.
+	# So the world stopped, the prompt asked for a key, and the instruction was still
+	# appearing a word at a time underneath it - the exact moment a pause is worst.
+	if tut_active and not tut_speech_done():
+		tut_speech_tick = -100000.0
+
+
+func tut_log_hold(why: String) -> void:
+	# ONE LINE PER FREEZE (dev, --tutlog). A stopped world looks exactly like a running one
+	# in a screenshot, so this is the only way to check the thing Louis actually reported -
+	# WHEN a lesson stops. `age` is ticks since the prop left the hand and `in` is ticks
+	# until it lands, which are the two numbers the two guards are written against:
+	# TUT_RELEASE_CLEAR must be true of every age, and a freeze with nothing landing and
+	# nothing owed should not exist at all.
+	if not _tutlog or _tut_logged == tick:
+		return
+	_tut_logged = tick
+	var props := ""
+	for b in balls:
+		if b.state == STATE_FLIGHT:
+			props += "  [age %d in %d]" % [tick - b.launch_tick, b.land_tick - tick]
+	print("tutlog t%5d  %-10s step %2d %-10s speech %s%s" % [tick, why, tut_step,
+		String(tut_step_data().get("goal", "")), "done" if tut_speech_done() else "typing", props])
+
+
+# THE FREEZE IS NOT MOVED OUT OF THE RELEASE WINDOW; THE PICTURE IS FIXED AT ITS SOURCE.
+#
+# The first answer to Louis's "don't pause when the balls have only just left the hand" was
+# literally that: a `tut_release_clear()` gate refusing to open any freeze while a prop was
+# inside TUT_RELEASE_CLEAR of its launch. It worked, and it broke the lesson - which is worth
+# writing down, because it is not obvious and it cost a full diagnosis.
+#
+# A SCRIPTED LESSON IS A SEQUENCE, AND DELAYING ONE BEAT LETS ANOTHER MECHANISM TAKE IT OUT OF
+# ORDER. Measured with --tutlog on the empty-hands cascade: step 44 (throw) should open its
+# freeze at t3107, the tick its step began; the release gate held it back 36 ticks because the
+# previous throw was two ticks old, and inside that window the CATCH GUARD fired instead (a
+# prop was 14 ticks from landing, which outranks everything) and the autoplayer caught into a
+# hand the advanced style needs empty. From there the hand order was one exchange out and the
+# lesson never finished - 46 of 59 steps, stalled, where the same script had run to completion
+# for weeks. This is CLAUDE.md's own standing warning about hand-written choreography, arriving
+# from a direction nobody had thought of: the guard does not just "quietly cover" a mistake in
+# the script, it can CAUSE one if anything moves a beat.
+#
+# What fixes the picture instead, and fixes it everywhere rather than only in a lesson:
+# HAND_FOLLOW (the hand leaves with the prop it threw) and the freeze-hold in update_hands (a
+# hand that has just let go stops easing while the world is stopped). Frozen at age zero the
+# hand is exactly on the release point now, which is the frame Louis asked for; nothing has to
+# refuse to pause.
 
 
 func tut_quiet_fx() -> bool:
