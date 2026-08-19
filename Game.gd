@@ -19107,15 +19107,42 @@ func draw_results(font: Font, s: Vector2) -> void:
 		draw_string(font, Vector2(lx, py + 96.0), String(ft[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(1.0, 0.55, 0.42))
 	if age >= 64:
 		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
-		var sc := 1.0 + 1.1 * (1.0 - k) * (1.0 - k)   # stamps down from large to rest
 		var g := run_grade()
 		var gc := grade_color(g)
 		var bc := Vector2(rx - 42.0, py + 56.0)
-		draw_set_transform(bc, -0.06 * (1.0 - k), Vector2(sc, sc))
-		draw_circle(Vector2.ZERO, 42.0, Color(gc.r, gc.g, gc.b, 0.14 * k + 0.06))
-		draw_arc(Vector2.ZERO, 42.0, 0.0, TAU, 40, gc, 3.0, true)
-		draw_string(font, Vector2(-42.0, 21.0), g, HORIZONTAL_ALIGNMENT_CENTER, 84.0, ps(58), gc)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# THE PRIZE IS A PRIZE, AND ONLY WHEN ONE IS WON (2026-08-19). The badge was a
+		# draw_circle plus a draw_arc - two antialiased rims - inside a draw_set_transform
+		# whose scale ran continuously from 2.1 to 1.0, which is the exact pair of things
+		# pixel art cannot take: a soft edge, and a fractional scale. It also handed a
+		# bottom grade the same laurel as a flawless one.
+		# A rosette is a theatre award and it is EARNED, so S/A/B get the sprite and C/D
+		# keep a plain grid ring. The letter stays procedural on the sprite's own darkened
+		# plaque - text is screen density by decision 2, and a grade is a letter.
+		var won := g == "S" or g == "A" or g == "B"
+		# WHERE THE LETTER GOES IS MEASURED OFF THE SPRITE, NOT GUESSED. The rosette's
+		# plaque is 20 of its 34x56 art pixels across, centred at (-0.5, -11.5) from the
+		# sprite's own centre - so at ART_PIXEL 2, and with the sprite hung 8px low to
+		# leave its ribbon tails room, the plaque lands at bc + (-1, -15) and is 40 screen
+		# pixels wide. A 58pt letter was sized for the 84px circle this replaced and
+		# overflowed the plaque by half its own height.
+		var lc := bc
+		var big := 44
+		var rest := 32
+		if won and art_blit("ui/rosette", bc + Vector2(0.0, 8.0), 1.0, 0.0,
+				Color(gc.r, gc.g, gc.b, 0.55 + 0.45 * k)):
+			lc = bc + Vector2(-1.0, -15.0)
+		else:
+			draw_glow_pix(bc, 46.0, Color(gc.r, gc.g, gc.b, (0.14 * k + 0.06)))
+			draw_ring_pix(bc, 42.0, 4.0, Color(gc.r, gc.g, gc.b, 0.85 * k + 0.15))
+			big = 78
+			rest = 58
+		# THE STAMP SNAPS, IT DOES NOT EASE. The old beat was a draw_set_transform whose
+		# scale ran continuously 2.1 -> 1.0, which is the one thing pixel art cannot take.
+		# Two whole steps read as a HARDER impact than the ease did - which is the point of
+		# a stamp - and both sizes are multiples of 4, where this font is crisp.
+		var gsz := rest if k >= 0.34 else big
+		draw_string(font, Vector2(lc.x - 42.0, lc.y + float(gsz) * 0.34), g,
+			HORIZONTAL_ALIGNMENT_CENTER, 84.0, ps(gsz), gc)
 	draw_line(Vector2(lx, py + 104.0), Vector2(rx, py + 104.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
 
 	# stat rows, each fading in a beat after the last; the score value counts up

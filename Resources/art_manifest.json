@@ -310,6 +310,9 @@
   "vig/tomato_bit": {
     "path": "res://Assets/UI/vignette/tomato_bit.png"
   },
+  "ui/rosette": {
+    "path": "res://Assets/UI/rosette.png"
+  },
   "_FIGURE": {
     "height_art": 164,
     "width_art": 84,
