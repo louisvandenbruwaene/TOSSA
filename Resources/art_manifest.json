@@ -328,7 +328,9 @@
     ],
     "frames": 46,
     "cell": [72, 88],
-    "stalk_dx": -3.5
+    "stalk_dx": -3.5,
+    "bloom_cx": 34.2,
+    "bloom_cy": 26.7
   },
   "stem/grow_00": {
     "path": "res://Assets/UI/flower/grow_00.png"

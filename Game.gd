@@ -4347,10 +4347,17 @@ func day_actions() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var tired := too_tired()
 	var tired_why := "too tired to work (stamina under %d)  -  sleep first" % int(TIRED_FLOOR)
-	var purist_sub := "P releases Accuracy + Speed." if purist else "P binds Accuracy + Speed for PURIST."
+	# NO PURIST SUB LINE (2026-08-19, Louis: it "is still pushing down other text (like:
+	# record to beat, next unlock) ... if you want to keep that spacing, you need to remove
+	# purist there"). The perform row's only sub was the P hint, and a sub is a WHOLE LINE -
+	# so the row spent one, always, on a key rather than on the three things a player is
+	# actually reading there: the venue, the record to beat, and what unlocks next. The
+	# STATE still shows as the right-aligned PURIST badge on the picker line, and the KEY
+	# moved into the hub's own hints row, which costs nothing because that row already
+	# exists and already grows a stage hint for this exact row.
 	out.append({"id": "perform", "grp": "work", "icon": "star", "name": "PERFORM",
 		"cost": "", "ok": not tired, "why": tired_why if tired else "",
-		"sub": purist_sub})
+		"sub": ""})
 	if not sprint_active:
 		out.append({"id": "practice", "grp": "work", "icon": "loop", "name": "PRACTICE",
 			"cost": "", "ok": not tired, "why": tired_why if tired else "",
@@ -18271,7 +18278,17 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		var gdx := -float(stem_grow.get("stalk_dx", 0.0)) * float(ART_PIXEL)
 		if art_blit(gkey, Vector2(x + gdx, base - gh * 0.5)):
 			stem_pay_waypoints(frac, marks, live)
-			draw_goal_stem_bloom(Vector2(x, base - gh), frac, over, accent, live)
+			# THE AURA GOES ON THE BLOOM, NOT ON THE CANVAS'S TOP EDGE. Passing the sprite's
+			# top hung the halo 27 art px clear of the flower it belongs to - a glow with
+			# nothing under it. `bloom_cx`/`bloom_cy` are measured by the installer off the
+			# LAST frame, which is the only one the aura is ever drawn over, and are art
+			# pixels of the sprite's own canvas: the left edge is the blit centre minus half
+			# the width, so the bloom is that plus its own offset.
+			var gw := gt.get_size().x * float(ART_PIXEL)
+			var bcx: float = float(stem_grow.get("bloom_cx", gt.get_size().x * 0.5))
+			var bcy: float = float(stem_grow.get("bloom_cy", 0.0))
+			draw_goal_stem_bloom(Vector2(x + gdx - gw * 0.5 + bcx * float(ART_PIXEL),
+				base - gh + bcy * float(ART_PIXEL)), frac, over, accent, live)
 			return
 	draw_rect(Rect2(x - hw, top, hw * 2.0, trk_h), Color(0.20, 0.17, 0.18, 0.85))
 	draw_rect(Rect2(x - hw, top, ap, trk_h), Color(0.42, 0.36, 0.34, 0.5))
@@ -19006,7 +19023,17 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		var col_w := LW - 14.0 - (col_x - LX)
 		var fc := Color(0.98, 0.60, 0.72)
 		draw_string(font, Vector2(col_x, ccard_y + 96.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, ps(11), Color(0.85, 0.72, 0.66))
-		draw_flower(Vector2(col_x + 9.0, ccard_y + 118.0), 0, 1.7, -PI * 0.5, 0.95)
+		# THROUGH draw_coin_mark, LIKE EVERY OTHER PRICE IN THE GAME (2026-08-19, Louis:
+		# "the flower icon in the juggling stage (current earned flowers) is uglier than the
+		# shop flower icon and it should also rotate ... make sure that every single flower
+		# icon (currency) in the entire game looks like those in the shop"). This was the
+		# ONE currency mark calling draw_flower directly, and it therefore missed both
+		# things draw_coin_mark adds: the glyph resolution (grid 1.0 - on the art grid a
+		# 7px mark rounds into a berry, see draw_flower's own note) and `turning`. So the
+		# live HUD's mark was a coarser, dead version of the one on every shop card.
+		# r = 8.5 is the same mark at the same size: draw_coin_mark divides by 5 to reach
+		# draw_flower's scale, and this was drawn at 1.7.
+		draw_coin_mark(Vector2(col_x + 9.0, ccard_y + 118.0), 8.5, Color(1, 1, 1, 0.95), true)
 		# the night's take SHRINKS to fit, never trims: fit_text would render a good
 		# night's 12,400 as "12,4...", and a truncated number is not a number
 		var take := commafy(run_flowers)
@@ -23216,6 +23243,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var hints := [[["Up", "Down"], "choose"], [["Enter"], "open" if selid.begins_with("grp:") else "do it"], [["Tab"], "sheet"], [["Esc"], esc_note]]
 		if selid == "perform":
 			hints.insert(1, [["Left", "Right"], "stage"])
+			hints.insert(2, [["P"], "release purist" if purist else "purist"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 
 	if day_anim != "":
@@ -23232,7 +23260,10 @@ func day_card_height(font: Font, r: Dictionary, sel: bool, sub_w: float) -> floa
 	var perf := String(r["id"]) == "perform"
 	if perf:
 		h += 28.0                                   # the stage picker line
-	h += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 10.0
+	# MEASURED THE SAME WAY IT IS DRAWN, empty sub included - this function and
+	# day_draw_card must agree line for line or a card is sized for text it never shows.
+	if String(r["sub"]) != "":
+		h += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 10.0
 	if not bool(r["ok"]) and String(r["why"]) != "":
 		h += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	if perf:
@@ -23294,9 +23325,13 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, sub_w: floa
 			draw_string(font, Vector2(box.position.x + box.size.x - 110.0, y + 16.0), "PURIST",
 				HORIZONTAL_ALIGNMENT_RIGHT, 96.0, ps(11), Color(0.84, 0.72, 0.90))
 		y += 28.0
-	draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), String(r["sub"]),
-		HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1, Color(0.86, 0.80, 0.70))
-	y += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 10.0
+	# an EMPTY sub costs no line. get_multiline_string_size("") still returns one line's
+	# height, so simply blanking the string would have moved everything below it down by
+	# exactly the row it was supposed to give back.
+	if String(r["sub"]) != "":
+		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), String(r["sub"]),
+			HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1, Color(0.86, 0.80, 0.70))
+		y += font.get_multiline_string_size(String(r["sub"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 10.0
 	if not ok and String(r["why"]) != "":
 		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), String(r["why"]),
 			HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1, Color(1.0, 0.66, 0.48))
@@ -23492,7 +23527,7 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 		"egg":
 			fill_ellipse(c, 5.5, 7.5, col)
 		"coin":
-			draw_coin_mark(c, 7.5, col)
+			draw_coin_mark(c, 7.5, col, true)
 		"book":
 			# SKILLS: an OPEN book (Louis) - two leaves rising to a spine, a page edge on
 			# each side and a few ruled lines. Two rectangles side by side read as a
@@ -26103,7 +26138,7 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 		# white blob on it is the exact coin `draw_coin_mark` replaced back in July - so the
 		# purse the player is handed in the last beat of the tutorial was drawn in the currency
 		# art of two economies ago, while the hub they walk into next draws flowers.
-		draw_coin_mark(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 1.0, 1.0, ka))
+		draw_coin_mark(Vector2(kx + 120.0, ky + 66.0), 8.0, Color(1.0, 1.0, 1.0, ka), true)
 		draw_string(font, Vector2(kx + 140.0, ky + 72.0), commafy(money), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.86, 0.45, ka))
 		for i in 3:
 			var bc := ball_color(i)
@@ -26286,7 +26321,7 @@ func draw_play_mode_screen(font: Font, s: Vector2) -> void:
 			Color(ac.r, ac.g, ac.b, 0.9 if selected else 0.3), 2.2 if selected else 1.0, 14.0, 16.0)
 		draw_glow(Vector2(x + cw * 0.5, y + 78.0), 56.0, Color(ac.r, ac.g, ac.b, 0.12))
 		if i == 0:
-			draw_coin_mark(Vector2(x + cw * 0.5, y + 78.0), 18.0, ac)
+			draw_coin_mark(Vector2(x + cw * 0.5, y + 78.0), 18.0, ac, true)
 		else:
 			draw_string(title_font(), Vector2(x, y + 96.0), "»", HORIZONTAL_ALIGNMENT_CENTER,
 				cw, ps(54), ac)
@@ -27445,6 +27480,13 @@ func draw_coin_mark(c: Vector2, r: float, col: Color, turning: bool = false) -> 
 	# about what the number in front of them means
 	# `turning` is opt-in, and deliberately so (2026-07-27, Louis: "the flowers
 	# shouldn't turn when on stage, perhaps the icon could tho: in the store").
+	# EVERY CALL SITE OF THIS FUNCTION NOW PASSES IT (2026-08-19, Louis: "make sure that
+	# every single flower icon (currency) in the entire game looks like those in the shop"),
+	# and that does not reopen the 2026-07-27 decision - it settles it. The split that note
+	# describes is between a flower lying ON THE BOARDS, which is an object at rest, and the
+	# same mark used as a UI ICON, which is a symbol. Nothing on the boards comes through
+	# here; three UI icons (the hub's card icon, the starting-kit purse, the run-type card)
+	# were simply never given the flag when they were written.
 	# A flower lying on the boards is an OBJECT at rest and must be still; the same
 	# mark used as a UI icon is a symbol, and a slow drift there just keeps the
 	# screen alive. Phased off its own x so a shelf of price plates drifts
