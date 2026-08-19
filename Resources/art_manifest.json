@@ -313,6 +313,12 @@
   "ui/rosette": {
     "path": "res://Assets/UI/rosette.png"
   },
+  "stem/bloom": {
+    "path": "res://Assets/UI/flower/bloom.png"
+  },
+  "stem/flower": {
+    "path": "res://Assets/UI/flower/flower.png"
+  },
   "_FIGURE": {
     "height_art": 164,
     "width_art": 84,

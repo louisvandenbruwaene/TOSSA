@@ -1174,8 +1174,13 @@ const FLOWER_REACH := 1.24
 const STEM_BOX_W := 142.0         # the stalk's whole column, out to the card's right margin
 # 110, not 124: the bud sits 8px above the stalk's base and is 16px tall, so a taller box
 # put its bottom two pixels off the cash-in line along the card's foot.
-const STEM_BOX_H := 110.0
-const STEM_BOX_TOP := 50.0        # ...inset this far down the card, to leave the bloom room
+const STEM_BOX_H := 132.0
+# 34, not 50 (2026-08-19, Louis: "smaller topflower and longer green"). The inset exists
+# only to leave the celebration headroom, so a smaller bloom buys the stalk its own length
+# back: 132 of green where there were 110, with the tip still landing clear of the act
+# header above. The two numbers move together and neither is free - see STEM_SHED_R, which
+# orbits wider than the bloom and is what actually sets the ceiling.
+const STEM_BOX_TOP := 34.0        # ...inset this far down the card, to leave the bloom room
 const STEM_BLOOM_SC := 5.0        # the bloom at the moment the final goal falls...
 const STEM_BLOOM_GROW := 1.8      # ...plus this much again at full overflow
 # THE CELEBRATION HAS A CEILING, AND IT IS THE CARD ABOVE. The bloom is meant to overflow
@@ -1185,9 +1190,9 @@ const STEM_BLOOM_GROW := 1.8      # ...plus this much again at full overflow
 # The stalk's box is inset far enough down the card that a full bloom lands just inside the
 # card's own top edge, and the shed ring is sized to stop there too - it orbits WIDER than
 # the bloom, so it, not the bloom, is what sets the real ceiling.
-const STEM_SHED_R := 40.0         # the ring of shed petals orbits at this...
-const STEM_SHED_GROW := 8.0       # ...widening by this much as the overflow grows
-const STEM_SHED_SC := 1.1         # each shed petal's own scale
+const STEM_SHED_R := 30.0         # the ring of shed petals orbits at this...
+const STEM_SHED_GROW := 6.0       # ...widening by this much as the overflow grows
+const STEM_SHED_SC := 0.8         # each shed petal's own scale
 const STEM_TRACK_W := 6.0         # the stalk's width in ART pixels (so 12 screen px)
 const STEM_LEAF_LEN := 44.0       # a leaf's reach off the stalk...
 const STEM_LEAF_W := 9.5          # ...and its half-thickness at the widest point
@@ -18220,7 +18225,19 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		var my := base - box.size.y * clampf(m, 0.0, 1.0)
 		var fp := Vector2(x + fdir * STEM_FLOWER_OUT, my - 10.0)
 		var back := Vector2(x, my) - fp
-		draw_flower(fp, 2, STEM_FLOWER_SC, back.angle() - PI * 0.5, 0.95, back.length() / STEM_FLOWER_SC)
+		# THE HEAD'S OWN LITTLE STEM IS STILL DRAWN, because it is a DIRECTION - it points
+		# back at the stalk and its length is whatever the gap happens to be, which no
+		# sprite can be. Only the bloom on the end of it is a painting.
+		var swp := maxf(1.0, 1.6 * STEM_FLOWER_SC) * 0.5
+		var sdir := back.normalized()
+		var snrm := Vector2(-sdir.y, sdir.x) * swp
+		fill_poly_pix(PackedVector2Array([fp - snrm, fp + snrm,
+			Vector2(x, my) + snrm, Vector2(x, my) - snrm]), Color(0.30, 0.56, 0.28, 0.95))
+		# SEAM: NOT ROTATED. draw_flower spun these slowly, which a procedural rosette can
+		# take and a painting cannot - a rotated sprite is resampled every frame, and a real
+		# flower on a stalk does not turn anyway. Louis asked for natural.
+		if not art_blit("stem/flower", fp, 1.0, 0.0, Color(1, 1, 1, 0.95)):
+			draw_flower(fp, 2, STEM_FLOWER_SC, back.angle() - PI * 0.5, 0.95, back.length() / STEM_FLOWER_SC)
 		if live and not is_goal[fi] and (stem_way_given & (1 << fi)) == 0:
 			stem_way_given |= 1 << fi
 			warm_room(0.03)
@@ -18256,8 +18273,13 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 		if gold and live and not stem_gold_bonus_given:
 			stem_gold_bonus_given = true
 			warm_room(0.05)
-		draw_flower(bud, 2, STEM_BLOOM_SC + 0.45 + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
-		draw_flower(bud, 0, 1.10 + 0.20 * over, -atick() * 0.014, 0.98)
+		# SEAM. THE OVERFLOW NO LONGER GROWS THE BLOOM, and it cannot: a sprite scaled by
+		# STEM_BLOOM_GROW * over is a fractional scale on every frame of the celebration.
+		# The overflow is carried by the glow and the widening ring of shed petals instead,
+		# which were always doing most of that work anyway.
+		if not art_blit("stem/bloom", bud, 1.0, 0.0, Color(1, 1, 1, 1.0)):
+			draw_flower(bud, 2, STEM_BLOOM_SC + 0.45 + STEM_BLOOM_GROW * over, atick() * 0.01, 1.0)
+			draw_flower(bud, 0, 1.10 + 0.20 * over, -atick() * 0.014, 0.98)
 		if flawless:
 			for i in 5:
 				var ta := atick() * 0.015 + TAU * float(i) / 5.0
@@ -18270,8 +18292,9 @@ func draw_goal_stem(box: Rect2, frac: float, over: float, marks: PackedFloat32Ar
 			for i in 5:
 				var ta2 := atick() * 0.015 + TAU * float(i) / 5.0
 				draw_star4(bud + Vector2(cos(ta2), sin(ta2)) * 16.0, 2.2, Color(1.0, 0.97, 0.78, 0.8))
-		draw_flower(bud, 2, 3.6, atick() * 0.008, 1.0)
-		draw_flower(bud, 0, 1.10, -atick() * 0.012, 0.98)
+		if not art_blit("stem/bloom", bud, 1.0, 0.0, Color(1, 1, 1, 1.0)):
+			draw_flower(bud, 2, 3.6, atick() * 0.008, 1.0)
+			draw_flower(bud, 0, 1.10, -atick() * 0.012, 0.98)
 	else:
 		# STILL A BUD - and it swells as the goal nears, so the change is a growth and
 		# not a swap. It also BREATHES, which is the one thing the rail was missing: for
