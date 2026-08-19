@@ -1010,6 +1010,9 @@ still smooth vector drawing long after everything around them became sprites.
 phase - they play for 0.8-1.8s in the middle of a hub action and then the ledger moves, so no
 capture could land on one, and an unfrozen phase photographs a different moment every run. Its
 effect can never land, so a capture cannot spend ten flowers.
+`--binds acc|spd|both|off` books tonight's limiters for a capture: the two hub rows need a cursor
+and an Enter, which no capture can press, so their BOUND state had no capture path at all. Unlike
+`--assists` it DOES write back, because a booking belongs to the save.
 `--assists on|off` pins BOTH assist switches for one run: the two dark icons and the UNAIDED row
 need two keypresses inside a live act, which no capture can make, and the flag never writes its
 pin back to the shared settings file.

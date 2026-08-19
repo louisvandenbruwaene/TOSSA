@@ -42,6 +42,10 @@ declare -a TARGETS=(
   "day_hub_work:40:day:--day work"
   "day_hub_rest:40:day:--day rest"
   "day_hub_prep:40:day:--day prep"
+  # TONIGHT'S TWO LIMITERS, ON. They are set by walking the hub's cursor onto a row and
+  # pressing Enter, which no capture can do - so the BOUND state of the rows, the perform
+  # card's badge and the record board they switch to had no capture path (see --binds).
+  "day_hub_binds:40:day:--day work --binds both"
   # THE FIVE HUB VIGNETTES. They had no target until 2026-08-19 and could not have had
   # one: each plays for 0.8-1.8s in the middle of a hub action and then the ledger moves,
   # so a capture could never land on one. That is exactly why they were still smooth
