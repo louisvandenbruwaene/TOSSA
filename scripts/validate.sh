@@ -156,12 +156,23 @@ for lesson in count_4 pattern_columns trick_btb trick_spin; do
 done
 
 # --- 3d. Dangerous-prop consequence -----------------------------------------
-log_head "3d. Dangerous-prop recovery (--prop 6)"
+# THIS ASSERTS THE OPPOSITE OF WHAT IT USED TO, ON PURPOSE (2026-08-19, Louis: "disable the
+# lose all stamina when hit by a dangerous object for now, it's irritating"). It used to
+# require reason=chainsaw_injury; the rule is off, so a chainsaw drop must now end the act
+# the ordinary way - on drops, on stamina, on the crowd - or not at all.
+#
+# The switch is Game.gd's INJURY_ENDS_ACT, and this test moves with it. That is the point of
+# testing the BEHAVIOUR: turning the rule back on makes this check fail loudly, which is the
+# reminder to flip it back, rather than leaving a green suite describing a game that no
+# longer exists.
+log_head "3d. Dangerous-prop drop (--prop 6, injury rule disabled)"
 run_headless 30 "$WORK/injury.log" --demo --booking --venue 0 --prop 6 || true
-if grep -q '^ACT .*reason=chainsaw_injury' "$WORK/injury.log"; then
-  log_ok "A chainsaw drop ended the act through its distinct recovery path."
+if ! grep -q '^ACT ' "$WORK/injury.log"; then
+  fail "Dangerous-prop act never resolved (no ACT line) - cannot tell what it did."
+elif grep -q '^ACT .*reason=.*_injury' "$WORK/injury.log"; then
+  fail "A dangerous prop still ended the act on injury - INJURY_ENDS_ACT is meant to be off."
 else
-  fail "Dangerous-prop drop did not resolve as chainsaw_injury."
+  log_ok "A chainsaw drop no longer ends the act on injury ($(grep -m1 -o 'reason=[a-z_]*' "$WORK/injury.log"))."
 fi
 scan_run_log "$WORK/injury.log" || FAIL=1
 

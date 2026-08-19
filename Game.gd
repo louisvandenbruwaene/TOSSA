@@ -4265,9 +4265,27 @@ func dangerous_prop(kind: int = -1) -> bool:
 	return prop_weight(kind) >= 3
 
 
+# THE INJURY RULE IS OFF (2026-08-19, Louis: "disable the lose all stamina when hit by a
+# dangerous object for now, it's irritating").
+#
+# WHAT IT DID: dropping a knife, a torch or the chainsaw emptied stamina to zero, set
+# `exhausted`, and ended the act on the spot with a recovery card - one slip, at any point
+# in a set, and the night was over with whatever was scored so far. That is a whole evening
+# and a booking segment spent on a single mistimed catch, and the props it punishes are the
+# ones the score curve pushes the player toward, so the late game is where it bites hardest.
+#
+# WHAT "FOR NOW" MEANS FOR THE CODE: exactly one predicate returns false, and every other
+# piece stays wired up and reachable - `injury_prop`, the three `*_injury` collapse reasons
+# with their fail cards, the red drop flash in draw_hud. Nothing was deleted, so turning it
+# back on (or handing it a gentler cost than "all of it") is this one line plus a decision
+# about what the cost should be. Deleting the machinery would have made that a rewrite.
+const INJURY_ENDS_ACT := false
+
 func injury_prop_kind(kind: int) -> bool:
 	# Clubs are theatrical danger but not an injury prop. These three carry the explicit
 	# recovery consequence promised by their blade, flame, or running motor.
+	if not INJURY_ENDS_ACT:
+		return false
 	return kind in [PROP_KNIVES, PROP_TORCHES, PROP_CHAINSAW]
 
 
