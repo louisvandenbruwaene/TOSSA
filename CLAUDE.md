@@ -1075,6 +1075,20 @@ review" for the accept/reject examples and why.
   giving it a gentler cost than "all of it") is one line plus a decision. **`validate.sh`'s step 3d
   moved with it** and now asserts the opposite: a chainsaw drop must NOT end the act on injury.
   Test the behaviour, not the machinery, or the suite stays green describing a game that is gone.
+- **THE TWO LIMITERS ARE A PANEL INSIDE THE PERFORM CARD (2026-08-19, Louis: "binding accuracy and
+  slowmo should be a small subwindow of the perform window, not separate ones").** Walking to them
+  as their own cards worked and cost too much: full-height cards with icon discs and 17pt titles
+  gave two SETTINGS the same weight as PERFORM and PRACTICE, so a drawer of three things to do
+  read as a list of five. `inset` is a DRAWING flag and nothing else - the rows stay in
+  `day_actions()`, in order, so the cursor still walks onto them, Enter still toggles through
+  `day_activate`, the footer still says "toggle" and `--binds` still captures. `day_card_height`
+  gives them zero height (and the layout loop no gap), and the perform card reserves the panel at
+  the FOOT of its own box. Two smaller things make it read as one window rather than three:
+  **`open` is not `selected`** (the perform card stays grown while the cursor is inside its panel,
+  or the venue name and the record to beat vanish at the moment you are setting that act up), and
+  `day_perform_focus()` keeps Left/Right on the stage picker from inside the panel, because the
+  arrows are on screen the whole time.
+
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
 The distilled rulebook (text rendering, drawing, performance, persistence, testing) now lives in
