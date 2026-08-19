@@ -589,7 +589,19 @@ const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher 
 const HAND_IN_DIP := 26.0
 const HAND_IN_DX := 54.0      # inner_pos: just outside the torso, where a prop is held
 const HAND_OUT_DX := 100.0    # outer_pos: the catch point, and the widest the arms go
-const COL_LANE_IN := 44.0     # innermost lane, measured from the centre line
+const COL_LANE_IN := 52.0     # innermost lane, measured from the centre line.
+							   # **IT IS THE PAINTED ARM'S OWN FLOOR, AND IT WAS 44**
+							   # (2026-08-19, Louis: "fix the hands for columns"). The arm
+							   # bank is an IK solve published as a table of reaches, and it
+							   # covers 26..51 ART px - so 52..102 screen px. A lane at 44
+							   # sits INSIDE that floor, which means `fig_arm_pick` returns
+							   # the innermost arm it has while `fig_hand_pos`'s FIG_PALM_MAX
+							   # guard rejects that arm's palm, and the prop, the catch ring
+							   # and the hand are all drawn ~50px from the sleeve that is
+							   # supposed to be holding them. Every columns lane was doing
+							   # this, at every count. col_lane_in() reads the bank at
+							   # runtime so the two can never drift apart again; this
+							   # constant is the fallback for a build with no painted arms.
 const COL_LANE_STEP := 44.0   # ...and the widest two lanes on one side ever sit apart,
 							   # so a low count keeps the tidy spread it always had
 const COLUMNS_SYNC := 0.65    # how strongly a Columns throw is pulled toward the
@@ -6084,13 +6096,12 @@ func tut_do_ready() -> bool:
 func tut_landing_ball(h: int) -> Ball:
 	# THE PROP THIS HAND MUST DEAL WITH NEXT: of everything in flight bound for hand h, the
 	# one arriving SOONEST - which, at the one height a lesson throws at, is always the one
-	# thrown first. Returns null when nothing is on its way. (The odd-count middle ball
-	# belongs to whichever hand takes it, the same exception tut_incoming/tut_guard_hand make.)
+	# thrown first. Returns null when nothing is on its way.
 	var best: Ball = null
 	for b in balls:
 		if b.state != STATE_FLIGHT:
 			continue
-		if b.to_hand != h and b != col_mid_ball:
+		if b.to_hand != h:
 			continue
 		if best == null or b.land_tick < best.land_tick:
 			best = b
@@ -6224,10 +6235,10 @@ func tut_do_autoplay() -> void:
 
 
 func tut_incoming(h: int) -> bool:
-	# is any ball in flight dropping toward hand h right now? (the odd-count middle ball
-	# either hand may take, so it counts for both). Used to keep a top-up off a busy hand.
+	# is any ball in flight dropping toward hand h right now? Used to keep a top-up off a
+	# busy hand. Every prop is bound to one hand now, the odd-columns spare included.
 	for b in balls:
-		if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball):
+		if b.state == STATE_FLIGHT and b.to_hand == h:
 			return true
 	return false
 
@@ -8287,6 +8298,29 @@ func inner_pos(h: int) -> Vector2:
 	return Vector2(c.x - HAND_IN_DX, y) if h == LEFT else Vector2(c.x + HAND_IN_DX, y)
 
 
+func hand_carry_y(dx: float) -> float:
+	# HOW LOW A HAND SITS AT A GIVEN REACH, in screen y. `dx` is its distance from the centre
+	# line. The two named slots are the two ends of it - inner_pos carries HAND_IN_DIP below
+	# the catch line, outer_pos sits on it - and everything between is the same carry, taken
+	# linearly.
+	#
+	# THIS EXISTS FOR COLUMNS (2026-08-19), WHOSE HANDS TAKE EVERY REACH BETWEEN THEM. A
+	# columns hand stands under its own lane, so it is at dx 52..100 depending which column it
+	# owns, and hand_target used to give all of them inner_pos's y - the full dip, at every
+	# lane. Two things were wrong with that at once, and they pulled in opposite directions:
+	#   * the LANE's props launch and land on the catch line (`cy` in do_throw), so a held
+	#     prop was drawn 26px above the hand holding it at every lane in the pattern;
+	#   * the painted arm bank carries its own dip as a function of REACH - measured off
+	#     `_ARMS`, 27 screen px at reach 26 falling smoothly to 0 at reach 51 - so a hand
+	#     pinned at the inner dip disagreed with the arm painted for its reach by up to 26px,
+	#     which is nearly twice FIG_PALM_MAX and is why the guard was still refusing 28% of
+	#     columns frames after the lanes themselves were fixed.
+	# One line reconciles all three: the hand, the prop and the painting now describe the same
+	# carry, because the game's two slots and the bank's sweep are the same two poses.
+	var t := clampf((absf(dx) - HAND_IN_DX) / maxf(1.0, HAND_OUT_DX - HAND_IN_DX), 0.0, 1.0)
+	return stage_center().y + HAND_IN_DIP * (1.0 - t)
+
+
 func slot_pos(h: int, slot: int) -> Vector2:
 	match slot:
 		HAND_INNER:
@@ -8581,18 +8615,20 @@ func fig_hand_pos(h: int) -> Vector2:
 	# ...BUT ONLY WHILE THE PAINTING IS ACTUALLY NEAR THE HAND, and this guard is what makes
 	# the whole idea safe at the edges.
 	#
-	# COLUMNS reaches where no painting does. COL_HAND_MIN was removed in 2026-07-28 so a hand
-	# stands under its own lane even when that lane is inside the torso: measured over a 7-ball
-	# run the right hand spends 36% of its time inside reach 20 and touches dead centre. No arm
-	# bank covers that - a pose with the arms crossed in front of the body is invisible to the
-	# motion-based fitter, because an arm that never leaves the silhouette never moves against
-	# it - so the nearest painted arm out there is a long way off.
+	# THE GUARD IS A BACKSTOP NOW, AND IT USED TO BE COLUMNS' NORMAL STATE (2026-08-19).
+	# Columns reached where no painting does: the lane band started at 44 screen px against a
+	# bank that stops at 52, and the odd count's spare lane sat on the middle line, i.e. at
+	# reach 0. Measured over a 7-ball run the right hand spent 36% of its time inside reach 20
+	# and touched dead centre, and this guard fired for 70% of columns frames - so the pattern
+	# ran almost entirely on the fallback, with the sleeve left behind wherever the prop went.
 	#
-	# Following the palm THEN would be actively wrong: a ball waiting to go up the middle lane
-	# would be drawn 50px to one side of that lane and would jump back to it on the throw. So
-	# past this distance the mechanic wins and the prop is drawn where it really is. Inside it -
-	# every cascade, and columns at ordinary counts - the palm wins and the prop sits in the
-	# hand. Each rule is right in its own regime and the swap happens where they agree.
+	# Both causes are gone at the source (col_lane_in reads the bank's own floor;
+	# columns_lane_count moved the spare column off the unreachable middle), so every lane in
+	# every pattern is now a reach the bank actually paints. The guard stays because it is
+	# still the right answer if a pose is ever asked for that the bank does not hold: following
+	# a palm 50px from the prop would draw the ball beside its own lane and snap it back on the
+	# throw, which is worse than a hand a pixel out. It should simply never fire in play now,
+	# and --handlog is what says whether that is true.
 	if _handlog:
 		# the UNGUARDED distance, which is what says whether the bank has art for this reach
 		# at all - the guarded number cannot, because it reads zero both when the palm is
@@ -8792,49 +8828,120 @@ func fig_design_col(key: String, fallback: Color) -> Color:
 	return Color(float(arr[0]) / 255.0, float(arr[1]) / 255.0, float(arr[2]) / 255.0)
 
 
-func columns_side_lanes() -> int:
-	# how many columns ONE hand owns. On an odd count the centre column is the odd one
-	# out and belongs to neither side, which is why this is a plain halving either way.
-	return maxi(1, num_balls / 2)
+func col_lane_in() -> float:
+	# THE INNERMOST LANE A HAND CAN ACTUALLY STAND ON, in screen px from the centre line,
+	# READ OFF THE PAINTED ARM BANK rather than declared beside it.
+	#
+	# The bank is a table of poses indexed by reach in ART px, and its smallest entry is the
+	# closest to the body any painted arm gets. A lane inside that is a lane whose hand has
+	# no arm: fig_arm_pick still returns the innermost pose it owns, fig_hand_pos's
+	# FIG_PALM_MAX guard then refuses that pose's palm as too far from the simulated hand,
+	# and the prop is drawn on its lane with the sleeve left behind - which is exactly what
+	# Columns looked like until 2026-08-19.
+	#
+	# Reading it here rather than copying the number means regenerating the bank with a
+	# different floor moves the lanes with it. Falls back to the constant when there is no
+	# bank at all, so the procedural figure behaves as it always did.
+	var bank := fig_arm_bank(RIGHT)
+	if bank.is_empty():
+		return COL_LANE_IN
+	var lo := INF
+	for e: Dictionary in bank:
+		lo = minf(lo, float(e["reach"]))
+	return maxf(COL_LANE_IN, lo * ART_PIXEL)
 
 
-func columns_step() -> float:
+func columns_lane_count(h: int) -> int:
+	# how many columns hand `h` owns. An odd count cannot split evenly, and the extra lane
+	# goes to the DOMINANT hand.
+	#
+	# **IT USED TO BE A CENTRE COLUMN AND IT CANNOT BE** (2026-08-19). The odd ball was
+	# rendered as a lane on the middle line, thrown and caught from it, so the pattern read
+	# as a symmetric left / middle / right - and a hand standing on that line is asking for
+	# reach ZERO. No arm can be painted there, and not because the bank is thin: a two-bone
+	# arm with a pinned shoulder can only put its hand between |l1 - l2| and l1 + l2 from
+	# that shoulder, so its own root is outside its reach by construction. No regeneration
+	# fixes it and no constant reconciles it. The pattern's own note (`fig_palm_far`) already
+	# recorded that a columns hand "goes to reach 0 for about a third of the run" and left a
+	# bare palm to cover it - a hand with no arm on the end of it, which is what Louis was
+	# looking at.
+	#
+	# So the odd lane is an ordinary column on the dominant side, at that side's inner edge.
+	# The pattern reads as one hand owning one more column than the other, which is what an
+	# odd count IS, rather than as a middle line the performer cannot reach.
+	var m := num_balls / 2
+	if num_balls % 2 == 1 and h == dominant_hand:
+		m += 1
+	return maxi(1, m)
+
+
+func columns_step_for(k: int) -> float:
 	# the gap between two of one hand's columns. The band it has to fit into is fixed
-	# (COL_LANE_IN out to HAND_OUT_DX), so this falls like 1/count - deliberately the
+	# (col_lane_in out to HAND_OUT_DX), so this falls like 1/count - deliberately the
 	# same curve prop_hit_scale's hitbox falls on, which is what keeps the clearance
 	# roughly constant instead of running out at the top of the count range. Capped at
 	# COL_LANE_STEP so three or four objects keep the airy spread they always had.
-	var m := columns_side_lanes()
-	if m <= 1:
+	#
+	# THE BAND GOT NARROWER ON 2026-08-19 AND THE LANES ARE TIGHTER FOR IT, which is the
+	# honest price of every column being a place a hand can be drawn. The old band ran from
+	# 44px out AND had a lane on the middle line, so seven objects sat 28px apart across a
+	# 200px spread; the paintable band is 52..100 on each side, so the same seven sit 16-24
+	# apart. Audited with `--collcheck --latecatch 6` at clubs, the HITBOX gate stays positive
+	# at every count (3: 145px, 4: 116, 5: 23, 7: 15, 9: 11, 11: 30), so nothing collides. The
+	# DRAWN gap goes negative from 5 objects up, which is props visibly crossing - the same
+	# thing Half Shower and Tennis are already documented to do by geometry, and the reason
+	# prop_hit_scale shrinks hitboxes with count in the first place. Crowding is what a high
+	# count in a fixed-lane pattern IS; a prop with no arm on the end of it was a bug.
+	if k <= 1:
 		return 0.0
-	return minf(COL_LANE_STEP, (HAND_OUT_DX - COL_LANE_IN) / float(m - 1))
+	return minf(COL_LANE_STEP, (HAND_OUT_DX - col_lane_in()) / float(k - 1))
 
 
 func columns_mid_slot() -> int:
-	# the centre column's slot, or -1 at an even count where there is no centre column
-	return (num_balls / 2) if num_balls % 2 == 1 else -1
+	# the odd count's SPARE column - the dominant hand's innermost lane - or -1 at an even
+	# count, where both hands own the same number and there is no spare. It keeps its old
+	# name and its old role (col_mid_ball, the one prop that never crosses hands); only its
+	# position moved off the unreachable middle line. See columns_lane_count.
+	if num_balls % 2 == 0:
+		return -1
+	var lc := columns_lane_count(LEFT)
+	return (lc - 1) if dominant_hand == LEFT else lc
+
+
+func columns_lane_hand(slot: int) -> int:
+	# which hand owns column `slot`. Slots run left to right: the left hand's lanes widest
+	# first, then the right hand's innermost first.
+	return LEFT if slot < columns_lane_count(LEFT) else RIGHT
 
 
 func columns_x(slot: int) -> float:
 	# the x of vertical column `slot` (0..num_balls-1). Every column is a line a HAND CAN
-	# STAND ON: the set is centred in the band each hand can reach without splaying, so
-	# it never grows past the stance however many objects are up (it used to be a fixed
-	# 40px per column, which at seven objects already reached 120px past centre and at
-	# fifteen reached 280 - the arms had to follow it out there).
+	# STAND ON, and that is now true in both directions: the set is centred in the band each
+	# hand can reach without splaying, so it never grows past the stance however many objects
+	# are up (it used to be a fixed 40px per column, which at seven objects already reached
+	# 120px past centre and at fifteen reached 280 - the arms had to follow it out there),
+	# and the band's INNER edge is the painted arm's own floor, so no lane can be closer to
+	# the body than an arm can be drawn.
 	var c := stage_center().x
-	var mid := columns_mid_slot()
-	if slot == mid:
-		return c   # the centre column: straight up the middle line, thrown from it too
-	var m := columns_side_lanes()
-	var step := columns_step()
+	var h := columns_lane_hand(slot)
+	var lc := columns_lane_count(LEFT)
+	var k := columns_lane_count(h)
+	# 0 is the INNERMOST lane on that hand's side, k-1 the widest
+	var i := (lc - 1 - slot) if h == LEFT else (slot - lc)
+	var lin := col_lane_in()
+	var step := columns_step_for(k)
 	# centre the side's lanes in the band, so a hand that owns only two of them uses the
 	# middle of its reach rather than being pinned to the inside edge
-	var first := COL_LANE_IN + ((HAND_OUT_DX - COL_LANE_IN) - float(m - 1) * step) * 0.5
-	var last_left := num_balls / 2 - 1
-	var first_right := (mid + 1) if mid >= 0 else num_balls / 2
-	if slot >= first_right:
-		return c + first + float(slot - first_right) * step
-	return c - (first + float(last_left - slot) * step)
+	var first := lin + ((HAND_OUT_DX - lin) - float(k - 1) * step) * 0.5
+	var dx := first + float(clampi(i, 0, k - 1)) * step
+	return (c - dx) if h == LEFT else (c + dx)
+
+
+func columns_mid_x() -> float:
+	# where the odd count's spare column stands. Stage centre only when there is no spare
+	# (an even count, where nothing reads this).
+	var mid := columns_mid_slot()
+	return columns_x(mid) if mid >= 0 else stage_center().x
 
 
 func assign_lane(b: Ball, h: int) -> void:
@@ -8846,11 +8953,11 @@ func assign_lane(b: Ball, h: int) -> void:
 	# neither and is handed out by do_throw. Persists on the ball for the whole run.
 	if b.lane_x >= 0.0:
 		return
-	var mid_slot := columns_mid_slot()
-	var inner := num_balls / 2 - 1                                  # left, nearest centre
+	var lc := columns_lane_count(LEFT)
+	var inner := lc - 1                                             # left, nearest centre
 	var outer := 0                                                  # left, widest
 	if h == RIGHT:
-		inner = (mid_slot + 1) if mid_slot >= 0 else num_balls / 2
+		inner = lc
 		outer = num_balls - 1
 	var taken := {}
 	for o in balls:
@@ -8866,15 +8973,20 @@ func assign_lane(b: Ball, h: int) -> void:
 			b.lane_x = x
 			return
 	# NO TWO PROPS MAY SHARE A COLUMN - that is a head-on collision, not a near miss, so
-	# the fallback is the CENTRE line rather than a lane that is already occupied (which
-	# is what it used to be). Reachable when a mid-run pattern change lands more props in
-	# one hand than that side has columns; the centre is the odd count's spare line, so
-	# taking it also makes this ball the centre one, catchable by either hand.
-	var cx := stage_center().x
-	if not taken.has(int(round(cx))):
-		b.lane_x = cx
-		col_mid_ball = b
-		return
+	# the fallback is the SPARE lane rather than one that is already occupied (which is what
+	# it used to be). Reachable when a mid-run pattern change lands more props in one hand
+	# than that side has columns.
+	# It used to fall back to the middle LINE, which was the odd count's spare column then
+	# and is a place no arm can reach now (see columns_lane_count) - so the one path meant to
+	# rescue an over-subscribed hand was also the one path that could put a prop somewhere
+	# the performer cannot be drawn holding it.
+	var mid := columns_mid_slot()
+	if mid >= 0:
+		var mx := columns_x(mid)
+		if not taken.has(int(round(mx))):
+			b.lane_x = mx
+			col_mid_ball = b
+			return
 	b.lane_x = columns_x(clampi(inner, 0, num_balls - 1))   # never leave it unset
 
 
@@ -9006,6 +9118,7 @@ func hand_target(h: int) -> Vector2:
 		# it has a lane at all - falls back to the slot, which is a beat nobody sees.
 		if pattern == COLUMNS and stack(h)[0].lane_x >= 0.0:
 			p.x = stack(h)[0].lane_x
+			p.y = hand_carry_y(p.x - stage_center().x)   # ...and the carry that reach implies
 	else:
 		# EMPTY AND NOTHING INCOMING RESTS INWARD, EVERYWHERE (2026-07-31, Louis: this
 		# should not be a tutorial-only rule - "should be everywhere"). Outward is the
@@ -9016,13 +9129,14 @@ func hand_target(h: int) -> Vector2:
 	# here (COL_HAND_MIN, 40px) keeping a Columns hand out of the torso, because the lane
 	# layout could put a column inside the body - at four objects the inner lanes sat 22px
 	# off centre - and a hand sent there vanished into the chest. The lane band starts
-	# outside the torso by construction now (COL_LANE_IN), so the floor had nothing left
+	# outside the torso by construction now (col_lane_in), so the floor had nothing left
 	# to protect and was doing active harm: it was the reason a ball leapt sideways out of
-	# the hand on release. **If a column is ever allowed inside COL_LANE_IN again, this is
-	# the guard that has to come back with it.** The one hand that does now come to the
-	# centre line is the one throwing or catching the CENTRE column, which is a hand in
-	# front of the shirt rather than in the chest, and where a real juggler's hand goes
-	# for a centre toss - the arms are drawn over the coat, so it reads correctly.
+	# the hand on release. **If a column is ever allowed inside col_lane_in again, this is
+	# the guard that has to come back with it** - and 2026-08-19 is what that costs: the
+	# band's inner edge was 8px inside the painted arm's own floor and the odd count's spare
+	# lane was on the middle line, so the clamp was gone AND there was nothing keeping the
+	# hands where an arm could be drawn. The band is now defined by the arm bank itself, so
+	# no clamp is needed and no lane can go where a clamp would have been the only rescue.
 	# a brief upward kick right after a throw sells the release
 	var k := tick - int(throw_kick[h])
 	if k >= 0 and k < 14:
@@ -9284,7 +9398,7 @@ func start_run(n: int) -> void:
 	# hop it used to make from the hand's resting slot.
 	if pattern == COLUMNS and num_balls % 2 == 1 and not stack(dominant_hand).is_empty():
 		col_mid_ball = stack(dominant_hand)[0]
-		col_mid_ball.lane_x = stage_center().x
+		col_mid_ball.lane_x = columns_mid_x()
 	_demo_next = dominant_hand
 
 
@@ -9382,10 +9496,20 @@ func on_catch(h: int) -> void:
 	var best: Ball = null
 	var best_d := 1000000
 	for b in balls:
-		# the odd-columns middle ball comes straight down dead centre and EITHER
-		# hand may scoop it (Louis), so it counts for whichever catch fires first;
-		# every other ball is claimed only by the hand it is actually flying to
-		if b.state == STATE_FLIGHT and (b.to_hand == h or b == col_mid_ball):
+		# EVERY ball is claimed only by the hand it is actually flying to.
+		#
+		# **THE ODD-COLUMNS SPARE USED TO BE AN EXCEPTION AND IT CANNOT BE ANY MORE**
+		# (2026-08-19). While that prop came down dead centre, either hand could scoop it,
+		# and centre is equally far from both - a fair rule for a lane on the middle line.
+		# The spare column stands in the DOMINANT hand's innermost lane now (see
+		# columns_lane_count), so the exception meant the off hand could catch a prop whose
+		# column is on the far side of the body and would then stand under it: measured with
+		# --handlog at five balls, the left hand holding the spare aimed at centre +52 while
+		# its own lanes are at -54 and -98. fig_arm_pick reads reach as |x - centre| and
+		# cannot see the sign, so the painted LEFT arm was drawn 52px to the left while its
+		# hand was 52px to the right - a residual of 109 screen px, eight times the guard's
+		# whole budget, every frame. A lane that belongs to one hand is caught by that hand.
+		if b.state == STATE_FLIGHT and b.to_hand == h:
 			var d := absi(b.land_tick - tick)
 			if d < best_d:
 				best = b
@@ -9923,18 +10047,23 @@ func do_throw(h: int, hold: int) -> void:
 	# an over-the-top throw never joins the lane bookkeeping (it is the breakout,
 	# and letting it claim the middle-ball mark or a lane made it un-over-the-top)
 	var lanes := col_lanes and not over_top
-	# an odd ball count cannot split evenly into two lanes: rather than just piling
-	# the extra ball into one side (the same look as a four-ball columns with one
-	# ball removed), one ball renders as a middle lane, so the pattern reads as a
-	# genuinely symmetric left / middle / right instead of a lopsided double lane.
+	# an odd ball count cannot split evenly into two lanes, so one prop is the SPARE: it
+	# belongs permanently to the dominant hand and never crosses, and it stands in that
+	# hand's innermost column. (It used to stand on the middle LINE, which read as a
+	# symmetric left / middle / right and asked the performer's arm to reach its own
+	# shoulder - see columns_lane_count for why no painting of that arm can exist.)
 	var mid_ball := false
 	if lanes and num_balls % 2 == 1:
 		# (`was_mid` lived here: it told the launch point whether this was the ball's
 		# first throw as the middle one, because a first throw launched from the hand
-		# and later ones from stage centre. The middle ball always launches from the
-		# hand now, so the distinction has nothing left to decide.)
-		if col_mid_ball == null or not balls.has(col_mid_ball):
-			col_mid_ball = b   # the first ball thrown once lanes engage claims the middle
+		# and later ones from stage centre. The spare always launches from the hand now,
+		# so the distinction has nothing left to decide.)
+		# ONLY THE DOMINANT HAND MAY CLAIM THE SPARE, because the spare's column stands on
+		# the dominant side. start_run hands it out at the deal; this is the re-claim after
+		# the original one is lost, and letting the OFF hand take it would put that hand
+		# under a column on the far side of its own body for the rest of the run.
+		if (col_mid_ball == null or not balls.has(col_mid_ball)) and h == dominant_hand:
+			col_mid_ball = b
 		mid_ball = b == col_mid_ball
 		if mid_ball:
 			lanes = false
@@ -9999,11 +10128,15 @@ func do_throw(h: int, hold: int) -> void:
 		#     was clear. It is a column now, thrown from the centre line it lands on, so
 		#     the hand comes to the line to throw and catch it (see hand_target).
 		if mid_ball:
-			b.lane_x = stage_center().x
+			b.lane_x = columns_mid_x()
 		else:
 			assign_lane(b, h)
-		b.from_pos = Vector2(b.lane_x, cy)
-		b.to_pos = Vector2(b.lane_x, cy)
+		# A LANE'S PROPS LAUNCH AND LAND IN THE HAND THAT OWNS THEM, which for Columns means
+		# at the height that lane's reach implies - not on the flat catch line. See
+		# hand_carry_y: the line version drew every held prop 26px above its own hand.
+		var ly := hand_carry_y(b.lane_x - stage_center().x)
+		b.from_pos = Vector2(b.lane_x, ly)
+		b.to_pos = Vector2(b.lane_x, ly)
 	elif over_top:
 		# the over-the-top lob leaves from the OUTER catch corner and rides a tall
 		# parabola down onto land_slot (over_top_land_slot: the complement of the
@@ -28810,7 +28943,7 @@ func _demo_step() -> void:
 		if _late_catch_n < 0 and not stack(h).is_empty() and not parkcheck_collecting():
 			continue
 		for b in balls:
-			if b.state != STATE_FLIGHT or (b.to_hand != h and b != col_mid_ball):
+			if b.state != STATE_FLIGHT or b.to_hand != h:
 				continue
 			var due := (tick == b.land_tick + _late_catch_n) if _late_catch_n >= 0 else absi(b.land_tick - tick) <= 1
 			if due:
