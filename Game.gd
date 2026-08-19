@@ -18454,14 +18454,22 @@ func fit_size(font: Font, text: String, w: float, want: int, low: int = 10) -> i
 	return sz
 
 
-func draw_fit_string(font: Font, pos: Vector2, text: String, align: int, w: float, size: int, col: Color) -> void:
+func draw_fit_string(font: Font, pos: Vector2, text: String, align: int, w: float, size: int,
+		col: Color, shout: bool = false) -> void:
 	# draw_string, but the text is shortened to fit `w` first instead of being clipped.
 	# Use this for anything whose length is DATA (a venue name, a trick name, a prop
 	# name, a save-slot title) rather than a fixed string the layout was built around.
-	draw_string(font, pos, fit_text(font, text, w, size), align, w, ps(size), col)
+	# `shout` swaps in draw_text_shout's 8-way outline for text that sits on a PAINTING
+	# rather than on a panel - the establishing card, which has no panels by design.
+	var t := fit_text(font, text, w, size)
+	if shout:
+		draw_text_shout(font, pos, t, align, w, size, col)
+		return
+	draw_string(font, pos, t, align, w, ps(size), col)
 
 
-func draw_wrap_fit(font: Font, text: String, box: Rect2, size_in: int, col: Color, align := HORIZONTAL_ALIGNMENT_LEFT) -> float:
+func draw_wrap_fit(font: Font, text: String, box: Rect2, size_in: int, col: Color,
+		align := HORIZONTAL_ALIGNMENT_LEFT, shout: bool = false) -> float:
 	# THE block-text overflow guard, the paragraph half of what fit_text does for one
 	# line: wrap into a BOX and draw only the lines that fit its HEIGHT, marking the
 	# last one when there was more. Use it wherever a description sits above something
@@ -18481,7 +18489,10 @@ func draw_wrap_fit(font: Font, text: String, box: Rect2, size_in: int, col: Colo
 		var ln := lines[i]
 		if i == room - 1 and lines.size() > room:
 			ln = fit_text(font, ln + " ...", box.size.x, size)
-		draw_string(font, Vector2(box.position.x, y), ln, align, box.size.x, ps(size), col)
+		if shout:
+			draw_text_shout(font, Vector2(box.position.x, y), ln, align, box.size.x, size, col)
+		else:
+			draw_string(font, Vector2(box.position.x, y), ln, align, box.size.x, ps(size), col)
 		y += lh
 	return float(shown) * lh
 
@@ -26693,6 +26704,15 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# cards with a fill and a border, i.e. exactly the "windows of info" Louis asked to be rid
 	# of; the gradient above already gives them a dark ground to sit on, which is what the
 	# panel fill was really for. Their geometry survives only as text origins.
+	#
+	# ...AND THEY CARRY THE MARQUEE'S OUTLINE, WHICH THEY DID NOT (2026-08-19). Removing the
+	# panels moved these lines onto the painting, and the note above about the blurb applies
+	# to them word for word: draw_text_shout's 8-way outline "is what has to carry it now".
+	# Only the marquee ever got it. Measured on the Circus card, which is exactly the venue
+	# that note says to re-check against: the bottom-right block lands on the lit tent
+	# DOORWAY - a bright arch ringed with bulbs, the brightest thing in the lower half of the
+	# frame, and the one place the bottom gradient cannot help because the light is IN the
+	# painting. A gradient darkens a picture uniformly; an outline follows the letters.
 	var rw := 330.0
 	var rh := 96.0 if purist else 76.0
 	var rx := 18.0
@@ -26704,22 +26724,22 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	var by2 := s.y - 88.0 - bh
 
 	# bottom-LEFT: the record chase at this venue (its own board on a purist night)
-	draw_string(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
+	draw_text_shout(font, Vector2(rx + 16.0, ry + 24.0), "RECORD TO BEAT", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
 	if establish_venue >= 0 and establish_venue < rec_table().size() and rec_table()[establish_venue] > 0:
-		draw_fit_string(font, Vector2(rx + 16.0, ry + 54.0), score_text(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, rw - 32.0, 24, Color(0.96, 0.83, 0.52, tagA))
+		draw_fit_string(font, Vector2(rx + 16.0, ry + 54.0), score_text(rec_table()[establish_venue]), HORIZONTAL_ALIGNMENT_LEFT, rw - 32.0, 24, Color(0.96, 0.83, 0.52, tagA), true)
 	else:
-		draw_string(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(0.9, 0.82, 0.6, 0.85 * tagA))
+		draw_text_shout(font, Vector2(rx + 16.0, ry + 52.0), "none yet  -  set one", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.9, 0.82, 0.6, 0.85 * tagA))
 	if purist:
-		draw_string(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.82, 0.72, 0.85, 0.9 * tagA))
+		draw_text_shout(font, Vector2(rx + 16.0, ry + 80.0), "PURIST  -  no stat help, its own board", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.82, 0.72, 0.85, 0.9 * tagA))
 
 	# bottom-RIGHT: the act's ask - the three goals to chase, and the whole-act
 	# challenge when one was rolled. Cash in from the first number on; each further
 	# goal is the gamble.
 	if booking_active:
-		draw_string(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55, 0.9 * tagA))
-		draw_string(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
+		draw_text_shout(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
+		draw_text_shout(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
 			score_text(goal_for(establish_venue, 0)), score_text(goal_for(establish_venue, 1)), score_text(goal_for(establish_venue, 2))],
-			HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, ps(19), Color(1.0, 0.88, 0.5, tagA))
+			HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 19, Color(1.0, 0.88, 0.5, tagA))
 		if has_enc:
 			var ec := Color(1.0, 0.55, 0.4)
 			var ey := by2 + 82.0
@@ -26727,9 +26747,9 @@ func draw_establish(font: Font, s: Vector2) -> void:
 				if e < 0 or e >= ENCORES.size():
 					continue
 				var enc: Dictionary = ENCORES[e]
-				draw_fit_string(font, Vector2(bx + 16.0, ey), "TONIGHT:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA))
+				draw_fit_string(font, Vector2(bx + 16.0, ey), "TONIGHT:  %s" % String(enc["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 13, Color(ec.r, ec.g, ec.b, 0.95 * tagA), true)
 				draw_wrap_fit(font, String(enc["desc"]), Rect2(bx + 16.0, ey + 10.0, bw - 32.0, 52.0), 11,
-					Color(0.9, 0.82, 0.72, 0.85 * tagA))
+					Color(0.9, 0.82, 0.72, 0.85 * tagA), HORIZONTAL_ALIGNMENT_LEFT, true)
 				ey += 70.0
 
 	var pulse := 0.6 + 0.4 * sin(float(cine_tick) * 0.08)
