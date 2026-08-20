@@ -1216,6 +1216,21 @@ and an Enter, which no capture can press, so their BOUND state had no capture pa
 `--assists on|off` pins BOTH assist switches for one run: the two dark icons and the UNAIDED row
 need two keypresses inside a live act, which no capture can make, and the flag never writes its
 pin back to the shared settings file.
+`--dom left|right` pins the STRONG HAND for one run, on the same never-write-back contract. Every
+pattern with a high road is mirrored by that setting - Shower, Half Shower, Tennis's weave,
+Columns' spare lane - and so is every line of text that names a hand, so half of those pictures
+had no capture path at all and a left-handed player was being shown (and told) the mirror image
+of their own act.
+`--touchcheck` audits **"the props always touch the hands"** and prints four numbers: the worst
+gap between a prop's release point and the hand that released it, the worst gap between a landing
+point and the hand that took it, that same catch measured against where the hand was HEADED
+(`catch aim`, which excuses a hand still travelling and indicts one aimed elsewhere), and the
+worst of both seams inside a Skills preview. It counts how many seams exceeded 10px as well as
+the worst one, because a repeating fault and a one-off need different fixes. Drive it with
+`--demo --pattern <id> --balls N` for the stage and `--skills <n>` for a preview; the preview half
+needs a WINDOWED run (headless never calls `_draw`, and the flag says so rather than printing
+zeroes). It found four real faults on the day it was written, including one - Tennis asking
+`stack(h).has(...)` about a prop it was not about to throw - that no screenshot could have shown.
 `--stem <frac> [over]` pins the goal stem's fill: the meter is score against a venue's FINAL
 goal, so a bloom needs a whole winning act to photograph and the subgoal flowers appear at fills
 a demo run may never sit on. Overflow only exists at full fill.
@@ -1278,3 +1293,24 @@ quality-led, tonal stingers only, no ambient crowd bed.
   overrides that for its two-ball step. Any tutorial choreography written by hand has to know
   which of the two it is standing in, or the scripted hand order goes wrong from the second
   exchange - and it goes wrong invisibly, because the catch guard quietly covers for it.
+- **A PROP LEAVES FROM THE HAND, NOT FROM THE HAND'S TARGET** (2026-08-20). `do_throw` sets
+  `b.from_pos` to the pattern's launch SLOT and then overwrites it with `hpos[h]` for every throw
+  that is not a Columns lane or a Behind the Back. The slot is the design - the roads, and
+  `over_top_land_slot`'s launch-never-on-a-landing guarantee, are laid out from it - but a hand is
+  smoothed toward its slot and a throw pressed before it arrives used to teleport the prop up to
+  46px to meet it (measured on the Half Shower, whose high hand catches at INNER and launches from
+  OUTER). On the metronome the change costs nothing at all: `--collcheck` is byte-identical before
+  and after. Under `--latecatch 5` a rushed pattern now visibly degrades, which is what rushing is.
+- **A PREVIEW MAY NOT CARRY ITS OWN COPY OF THE SIM'S NUMBERS.** The Skills panel's constants
+  (`PV_*`) are all derived - `PV_OUTER` from `HAND_OUT_DX`, `PV_ARC` from `ARC_PER_AIR * BASE_AIR`,
+  every road height from the sim's own minimum fraction, every Columns lane from `columns_x` at
+  `PV_COUNT` objects. They used to be hand-copied decimals and three of them had gone stale
+  silently: the lane spacing still described the pre-2026-08-19 layout with a column on the dead
+  centre line, and the Shower's feed still described an airtime that had been cut to a sixth.
+  **If a preview needs a number the sim has, take the sim's - and if the sim cannot answer for a
+  hypothetical (three objects, when the run has seven), give its function a parameter rather than
+  a second copy.**
+- Dev flags that run **unattended** must be added to `dev_unattended()`, not to a hand-written
+  `_demo or _shot` pair. That predicate is what keeps a headless audit from auto-pausing on focus
+  loss and, far more seriously, what sends its progress to the scratch demo save instead of a real
+  career slot - a bare `--handlog` was saving over slot 0 until 2026-08-20.

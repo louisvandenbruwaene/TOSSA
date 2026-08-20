@@ -12,9 +12,12 @@ const PATTERNS := [
 	{"id": "columns",    "name": "Columns",     "lvl": 6, "acc": 50, "perf": 14, "mult": 1.2, "room": 1.0,
 	 "desc": "Straight up and down in fixed lanes; an odd count opens a middle lane too. Clean or nothing."},
 	{"id": "halfshower", "name": "Half Shower", "lvl": 10, "acc": 150, "ven": 1, "perf": 24, "mult": 2.0, "room": 0.05,
-	 "desc": "The right hand throws over the top; the left keeps the weave, but low."},
+	 # WHICH HAND IS WHICH IS A SETTING (dominant_hand), so no card may name one: a
+	 # left-handed player was being told the mirror image of their own act, on the card,
+	 # in the Skills strip and in the preview beside them (2026-08-20).
+	 "desc": "Your strong hand throws over the top; the other keeps the weave, but low."},
 	{"id": "shower",     "name": "Shower",      "lvl": 1, "ven": 3, "mult": 3.0, "room": 0.7,
-	 "desc": "The full circle. Right throws high, left feeds fast and low."},
+	 "desc": "The full circle. The strong hand throws high, the other feeds fast and low."},
 	{"id": "rcasc",      "name": "Reverse Cascade", "lvl": 1, "ven": 4, "mult": 1.5, "room": 1.0,
 	 "desc": "BOTH hands throw over the top, the weave runs backward."},
 	{"id": "tennis",     "name": "Tennis",      "lvl": 1, "ven": 5, "mult": 1.5, "room": 0.05,

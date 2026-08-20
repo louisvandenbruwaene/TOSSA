@@ -548,6 +548,23 @@ const OVER_TOP_MIN := 0.5     # generic over-the-top minimum height fraction (Ov
 const TENNIS_MIN := OVER_TOP_MIN * 1.2   # Tennis's marked prop goes 20% higher than a
 							   # plain over-the-top lob (2026-07-28, Louis) - it is the one
 							   # prop crossing over a full weave rather than one road
+# THE HAND GIVES UNDER THE HIGH ONE (2026-08-20, Louis: the higher thrown object "should when
+# caught make the hand go a bit lower and then again a bit higher for the throw, not just a
+# static hand"). Tennis's marked prop is the only thing in the game that falls from TENNIS_MIN
+# onto a hand that then throws it straight back up from the same point - so that hand had
+# nothing at all to do between the two: `throw_slot` answers OUTER while it holds the mark, and
+# it simply sat there, catching and launching a lob without a flicker.
+#
+# The gesture is an ABSORB, and it is expressed as a REACH rather than as a raw y offset, which
+# is the whole reason it can be drawn at all: hand_carry_y turns a reach into the hand line the
+# painted arm bank already carries for it, so sinking the hand 15px inward gives 8.5px of drop
+# AND lands on a pose the bank actually holds (reach 85 of the painted 52..102). That is Louis's
+# "use the first couple of frames of the arms going inwards and then just in reverse" - the
+# frames exist, this only asks for them. A y offset invented here would be exactly the 22px
+# release kick that hand_target's own note records as unpaintable.
+const TENNIS_ABSORB := 15.0   # how far in (screen px of reach) the catching hand gives
+const TENNIS_SINK := 12       # ticks to sink under the catch (0.10s)
+const TENNIS_LIFT := 18       # ...and to come back up to the launch point (0.15s)
 # WHERE A COLUMN MAY STAND (2026-07-28, Louis: every object goes straight up and comes
 # down exactly where it was thrown, and "for many objects ... nor does it widen the arms
 # positioning (wider looks bad)"). Both rules are geometry, so the lane band is defined
@@ -1338,6 +1355,11 @@ class Ball:
 	var lane_x := -1.0        # Columns: the x of this ball's own vertical column, so two
 							  # balls in one hand never stack on the same line (-1 = unset)
 	var thrown_from := -1     # which hand actually released this (LEFT/RIGHT); informational
+	var held_tick := -999     # the tick this prop actually LANDED IN A HAND, which is not
+							  # land_tick: a catch may be pressed up to COMMIT ticks early or
+							  # late_window ticks late, and a gesture timed off the arrival
+							  # rather than off the catch starts before or after the hand has
+							  # the thing (see the Tennis absorb in hand_target)
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
 
 
@@ -1604,6 +1626,10 @@ const UNAIDED_REP := 300      # what a house's first unaided clear is worth in s
 var assist_speed := true      # the BOOT: is the Speed stat's slow motion running
 var assist_slow := true       # the STOPWATCH: is every other slow-motion source running
 var act_assisted := false     # did EITHER actually slow the world at any point this act
+var _dom_pinned := false      # dev (--dom): same contract as _assists_pinned below - the
+							   # strong hand is a SETTING, so every pattern with a high road
+							   # and every line of text that names a hand has a mirrored face
+							   # nobody could capture. Pinning it must never write back.
 var _assists_pinned := false  # dev (--assists): this run's switches came from the command
 							   # line, so they are never written back to the settings file
 var unaided_venues: Array[bool] = [false, false, false, false, false, false, false]
@@ -2136,6 +2162,35 @@ var _late_catch_n := -1     # dev: --latecatch N makes the auto-player catch N t
 							 # only ever exercised frame-perfect timing, never a realistic
 							 # "Perfect, but not frame-0" catch followed by an immediate
 							 # re-throw. -1 = off (the original --collcheck behaviour).
+# --touchcheck: "MAKE SURE THE BALLS ALWAYS TOUCH THE HAND WHEN THROWING AND CATCHING"
+# (2026-08-20, Louis) as a number, because it is not a thing a still frame can settle: a prop
+# leaving from somewhere the hand is not shows up for a tenth of a second and reads as a jerk
+# rather than as a gap. Three seams, all in screen px:
+#   throw   the release point against the hand that released it (do_throw's b.from_pos vs hpos)
+#   catch   the landing point a throw was aimed at, against the hand that took it
+#   hold    a preview's carried prop against the preview's own hand (the stage draws a held
+#           prop AT the hand by construction, so only the preview can be wrong about this)
+# Zero is not the target for the first two - a hand is smoothed toward its slot (HAND_SMOOTH)
+# and is legitimately a few px behind on the tick a throw goes - but a hand at the WRONG SLOT
+# is 46px out (inner to outer), which is the failure this was written to catch, and it caught
+# one: Tennis's `next_throw_over_top` was answering for the wrong prop in a two-prop hand.
+var _touch := false
+var _touch_throw := 0.0
+var _touch_throw_at := ""
+var _touch_catch := 0.0
+var _touch_catch_at := ""
+var _touch_aim := 0.0
+var _touch_aim_at := ""
+var _touch_hold := 0.0
+var _touch_hold_at := ""
+var _touch_n := 0           # how many seams were actually measured, so "0.0 px" can be told
+							 # apart from "nothing happened" (they printed the same line once)
+var _touch_bad := 0         # ...and how many of them were over TOUCH_OK. A worst-case alone
+							 # cannot tell a one-off at the start of a loop from a fault that
+							 # repeats every cycle, and those want completely different fixes
+const TOUCH_OK := 10.0      # a gap this size or under is the hand being smoothed toward its
+							 # slot, or the audit sampling a frame after a release. Above it,
+							 # something is in the wrong place
 var _handlog := false       # dev: --handlog prints each hand's x every tick during play,
 							  # to tell a real jitter (oscillating x) from a hand that merely
 							  # sits still but far from the ball's lane (ROADMAP 12b)
@@ -2482,6 +2537,11 @@ func _ready() -> void:
 		_late_catch_n = int(ua[lci + 1])
 	if ua.has("--handlog"):     # dev: log hand x every tick (ROADMAP 12b jitter diagnosis)
 		_handlog = true
+	if ua.has("--touchcheck"):  # dev: audit prop-to-hand contact at every throw and catch
+		_touch = true           # (see _touch). Works on the stage with --demo --pattern <id>
+								# and on the Skills panel with --skills <n>, so the picture
+								# the player is taught from is held to the same measurement
+								# as the one they play.
 	if ua.has("--tutlog"):      # dev: log every tutorial freeze (see _tutlog)
 		_tutlog = true
 	# debug_mode is NOT in this list (2026-08-05, Louis: the debug build should open the
@@ -2490,7 +2550,7 @@ func _ready() -> void:
 	# were unreachable in the one build made for looking at things. Every OTHER entry here
 	# is an unattended dev capture that genuinely has nowhere to click, and --demo/--shot
 	# still skip the menu when combined with --debug, which is what venue previews use.
-	var skip_menu := _demo or _shot or _collcheck or _handlog or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
+	var skip_menu := _demo or _shot or _collcheck or _handlog or _touch or ua.has("--sheet") or ua.has("--shop") or ua.has("--results") or ua.has("--pause") or ua.has("--day") or ua.has("--stats")
 	if ua.has("--menu"):   # dev: hold the title screen, which is what --shot otherwise skips past.
 		skip_menu = false  # It briefly took a 1..4 variant while the four backdrops were being
 						   # compared; there is one picture again, so there is nothing to pick.
@@ -2576,6 +2636,14 @@ func _ready() -> void:
 		# be photographed - they need two keypresses in a live act, which no capture makes -
 		# and this file's own rule is that a screen with no capture target is a screen nobody
 		# has looked at since the art density changed.
+		# dev: --dom left | right pins the STRONG HAND for one run, without touching the
+		# settings file (see _dom_pinned). Every pattern with a high road is mirrored by it -
+		# Shower, Half Shower, Tennis's weave, Columns' spare lane - and so is every line that
+		# names a hand, so half of those pictures had no capture path at all.
+		var di := ua.find("--dom")
+		if di != -1 and di + 1 < ua.size():
+			dominant_hand = LEFT if ua[di + 1] == "left" else RIGHT
+			_dom_pinned = true
 		var ai := ua.find("--assists")
 		if ai != -1 and ai + 1 < ua.size():
 			var want := ua[ai + 1] != "off"
@@ -2923,7 +2991,7 @@ func _physics_process(delta: float) -> void:
 		elif ucard_flip >= 0.0 and ucard_out_tick < 0.0 \
 				and atick() - ucard_flip >= UCARD_FLIP + UCARD_READ + 40.0:
 			ucard_out_tick = atick()
-	if _shot or _collcheck or _handlog:
+	if _shot or _collcheck or _handlog or _touch:
 		_shot_frames += 1   # advances even while paused, so we can capture the sheet
 		if _shot_frames >= _shot_tick:
 			_capture_and_quit()
@@ -3663,7 +3731,7 @@ func _notification(what: int) -> void:
 	# a performance must never die to a missed alt-tab: losing window focus mid-set
 	# auto-pauses instead of letting the sim keep draining stamina unattended.
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
-		if _demo or _shot:
+		if dev_unattended():
 			return   # unattended dev captures may lose focus; they must keep running
 		if game_state == ST_PLAY and started and running and not paused and not sheet_open and not shop_open and not results_open:
 			open_pause()
@@ -3676,7 +3744,7 @@ func _on_joy_connection(_device: int, connected: bool) -> void:
 	if connected:
 		return
 	_pad_last = false
-	if _demo or _shot:
+	if dev_unattended():
 		return
 	if game_state == ST_PLAY and started and running and not paused and not sheet_open and not shop_open and not results_open:
 		open_pause()
@@ -6114,7 +6182,7 @@ func tut_due_actions() -> Array:
 	var kt := k_throw()
 	var kc := k_catch()
 	var adv := tut_style() == TUT_ADVANCED
-	var side := func(h: int) -> String: return "left" if h == LEFT else "right"
+	var side := func(h: int) -> String: return hand_side(h)
 	for h: int in [LEFT, RIGHT]:
 		if soon[h] > TUT_EXCHANGE_LEAD:
 			continue
@@ -8079,6 +8147,10 @@ func save_settings() -> void:
 	# the settings file is SHARED with the real game - so a capture that later saved settings
 	# for any other reason would hand Louis a career with his own assists switched off. The
 	# stored values are left exactly as they were loaded.
+	if _dom_pinned:
+		var pdom := ConfigFile.new()
+		if pdom.load(SETTINGS_PATH) == OK:
+			cf.set_value("opt", "dominant_hand", int(pdom.get_value("opt", "dominant_hand", RIGHT)))
 	if _assists_pinned:
 		var prev := ConfigFile.new()
 		if prev.load(SETTINGS_PATH) == OK:
@@ -8490,8 +8562,31 @@ func stack(h: int) -> Array[Ball]:
 	return _stack_l if h == LEFT else _stack_r
 
 
+func dev_unattended() -> bool:
+	# TRUE for any run started by a dev flag that nobody is sitting in front of. There are
+	# five such flags and the list had been written out by hand in four places, as `_demo or
+	# _shot`, every time - so the three audits added since (--collcheck, --handlog,
+	# --touchcheck) inherited none of what that pair buys:
+	#   * an unattended run must not auto-pause when the window loses focus (it always does,
+	#     since the terminal that launched it has the focus);
+	#   * and, far more seriously, it must not write its progress into a REAL CAREER SLOT.
+	#     save_path already sent --demo and --shot runs to the scratch demo file for exactly
+	#     that reason; a bare `--handlog` was saving over slot 0.
+	# One predicate, so a new flag joins by being added here rather than by being remembered
+	# in four places.
+	return _demo or _shot or _collcheck or _handlog or _touch or _parkcheck
+
+
 func other(h: int) -> int:
 	return RIGHT if h == LEFT else LEFT
+
+
+func hand_side(h: int) -> String:
+	# the word for a hand, for any line of text that has to name one. It exists so that
+	# nothing writes "right" for the strong hand: the dominant hand is a SETTING, and a
+	# left-handed player reading "right over the top" is being told the mirror image of
+	# their own act (2026-08-20 - the Skills previews were doing exactly that).
+	return "left" if h == LEFT else "right"
 
 
 # -----------------------------------------------------------------------------
@@ -9227,7 +9322,7 @@ func col_lane_in() -> float:
 	return maxf(COL_LANE_IN, lo * ART_PIXEL)
 
 
-func columns_lane_count(h: int) -> int:
+func columns_lane_count(h: int, n: int = -1) -> int:
 	# how many columns hand `h` owns. An odd count cannot split evenly, and the extra lane
 	# goes to the DOMINANT hand.
 	#
@@ -9245,8 +9340,16 @@ func columns_lane_count(h: int) -> int:
 	# So the odd lane is an ordinary column on the dominant side, at that side's inner edge.
 	# The pattern reads as one hand owning one more column than the other, which is what an
 	# odd count IS, rather than as a middle line the performer cannot reach.
-	var m := num_balls / 2
-	if num_balls % 2 == 1 and h == dominant_hand:
+	#
+	# `n` IS THE COUNT TO ANSWER FOR, and it defaults to the one being juggled. It exists so
+	# the Skills preview can ask this same geometry for the three objects it draws WITHOUT
+	# reading the live run (2026-08-20): the preview used to carry its own lane spacing - a
+	# lone PV_LANE constant, one lane on the dead centre line - and was therefore showing the
+	# pattern as it looked before 2026-08-19, complete with the middle column no arm can reach.
+	# One derivation, two callers, and they cannot drift again.
+	var count := num_balls if n < 0 else n
+	var m := count / 2
+	if count % 2 == 1 and h == dominant_hand:
 		m += 1
 	return maxi(1, m)
 
@@ -9273,24 +9376,60 @@ func columns_step_for(k: int) -> float:
 	return minf(COL_LANE_STEP, (HAND_OUT_DX - col_lane_in()) / float(k - 1))
 
 
-func columns_mid_slot() -> int:
+func columns_claim_lanes() -> void:
+	# A COLUMN IS CLAIMED WHILE THE PROP IS STILL IN THE HAND, not on the way out of it
+	# (2026-08-20, measured at 50.5px by --touchcheck: Columns' very first throw of every
+	# prop was the worst prop-to-hand gap in the game).
+	#
+	# assign_lane used to run inside do_throw, so a prop's FIRST throw was launched from a
+	# lane the hand had never stood under: hand_target places a Columns hand on
+	# `stack(h)[0].lane_x` and falls back to the plain inner slot while that is unset, so the
+	# hand waited at 54 and the prop left from 76, 98, or wherever its lane turned out to be.
+	# The old note called that "a beat nobody sees" - it is one throw per prop per run, and
+	# it is the biggest single jump the audit finds. Claiming the lane the moment the prop is
+	# in a hand means the hand is already standing under it, so the throw is a hand and a
+	# prop leaving together.
+	#
+	# Cheap enough to run every tick: it looks at held props only and every one of them
+	# short-circuits on the first line once it owns a lane. Every tick rather than at the
+	# deal, because the pattern can be switched mid-run and a prop caught under Cascade has
+	# no lane at all until Columns starts.
+	if pattern != COLUMNS or collapsing:
+		return
+	for h in [LEFT, RIGHT]:
+		for b in stack(h):
+			if b.lane_x >= 0.0:
+				continue
+			# the SPARE takes the spare column by name rather than by turn, because do_throw
+			# puts it there when it launches (`columns_mid_x`) and the two must not be able
+			# to disagree: a prop that had claimed some other lane in the meantime would jump
+			# across to this one on its next throw, which is the very leap this function
+			# exists to remove.
+			if b == col_mid_ball and columns_mid_slot() >= 0:
+				b.lane_x = columns_mid_x()
+			else:
+				assign_lane(b, h)
+
+
+func columns_mid_slot(n: int = -1) -> int:
 	# the odd count's SPARE column - the dominant hand's innermost lane - or -1 at an even
 	# count, where both hands own the same number and there is no spare. It keeps its old
 	# name and its old role (col_mid_ball, the one prop that never crosses hands); only its
 	# position moved off the unreachable middle line. See columns_lane_count.
-	if num_balls % 2 == 0:
+	var count := num_balls if n < 0 else n
+	if count % 2 == 0:
 		return -1
-	var lc := columns_lane_count(LEFT)
+	var lc := columns_lane_count(LEFT, n)
 	return (lc - 1) if dominant_hand == LEFT else lc
 
 
-func columns_lane_hand(slot: int) -> int:
+func columns_lane_hand(slot: int, n: int = -1) -> int:
 	# which hand owns column `slot`. Slots run left to right: the left hand's lanes widest
 	# first, then the right hand's innermost first.
-	return LEFT if slot < columns_lane_count(LEFT) else RIGHT
+	return LEFT if slot < columns_lane_count(LEFT, n) else RIGHT
 
 
-func columns_x(slot: int) -> float:
+func columns_x(slot: int, n: int = -1) -> float:
 	# the x of vertical column `slot` (0..num_balls-1). Every column is a line a HAND CAN
 	# STAND ON, and that is now true in both directions: the set is centred in the band each
 	# hand can reach without splaying, so it never grows past the stance however many objects
@@ -9299,9 +9438,9 @@ func columns_x(slot: int) -> float:
 	# and the band's INNER edge is the painted arm's own floor, so no lane can be closer to
 	# the body than an arm can be drawn.
 	var c := stage_center().x
-	var h := columns_lane_hand(slot)
-	var lc := columns_lane_count(LEFT)
-	var k := columns_lane_count(h)
+	var h := columns_lane_hand(slot, n)
+	var lc := columns_lane_count(LEFT, n)
+	var k := columns_lane_count(h, n)
 	# 0 is the INNERMOST lane on that hand's side, k-1 the widest
 	var i := (lc - 1 - slot) if h == LEFT else (slot - lc)
 	var lin := col_lane_in()
@@ -9380,7 +9519,16 @@ func next_throw_over_top(h: int) -> bool:
 	if pattern == TENNIS:
 		if tennis_ball == null or not balls.has(tennis_ball):
 			return true   # nothing marked yet: the very NEXT throw claims the mark
-		return stack(h).has(tennis_ball)
+		# THE NEXT THROW IS THE FRONT OF THE STACK, NOT ANYTHING IN IT (2026-08-20, found
+		# while making the preview and the stage agree). do_throw takes `stack(h).pop_front()`,
+		# so a hand holding two props with the marked one BEHIND was answering this question
+		# about a prop it was not about to throw: throw_slot sent the hand out to OUTER and
+		# the ordinary weave throw then left from inner_pos, 46px away. The prop leapt out of
+		# the hand at release and the hand snapped after it (hand_target's follow-through
+		# starts ON the release point), once per cycle, at every count where a hand holds
+		# more than one - which is every count above four. `has` was only ever right while a
+		# hand held at most one prop.
+		return not stack(h).is_empty() and stack(h)[0] == tennis_ball
 	# the shower's and half shower's high hand ride the over-the-top road too
 	return h == dominant_hand and pattern in [SHOWER, HALFSHOWER]
 
@@ -9445,13 +9593,44 @@ func over_top_land_slot(t: int) -> int:
 # draws centred on the waiting palm even when drift has nudged that landing a
 # few px off the slot's nominal centre. With nothing inbound, the slot the last
 # throw aimed at.
-func hand_target(h: int) -> Vector2:
-	var p: Vector2
-	var inc: Ball = null
+func incoming_ball(h: int) -> Ball:
+	# THE PROP HAND h WILL ACTUALLY TAKE NEXT: the one nearest IN TIME, overdue or not.
+	#
+	# EVERY ball is claimed only by the hand it is actually flying to.
+	#
+	# **THE ODD-COLUMNS SPARE USED TO BE AN EXCEPTION AND IT CANNOT BE ANY MORE**
+	# (2026-08-19). While that prop came down dead centre, either hand could scoop it,
+	# and centre is equally far from both - a fair rule for a lane on the middle line.
+	# The spare column stands in the DOMINANT hand's innermost lane now (see
+	# columns_lane_count), so the exception meant the off hand could catch a prop whose
+	# column is on the far side of the body and would then stand under it: measured with
+	# --handlog at five balls, the left hand holding the spare aimed at centre +52 while
+	# its own lanes are at -54 and -98. fig_arm_pick reads reach as |x - centre| and
+	# cannot see the sign, so the painted LEFT arm was drawn 52px to the left while its
+	# hand was 52px to the right - a residual of 109 screen px, eight times the guard's
+	# whole budget, every frame. A lane that belongs to one hand is caught by that hand.
+	#
+	# ONE ANSWER FOR THE PRESS AND FOR THE HAND (2026-08-20). on_catch resolved a press to
+	# the nearest arrival in time while hand_target reached for the EARLIEST land_tick, and
+	# those are different props whenever one is overdue: a prop past its arrival and still
+	# inside MISS_GRACE keeps the earliest stamp forever, so the hand went on reaching for
+	# something about to be declared dropped while the press took the fresh one landing
+	# beside it. Measured with --touchcheck at seven objects, that was a catch 26.4px from
+	# where the hand was even HEADED - not a hand running late, a hand aimed elsewhere.
+	var best: Ball = null
+	var best_d := 1000000
 	for b in balls:
 		if b.state == STATE_FLIGHT and b.to_hand == h:
-			if inc == null or b.land_tick < inc.land_tick:
-				inc = b
+			var d := absi(b.land_tick - tick)
+			if d < best_d:
+				best = b
+				best_d = d
+	return best
+
+
+func hand_target(h: int) -> Vector2:
+	var p: Vector2
+	var inc: Ball = incoming_ball(h)
 	# HOLDING MEANS INWARD, EMPTY MEANS OUTWARD, and nothing else gets a say (2026-07-27,
 	# Louis: "the hand is already gone to catch, but hasn't thrown yet, making the throw
 	# look weird"). A holding hand used to reach for an incoming prop's landing point as
@@ -9490,11 +9669,28 @@ func hand_target(h: int) -> Vector2:
 		# hand and the "strange" objects were the same bug seen from two ends.
 		#
 		# pop_front is what do_throw takes, so stack[0] is the next one out. A ball keeps
-		# its lane for the whole run once assigned, so only its very first throw - before
-		# it has a lane at all - falls back to the slot, which is a beat nobody sees.
+		# its lane for the whole run once assigned, and columns_claim_lanes now hands one to
+		# every prop the moment it is in a hand - so the fallback below is only reached in
+		# the frame between a catch and the next tick. It used to cover a prop's whole first
+		# throw, which is where --touchcheck found the 50.5px leap that fix removed.
 		if pattern == COLUMNS and stack(h)[0].lane_x >= 0.0:
 			p.x = stack(h)[0].lane_x
 			p.y = hand_carry_y(p.x - stage_center().x)   # ...and the carry that reach implies
+		elif pattern == TENNIS and stack(h)[0] == tennis_ball:
+			# TENNIS: THE HAND ABSORBS THE HIGH ONE AND LIFTS IT BACK OUT (see TENNIS_ABSORB).
+			# Timed off `held_tick` - the tick the prop actually landed in this hand - and not
+			# off its land_tick, because a catch is pressed early or late by up to a fifth of
+			# a second and a gesture that starts on the nominal arrival would either begin
+			# before the hand has the thing or finish after it is gone.
+			var since := tick - stack(h)[0].held_tick
+			var give := 0.0
+			if since >= 0 and since < TENNIS_SINK + TENNIS_LIFT:
+				give = float(since) / float(TENNIS_SINK) if since < TENNIS_SINK \
+					else 1.0 - float(since - TENNIS_SINK) / float(TENNIS_LIFT)
+			if give > 0.0:
+				var dx := HAND_OUT_DX - TENNIS_ABSORB * give
+				var cx := stage_center().x
+				p = Vector2(cx - dx if h == LEFT else cx + dx, hand_carry_y(dx))
 	else:
 		# EMPTY AND NOTHING INCOMING RESTS INWARD, EVERYWHERE (2026-07-31, Louis: this
 		# should not be a tutorial-only rule - "should be everywhere"). Outward is the
@@ -9701,7 +9897,7 @@ func start_run(n: int) -> void:
 	# stamina PERSISTS through the day now: only sleep (or a meal) restores it, so
 	# a third booking in one evening is genuinely tired work. Dev auto-runs top up
 	# so screenshots stay comparable.
-	if _demo or _shot or debug_mode:
+	if dev_unattended() or debug_mode:
 		stamina = stamina_max
 	stamina = clampf(stamina, 0.0, stamina_max)
 	run_xp = 0
@@ -9900,27 +10096,8 @@ func on_catch(h: int) -> void:
 	# it is still STATE_FLIGHT at this point in the function.
 	if not sure and not catch_full_on() and not stack(h).is_empty() and balls_airborne() > 1:
 		return
-	var best: Ball = null
-	var best_d := 1000000
-	for b in balls:
-		# EVERY ball is claimed only by the hand it is actually flying to.
-		#
-		# **THE ODD-COLUMNS SPARE USED TO BE AN EXCEPTION AND IT CANNOT BE ANY MORE**
-		# (2026-08-19). While that prop came down dead centre, either hand could scoop it,
-		# and centre is equally far from both - a fair rule for a lane on the middle line.
-		# The spare column stands in the DOMINANT hand's innermost lane now (see
-		# columns_lane_count), so the exception meant the off hand could catch a prop whose
-		# column is on the far side of the body and would then stand under it: measured with
-		# --handlog at five balls, the left hand holding the spare aimed at centre +52 while
-		# its own lanes are at -54 and -98. fig_arm_pick reads reach as |x - centre| and
-		# cannot see the sign, so the painted LEFT arm was drawn 52px to the left while its
-		# hand was 52px to the right - a residual of 109 screen px, eight times the guard's
-		# whole budget, every frame. A lane that belongs to one hand is caught by that hand.
-		if b.state == STATE_FLIGHT and b.to_hand == h:
-			var d := absi(b.land_tick - tick)
-			if d < best_d:
-				best = b
-				best_d = d
+	var best: Ball = incoming_ball(h)
+	var best_d := absi(best.land_tick - tick) if best != null else 1000000
 	if best == null or best_d > COMMIT:
 		if sure:
 			tut_hold_abort()   # the beat asked for a catch and there is nothing to catch:
@@ -10006,7 +10183,37 @@ func on_catch(h: int) -> void:
 		if _handlog:
 			print("t%4d  PARKED %s - caught with %d already in hand, that hand is done throwing"
 				% [tick, "L" if h == LEFT else "R", stack(h).size()])
+	if _touch:
+		# --touchcheck, TWO numbers, because a catch away from the hand has two very
+		# different causes and only one of them is a fault:
+		#   gap  the prop's landing point against where the hand actually IS. Travel counts
+		#        here: a hand smoothed toward an arrival it will reach is legitimately a few
+		#        px short, and draw_hand tweens the prop into it either way.
+		#   aim  the same landing point against where the hand is HEADED. Zero means the hand
+		#        was on its way and only needed longer; anything else means the hand was
+		#        never coming - the geometry disagreed with itself, which is the fault.
+		# Read before the append, since both questions are about the hand as it was.
+		_touch_n += 1
+		var cg := best.to_pos.distance_to(hpos[h])
+		if cg > TOUCH_OK:
+			_touch_bad += 1
+		if cg > _touch_catch:
+			_touch_catch = cg
+			_touch_catch_at = "%s, %s hand, t%d" % [String(PATTERNS[pattern]["name"]), hand_side(h), tick]
+		# ...and the aim is only asked OUTSIDE the follow-through. For HAND_FOLLOW ticks
+		# after its own throw a hand is deliberately still with the prop it released
+		# (hand_target's blend), so of course it is not yet aiming at the next arrival -
+		# that is the gesture, not a disagreement. At seven objects a hand throws and
+		# catches inside that window constantly, and unguarded this measured the
+		# follow-through rather than the geometry.
+		var ca := best.to_pos.distance_to(hand_target(h)) \
+			if tick - int(throw_kick[h]) >= HAND_FOLLOW else 0.0
+		if ca > _touch_aim:
+			_touch_aim = ca
+			_touch_aim_at = "%s, %s hand, t%d, holding %d%s" % [String(PATTERNS[pattern]["name"]),
+				hand_side(h), tick, stack(h).size(), ", parked" if hand_parked[h] else ""]
 	best.state = STATE_HAND
+	best.held_tick = tick
 	stack(h).append(best)
 	sprint_record("catch_l" if h == LEFT else "catch_r")
 	catch_flash[h] = tick
@@ -10647,6 +10854,44 @@ func do_throw(h: int, hold: int) -> void:
 		# it can never disagree about where it is actually going.
 		b.from_pos = inner_pos(h)
 		b.to_pos = slot_pos(b.to_hand, land_slot)
+	if not (lanes or mid_ball):
+		# A PROP LEAVES FROM THE HAND, NOT FROM THE HAND'S TARGET (2026-08-20, Louis: "make
+		# sure the balls always touch the hand when throwing and catching"). Measured with
+		# --touchcheck at three clubs: a Half Shower's high hand catches the weave's low road
+		# at INNER and launches its own high road from OUTER, so a throw pressed two ticks
+		# after that catch left from a point 44.1px from the hand that was holding it. The
+		# hand is smoothed toward its slot (HAND_SMOOTH) and cannot teleport; the prop was
+		# doing the teleporting instead, once per cycle, in the two patterns whose whole
+		# shape is "catch here, carry, launch there".
+		#
+		# The SLOT stays the design - it is what hand_target aims at, what the roads are laid
+		# out from, and what over_top_land_slot's launch-never-on-a-landing guarantee is
+		# written in - but at the instant of release the hand is the fact and the slot is an
+		# intention. Everything downstream already agrees with that reading: throw_from (and
+		# so hand_target's follow-through) is this same point, so the hand now eases out of
+		# where it really was rather than being yanked to a slot it had not reached.
+		#
+		# NOT for a lane throw (the branch above): a column is a vertical line, thrown and
+		# caught at one x, so a release nudged sideways by a hand still travelling between
+		# lanes would make it a diagonal - the exact fault the 2026-07-28 note records. Those
+		# stand on the lane instead, which columns_claim_lanes now makes true from the deal.
+		# NOT for a Behind the Back either, whose release point is behind the far hip BY
+		# DESIGN and is set below, after this.
+		#
+		# WHAT IT COSTS, MEASURED, because there is a real trade here and --collcheck is the
+		# thing that sees the other side of it. On the metronome - a throw on its own beat,
+		# with the hand where it meant to be - the audit is byte-identical before and after:
+		# 40.6/51.5/34.8/40.0px of clearance at five clubs for cascade / half shower / shower
+		# / reverse cascade. Under `--latecatch 5`, which throws on the very tick of the catch
+		# and is the harshest timing the harness can make, the reverse cascade's drawn gap
+		# falls from +13.2px to -28.2. That is not a geometry bug appearing, it is the throw
+		# being honest about a hand that has not carried yet: both of that pattern's hands
+		# launch from OUTER and catch at INNER, so a prop thrown the instant it lands really
+		# does leave from the inner slot and really does cross the other road. The old
+		# behaviour hid it by teleporting the prop 46px to the slot instead, which is the
+		# thing Louis can see and the audit cannot. Rushing a pattern degrades it; that is
+		# what rushing is.
+		b.from_pos = hpos[h]
 	if this_trick == TR_BTB:
 		# BEHIND THE BACK actually goes behind now (Louis: it never read as
 		# behind): the arm wraps and the ball RELEASES from behind the opposite
@@ -10656,6 +10901,17 @@ func do_throw(h: int, hold: int) -> void:
 		var bc := stage_center()
 		b.from_pos = Vector2(lerpf(bc.x, inner_pos(other(h)).x, 0.75), bc.y + 26.0)
 
+	if _touch:
+		# --touchcheck: did this prop leave from where the hand actually was? Measured
+		# against hpos rather than the painted palm, because hpos is the one the drawn
+		# palm follows and the one every slot decision is made in.
+		_touch_n += 1
+		var tg := b.from_pos.distance_to(hpos[h])
+		if tg > TOUCH_OK:
+			_touch_bad += 1
+		if tg > _touch_throw:
+			_touch_throw = tg
+			_touch_throw_at = "%s, %s hand, t%d" % [String(PATTERNS[pattern]["name"]), hand_side(h), tick]
 	throw_from[h] = b.from_pos   # ...and the hand leaves from there too (see hand_target)
 	throw_kick[h] = tick
 	charging[h] = false
@@ -12068,10 +12324,18 @@ func resolve_act() -> void:
 	if _demo:
 		# dev: report the whole-act outcome, so --demo --booking is a one-shot end-to-end
 		# check of the resolve path (goals, stripping, pay, rep)
-		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s reason=%s score=%s pay=%d rep=%+d record=%s demowall=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f" % [
+		# ...INCLUDING WHICH NIGHT IT WAS. The line reported everything about the outcome and
+		# nothing about the conditions, so an act that collapses in three seconds reads as a
+		# regression until somebody re-runs it by hand with --encore and finds the Gale that
+		# was blowing. One field, on the same line: every reader of this log greps it whole.
+		var enames: Array[String] = []
+		for e in encores:
+			enames.append(String(ENCORES[e]["id"]))
+		print("ACT venue=%d prop=%d n=%d goals=%d/%d collapsed=%s reason=%s score=%s pay=%d rep=%+d record=%s demowall=%s ticks=%d flowers=%d tomatoes=%d ovation=%d peakappl=%.2f encores=%s" % [
 			run_venue, prop_type, num_balls, goals_hit, NUM_GOALS, str(set_collapsed),
 			fail_reason, score_text(score), last_pay, last_rep_delta, str(results_record), str(pending_demo_wall), tick, run_flowers,
-			run_tomatoes, ovation_bonus, peak_applause])
+			run_tomatoes, ovation_bonus, peak_applause,
+			"none" if enames.is_empty() else ",".join(enames)])
 		if daily_active:
 			print(daily_share)
 		# ...and quit ONLY once the ovation has played out. Quitting on the spot meant the
@@ -12079,7 +12343,16 @@ func resolve_act() -> void:
 		# rain and its bonus had no automated coverage at all - and a screenshot of it was
 		# impossible, since the process was gone the frame the act ended. The line above
 		# still prints at the same moment, so nothing reading the log changes.
-		if ovation_left <= 0:
+		# ...AND NEVER WHILE A CAPTURE IS STILL PENDING (2026-08-20). --shot names a frame,
+		# and an act that ends before that frame took the whole process with it: the flag
+		# then produced no file and no error, which is exactly what validate.sh's stage
+		# smoke test reports whenever the demo save has drifted far enough for the act to
+		# collapse early. Same reasoning as the ovation hold immediately below - a dev flag
+		# that quietly does nothing is worse than one that fails - and the capture says
+		# which screen it actually got, so a shot taken after the act is still honest.
+		if _shot and _shot_frames < _shot_tick:
+			pass
+		elif ovation_left <= 0:
 			get_tree().quit()
 		else:
 			_demo_quit_after_ovation = true
@@ -13007,7 +13280,7 @@ func save_file() -> String:
 	# scratch file and must never touch a real career slot.
 	if debug_mode:
 		return SAVE_PATH_DEBUG
-	if _demo or _shot:
+	if dev_unattended():
 		return SAVE_PATH_DEMO
 	return slot_path(save_slot)
 
@@ -13527,6 +13800,7 @@ func coach_text() -> String:
 
 
 func update_sim() -> void:
+	columns_claim_lanes()
 	# THE CLOCK (Phase 2): the crowd's patience bleeds every tick while performing, at a
 	# venue-scaled rate the Encore can bend. Reach zero and the room empties (the collapse
 	# that was always built and never reached). Catches and big throws pay patience back,
@@ -17717,16 +17991,27 @@ func draw_hand(h: int) -> void:
 	for i in st.size():
 		var bp := pos
 		# THE ONE CASE "drawn in that hand, no exceptions" (above) still needs a beat of
-		# help: Full-Hand-Catch (`set_catch_full`, an accessibility setting, OFF by
-		# default) lets a second ball land into a hand that is still holding the first -
-		# and hand_target deliberately never eases that hand toward an incoming ball
-		# while it holds one (2026-07-27, see hand_target), so the newly-caught ball's
-		# last FLIGHT frame is out at its true landing point while this, its first HELD
-		# frame, is back at the hand's held/throw position. A hard cut between those two
-		# reads as a teleport. This is not the old bug (a ball parked somewhere and left
-		# there) - it settles to `pos` well inside a tenth of a second and only ever
-		# triggers for the ball that was JUST added on top of an already-full hand.
-		if i == st.size() - 1 and st.size() > 1:
+		# help: a ball's last FLIGHT frame is at its true landing point and its first HELD
+		# frame is at the hand, and a hard cut between two points that are not the same
+		# point reads as a teleport. It settles to `pos` well inside a tenth of a second,
+		# and when the two ARE the same point - a hand waiting at the landing it was aimed
+		# at, which is the ordinary catch - the tween has nothing to travel and cannot be
+		# seen at all.
+		#
+		# IT USED TO BE SCOPED TO ONE RARE CASE and the reasoning behind that scope was
+		# already the general argument (2026-08-20). It only ran for a Full-Hand-Catch
+		# rescue (`set_catch_full`, off by default), because a hand holding one prop never
+		# eases toward a second - but a hand can be far from an arrival for a much more
+		# ordinary reason, which is that it is still travelling. Measured with --touchcheck
+		# at seven objects: 44.4px on a plain Cascade and 52.6 on a Half Shower, both with
+		# an EMPTY hand simply not there yet, both drawn as an instant sideways jump. Every
+		# catch tweens now; the ones that were already exact still look exactly the same.
+		#
+		# `held_tick == catch_flash` is what says THIS prop is the one that just landed.
+		# catch_flash is also stamped by a WHIFF, and a whiff at a hand that is holding
+		# something (possible only with Full-Hand-Catch on) would otherwise send the prop
+		# already in that hand back out to its own old landing point and slide it home again.
+		if i == st.size() - 1 and st[i].held_tick == int(catch_flash[h]):
 			var settle := clampf(float(tick - catch_flash[h]) / CATCH_SETTLE_TICKS, 0.0, 1.0)
 			if settle < 1.0:
 				bp = flight_pos(st[i]).lerp(pos, 1.0 - (1.0 - settle) * (1.0 - settle))   # ease-out
@@ -17742,7 +18027,7 @@ func draw_dark_held_props() -> void:
 		var st: Array = stack(h)
 		for i in st.size():
 			var bp := pos
-			if i == st.size() - 1 and st.size() > 1:
+			if i == st.size() - 1 and st[i].held_tick == int(catch_flash[h]):
 				var settle := clampf(float(tick - catch_flash[h]) / CATCH_SETTLE_TICKS, 0.0, 1.0)
 				if settle < 1.0:
 					bp = flight_pos(st[i]).lerp(pos,
@@ -23634,9 +23919,23 @@ func _skills_row(font: Font, x: float, y: float, w: float, ename: String, req: D
 # there"). Everything a preview draws is bounded by construction (see draw_skill_
 # preview's `inner` rect): a prop that would leave the frame is not clipped mid-shape,
 # it fades and hands over to a top-edge marker, which is what the real High Toss does.
+#
+# EVERY NUMBER BELOW IS DERIVED FROM THE SIM'S OWN, and that is the 2026-08-20 change
+# (Louis: Columns and Tennis "are different in the preview and actual juggling"). The block
+# used to be hand-copied decimals - 39.6 for a Columns lane, 1.6 for a Shower's high road,
+# 0.34 for its feed - each true on the day it was measured and none of them able to follow
+# the constant it was copied from. Three had already gone stale: the lane spacing predated
+# the 2026-08-19 rebuild that moved Columns off the middle line, and the feed's airtime
+# predated the evening the pass was cut to a sixth of a tap. A preview whose whole purpose
+# is to teach the pattern cannot be a second, slowly-rotting copy of it.
 const PV_K := 0.55            # preview px per stage px (PV_OUTER / outer_pos's own 100)
-const PV_OUTER := 55.0        # the catch point (outer_pos, 100px out) at preview scale
-const PV_INNER := 29.7        # the throw point (inner_pos, 54px out) at preview scale
+const PV_OUTER := HAND_OUT_DX * PV_K   # the catch point (outer_pos) at preview scale
+const PV_INNER := HAND_IN_DX * PV_K    # the throw point (inner_pos) at preview scale
+const PV_DIP := HAND_IN_DIP * PV_K     # ...and how far BELOW the catch line that point sits.
+							   # The preview drew both slots on one flat line while the game
+							   # has carried the inner one 26px down since 2026-08-12, so the
+							   # little figure telescoped its hands in and out where the real
+							   # one scoops down and back up - see pv_dip
 const PV_HEAD := 22.2         # draw_juggler's head unit H at preview scale
 const PV_FLOOR := 91.0        # the floor line, below the hand line (4.11 head units)
 # The brightest a preview panel's own floor may be lit, on its strongest channel. Set just
@@ -23644,21 +23943,59 @@ const PV_FLOOR := 91.0        # the floor line, below the hand line (4.11 head u
 # figure standing on them - see draw_preview_floor, where the lift is a multiplier and the
 # pale-floored houses would otherwise carry it past this on their own.
 const PV_FLOOR_MAX := 0.38
-const PV_ARC := 99.3          # peak px of a height-1.0 throw: BASE_AIR * ARC_PER_AIR, scaled
+const PV_ARC := ARC_PER_AIR * BASE_AIR * PV_K   # peak px of a height-1.0 throw (a bare tap)
 const PV_TIME := 1.15         # seconds a height-1.0 throw hangs. Real time is 0.7s; the
                               # preview runs ~1.6x slow so the shape is readable (Louis)
+const PV_SLOW := PV_TIME / (BASE_AIR / 120.0)   # ...as a factor, for anything else here that
+							   # has to be shown at the preview's pace rather than the sim's
 const PV_CARRY := 0.30        # seconds a hand carries a caught prop to its launch point
-const PV_LANE := 39.6         # Columns' OUTER lane at preview scale. The preview runs the
-							   # pattern at three objects, where columns_x puts the two side
-							   # lanes 72px off centre and the third up the middle line, so
-							   # this is that 72 x PV_K. It is a lane POSITION now, not the
-							   # old fixed 44px spacing, because the spacing is a function of
-							   # the count (columns_step) and 44 is only its widest value
-const PV_HIGH := 1.5          # an over-the-top lob (OVER_TOP_MIN) as a multiple of a tap
-const PV_SHOWER_HIGH := 1.6   # SHOWER_MIN's taller high road
-const PV_FEED := 0.34         # the Shower's flat, fast feed pass (SHOWER_FEED)
-const PV_BTB_DROP := 14.3     # how far below the hand line a Behind-the-Back throw
-                              # releases (do_throw's +26px), at preview scale
+const PV_FOLLOW := HAND_FOLLOW / 120.0 * PV_SLOW   # ...and how long it stays with the prop it
+							   # just released (hand_target's own follow-through), so a preview
+							   # hand is ON the release point at the instant of release
+const PV_COUNT := 3           # how many objects a pattern preview puts up. Columns reads its
+							   # lanes off the sim at exactly this count (see pv_lane), so the
+							   # picture and the caption can never disagree about it either
+# A HOLD, as a multiple of a tap's airtime - the conversion between the sim's height FRACTIONS
+# (0 = tap, 1.0 = a full hold, what do_throw calls `frac`) and this preview's height
+# MULTIPLIERS (1.0 = a tap). Both airtime and arc are linear in `air`, so one factor carries
+# both, and every road below is now stated as the sim's own minimum rather than as a decimal
+# somebody read off a screenshot.
+const PV_HOLD := HOLD_GAIN * HOLD_MAX / BASE_AIR
+const PV_HIGH := 1.0 + OVER_TOP_MIN * PV_HOLD          # a plain over-the-top lob
+const PV_SHOWER_HIGH := 1.0 + SHOWER_MIN * PV_HOLD     # the Shower's taller high road
+const PV_TENNIS_HIGH := 1.0 + TENNIS_MIN * PV_HOLD     # ...and Tennis's marked prop, which
+							   # clears a whole weave rather than one road and is 20% higher
+							   # again (TENNIS_MIN). The preview used to draw it at the plain
+							   # lob's height, so the one thing the pattern is named for was
+							   # the one thing drawn at the wrong height
+const PV_FEED := SHOWER_FEED  # the Shower's fast feed pass - its AIRTIME, with its arc
+							   # flattened separately by SHOWER_FEED_ARC exactly as in flight
+							   # (see pv_throw's `arc_k`: height and time are one number for
+							   # every other throw in the game and two for this one)
+const PV_BTB_DROP := 26.0 * PV_K   # how far below the hand line a Behind-the-Back throw
+                              # releases (do_throw's own +26px), at preview scale
+const PV_STACK := 5.0         # how high a SECOND prop in the same hand rides above the first,
+							   # the preview's share of draw_hand's own 6px step
+
+
+func pv_touch(gap: float, ename: String, h: int, t: float, seam: String) -> void:
+	# --touchcheck's preview half, banked. See _touch for what the numbers mean; the preview
+	# has no follow-through of its own to excuse a gap, so anything here is a real one.
+	_touch_n += 1
+	if gap > TOUCH_OK:
+		_touch_bad += 1
+	if gap <= _touch_hold:
+		return
+	_touch_hold = gap
+	_touch_hold_at = "%s preview, %s %s hand, t=%.2f" % [ename, seam, hand_side(h), t]
+
+
+func pv_dip(dx: float) -> float:
+	# how far below the catch line a hand sits at stage reach `dx`, at preview scale. It is
+	# the sim's own hand_carry_y, asked in the preview's units: the two named slots are its
+	# two ends (outer on the line, inner PV_DIP below it) and a Columns lane is somewhere
+	# between, which is exactly the sweep the painted arm bank carries.
+	return (hand_carry_y(dx) - stage_center().y) * PV_K
 
 
 func pv_o(hand: int) -> Vector2:
@@ -23666,7 +24003,16 @@ func pv_o(hand: int) -> Vector2:
 
 
 func pv_i(hand: int) -> Vector2:
-	return Vector2(-PV_INNER if hand == LEFT else PV_INNER, 0.0)
+	return Vector2(-PV_INNER if hand == LEFT else PV_INNER, PV_DIP)
+
+
+func pv_lane(slot: int) -> Vector2:
+	# one Columns lane, read off columns_x at the count this preview draws - so the lanes
+	# ARE the game's lanes, dominant hand and all. See columns_lane_count for why there is
+	# no lane on the middle line any more, and why a preview that still drew one was showing
+	# a hand reaching for a place no arm can be painted.
+	var dx := columns_x(slot, PV_COUNT) - stage_center().x
+	return Vector2(dx * PV_K, pv_dip(dx))
 
 
 func pv_btb(hand: int) -> Vector2:
@@ -23675,17 +24021,30 @@ func pv_btb(hand: int) -> Vector2:
 	return Vector2((-PV_INNER if hand == LEFT else PV_INNER) * 0.75, PV_BTB_DROP)
 
 
-func pv_throw(a: Vector2, b: Vector2, hgt: float, bhd := 0.0) -> Dictionary:
+func pv_throw(a: Vector2, b: Vector2, hgt: float, bhd := 0.0, arc_k := 1.0) -> Dictionary:
 	# one leg of FLIGHT: the parabola flight_pos draws, hanging in proportion to its
 	# height exactly as real airtime does. `bhd` is how far into the leg the prop is
 	# still hidden behind the figure (_btb_behind's own 0.35 for a behind-the-back throw).
-	return {"a": a, "b": b, "h": hgt, "d": PV_TIME * maxf(hgt, 0.25), "carry": false, "bhd": bhd}
+	# `arc_k` splits the two halves of `hgt` for the one throw in the game where they come
+	# apart: the Shower's feed keeps its own quick airtime and rises only SHOWER_FEED_ARC of
+	# the arc that airtime would otherwise buy (do_throw's `b.flat`). Everywhere else arc and
+	# time are one number, so it is 1.0 and nothing about any other road moves.
+	# ...and the FLOOR on that duration is 0.12 rather than the 0.25 it was: it is there so
+	# no leg is over before the eye can follow it, and at 0.25 it was rounding the Shower's
+	# feed - the only road in the game below it - up to half again its real airtime, on the
+	# one panel whose job is to say how fast that pass goes. 0.12 of a tap is 22 frames at
+	# the preview's pace, which is plenty of leg to see.
+	return {"a": a, "b": b, "h": hgt * arc_k, "d": PV_TIME * maxf(hgt, 0.12),
+			"carry": false, "bhd": bhd}
 
 
-func pv_carry(a: Vector2, b: Vector2, bhd := 0.0) -> Dictionary:
+func pv_carry(a: Vector2, b: Vector2, bhd := 0.0, dur := -1.0) -> Dictionary:
 	# the hand's own carry, from where it caught the prop to where its next throw
-	# leaves from: a short scoop along the hand line, not a flight
-	return {"a": a, "b": b, "h": 0.0, "d": PV_CARRY, "carry": true, "bhd": bhd}
+	# leaves from: a short scoop along the hand line, not a flight. `dur` is how long the
+	# hand DWELLS, and it is the one thing here a juggler really does vary: it is what keeps
+	# a prop on a different road in step with the rest (see Tennis, whose marked prop hangs
+	# 1.6x as long as the weave underneath it and would otherwise drift through it).
+	return {"a": a, "b": b, "h": 0.0, "d": PV_CARRY if dur < 0.0 else dur, "carry": true, "bhd": bhd}
 
 
 func pv_cascade_legs(hgt := 1.0, bhd := 0.0) -> Array:
@@ -23719,39 +24078,75 @@ func skill_preview(is_trick: bool, idx: int) -> Dictionary:
 				return {"tracks": [{"legs": pv_cascade_legs(1.6), "n": 3}],
 						"note": "one full turn, caught blind", "spin": true}
 			_:
-				# Overthrow: ONE marked prop launched up and over the pattern (an
-				# over-the-top road: out of the OUTER corner, down onto the inner slot),
-				# while the other two keep the weave underneath it
-				return {"tracks": [{"legs": pv_cascade_legs(), "n": 2},
-						{"legs": [pv_throw(pv_o(LEFT), pv_i(RIGHT), 1.95), pv_carry(pv_i(RIGHT), pv_i(RIGHT)),
-								  pv_throw(pv_i(RIGHT), pv_o(LEFT), 1.0), pv_carry(pv_o(LEFT), pv_o(LEFT))],
-						 "n": 1, "mark": true}],
-						"note": "one throw over the top of the rest"}
+				# ANY TRICK THIS FUNCTION HAS NOT BEEN TAUGHT: a plain cascade, which is
+				# every trick's underlying pattern and therefore the one picture that
+				# cannot be actively wrong. It is unreachable today (TRICKS holds exactly
+				# the three above) and it is NOT dead code: without it a fourth trick would
+				# fall through to the pattern `match` below and be previewed as whichever
+				# PATTERN happens to share its index - a Cascade, Columns or Half Shower
+				# drawn under a trick's name, with nothing anywhere saying so.
+				# What used to be here was Overthrow's choreography, kept long after the
+				# trick itself was folded into the patterns that ARE that road.
+				return {"tracks": [{"legs": pv_cascade_legs(), "n": 3}],
+						"note": "the cascade underneath it"}
 	match idx:
 		COLUMNS:
-			# three lanes on columns_x's own spacing: each prop rides straight up and
-			# down its own line (a from == to leg - the parabola alone draws the bounce),
-			# and the middle lane runs half a cycle out of phase with the outer two,
-			# which is what makes the pattern read as columns and not as three balls
+			# THE LANES ARE THE GAME'S LANES (2026-08-20, Louis: Columns is "different in the
+			# preview and actual juggling"). Each prop rides straight up and down its own
+			# line (a from == to leg - the parabola alone draws the bounce) and the SPARE
+			# lane runs half a cycle out of phase with the rest, which is what makes the
+			# pattern read as columns rather than as three balls going up together.
+			#
+			# What it drew before was three lanes at a fixed +-39.6 with the third ON THE
+			# CENTRE LINE, which is the layout the game itself abandoned on 2026-08-19: a
+			# hand under that lane is asking for reach zero, no two-bone arm can put its own
+			# hand on its own shoulder, and the preview duly drew a ball hanging over the
+			# waistcoat buttons with both hands splayed out beside it holding nothing. At
+			# three objects the real pattern is not symmetric at all - the dominant hand owns
+			# two of the three columns and swings between them, which is what an odd count IS.
 			var lanes: Array = []
-			for k in 3:
-				var lx := Vector2(float(k - 1) * PV_LANE, 0.0)
+			var spare := columns_mid_slot(PV_COUNT)
+			for k in PV_COUNT:
+				var lx := pv_lane(k)
 				lanes.append({"legs": [pv_throw(lx, lx, 1.15), pv_carry(lx, lx)], "n": 1,
-							  "phase": 0.5 if k == 1 else 0.0})
-			return {"tracks": lanes, "note": "3 objects - one lane each"}
+							  "phase": 0.5 if k == spare else 0.0})
+			return {"tracks": lanes, "note": "%d objects - one lane each" % PV_COUNT}
 		HALFSHOWER:
 			# the low leg is HALFSHOWER_LOW itself, so the picture cannot drift from the
 			# cap the sim throws at: it drew 0.95 of a tap while the sim now caps that
 			# road at 0.65, which is the preview drawing the very overlap the cap exists
-			# to prevent
-			return {"tracks": [{"legs": [pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_HIGH),
-									pv_carry(pv_o(LEFT), pv_i(LEFT)),
-									pv_throw(pv_i(LEFT), pv_o(RIGHT), HALFSHOWER_LOW)], "n": 3}],
-					"note": "right over the top, left low"}
+			# to prevent.
+			#
+			# ...AND THE LOW ROAD LANDS INNER, WITH A CARRY OUT TO THE LAUNCH (2026-08-20).
+			# It was drawn landing on the high hand's OUTER slot - which is the very slot
+			# that hand launches from, i.e. the -1.3px launch-on-a-landing fault do_throw's
+			# `land_slot` block was rewritten to kill on 2026-08-19. The preview kept
+			# drawing the bug for a day after the game stopped doing it, and with no carry
+			# leg at all the high hand never held anything: the prop arrived at the point it
+			# would next leave from and the cycle simply restarted, so a THIRD of the
+			# pattern happened with nothing in either hand.
+			var dom_h := dominant_hand
+			var off_h := other(dom_h)
+			return {"tracks": [{"legs": [pv_throw(pv_o(dom_h), pv_o(off_h), PV_HIGH),
+									pv_carry(pv_o(off_h), pv_i(off_h)),
+									pv_throw(pv_i(off_h), pv_i(dom_h), HALFSHOWER_LOW),
+									pv_carry(pv_i(dom_h), pv_o(dom_h))], "n": 3}],
+					"note": "%s over the top, %s low" % [hand_side(dom_h), hand_side(off_h)]}
 		SHOWER:
-			return {"tracks": [{"legs": [pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_SHOWER_HIGH),
-									pv_carry(pv_o(LEFT), pv_i(LEFT)),
-									pv_throw(pv_i(LEFT), pv_o(RIGHT), PV_FEED)], "n": 3}],
+			# same two corrections as the Half Shower above - the feed lands INNER and the
+			# high hand carries it out to its own launch point - plus the feed's real
+			# shape: SHOWER_FEED's airtime under SHOWER_FEED_ARC's flattened rise, which is
+			# a prop snapping sideways across the body rather than the lazy half-height lob
+			# a hand-copied 0.34 was drawing.
+			# ...AND THE HIGH ROAD IS THE STRONG HAND'S, whichever hand the player chose in
+			# Settings. Every one of these was written RIGHT-over-the-top because that is the
+			# default, so a left-handed player was shown the mirror image of their own act.
+			var dom_s := dominant_hand
+			var off_s := other(dom_s)
+			return {"tracks": [{"legs": [pv_throw(pv_o(dom_s), pv_o(off_s), PV_SHOWER_HIGH),
+									pv_carry(pv_o(off_s), pv_i(off_s)),
+									pv_throw(pv_i(off_s), pv_i(dom_s), PV_FEED, 0.0, SHOWER_FEED_ARC),
+									pv_carry(pv_i(dom_s), pv_o(dom_s))], "n": 3}],
 					"note": "one circle, one direction"}
 		RCASC:
 			# both hands over the top, so both launch from OUTER and both land INNER
@@ -23771,9 +24166,43 @@ func skill_preview(is_trick: bool, idx: int) -> Dictionary:
 			# left, right) evenly instead: measured on the preview's own numbers, the second
 			# prop is in the catching hand at the instant the first is at its apex. See the
 			# `spread` note in draw_skill_preview.
+			#
+			# ...AND THE MARKED PROP IS CAUGHT AND THROWN, not bounced (2026-08-20, Louis:
+			# the higher thrown object "should when caught make the hand go a bit lower and
+			# then again a bit higher for the throw, not just a static hand"). Its two legs
+			# were both FLIGHTS, corner to corner with nothing between them, so the prop
+			# never spent an instant in a hand - and since this preview places its hands on
+			# the props they are CARRYING (see draw_skill_preview), the hand waiting under
+			# the one road the pattern is named for had nothing to hold and never moved.
+			# A carry from the catch point back to the same launch point is what the game
+			# does (throw_slot answers OUTER for as long as the mark is in the hand), and
+			# the scoop pv_leg_pos puts on every carry IS the absorb-and-lift: the same
+			# gesture the stage now makes, see TENNIS_ABSORB.
+			# THE TWO TRACKS ARE ONE RHYTHM, and they have to be made so on purpose: the
+			# marked prop hangs PV_TENNIS_HIGH times as long as a weave throw, so two loops
+			# left to run at their own natural lengths drift through each other and every
+			# few seconds ask one hand to catch the mark while it is carrying a low prop -
+			# a conjunction that on stage is not a near miss but a DROP (a hand holding
+			# something it can still throw never reaches for an arrival). Its DWELL is
+			# solved so that one high road takes exactly three low throws, which is what a
+			# three-object Tennis is, and the two then hold their phase forever.
+			var weave := 2.0 * PV_TIME + 2.0 * PV_CARRY
+			var mark_dwell := maxf(0.12, (weave * 1.5 - 2.0 * PV_TIME * PV_TENNIS_HIGH) * 0.5)
 			return {"tracks": [{"legs": pv_cascade_legs(), "n": 2, "spread": 0.25},
-					{"legs": [pv_throw(pv_o(LEFT), pv_o(RIGHT), PV_HIGH),
-							  pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_HIGH)], "n": 1, "mark": true}],
+					{"legs": [pv_throw(pv_o(LEFT), pv_o(RIGHT), PV_TENNIS_HIGH),
+							  pv_carry(pv_o(RIGHT), pv_o(RIGHT), 0.0, mark_dwell),
+							  pv_throw(pv_o(RIGHT), pv_o(LEFT), PV_TENNIS_HIGH),
+							  pv_carry(pv_o(LEFT), pv_o(LEFT), 0.0, mark_dwell)], "n": 1, "mark": true,
+					 # ...and offset within that rhythm, because WHERE the high road sits
+					 # between the low throws is the last free variable and it decides how
+					 # often the mark arrives at a hand that is already carrying something.
+					 # Swept with --touchcheck over 20s of the loop at every tenth: 0.4 is
+					 # the best of them (4 of 81 seams over 10px, worst 15.8), against 20 of
+					 # 118 and a worst of 27.7 at the neighbouring 0.1. It cannot reach zero
+					 # while the two roads are separate tracks - three props on one rhythm is
+					 # a siteswap and this little loop is not one - so the residual is a
+					 # known, bounded half-prop overlap rather than a fault to chase.
+					 "phase": 0.4}],
 					"note": "one marked prop over the weave"}
 		_:
 			# Cascade, shown at 3: the crossing weave the pattern is named for. Its
@@ -23813,11 +24242,21 @@ func pv_state(legs: Array, tsec: float) -> Dictionary:
 			# figure which hand is holding what - and without it the hands were guessed from
 			# "is any prop within 34px of the hand line", which is true for none of them
 			# through most of a cascade.
+			# `el` / `rem` are how long this leg has been running and how long it has left,
+			# in seconds: an EMPTY hand is placed by them (it waits where the soonest prop
+			# coming its way will land, and it leaves with the one it just released), which
+			# is hand_target's own rule rather than a guess about proximity.
+			# `prev` is the START of the leg before this one, and it is what says WHOSE hand
+			# a throw left. The x of the release point cannot: Behind the Back releases past
+			# the far hip, so its sign names the wrong arm - and the leg before any throw is
+			# that hand's own carry, in every pattern and every trick here.
+			var prev: Dictionary = legs[(i + legs.size() - 1) % legs.size()]
 			return {"pos": pv_leg_pos(leg, p), "behind": p < float(leg["bhd"]),
-					"carry": bool(leg["carry"]), "from": Vector2(leg["a"]), "to": Vector2(leg["b"])}
+					"carry": bool(leg["carry"]), "from": Vector2(leg["a"]), "to": Vector2(leg["b"]),
+					"prev": Vector2(prev["a"]), "el": tloop - acc, "rem": dur - (tloop - acc)}
 		acc += dur
-	return {"pos": Vector2.ZERO, "behind": false, "carry": false,
-			"from": Vector2.ZERO, "to": Vector2.ZERO}
+	return {"pos": Vector2.ZERO, "behind": false, "carry": false, "from": Vector2.ZERO,
+			"to": Vector2.ZERO, "prev": Vector2.ZERO, "el": 0.0, "rem": 0.0}
 
 
 func draw_mini_juggler(o: Vector2, hl: Vector2, hr: Vector2, turn: float, k: float = 1.0) -> void:
@@ -24035,7 +24474,10 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 			props.append({"pos": o + Vector2(st["pos"]), "col": ball_color(ci),
 						  "behind": bool(st["behind"]), "mark": marked,
 						  "carry": bool(st.get("carry", false)),
-						  "from": Vector2(st.get("from", Vector2.ZERO))})
+						  "from": Vector2(st.get("from", Vector2.ZERO)),
+						  "to": Vector2(st.get("to", Vector2.ZERO)),
+						  "prev": Vector2(st.get("prev", Vector2.ZERO)),
+						  "el": float(st.get("el", 0.0)), "rem": float(st.get("rem", 0.0))})
 			ci += 1
 
 	# THE HANDS ARE DRIVEN BY THE CARRY LEGS, not guessed from proximity (2026-08-13).
@@ -24055,35 +24497,105 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	# centre (Columns). Nothing here needs to know which pattern it is drawing.
 	var hp := [o + Vector2(-PV_OUTER, 0.0), o + Vector2(PV_OUTER, 0.0)]
 	var held := [false, false]
-	for pr in props:
+	var hold_rem := [INF, INF]
+	var front := [-1, -1]
+	for i in props.size():
+		var pr: Dictionary = props[i]
 		if not bool(pr.get("carry", false)):
 			continue
-		var p: Vector2 = pr["pos"]
 		# THE SIDE COMES FROM THE LEG'S OWN START, not from where the prop is this instant. A
 		# carry crosses toward the centre and a Behind-the-Back one crosses past it, so reading
 		# the live x hands the prop to the wrong arm halfway through every carry - which is a
 		# hand that jumps across the body and back once per prop per loop.
 		var h := LEFT if float(pr.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
-		if held[h]:
+		# A HAND CAN CARRY TWO, AND IT STANDS ON THE ONE IT THROWS NEXT - the carry ending
+		# soonest, which is throw_slot's own answer on stage (the hand aims at the launch
+		# point of the FRONT of its stack). It used to keep whichever prop this loop happened
+		# to reach first, so in Tennis the weave's carry could take the hand while the marked
+		# prop was in it, leaving the one prop the pattern is named for hanging in open air
+		# 50px above an empty palm.
+		if float(pr.get("rem", INF)) >= hold_rem[h]:
 			continue
+		hold_rem[h] = float(pr["rem"])
 		held[h] = true
-		hp[h] = p
-	# a hand with nothing in it is on its way back out to meet the next catch, so it sits at
-	# the outer slot - which is where it always sat, but now that is a STATE rather than the
-	# only thing that ever happened.
-	for pr in props:
-		if bool(pr["behind"]) or bool(pr.get("carry", false)):
+		front[h] = i
+		hp[h] = pr["pos"]
+	# ...and everything ELSE that hand is carrying is drawn IN it, stacked, exactly as
+	# draw_hand does on stage. This is the other half of "a prop in a hand is drawn in that
+	# hand, with no exceptions": the preview had no notion of a hand holding two at all.
+	var stacked := [0, 0]
+	for i in props.size():
+		var pr2: Dictionary = props[i]
+		if not bool(pr2.get("carry", false)) or i == front[LEFT] or i == front[RIGHT]:
 			continue
-		var p2: Vector2 = pr["pos"]
-		var dy := absf(p2.y - o.y)
-		if dy > 22.0 or absf(p2.x - o.x) < 9.0:
-			continue   # ...and never Columns' MIDDLE lane: that prop rests at stage
-					   # centre, over the hip, and belongs to neither hand's reach
-		var h2 := LEFT if p2.x < o.x else RIGHT
-		if not held[h2]:
-			# a prop about to land: the hand rises to meet it rather than waiting flat
-			hp[h2] = Vector2(p2.x, o.y + clampf(p2.y - o.y, -10.0, 8.0))
+		var h2 := LEFT if float(pr2.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
+		stacked[h2] += 1
+		pr2["stack"] = stacked[h2]
+		pr2["pos"] = hp[h2] + Vector2(0.0, -PV_STACK * float(stacked[h2]))
+	# AN EMPTY HAND WAITS WHERE ITS NEXT PROP WILL ACTUALLY LAND, which is hand_target's
+	# own rule on stage: `inc.to_pos`, the landing point of the soonest prop really flying
+	# this way. What was here instead was a proximity guess - "any prop within 22px of the
+	# hand line, on this side, at least 9px off centre" - and it had to be, because a leg
+	# could not say when it would arrive. Three things were wrong with it at once: a hand
+	# waited flat at its widest reach until a prop was nearly in it and then twitched to
+	# meet it; a lane that lands INSIDE 9px of centre was excluded by hand (the special
+	# case for a middle column that no longer exists); and a Columns hand that owns two
+	# lanes had no way to know which of them to stand under.
+	var soonest := [INF, INF]
+	for pr in props:
+		if bool(pr.get("carry", false)):
+			continue
+		var land: Vector2 = pr.get("to", Vector2.ZERO)
+		var h2 := LEFT if land.x < 0.0 else RIGHT
+		if held[h2] or float(pr.get("rem", INF)) >= soonest[h2]:
+			continue
+		soonest[h2] = float(pr["rem"])
+		hp[h2] = o + land
+	# ...AND IT LEAVES WITH THE PROP IT THREW. hand_target eases a stage hand out of its own
+	# release point over HAND_FOLLOW ticks so the arm goes WITH the object instead of
+	# flicking away from it; without the same easing here a preview hand is already out at
+	# the next catch slot on the frame after a release, which is the "abandoned rather than
+	# thrown" read that note was written about. This is also the half of "the props always
+	# touch the hand" that the carry legs cannot cover: at the instant of release the hand
+	# is exactly ON the prop, by construction.
+	for pr in props:
+		# ...INCLUDING A PROP THAT IS STILL BEHIND THE FIGURE. `behind` is a drawing ORDER,
+		# not a fact about the hand: a Behind the Back release IS behind the body, and the
+		# hand that made it is behind there with it. Skipping those left the throwing hand
+		# snapped back to its outer rest on the very frame of the release - measured at
+		# 78.5px by --touchcheck, the single worst gap in any preview, and the one pattern
+		# where the hand had visibly just been at the release point a frame earlier.
+		if bool(pr.get("carry", false)):
+			continue
+		var el := float(pr.get("el", PV_FOLLOW))
+		if el >= PV_FOLLOW:
+			continue
+		var h3 := LEFT if float(pr.get("prev", Vector2.ZERO).x) < 0.0 else RIGHT
+		if held[h3]:
+			continue
+		hp[h3] = (o + Vector2(pr.get("from", Vector2.ZERO))).lerp(hp[h3], el / PV_FOLLOW)
 
+	if _touch:
+		# --touchcheck, THE PREVIEW HALF, and it asks the same question at the same two
+		# seams the stage is asked at: a leg of flight is a throw and a catch, so at the
+		# instant one STARTS the hand that released it must be on it, and at the instant one
+		# ENDS the hand receiving it must be there. (A carried prop is not worth measuring:
+		# the hands are placed ON the props they carry a few lines above, so the answer
+		# would be zero by construction.) One frame's worth of tolerance either side, which
+		# is the finest this can be sampled at.
+		var edge := 1.5 / 120.0
+		for pr in props:
+			if bool(pr.get("carry", false)):
+				continue
+			if float(pr.get("el", 1.0)) <= edge:
+				# a release: the hand is the one that CARRIED it, which `prev` names (see
+				# pv_state - a behind-the-back release is past the far hip and its own x
+				# names the wrong arm)
+				var rh := LEFT if float(pr.get("prev", Vector2.ZERO).x) < 0.0 else RIGHT
+				pv_touch(Vector2(pr["pos"]).distance_to(hp[rh]), ename, rh, t, "throw")
+			if float(pr.get("rem", 1.0)) <= edge:
+				var ch := LEFT if float(pr.get("to", Vector2.ZERO).x) < 0.0 else RIGHT
+				pv_touch(Vector2(pr["pos"]).distance_to(hp[ch]), ename, ch, t, "catch")
 	var spin := bool(data.get("spin", false))
 	var turn := 0.0
 	if spin:
@@ -24110,7 +24622,9 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 			var sim: Vector2 = hp[hh]
 			var palm := fig_preview_palm(o, hh, absf(sim.x - o.x) / ppx)
 			if palm.x < INF and palm.distance_to(sim) <= FIG_PALM_MAX * ppx:
-				pr["pos"] = palm
+				# ...carrying the stack offset with it, or the second prop in a hand would be
+				# corrected onto the first one
+				pr["pos"] = palm + Vector2(0.0, -PV_STACK * float(pr.get("stack", 0)))
 	for pr in props:
 		if not bool(pr["behind"]):
 			pv_draw_prop(pr, inner)
@@ -30470,6 +30984,20 @@ func parkcheck_step() -> void:
 
 
 func _capture_and_quit() -> void:
+	if _touch:
+		# the three seams of "a prop always touches the hand" - see _touch. Nothing was
+		# measured is a REPORTABLE result here, not silence: a --touchcheck run that never
+		# threw anything (no --demo, or a preview with no carry legs) would otherwise print
+		# three zeroes and read as a clean bill of health.
+		if _touch_n == 0:
+			print("touchcheck WARNING: nothing measured - no throw or catch happened this "
+				+ "run (add --demo for the stage, --skills <n> for a preview)")
+		else:
+			print("touchcheck seams measured: %d, over %.0fpx: %d" % [_touch_n, TOUCH_OK, _touch_bad])
+		print("touchcheck worst throw gap: %.1f px  (%s)" % [_touch_throw, _touch_throw_at])
+		print("touchcheck worst catch gap: %.1f px  (%s)" % [_touch_catch, _touch_catch_at])
+		print("touchcheck worst catch aim: %.1f px  (%s)" % [_touch_aim, _touch_aim_at])
+		print("touchcheck worst preview gap: %.1f px  (%s)" % [_touch_hold, _touch_hold_at])
 	if _collcheck:
 		# the overlap audit's verdict: the tightest edge-to-edge clearance any two
 		# airborne props reached this session (negative would be a visual overlap)
