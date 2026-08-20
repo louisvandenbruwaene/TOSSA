@@ -187,3 +187,33 @@ whose warm mid-tones are all muted. And do not over-steer either - a Championshi
 measures. The shipped Championship is the FIRST roll, at 0.087: its residual is dispersed
 across floorboard grain rather than pooled in one wash, which is the case the advisory's own
 note says diffuses fine, and at 1x under the veil it reads as a lightly grained wooden floor.
+
+
+## The Midnight Show backdrop, repainted (`bg/the_midnight_show`)
+
+`create_image_pixen`, 640x360, 2 generations. 2026-08-20, unprompted: it was the only painting
+in the game the reducer still flagged (`gamut 0.165  <-- LOOK AT IT`), and the reason was one
+choice - **its drapes were mint green.** The locked 48 is a warm theatre palette with no
+mid-luminance teal at all, which is the same trap the Backyard's teal dusk sky fell into, so the
+biggest surface in the picture had nowhere to land and error diffusion sprayed the whole thing.
+Its stage was also a pale honey oak, i.e. the brightest floor in the game in the one room whose
+entire purpose is being dark.
+
+The repaint asks for the room the venue actually is: deep indigo drapes almost black in their
+folds, dark umber boards, and the supper tables with their candles cropped along the bottom
+edge. **0.165 -> 0.013, floor 0.048, and 0.0% green.**
+
+TWO ROLLS, and the second was about the FLOOR BAND rather than the colour. Roll 1 got the colour
+right first time and put its boards in a 22px strip - `stand` 0.811 lands the feet at art y 292,
+so there was nothing to stand on. Naming the band as a fraction of the frame is what fixed it:
+"the whole LOWER HALF, from half way down the picture to near the bottom edge, is a wide deep
+band of dark stage boards", with the tables demoted to "the last narrow strip along the very
+bottom edge, cropped by the frame". Roll 1 also drew a tied-back curtain leg just left of centre
+and two soft round glows on the drape; naming those in the negatives ("no gathered curtain, no
+tie-back ... no round glow or wash of light on the curtain") cleared both.
+
+**DO NOT JUDGE THIS ONE BY THE PLAYED SCREEN.** `full_dark_stage()` puts a near-black wash at
+alpha 0.72 over the finished backdrop, so most of this painting is invisible in play and the
+improvement is almost entirely in the source. That is still worth having - the flagged dither is
+gone, the palette fit is honest, and the picture underneath is correct if the wash is ever
+tuned - but expect the capture to look much like the old one.
