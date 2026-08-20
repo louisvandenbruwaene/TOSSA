@@ -4836,32 +4836,6 @@ func day_rows() -> Array[Dictionary]:
 	return out
 
 
-func next_unlock_hint() -> String:
-	# A career should always name one nearby reason to keep going. Choose the closest
-	# unowned skill by its actual missing requirements, not by table order, so the hub
-	# never points at a distant late-game card while a practical unlock is one show away.
-	var best: Dictionary = {}
-	var best_gap := 1_000_000
-	for catalog: Array in [TRICKS, PATTERNS]:
-		for skill: Dictionary in catalog:
-			var sid := String(skill.get("id", ""))
-			if sid == "" or skill_free(skill) or gifted.has(sid):
-				continue
-			var gap := maxi(0, int(skill.get("perf", 0)) - int(career["perfs"])) * 100
-			gap += maxi(0, int(skill.get("lvl", 1)) - level) * 20
-			gap += maxi(0, int(skill.get("acc", 0)) - accuracy)
-			gap += maxi(0, int(skill.get("str", 0)) - strength)
-			gap += maxi(0, int(skill.get("end", 0)) - endurance)
-			gap += maxi(0, int(skill.get("spd", 0)) - speed)
-			gap += maxi(0, int(skill.get("ven", 0)) - venue_index()) * 80
-			if gap < best_gap:
-				best = skill
-				best_gap = gap
-	if best.is_empty():
-		return "all skills unlocked  -  chase a venue record"
-	return "next unlock: %s  -  %s" % [String(best["name"]), skill_req_text(best)]
-
-
 func day_group_col(gid: String) -> Color:
 	for g in DAY_GROUPS:
 		if String(g["id"]) == gid:
@@ -25208,7 +25182,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 	var is_open := func(i: int) -> bool:
 		return i == day_sel or (in_panel and String(rows[i]["id"]) == "perform")
 	for i in rows.size():
-		var h := day_card_height(font, rows[i], is_open.call(i), sub_w, selid)
+		var h := day_card_height(font, rows[i], is_open.call(i), sub_w)
 		heights.append(h)
 		# an INSET row is drawn inside another card and has no box and no gap of its own
 		total_h += h + (8.0 if h > 0.0 else 0.0)
@@ -25227,7 +25201,13 @@ func draw_day(font: Font, s: Vector2) -> void:
 	for i in rows.size():
 		if heights[i] <= 0.0:
 			continue
-		day_draw_card(font, rows[i], Rect2(ax, cy, aw, heights[i]), i == day_sel,
+		# SELECTED FOLLOWS OPEN, not day_sel (2026-08-20). While the cursor is on one of the
+		# perform card's limiter marks the selected ROW is that mark, which draws nothing of
+		# its own - so the card the player is working inside went back to looking unfocused
+		# the moment they stepped into it. is_open already answers "is the cursor here or
+		# inside here", and an inset row never reaches the drawing below, so no second card
+		# can light up.
+		day_draw_card(font, rows[i], Rect2(ax, cy, aw, heights[i]), is_open.call(i),
 			is_open.call(i), sub_w, selid)
 		cy += heights[i] + 8.0
 
@@ -25268,7 +25248,7 @@ const CARD_PAD_BOT := 14.0    # the floor under a grown day card's LAST line. A 
 							   # border - see day_card_height.
 
 
-func day_card_height(font: Font, r: Dictionary, open_c: bool, sub_w: float, sel_id: String = "") -> float:
+func day_card_height(font: Font, r: Dictionary, open_c: bool, sub_w: float) -> float:
 	# a card is one title line until it is OPEN, then it grows to fit exactly what it has to
 	# say. Measured with max_lines -1, the same as day_draw_card draws it, so a long
 	# explanation can never run past the bottom of its own card.
@@ -25279,14 +25259,13 @@ func day_card_height(font: Font, r: Dictionary, open_c: bool, sub_w: float, sel_
 	# moment the player is setting up that act - a subwindow that shuts its own window.
 	#
 	# AN INSET ROW HAS NO CARD OF ITS OWN. It is drawn inside the perform card's box (see
-	# day_bind_panel_h), so it takes no height and, in the layout loop, no gap either - a
+	# day_draw_stage_band), so it takes no height and, in the layout loop, no gap either - a
 	# zero-height card with an 8px gap under it would open a hole in the column.
 	if bool(r.get("inset", false)):
 		return 0.0
 	var perf := String(r["id"]) == "perform"
-	var binds := day_bind_panel_h(font, sub_w, sel_id) if perf else 0.0
 	if not open_c:
-		return 46.0 + binds
+		return 46.0
 	var h := 42.0
 	if perf:
 		h += 32.0                                   # the stage picker line
@@ -25297,10 +25276,7 @@ func day_card_height(font: Font, r: Dictionary, open_c: bool, sub_w: float, sel_
 	if not bool(r["ok"]) and String(r["why"]) != "":
 		h += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	if perf:
-		h += 22.0                                   # the record to chase
-		if next_venue_rep() > 0:
-			h += 20.0                               # ...and how the next stage opens
-		h += font.get_multiline_string_size(next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y
+		h += MARK_BAND_H                            # the limiter marks, the record, the gate
 	# THE LAST LINE NEEDS FLOOR UNDER IT (2026-08-19, Louis: "add more spacing below the
 	# 'record to beat' or whatever stands below it (the window cuts off the bottom text)").
 	# The card was measured to the exact bottom of its final glyph plus four pixels, which
@@ -25310,32 +25286,23 @@ func day_card_height(font: Font, r: Dictionary, open_c: bool, sub_w: float, sel_
 	# two pixels, in a box whose own bottom edge curves through those two pixels.
 	# CARD_PAD_BOT is that floor, and it is applied to every grown card rather than to the
 	# perform row alone - any card that ever grows a last line has the same edge under it.
-	return h + CARD_PAD_BOT + binds
+	return h + CARD_PAD_BOT
 
 
-const BIND_ROW_H := 21.0        # one limiter row inside the panel
-const BIND_PANEL_TOP := 19.0    # its own small heading
-const BIND_PANEL_PAD := 9.0     # floor under the last thing in it
-
-
-func day_bind_panel_h(font: Font, sub_w: float, sel_id: String) -> float:
-	# THE LIMITER PANEL, measured exactly as day_draw_bind_panel draws it - the same
-	# contract day_card_height has with day_draw_card, and for the same reason: this height
-	# is what reserves the space at the BOTTOM of the perform card, so a panel that measures
-	# short would be drawn over the unlock hint above it.
-	#
-	# It is not conditional on the perform row being selected. The two switches have to be
-	# visible while the cursor is ON one of them, and at that moment the selected card is a
-	# bind row, not perform.
-	var rows := day_bind_defs()
-	if rows.is_empty():
-		return 0.0
-	var h := BIND_PANEL_TOP + float(rows.size()) * BIND_ROW_H + BIND_PANEL_PAD
-	var hint := day_bind_hint(sel_id)
-	if hint != "":
-		h += font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, sub_w - 12.0,
-			ps(11), -1).y + 5.0
-	return h
+const MARK_BAND_H := 34.0       # ONE BAND UNDER THE STAGE NAME (2026-08-20, Louis: "just two
+								# small symbols below the stage name (without the window
+								# changing size for it) ... put the text that was below to the
+								# side"). Two limiter marks on the left of it, the record and
+								# the Reputation gate right-aligned opposite them.
+								#
+								# It is a CONSTANT, and that is the half of the note about the
+								# window: TONIGHT'S LIMITERS measured itself off which switch
+								# the cursor was on, because only the selected one carried its
+								# explanation - so the perform card grew and shrank by two
+								# lines of violet type while the player moved between two rows
+								# inside it, and the whole column below it slid. Nothing in
+								# this band depends on the cursor, so the card is the same
+								# height whatever is selected and whatever is booked.
 
 
 func day_bind_defs() -> Array[Dictionary]:
@@ -25349,19 +25316,10 @@ func day_bind_defs() -> Array[Dictionary]:
 	return out
 
 
-func day_bind_hint(sel_id: String) -> String:
-	# only the switch the cursor is on explains itself. Both at once is four lines of small
-	# violet type inside a card whose job is to say which stage you are playing.
-	for a in day_bind_defs():
-		if String(a["id"]) == sel_id:
-			return String(a["sub"])
-	return ""
-
-
 func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, open_c: bool, sub_w: float,
 		sel_id: String = "") -> void:
 	if bool(r.get("inset", false)):
-		return   # drawn inside the perform card - see day_draw_bind_panel
+		return   # drawn inside the perform card - see day_draw_stage_band
 	var ok := bool(r["ok"])
 	var ac: Color = r.get("col", Color(0.95, 0.7, 0.4))
 	if not ok:
@@ -25399,19 +25357,18 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, open_c: boo
 			HORIZONTAL_ALIGNMENT_RIGHT, cost_w - mark_w, ps(12), cost_col)
 	draw_fit_string(font, Vector2(tx, box.position.y + 29.0), String(r["name"]), HORIZONTAL_ALIGNMENT_LEFT,
 		right - cost_w - tx - 8.0, 17, title_c)
-	# THE LIMITER PANEL IS PINNED TO THE BOTTOM OF THE BOX, not laid after the last line.
-	# day_card_height reserved exactly this much room for it, so measuring from the foot up
-	# is the one placement that cannot drift as the lines above it come and go - and it has
-	# to be drawn whether the card is selected or not, because when the cursor is on a switch
-	# the SELECTED card is that switch's row, not this one.
-	if String(r["id"]) == "perform":
-		# measured only for the row that has one: day_bind_panel_h reads day_actions() back,
-		# and asking every card in the drawer for a panel it cannot have rebuilt that list
-		# six times a frame for nothing
-		var bind_h := day_bind_panel_h(font, sub_w, sel_id)
-		if bind_h > 0.0:
-			day_draw_bind_panel(font, Rect2(box.position.x + 14.0,
-				box.position.y + box.size.y - bind_h - 4.0, box.size.x - 28.0, bind_h), sel_id)
+	# A CLOSED PERFORM CARD STILL SAYS WHAT IS BOOKED. The marks live under the stage name,
+	# and a closed card has no stage name - so a player who books a limiter and then walks the
+	# cursor down the column would watch the only sign of it disappear. Right-aligned on the
+	# title line costs no height (46px of card, a 20px mark) and it is the same two shapes,
+	# so it reads as the same control seen from further away rather than as a second one.
+	if String(r["id"]) == "perform" and not open_c:
+		var mrx := box.position.x + box.size.x - 24.0
+		for a in day_bind_defs():
+			if String(a["cost"]) != "BOUND":
+				continue
+			day_limiter_mark(String(a["icon"]), Vector2(mrx, box.position.y + 23.0), true, false)
+			mrx -= 26.0
 	if not open_c:
 		return
 	var y := box.position.y + 42.0
@@ -25421,19 +25378,9 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, open_c: boo
 		var pv := play_venue()
 		var pick := "%s%s%s" % ["<   " if pv > 0 else "", String(venue_data(pv)["name"]), "   >" if pv < venue_index() else ""]
 		draw_string(font, Vector2(tx, y + 18.0), pick, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(18), Color(1.0, 0.88, 0.52))
-		# ...and the badge says WHICH limiters are booked, not merely that some are. With
-		# the two of them independently bookable, "PURIST" alone would have been silent on
-		# the two states that are not it.
-		var badge := ""
-		if purist:
-			badge = "PURIST"
-		elif bind_acc():
-			badge = "ACCURACY BOUND"
-		elif bind_spd():
-			badge = "SLOW-MO BOUND"
-		if badge != "":
-			draw_string(font, Vector2(box.position.x + box.size.x - 130.0, y + 18.0), badge,
-				HORIZONTAL_ALIGNMENT_RIGHT, 116.0, ps(11), PURIST_COL)
+		# NO WORD BADGE HERE ANY MORE. "PURIST" / "ACCURACY BOUND" / "SLOW-MO BOUND" was three
+		# strings saying what two struck-through marks say directly one line below, and the
+		# longest of them ran back into the venue name at the wide stages.
 		y += 32.0
 	# an EMPTY sub costs no line. get_multiline_string_size("") still returns one line's
 	# height, so simply blanking the string would have moved everything below it down by
@@ -25447,71 +25394,105 @@ func day_draw_card(font: Font, r: Dictionary, box: Rect2, sel: bool, open_c: boo
 			HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1, Color(1.0, 0.66, 0.48))
 		y += font.get_multiline_string_size(String(r["why"]), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1).y + 4.0
 	if String(r["id"]) == "perform":
-		var vi := play_venue()
-		var chase := "no record here yet  -  set one"
-		if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
-			chase = "record to beat   %s" % score_text(rec_table()[vi])
-		draw_string(font, Vector2(tx, y + 14.0), chase, HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.96, 0.83, 0.52, 0.92))
-		y += 22.0
-		var nxt := next_venue_rep()
-		if nxt > 0:
-			draw_string(font, Vector2(tx, y + 14.0), "next stage at Rep %s  (you have %s)" % [commafy(nxt), commafy(reputation)],
-				HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), Color(0.84, 0.74, 0.90, 0.92))
-			y += 20.0
-		draw_multiline_string(font, Vector2(tx, y + font.get_ascent(ps(12))), next_unlock_hint(), HORIZONTAL_ALIGNMENT_LEFT, sub_w, ps(12), -1,
-			Color(0.72, 0.92, 0.70, 0.94))
+		day_draw_stage_band(font, box, tx, y, sel_id)
 
 
-func day_draw_bind_panel(font: Font, box: Rect2, sel_id: String) -> void:
-	# TONIGHT'S LIMITERS, inside the card they change (2026-08-19 - see day_actions for why
-	# they stopped being cards of their own).
+func day_draw_stage_band(font: Font, box: Rect2, tx: float, y: float, sel_id: String) -> void:
+	# UNDER THE STAGE NAME: what you may give up tonight on the left, what the night is
+	# measured against on the right (2026-08-20, Louis: "just two small symbols below the
+	# stage name (without the window changing size for it) that when hovered over and entered
+	# it just crosses it out to disable the two stats independently, put the text that was
+	# below to the side: record: 'None / number', and x/y ... and leave the next skill out").
 	#
-	# Everything here is deliberately a size DOWN from the card around it: 10 and 12pt
-	# against the card's 17, a 4px checkbox instead of a 15px icon disc, one violet instead
-	# of the row's own accent. That is what makes it read as a panel inside a card rather
-	# than as three cards in a stack, which is the whole complaint this answers.
-	var pc := PURIST_COL
-	var any_on := bind_acc() or bind_spd()
-	soft_card(box, Color(pc.r * 0.12, pc.g * 0.10, pc.b * 0.16, 0.80),
-		Color(pc.r, pc.g, pc.b, 0.42 if any_on else 0.22), 1.0, 8.0, 0.0)
-	draw_string(font, Vector2(box.position.x + 10.0, box.position.y + 13.0), "TONIGHT'S LIMITERS",
-		HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 20.0, ps(10), Color(pc.r, pc.g, pc.b, 0.72))
-	var y := box.position.y + BIND_PANEL_TOP
+	# WHAT THIS REPLACED, and why the shape was wrong rather than merely big. TONIGHT'S
+	# LIMITERS was a titled sub-panel holding two full-width rows, each with a checkbox, a
+	# name, a BOUND/off readout and - for whichever one the cursor was on - two lines of small
+	# violet explanation. Ninety-odd pixels of a card whose actual job is naming the stage,
+	# spent to say "off, off". A limiter is ONE BIT of state, and a mark that is either clean
+	# or struck through is one bit of picture: it needs no label, no readout and no sentence,
+	# because a stat with a line through it already says it has been taken away.
+	#
+	# The three lines that used to stack underneath - the record, the Reputation gate and the
+	# next-skill hint - are where the rest of the height went. Two of them move to the RIGHT
+	# of this same band, which costs nothing because the left half is two 20px marks and the
+	# band was always going to be one text line tall. The third is simply gone: a hub that
+	# names the stage, the score to beat and the gate to the next stage is answering "what am
+	# I doing tonight", and the closest unowned trick is answering a different question, on a
+	# screen that has a SKILLS card of its own two rows down.
+	var right := box.position.x + box.size.x - 14.0
+	# the two marks, in the order day_actions lists them (Accuracy, then slow motion), each
+	# one lit while the cursor is on its own inset row
+	var mx := tx + 10.0
 	for a in day_bind_defs():
-		var on := String(a["cost"]) == "BOUND"
-		var cur := String(a["id"]) == sel_id
-		var rowr := Rect2(box.position.x + 4.0, y, box.size.x - 8.0, BIND_ROW_H - 2.0)
-		if cur:
-			# the cursor mark is a FILL plus a bar, not a border: a second rounded outline
-			# 4px inside the panel's own rounded outline is two rims chasing each other
-			draw_rect(rowr, Color(pc.r * 0.30, pc.g * 0.26, pc.b * 0.34, 0.95))
-			draw_rect(Rect2(rowr.position.x, rowr.position.y, 2.0, rowr.size.y),
-				Color(pc.r, pc.g, pc.b, 0.95))
-		var cx := box.position.x + 16.0
-		var cy := y + BIND_ROW_H * 0.5 - 1.0
-		# the switch itself: an open box that fills when the limiter is booked
-		draw_rect(Rect2(cx - 5.0, cy - 5.0, 10.0, 10.0), Color(pc.r, pc.g, pc.b, 0.55), false, 1.0)
-		if on:
-			draw_rect(Rect2(cx - 3.0, cy - 3.0, 6.0, 6.0), Color(pc.r, pc.g, pc.b, 0.95))
-		# NO ICON IN HERE, and it is not an oversight. Each row kept the mark it wore as a
-		# card - the broken bullseye and the crossed stopwatch - and both are 16px shapes
-		# with 2px strokes, drawn for a 30px icon disc. In a 21px row they overflow the row,
-		# and at that size the only thing either one still reads as is "a circle with a red
-		# line through it", twice. The checkbox already carries the state and the label
-		# already carries the name; the icons were carrying nothing but weight.
-		var namec := Color(1.0, 0.96, 1.0) if cur else (Color(pc.r, pc.g, pc.b, 0.95) if on
-			else Color(0.74, 0.70, 0.76))
-		draw_fit_string(font, Vector2(cx + 14.0, cy + 4.0), String(a["name"]),
-			HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 110.0, 12, namec)
-		draw_string(font, Vector2(box.position.x + box.size.x - 76.0, cy + 4.0),
-			"BOUND" if on else "off", HORIZONTAL_ALIGNMENT_RIGHT, 66.0, ps(11),
-			Color(pc.r, pc.g, pc.b, 0.95) if on else Color(0.62, 0.58, 0.62))
-		y += BIND_ROW_H
-	var hint := day_bind_hint(sel_id)
-	if hint != "":
-		draw_multiline_string(font, Vector2(box.position.x + 10.0, y + 2.0 + font.get_ascent(ps(11))),
-			hint, HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 20.0, ps(11), -1,
-			Color(0.80, 0.74, 0.84))
+		day_limiter_mark(String(a["icon"]), Vector2(mx, y + 15.0),
+			String(a["cost"]) == "BOUND", String(a["id"]) == sel_id)
+		mx += 30.0
+	# ...and opposite them, the two numbers a player reads before booking: the record standing
+	# at this stage, and Reputation against the gate the next one opens at. Both are
+	# right-aligned to the same edge so they read as a column rather than as two strays.
+	var col_w := 170.0
+	var vi := play_venue()
+	var rec := "None"
+	if vi >= 0 and vi < rec_table().size() and rec_table()[vi] > 0:
+		rec = score_text(rec_table()[vi])
+	draw_string(font, Vector2(right - col_w, y + 12.0), "record   %s" % rec,
+		HORIZONTAL_ALIGNMENT_RIGHT, col_w, ps(12), Color(0.96, 0.83, 0.52, 0.92))
+	# x / y, where y is the Reputation the NEXT stage opens at. At the top of the ladder there
+	# is no y, so it says the Reputation alone rather than dividing by a gate that is not
+	# there - "1,240 / 0" would read as a bug, and a bare number is the honest version of
+	# "nothing left to unlock".
+	var nxt := next_venue_rep()
+	var gate := commafy(reputation) if nxt <= 0 else "%s / %s" % [commafy(reputation), commafy(nxt)]
+	draw_string(font, Vector2(right - col_w, y + 28.0), gate,
+		HORIZONTAL_ALIGNMENT_RIGHT, col_w, ps(12), Color(0.84, 0.74, 0.90, 0.92))
+
+
+func day_limiter_mark(icon: String, c: Vector2, on: bool, cur: bool) -> void:
+	# ONE LIMITER, AS A PICTURE: clean means the stat is yours tonight, struck through means
+	# you have given it up. The strike IS the control - Enter on the row draws it or rubs it
+	# out - so it can only ever appear when the limiter is actually booked.
+	#
+	# WHY NOT day_icon's "eye" AND "watch", which are these two shapes already: both of those
+	# draw the red bar ALWAYS. As cards they sat beside a title that said what the row did, so
+	# their bar only had to mean "this is a limiter"; here the bar carries the state and a
+	# permanently-struck mark would say "bound" on a night nothing is bound. They are also
+	# drawn for a 30px icon disc and overflow a 20px mark. Same two objects, different job.
+	var pc := PURIST_COL
+	var col := Color(pc.r, pc.g, pc.b, 0.95) if on else Color(0.72, 0.68, 0.74, 0.80)
+	if cur:
+		col = Color(1.0, 0.97, 1.0)
+		draw_glow(c, 22.0, Color(pc.r, pc.g, pc.b, 0.24))
+	# THE TWO SILHOUETTES HAVE TO DIFFER OUTSIDE THE RING, and the first cut of this proved
+	# why: a bullseye and a stopwatch are both a circle with something small inside, so at
+	# 16px, in one violet, side by side, they came back as the same mark drawn twice - the
+	# very thing the old panel's comment says killed the icons in its rows. The fix is not
+	# more detail in the middle (there is no room) but a different OUTLINE: the target grows
+	# four crosshair spokes through its rim, the stopwatch a crown and two lugs. One is
+	# spiky, one has a hat, and that much survives being small.
+	if icon == "eye":
+		# ACCURACY: a crosshair target
+		draw_arc(c, 7.6, 0.0, TAU, 22, col, 1.6, true)
+		draw_circle(c, 1.8, col)
+		for k in 4:
+			var a := TAU * float(k) / 4.0
+			var u := Vector2(cos(a), sin(a))
+			draw_line(c + u * 4.6, c + u * 10.4, col, 1.5)
+	else:
+		# SLOW MOTION: the same stopwatch the stage card wears for the clock assist, so the
+		# object means one thing everywhere in the game
+		var d := c + Vector2(0.0, 1.4)
+		draw_arc(d, 7.0, 0.0, TAU, 22, col, 1.6, true)
+		draw_rect(Rect2(c.x - 2.0, c.y - 9.8, 4.0, 3.0), col)          # the crown
+		draw_line(Vector2(c.x - 4.6, c.y - 6.6), Vector2(c.x - 2.8, c.y - 4.8), col, 1.5)   # lugs
+		draw_line(Vector2(c.x + 4.6, c.y - 6.6), Vector2(c.x + 2.8, c.y - 4.8), col, 1.5)
+		draw_line(d, d + Vector2(0.0, -4.2), col, 1.6)                 # the hand, standing up
+		draw_line(d, d + Vector2(3.2, 1.6), Color(col.r, col.g, col.b, 0.8), 1.4)
+	if on:
+		draw_line(c + Vector2(-9.0, 9.0), c + Vector2(9.0, -9.0), Color(1.0, 0.55, 0.48, 0.95), 2.0)
+	if cur:
+		# the cursor is a BAR UNDER the mark, never a ring around it: a ring here is the same
+		# circle the bullseye already is, one radius out, and the pair read as one smudge
+		draw_rect(Rect2(c.x - 10.0, c.y + 13.0, 20.0, 2.0), Color(pc.r, pc.g, pc.b, 0.95))
 
 
 func crescent_points(c: Vector2, r: float, off: Vector2, ir: float) -> PackedVector2Array:

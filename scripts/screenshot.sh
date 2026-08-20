@@ -54,6 +54,12 @@ declare -a TARGETS=(
   # pressing Enter, which no capture can do - so the BOUND state of the rows, the perform
   # card's badge and the record board they switch to had no capture path (see --binds).
   "day_hub_binds:40:day:--day work --binds both"
+  # THE HOVERED LIMITER MARK (2026-08-20). The two marks under the stage name light and take
+  # an underline bar when the cursor is on one, and Enter is what strikes them out - a state
+  # that needs a cursor INSIDE the perform card, which no other target puts it in. Row 1 of
+  # the work drawer is the Accuracy mark; --binds spd strikes the other one, so the pair also
+  # proves lit-and-clean reads differently from dim-and-struck in the same picture.
+  "day_hub_mark_hover:40:day:--day work 1 --binds spd"
   # THE FIVE HUB VIGNETTES. They had no target until 2026-08-19 and could not have had
   # one: each plays for 0.8-1.8s in the middle of a hub action and then the ledger moves,
   # so a capture could never land on one. That is exactly why they were still smooth
