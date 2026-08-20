@@ -192,44 +192,54 @@ def shift_half(a: np.ndarray, dx: int) -> np.ndarray:
 
 
 # How much a row or column has to vary along its own length before it counts as PICTURE
-# rather than as framing. A generated painting frames itself: half_lit came back with ten
-# perfectly uniform rows above the pelmet and nine columns of flat dark outside the drape,
-# and the shipped bake carried them onto the most-seen screen in the game as a black border
-# down both sides and across the top (2026-08-20, Louis: "fit the edges of the curtains to
-# the edges of the screen: no need for blackspace above and to the sides").
-BLEED_STD = 2.0
-BLEED_REL = 3.0     # ...or this many times the edge row's own variation, whichever is larger
+# rather than as framing - see fit(), which is what does something about it (2026-08-20,
+# Louis: "fit the edges of the curtains to the edges of the screen: no need for blackspace
+# above and to the sides").
+FIT_STD = 2.0
+FIT_REL = 3.0       # ...or this many times the edge row's own variation, whichever is larger
 
 
 def _margin(lum: np.ndarray) -> int:
 	"""How many leading rows of `lum` are flat framing rather than picture."""
 	edge = float(lum[0].std())
-	gate = max(BLEED_STD, edge * BLEED_REL)
+	gate = max(FIT_STD, edge * FIT_REL)
 	n = 0
 	while n < len(lum) - 1 and float(lum[n].std()) <= gate:
 		n += 1
 	return n
 
 
-def bleed(a: np.ndarray) -> np.ndarray:
-	"""Run the outermost real content out to the frame edges.
+def fit(a: np.ndarray) -> np.ndarray:
+	"""Scale the picture's real content up until it fills the frame.
 
 	A BACKDROP COVERS THE FRAME. That is the whole contract of `art_blit_rect` - the sprite is
 	stretched to the box it is given, and the box here is the viewport - so a painting that
 	frames ITSELF with empty space does not read as a picture with a border, it reads as a
-	game that has not filled its own window.
+	game that has not filled its own window. half_lit came back with ten perfectly uniform
+	rows above the pelmet and nine flat columns outside the drape, and the half-shift that
+	puts the mirror axis on a swag's low point adds thirteen more to each side.
 
-	Extending rather than cropping is forced by the one rule pixel art cannot bend: the bake is
-	640x360 and the screen is 1280x720, so it is drawn at exactly 2 screen pixels per art pixel.
-	Crop the 22-column margins away and the remaining 596 has to be stretched by 2.148, which is
-	a fractional resample of pixel art - the failure this whole pipeline exists to avoid. So the
-	content moves outward instead, by repeating the first real row/column into the flat band in
-	front of it: a valance continuing up behind the arch and a drape's dark outer fold running
-	off frame, which is what both of those things do in a real theatre.
+	**RESCALED, NOT FILLED** (2026-08-20, Louis: "can't you just rescale it all? don't
+	regenerate, don't try to fix it by filling the rest, i just want you to rescale it so it
+	all keeps looking good"). Running the outermost row and column out to the edges was tried
+	first and is not a fix: the band it fills with is the drape's dark outer fold, so the
+	border stayed dark and the curtains still started an inch inside the frame. What he is
+	asking for is the picture to be BIGGER, and it costs 596 -> 640 across and 350 -> 360 down.
 
-	Sides before top, so the corners are filled once and consistently: the top rows are copied
-	after the side columns already reach the edge, rather than carrying the old dark corners up
-	with them.
+	NEAREST, and this is the one decision here that is not arithmetic. The scale is 1.074 x
+	1.029, so a resample either duplicates about one column in fourteen and one row in
+	thirty-five (nearest) or invents new colours between them (anything smoothing). Tried
+	both: Lanczos then re-snapped through the dither came back speckled right across the
+	curtain, because the dither is picking between palette entries on gradients the
+	interpolation has just softened, and the seats at the bottom turned to mush. Nearest
+	copies pixels, so it cannot leave the palette, cannot soften an edge, and the duplication
+	is invisible on cloth - the fringe's tassel rhythm survives it, which was the thing worth
+	checking.
+
+	THE LEFT HALF IS SCALED AND MIRRORED, never the whole frame: a resample of an even width
+	has no reason to duplicate the same columns on both sides of the axis, and this picture's
+	symmetry is not decoration - see the note at the top of this file for what an asymmetric
+	proscenium looks like.
 
 	A no-op on a painting that already fills its frame, which is why it needs no flag.
 	"""
@@ -237,14 +247,14 @@ def bleed(a: np.ndarray) -> np.ndarray:
 	left = _margin(lum.T)
 	right = _margin(lum.T[::-1])
 	top = _margin(lum)
-	out = a.copy()
-	if left:
-		out[:, :left] = out[:, left:left + 1]
-	if right:
-		out[:, -right:] = out[:, -right - 1:-right]
-	if top:
-		out[:top] = out[top:top + 1]
-	return out
+	if not (left or right or top):
+		return a
+	h, w, _ = a.shape
+	content = a[top:, left:w - right]
+	half = content[:, :(content.shape[1] + 1) // 2]
+	grown = Image.fromarray(half.astype(np.uint8), "RGB").resize((w // 2, h), Image.NEAREST)
+	g = np.asarray(grown).astype(int)
+	return np.concatenate([g, g[:, ::-1]], axis=1)
 
 
 def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool = False,
@@ -274,7 +284,7 @@ def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool 
 	elif im.size != (ART_W, ART_H):
 		raise SystemExit(f"{src.name}: expected {ART_W}x{ART_H} or {ART_W*2}x{ART_H*2}, got {im.size}")
 
-	rgb = bleed(np.asarray(im).astype(int))
+	rgb = fit(np.asarray(im).astype(int))
 	out = snap_dithered(rgb, load_palette()).astype(np.uint8)
 	rgba = np.dstack([out, np.full(out.shape[:2], 255, np.uint8)])
 
