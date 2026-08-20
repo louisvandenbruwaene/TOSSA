@@ -819,6 +819,19 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   most-used sizes were 13 and 15, two of the worst, which is why the talent tree read "ZZ POINTS
   TO SPEND". `ps()` quantises at every text call site and `validate.sh` check 8 fails the build if
   a new one skips it.
+- **THE SCREEN SHAKE WAS THE ONE THING STILL MOVING AT SUB-PIXEL SPEED (2026-08-20).** It set
+  the canvas `position` to a continuous `randf_range`, so for the ten-odd frames after every
+  drop the WHOLE FRAME sat at a fractional offset and every sprite in the game - props,
+  performer, HUD - was resampled off its own grid. Measured with `check_pixel_grid` on the
+  `stage_booed` target, whose act drops constantly: **73-95% of the frame off-grid**, against
+  5% for the same screen at rest, and the worst number any screen in this game has produced by
+  a factor of seven. `art_snap` on the offset takes it back to 5-8%.
+  **It hid because a still only catches it if the shake is running in that frame** - two of the
+  three sweeps in one session measured the same target at 5% and the third at 94.5%. A number
+  that swings that far between identical runs is not noise, it is a state the capture is
+  sometimes in and sometimes not; go and find which. And the fix is free in both directions:
+  the shake starts at 5.0 and decays 0.82, so whole-art-pixel offsets give {-4,-2,0,2,4}
+  falling to zero - a staccato rattle in chunky blocks, which is what a drop should feel like.
 - **Godot serves a CACHED import, not your PNG.** Editing a sprite on disk changes nothing in the
   game until `make reimport`, so an art fix looks like it did nothing. Two byte-identical captures
   before and after a change is the tell.
