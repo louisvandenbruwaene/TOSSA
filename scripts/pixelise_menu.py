@@ -191,6 +191,62 @@ def shift_half(a: np.ndarray, dx: int) -> np.ndarray:
 	return out
 
 
+# How much a row or column has to vary along its own length before it counts as PICTURE
+# rather than as framing. A generated painting frames itself: half_lit came back with ten
+# perfectly uniform rows above the pelmet and nine columns of flat dark outside the drape,
+# and the shipped bake carried them onto the most-seen screen in the game as a black border
+# down both sides and across the top (2026-08-20, Louis: "fit the edges of the curtains to
+# the edges of the screen: no need for blackspace above and to the sides").
+BLEED_STD = 2.0
+BLEED_REL = 3.0     # ...or this many times the edge row's own variation, whichever is larger
+
+
+def _margin(lum: np.ndarray) -> int:
+	"""How many leading rows of `lum` are flat framing rather than picture."""
+	edge = float(lum[0].std())
+	gate = max(BLEED_STD, edge * BLEED_REL)
+	n = 0
+	while n < len(lum) - 1 and float(lum[n].std()) <= gate:
+		n += 1
+	return n
+
+
+def bleed(a: np.ndarray) -> np.ndarray:
+	"""Run the outermost real content out to the frame edges.
+
+	A BACKDROP COVERS THE FRAME. That is the whole contract of `art_blit_rect` - the sprite is
+	stretched to the box it is given, and the box here is the viewport - so a painting that
+	frames ITSELF with empty space does not read as a picture with a border, it reads as a
+	game that has not filled its own window.
+
+	Extending rather than cropping is forced by the one rule pixel art cannot bend: the bake is
+	640x360 and the screen is 1280x720, so it is drawn at exactly 2 screen pixels per art pixel.
+	Crop the 22-column margins away and the remaining 596 has to be stretched by 2.148, which is
+	a fractional resample of pixel art - the failure this whole pipeline exists to avoid. So the
+	content moves outward instead, by repeating the first real row/column into the flat band in
+	front of it: a valance continuing up behind the arch and a drape's dark outer fold running
+	off frame, which is what both of those things do in a real theatre.
+
+	Sides before top, so the corners are filled once and consistently: the top rows are copied
+	after the side columns already reach the edge, rather than carrying the old dark corners up
+	with them.
+
+	A no-op on a painting that already fills its frame, which is why it needs no flag.
+	"""
+	lum = a.mean(axis=2)
+	left = _margin(lum.T)
+	right = _margin(lum.T[::-1])
+	top = _margin(lum)
+	out = a.copy()
+	if left:
+		out[:, :left] = out[:, left:left + 1]
+	if right:
+		out[:, -right:] = out[:, -right - 1:-right]
+	if top:
+		out[:top] = out[top:top + 1]
+	return out
+
+
 def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool = False,
 		  half_shift: int = 0) -> str:
 	im = Image.open(src).convert("RGB")
@@ -218,7 +274,7 @@ def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool 
 	elif im.size != (ART_W, ART_H):
 		raise SystemExit(f"{src.name}: expected {ART_W}x{ART_H} or {ART_W*2}x{ART_H*2}, got {im.size}")
 
-	rgb = np.asarray(im).astype(int)
+	rgb = bleed(np.asarray(im).astype(int))
 	out = snap_dithered(rgb, load_palette()).astype(np.uint8)
 	rgba = np.dstack([out, np.full(out.shape[:2], 255, np.uint8)])
 
