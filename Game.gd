@@ -2225,6 +2225,8 @@ const TOUCH_OK := 10.0      # a gap this size or under is the hand being smoothe
 var _handlog := false       # dev: --handlog prints each hand's x every tick during play,
 							  # to tell a real jitter (oscillating x) from a hand that merely
 							  # sits still but far from the ball's lane (ROADMAP 12b)
+var _binds_dev := false     # dev: --binds also opens the (post-win) limiter marks for the run,
+							# without granting the save the win itself - see the flag's own note
 var _tutlog := false        # dev: --tutlog prints every moment a LESSON STOPS THE WORLD -
 							  # which of the three mechanisms did it, what it is waiting for,
 							  # and how old every airborne prop is. A freeze is the one state
@@ -2689,9 +2691,15 @@ func _ready() -> void:
 		# the day card, the establishing card's line and the HUD's own row had no capture
 		# path at all. Unlike --assists this one DOES belong to the save (a booking is
 		# saved), so it goes through set_binds and is written back like any other choice.
+		# ...and it OPENS THE MARKS for the run too (2026-08-20), because they are post-win
+		# content now (see day_actions) and a capture save that has not won the game would
+		# photograph a stage band with nothing in it. `_binds_dev` is a run-local flag rather
+		# than a forced `won`: this flag writes its booking back to the save, and a dev
+		# capture must never be able to hand a career the win it did not earn.
 		var bdi := ua.find("--binds")
 		if bdi != -1 and bdi + 1 < ua.size():
 			var wb := ua[bdi + 1]
+			_binds_dev = true
 			set_binds(wb == "acc" or wb == "both", wb == "spd" or wb == "both")
 		var pi := ua.find("--pattern")   # dev: force a pattern for screenshots, e.g. --pattern shower
 		if pi != -1 and pi + 1 < ua.size():
@@ -4684,8 +4692,24 @@ func day_actions() -> Array[Dictionary]:
 	# change. The rows stay in the list, in this order, so the cursor still walks onto them,
 	# Enter still toggles them through day_activate, the footer still says "toggle", and the
 	# --binds capture still works. day_card_height gives them zero height and the perform
-	# card draws them in its own box - see day_bind_panel_h.
+	# card draws them in its own box - see day_draw_stage_band, which is now two struck-out
+	# marks under the stage name rather than a panel of rows.
+	# ...AND THEY ARE POST-WIN CONTENT (2026-08-20, Louis: "tonight's limiter should only be
+	# unlocked after beating the game"). Handing a first-time player two switches that make
+	# the act harder, on the row they are trying to get through, is asking a question they
+	# have no way to answer - and the pay-off (a better rate, a separate board) only means
+	# something to somebody who already knows what an ordinary night is worth. `won` is the
+	# same gate The Midnight Show and the Purist Legend chase already stand behind, so the
+	# whole Purist ladder now opens at one moment instead of three.
+	#
+	# The rows simply do not exist until then, which is all the gating this needs: the panel
+	# measures itself off day_bind_defs (empty -> no panel, no height), the cursor cannot walk
+	# onto a row that is not in the list, and day_activate can only be reached through it. The
+	# --binds capture flag deliberately still writes, because a capture of the unlocked hub is
+	# exactly the picture it exists to take.
 	var bind_row := func(id: String, on: bool, icon: String, name: String, sub: String) -> void:
+		if not won and not _binds_dev:
+			return
 		out.append({"id": id, "grp": "work", "icon": icon, "name": name, "inset": true,
 			"cost": "BOUND" if on else "off", "ok": true, "why": "", "toggle": true,
 			"col": PURIST_COL, "sub": sub})
@@ -4896,7 +4920,9 @@ func day_input(kc: int) -> void:
 				day_activate(String(rows[day_sel]["id"]), true, "")   # right opens one
 		KEY_P:
 			# the whole PURIST booking in one key: both limiters on, or both off. The two
-			# rows in the TONIGHT drawer are where either one is set on its own.
+			# marks under the stage name are where either one is set on its own.
+			if not won:
+				return   # post-win content, like the marks themselves - see day_actions
 			set_binds(not purist, not purist)
 			set_day_msg("PURIST  -  Accuracy and all slow motion bound" if purist else "back to the assisted board")
 			save_progress()
@@ -25228,7 +25254,8 @@ func draw_day(font: Font, s: Vector2) -> void:
 		var hints := [[["Up", "Down"], "choose"], [["Enter"], doing], [["Tab"], "sheet"], [["Esc"], esc_note]]
 		if perf_focus:
 			hints.insert(1, [["Left", "Right"], "stage"])
-			hints.insert(2, [["P"], "release purist" if purist else "purist"])
+			if won:
+				hints.insert(2, [["P"], "release purist" if purist else "purist"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 
 	if day_anim != "":
