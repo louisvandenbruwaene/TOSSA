@@ -321,6 +321,28 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   the 253..387 swag and joins invisibly. **Symmetric and smooth beat symmetric and
   edge-aligned**, and the outer swags stay part-cut on both sides, which is what a valance
   running behind a proscenium actually does.
+  **THE AXIS IS NOW A DIAL, NOT A HOPE** (2026-08-20): `pixelise_menu.py --half-shift N` slides
+  the half before mirroring, so a chosen column lands on the axis instead of whichever one the
+  generator left at the edge. Shifting right crops plain stage and pads from column 0 - the dark
+  outer edge of the curtain running off frame - which costs nothing. Re-rolling until a gather
+  happens to land on x=319 is spending a generation on arithmetic.
+- **THE TITLE HAS SIDE CURTAINS (2026-08-20, Louis: "regenerate the title card: i want side
+  curtains").** One 320x360 pixflux LEFT HALF (forced palette, 36 colours, nothing off it),
+  `--half-shift 13`, mirrored: measured **0.0% of pixels differ from their own mirror**, against
+  46.9% for the full-frame painting this route replaced. The three rolls and the exact prompt are
+  in `docs/pixellab_prompts.md`; two things generalise. **Saying where the picture ENDS makes it
+  end there**: a bounded "to the right of that curtain the stage is OPEN and EMPTY" invited a
+  matching right-hand leg and mirrored into the DIPTYCH, and an emphatic "the stage RUNS OFF THE
+  RIGHT EDGE and does not end" got a curtain there anyway with two baked spotlight cones for
+  company. The roll that worked mentioned the right edge once, quietly. **And the FOOTLIGHTS are
+  load-bearing on this screen, not decoration**: `menu_house_light` deleted the title's cone and
+  replaced it with a wash rising off them, allowed precisely because "they are real lamps in the
+  picture", so a half without lamps puts the game back into the fault the cone was deleted for.
+  `scripts/add_footlights.py` stamps them across from the roll that drew them properly - by
+  difference from the donor's own board tone, so what moves is the lamp and not a rectangle of
+  someone else's boards - and lays the row out **from the mirror axis outward**, because a pitch
+  measured from the left edge leaves the centre gap wrong by up to a full pitch, dead centre,
+  where the eye already is.
 - **Pixen cannot force a palette, so the reducer does it** in Oklab with serpentine
   Floyd-Steinberg. **Judge whether a painting will survive that by the TAIL, not the mean**: a
   good picture and a badly broken one measured 0.028 against 0.034 mean distance, a 1.2x spread
