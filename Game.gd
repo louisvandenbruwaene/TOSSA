@@ -2174,6 +2174,9 @@ var _late_catch_n := -1     # dev: --latecatch N makes the auto-player catch N t
 # and is legitimately a few px behind on the tick a throw goes - but a hand at the WRONG SLOT
 # is 46px out (inner to outer), which is the failure this was written to catch, and it caught
 # one: Tennis's `next_throw_over_top` was answering for the wrong prop in a two-prop hand.
+var _dev_boot := false      # TRUE when a dev flag put this run straight into the game instead
+							 # of a player pressing anything. It is `skip_menu` kept, and it is
+							 # what makes dev_unattended() safe to extend: see there.
 var _touch := false
 var _touch_throw := 0.0
 var _touch_throw_at := ""
@@ -2554,6 +2557,8 @@ func _ready() -> void:
 	if ua.has("--menu"):   # dev: hold the title screen, which is what --shot otherwise skips past.
 		skip_menu = false  # It briefly took a 1..4 variant while the four backdrops were being
 						   # compared; there is one picture again, so there is nothing to pick.
+	_dev_boot = skip_menu   # ...and no dev-flag run may write a real career slot: see
+							# dev_unattended, which reads this
 	if skip_menu:
 		save_slot = 0
 		load_progress()
@@ -8574,7 +8579,15 @@ func dev_unattended() -> bool:
 	#     that reason; a bare `--handlog` was saving over slot 0.
 	# One predicate, so a new flag joins by being added here rather than by being remembered
 	# in four places.
-	return _demo or _shot or _collcheck or _handlog or _touch or _parkcheck
+	#
+	# ...AND `_dev_boot` IS WHY IT IS NAMED FLAGS *OR* THAT, RATHER THAN A LIST TO KEEP UP TO
+	# DATE. It is `skip_menu`: true for any flag that put the run straight into the game
+	# instead of the title screen, which is every capture and every audit there is. The named
+	# flags above are the ones that can also run WITHOUT skipping the menu, so both halves are
+	# needed - but the save-path half of this can no longer be missed by a flag somebody
+	# forgot to list, and being missed by one is not a small bug: `--handlog` and a
+	# `--touchcheck --skills` run had each written their scratch progress over career slot 0.
+	return _dev_boot or _demo or _shot or _collcheck or _handlog or _touch or _parkcheck
 
 
 func other(h: int) -> int:

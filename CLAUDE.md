@@ -1310,7 +1310,11 @@ quality-led, tonal stingers only, no ambient crowd bed.
   **If a preview needs a number the sim has, take the sim's - and if the sim cannot answer for a
   hypothetical (three objects, when the run has seven), give its function a parameter rather than
   a second copy.**
-- Dev flags that run **unattended** must be added to `dev_unattended()`, not to a hand-written
-  `_demo or _shot` pair. That predicate is what keeps a headless audit from auto-pausing on focus
-  loss and, far more seriously, what sends its progress to the scratch demo save instead of a real
-  career slot - a bare `--handlog` was saving over slot 0 until 2026-08-20.
+- **NO DEV-FLAG RUN MAY WRITE A REAL CAREER SLOT**, and the guard is `dev_unattended()`, not a
+  hand-written `_demo or _shot` pair. It also keeps a headless audit from auto-pausing on focus
+  loss. Anything that skips the title screen sets `_dev_boot` and is covered automatically; the
+  flags named in the predicate are the ones that can ALSO run with the menu up. Both halves are
+  needed, and the cost of missing one is not small: a bare `--handlog`, and a
+  `--touchcheck --skills` run during the 2026-08-20 work, each wrote their scratch progress
+  straight over career slot 0. **Back up `~/Library/Application Support/Godot/app_userdata/TOSSA/`
+  before running any new harness** - that is what made the second one recoverable.
