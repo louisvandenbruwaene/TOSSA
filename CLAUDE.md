@@ -390,12 +390,24 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   instead, because a chair squashed to 0.55 is a chair that is wrong.
 - **A VENUE'S `veil` BELONGS TO ITS PAINTING, SO A REPAINT HAS TO RE-MEASURE IT.** The Midnight
   Show's 0.10 looked like a design choice and was a fact about the old art: drapes and tables
-  over near-black, which the standard 0.42 erased. The repaint has a warm oak stage, and 0.10
-  left it at luminance 85 against the old set's 45 and the Circus's 64 - making the darkest
-  room in the game the brightest, which cancels the reason the room exists (a vanishing suit
-  and a phosphor vest have nothing to vanish into on lit boards, so the Glow Kit stops being
-  worth wearing). It is the one number in `venue_data` that is about the art rather than the
-  design. 0.40 puts it back at ~62.
+  over near-black, which the standard 0.42 erased. The 2026-08-15 repaint had a warm oak stage,
+  and 0.10 left it at luminance 85 against the old set's 45 and the Circus's 64 - making the
+  darkest room in the game the brightest, which cancels the reason the room exists (a vanishing
+  suit and a phosphor vest have nothing to vanish into on lit boards, so the Glow Kit stops
+  being worth wearing). It is the one number in `venue_data` that is about the art rather than
+  the design. 0.40 put it back at ~62.
+  **...EXCEPT AT THE MIDNIGHT SHOW, WHERE IT IS NOW INERT, AND THAT IS WORTH KNOWING BEFORE
+  SOMEONE TUNES IT (2026-08-20).** `full_dark_stage()` lays a near-black rect over the FINISHED
+  backdrop at alpha **0.72**, and the Midnight Show is permanently inside it - so that room is
+  darkened twice and the second pass dominates. Measured on the 2026-08-20 repaint, sweeping
+  the veil across 0.40 / 0.30 / 0.20 / 0.12 moved the room behind the performer by **0.5 of a
+  level out of 255** (6.4 to 6.9). The veil is not what makes this house dark and cannot be
+  what fixes it.
+  **AND THE 0.72 HAS TO STAY, because the prop levels now depend on it.** With
+  `DARK_DIM_AIR` at 0.09 a flying ball reads about 15, so the room has to sit near 6 for it to
+  separate at all. Raising the house to where its own drapes and gold hem are comfortably
+  visible (12-16) would erase the props instead - the two numbers are one setting seen from
+  two ends, and the room being near-black is what buys the prop its 2.5x.
 - **A BACKDROP MAY HAVE A CENTRE PROBLEM `spine_busyness` CANNOT SEE.** It measures how much
   more TEXTURED the spine band is than the rest, and read 1.15 - inside the normal range - for
   a Midnight Show whose middle held a supper table and two seated diners the performer stood
