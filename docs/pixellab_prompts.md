@@ -131,6 +131,13 @@ outward**, not from the left edge: a lamp at column c has a twin at 639-c, so a 
 the left leaves the centre gap wrong by up to a full pitch - the one irregularity in an even row,
 dead centre, where the eye already is.
 
+THE THREE HALVES ARE TRACKED, WHICH NOTHING ELSE UNDER `artifacts/` IS. That directory is
+gitignored as disposable on the grounds that everything in it can be re-rolled from a prompt
+recorded here - true of every venue painting, and false of this one, because the shipped bake is
+one specific roll's composition carrying another specific roll's lamps. `half_lit.png` alone
+rebuilds the bake; A and B rebuild `half_lit`. Same call as `Assets/Props/big_torch.png`: when a
+generated picture is the irreplaceable SOURCE of a shipped asset, it is tracked.
+
 AND THE AXIS ITSELF IS CHOSEN, which `--half-shift` is for. The pelmet's gathers landed at x 112,
 160, 240 and 306, so the frame edge at 319 sat 13px past the last one on a falling arc - which
 mirrors into a shallow inverted V exactly as the title's own notes predict. `--half-shift 13`
