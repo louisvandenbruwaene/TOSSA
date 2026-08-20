@@ -1047,8 +1047,11 @@ review" for the accept/reject examples and why.
   dormant for a later redesign; hats, glasses, and the Energy Helmet must not draw or grant buffs.
 - **Venues:** Backyard→Street→Theatre→Circus→Championship→World Arena (the win, `TOP_VENUE`)→
   Midnight Show (bonus 7th, gated on having won + Reputation 6000). Midnight is permanently
-  near-black: scenery and performer stay barely visible while charged props read at full strength.
-  The optional Blackout Encore uses the same visual rule and cannot roll before Championship.
+  near-black: scenery and performer stay barely visible while charged props read at full strength,
+  and an uncharged prop is barely visible in the HAND and almost gone in the AIR (see the two
+  dark levels below). The optional Blackout Encore is the same rule, and still cannot roll before
+  Championship or without three glow props - 0.09 of the light is not a substitute for owning the
+  answer.
 - **THE TWO FOOT CARDS ARE ONE STRIP, AND A KEY GOES ON THE CARD IT BELONGS TO (2026-08-19,
   Louis: "now there is SPACE: not in halfshower, but if it's not possible to do the trick, you
   should simply not put that at all, because right now it doesn't all fit inside the window" and

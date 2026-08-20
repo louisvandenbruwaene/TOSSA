@@ -4162,10 +4162,14 @@ func encore_pool(venue: int) -> Array[int]:
 	#                     one (2026-07-18, Louis: it rolled before he could afford a club,
 	#                     and owning a SINGLE club is not enough to field a routine with).
 	#   Scared Audience - the mirror image, and the mirror is free: everyone owns balls.
-	#   Blackout        - ordinary props are now genuinely INVISIBLE in it (2026-07-29), not
-	#                     merely dim, so it starts at the Championship and needs three
-	#                     glow-in-the-dark balls or torches. Earlier rooms teach darkness;
-	#                     they do not spring a blind act on an unfinished collection.
+	#   Blackout        - an ordinary prop is barely visible in the hand and all but gone in
+	#                     the air (DARK_DIM_HAND / DARK_DIM_AIR), so it starts at the
+	#                     Championship and needs three glow-in-the-dark balls or torches.
+	#                     Earlier rooms teach darkness; they do not spring a near-blind act
+	#                     on an unfinished collection. (It was literally invisible from
+	#                     2026-07-29 to 2026-08-20 - the gate was written for that, and it
+	#                     is still the right gate: 0.09 of the light is not a substitute
+	#                     for owning the answer.)
 	var pool: Array[int] = []
 	if venue < 1:
 		return pool

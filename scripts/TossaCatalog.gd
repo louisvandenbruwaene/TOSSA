@@ -48,7 +48,7 @@ const ENCORES := [
 	{"id": "hecklers", "name": "The Hecklers", "desc": "The crowd is impatient. Their attention drains twice as fast."},
 	{"id": "fright", "name": "Stage Fright", "desc": "The lights are in your eyes. No landing markers."},
 	{"id": "gale", "name": "The Gale", "desc": "A hard wind sweeps the stage. Only a clean Perfect catch survives it."},
-	{"id": "blackout", "name": "Blackout", "desc": "The house lights are out. An ordinary prop is INVISIBLE in the air. Glow-in-the-dark props shine, and a torch is a flame with no handle under it."},
+	{"id": "blackout", "name": "Blackout", "desc": "The house lights are out. An ordinary prop is barely visible in the hand and ALMOST GONE in the air. Glow-in-the-dark props shine, and a torch is a flame with no handle under it."},
 	{"id": "cold", "name": "Cold Hands", "desc": "Every catch window is one tick tighter."},
 	{"id": "long", "name": "The Long Set", "desc": "The final goal asks for a longer run, but the crowd is patient. An endurance test."},
 	{"id": "understudy", "name": "The Understudy", "desc": "One drop and it is over."},
