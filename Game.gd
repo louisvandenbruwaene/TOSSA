@@ -1999,6 +1999,8 @@ var tut_hold_at := -1     # tick the current beat froze the world (its prompt ea
 var tut_hold_end := -999  # tick the last beat was satisfied (TUT_HOLD_GAP of motion after)
 var tut_beat_end := -999  # ...and the same for a basics `do` beat, which clears through
 						  # tut_check rather than tut_hold_mark (TUT_SETTLE of motion after)
+var tut_rank_end := -999  # ...and the same again BETWEEN THE RANKS OF ONE BEAT: a catch and
+						  # the throw after it are two asks, not one - see tut_rank_ready
 var tut_last_throw := LEFT   # which hand threw last, so feed throws alternate hands -
 							 # which is the whole reason a cascade crosses
 var tut_prev_prop := PROP_BALLS  # the prop equipped BEFORE a trick/count/pattern lesson
@@ -3119,7 +3121,7 @@ func _physics_process(delta: float) -> void:
 	# stopped SIM must not read as a hung game.
 	if tut_active:
 		tut_hold_update()
-		if not tut_hold.is_empty():
+		if not tut_hold.is_empty() and tut_rank_ready():
 			tut_log_hold("beat")
 			cine_tick += 1
 			if _demo:
@@ -3146,7 +3148,12 @@ func _physics_process(delta: float) -> void:
 		# where a beginner's balls were actually hitting the boards. Only during HELPED stretches
 		# - a `free` beat is left running, because trying it out and dropping it is what a free
 		# beat is for.
-		if tut_catch_hold():
+		# ...AND NOT WHILE A BEAT IS OPEN. During the gap tut_rank_ready holds between one ask
+		# and the next, the world is deliberately running, and the guard would stop it again
+		# instantly for the very prop the beat is about - which is the pause this is trying to
+		# stop happening twice. It cannot drop anything by standing aside either: the same
+		# guard window that would have opened this branch re-opens the beat itself.
+		if tut_hold.is_empty() and tut_catch_hold():
 			tut_snap_speech()
 			tut_log_hold("guard")
 			cine_tick += 1
@@ -6130,7 +6137,9 @@ func tut_frozen() -> bool:
 	# DO (a frozen beat's catch must always land), and its own tut_hold_names check
 	# would silently swallow every press during a "do" freeze, since tut_hold is empty
 	# for it. This is purely for drawing "is the world visibly stopped right now".
-	return tut_holding() or (tut_active and tut_do_step() and tut_do_ready()) or tut_catch_hold()
+	return (tut_holding() and tut_rank_ready()) \
+		or (tut_active and tut_do_step() and tut_do_ready()) \
+		or (tut_hold.is_empty() and tut_catch_hold())
 
 
 func tut_style() -> String:
@@ -6327,6 +6336,7 @@ func tut_hold_update() -> void:
 	due.sort_custom(func(a, b): return int(a["rank"]) < int(b["rank"]))
 	tut_hold = due
 	tut_hold_at = tick
+	tut_rank_end = -999
 	# a beat that had to open early (a prop was already falling) takes the rest of its line
 	# with it: if the game is stopping to ask for a key, the sentence naming that key is
 	# finished being coy about it
@@ -6383,7 +6393,8 @@ func tut_hold_mark(act: String, h: int) -> void:
 			break
 	for e in tut_hold:
 		if not bool(e.get("ok", false)):
-			return
+			tut_rank_end = tick   # ...and the world owes this beat some motion before it may
+			return                # stop again for the next ask - see tut_rank_ready
 	tut_hold.clear()
 	tut_hold_end = tick
 
@@ -6509,6 +6520,36 @@ func tut_do_ready() -> bool:
 	if lb == null:
 		return false
 	return tick >= lb.land_tick - TUT_CATCH_GUARD
+
+
+func tut_rank_ready() -> bool:
+	# MAY THE OPEN BEAT STOP THE WORLD FOR ITS NEXT RANK YET? (2026-08-20, Louis, on the trick
+	# lessons: "the throw pause ... shows the ball still in the air, when it should be in the
+	# hand and also follow the hands motion: between the catch and throw pause, the ball
+	# should have been caught and then paused and then animated to throw".)
+	#
+	# The basics' `do` beats got this on the same day (TUT_SETTLE) and the older lessons' own
+	# beat did not, which is why a TRICK lesson still had it. An ADVANCED beat carries BOTH
+	# asks - catch at rank 1, throw at rank 2 - and tut_hold_mark only lets the world go once
+	# the LAST of them is banked. So the catch landed and the throw was demanded in the same
+	# frozen tick: the prop teleported from 14 ticks up its arc to the hand's outermost catch
+	# reach, the arm never closed on it, and the prompt changed under the player's finger with
+	# nothing else on screen having moved. Held there, a prop at the end of an outstretched
+	# arm reads as still in the air, which is exactly what Louis is describing.
+	#
+	# THE GUARD ESCAPE IS WHAT MAKES THIS SAFE, and it is also what scopes it. A prop already
+	# inside the catch window cancels the gap, so:
+	#   * ADVANCED (catch then throw): after the catch nothing is landing at three props - the
+	#     next arrival is a third of an airtime away - so the world runs, the hand draws in
+	#     around the prop it just took, and THEN the throw is asked for.
+	#   * BEGINNER (throw then catch): the beat only opened because a prop is 14 ticks out and
+	#     that prop is still flying after the throw, so the gap is zero and the "J then K"
+	#     exchange is byte-for-byte what it was.
+	#   * high counts, where arrivals are tighter than the gap: cut short automatically. The
+	#     exchange really is that fast up there, and no prop can ever land unguarded.
+	if tut_rank_end < 0:
+		return true
+	return tick - tut_rank_end >= TUT_SETTLE or tut_guard_hand() >= 0
 
 
 func tut_settled() -> bool:
