@@ -106,6 +106,37 @@ Codex improvements:
   Flowers are not also confiscated; one consequence is enough.
 - **Save migrations have fixture-backed pure helpers:** migration logic belongs in
   `scripts/TossaSaveSchema.gd`; `Game.gd` owns file IO and applies the translated values.
+- **A LESSON PAUSE HAS TO MOVE THE WORLD BETWEEN BEATS (2026-08-20,** Louis: after the pause
+  for the catch "there should be a pause for throwing, right now the ball is still in the air,
+  it should be in the hand for that pause"). A `do` beat clears the instant its key lands and
+  the next step's freeze was gated on `tut_speech_done()`, which the catch guard SNAPS to
+  finished the moment it stops the world - so a catch and the throw after it resolved inside
+  ONE frozen tick. `--tutlog`: steps 47-50 all opened at tick 3177, 51-54 all at 3247, and the
+  empty-hands opening launched two props in the same tick. **A THROW BEAT NOW NEEDS THE PROP IN
+  THE HAND AND `TUT_SETTLE` (24 ticks) OF REAL MOTION**, and the aura asks the same question in
+  the same order the freeze does rather than always handing itself to the guard's falling prop.
+  **AND A PROP ALREADY COMING DOWN OUTRANKS EVERY GATE** - the first cut simply delayed the beat
+  and walked straight back into the trap above `tut_quiet_fx` (guard takes the freeze,
+  autoplayer catches into a hand the advanced style needs empty, lesson stalls at 45 of 59).
+  The guard would freeze at that instant anyway and it can only ask for a CATCH, so the
+  script's own throw has to win there.
+- **A lesson's opening throw belongs to the STRONG HAND (2026-08-20,** Louis: "the tutorials
+  should always use the dominant to start throwing"). Every lesson already meant to -
+  `tut_setup_step` seeds `tut_last_throw` to the weak hand so `tut_feed_hand` starts at the
+  strong one - and nothing enforced it, because the only thing that can refuse a press is a
+  beat WITH THE WORLD FROZEN and the opening runs before the first beat opens. `tut_open_hand`
+  governs that window only and stands aside for an open beat, a basics `do` step and free play.
+  The gate is in `do_throw`, at the choke point: the demo metronome bypasses `on_throw_press`,
+  so a gate up there is one the harness could never verify.
+- **Tonight's limiters are POST-WIN content (2026-08-20,** Louis), gated on `won` like The
+  Midnight Show and the Purist Legend chase, and shown as **two struck-out marks under the
+  stage name** rather than a panel of rows. `MARK_BAND_H` is a constant so the perform card
+  never changes height for them; the record and the Reputation gate (`x / y`) sit right-aligned
+  in the same band and the next-skill hint is gone. The two marks must differ OUTSIDE the ring
+  (a bullseye and a stopwatch at 16px are the same mark twice - the reason the old panel had no
+  icons at all), and they may not reuse `day_icon`'s pair, which draw their red bar always
+  because there the bar meant "limiter" rather than "booked". `--binds` keeps its capture path
+  through run-local `_binds_dev`, never a forced `won`, because that flag writes to the save.
 - **Flight and collision audits share pure geometry:** parabolic position/velocity and edge
   clearance live in `scripts/TossaGeometry.gd`, with contract tests. The live wrappers retain
   domain names; the audit must not grow a second copy of the clearance formula.
@@ -1210,7 +1241,11 @@ still smooth vector drawing long after everything around them became sprites.
 phase - they play for 0.8-1.8s in the middle of a hub action and then the ledger moves, so no
 capture could land on one, and an unfrozen phase photographs a different moment every run. Its
 effect can never land, so a capture cannot spend ten flowers.
-`--binds acc|spd|both|off` books tonight's limiters for a capture: the two hub rows need a cursor
+`--tutlog` also prints the hand order of a beat's asks and which hand is dominant: a basics
+`do` step names its hand in its goal, but an older lesson's beat is DERIVED from the sim and
+named it nowhere a log or a screenshot could reach.
+`--binds acc|spd|both|off` books tonight's limiters for a capture (and opens the post-win
+marks for that run): the two hub rows need a cursor
 and an Enter, which no capture can press, so their BOUND state had no capture path at all. Unlike
 `--assists` it DOES write back, because a booking belongs to the save.
 `--assists on|off` pins BOTH assist switches for one run: the two dark icons and the UNAIDED row
