@@ -20,6 +20,9 @@ THREE SOURCES, ONE OUTPUT:
                  1280x720 by `--menuref`, reduced by exactly 2. Guaranteed to match
                  TOSSA, and the fallback if generated art is ever rejected.
   --from <png>   any 640x360 image.
+  --half-shift N modifier on --from-half: slide the half N px sideways first, so a
+                 CHOSEN column lands on the mirror axis rather than whichever one the
+                 generator happened to leave at the edge. See shift_half.
   --mirror       modifier on any of the above: keep the source's LEFT half and mirror
                  it. THIS IS WHAT THE SHIPPED BAKE USES (2026-08-19, Louis: the title
                  "is not centered: the edges of the curtain are missing and the bows
@@ -157,7 +160,39 @@ def unsign(a: np.ndarray) -> np.ndarray:
 	return a
 
 
-def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool = False) -> str:
+def shift_half(a: np.ndarray, dx: int) -> np.ndarray:
+	"""Slide a half's content sideways so a CHOSEN column lands on the mirror axis.
+
+	THE AXIS IS NOT A FREE CHOICE - it must land on a swag's low point (the note at the top
+	of this file, and CLAUDE.md, both say so, and both were written after a spike appeared
+	dead centre). `--from-half` mirrors at the half's own right edge, so until now the axis
+	was wherever the generator happened to put it. Measured on the 2026-08-20 side-curtain
+	half: the pelmet's gathers sit at x 112, 160, 240 and 306, and the frame edge at 319 is
+	13px past the last of them on a falling arc - which mirrors into a shallow inverted V at
+	the centre of the finished picture.
+
+	Shifting RIGHT crops the right edge, which on a side-curtain half is plain empty stage
+	and can be spared, and pads the left with a repeat of column 0, which is the dark outer
+	edge of the curtain running off frame - what a valance behind a proscenium does anyway.
+	Shifting LEFT is the mirror image of that and pads from the last column.
+
+	The alternative - re-rolling until a gather lands on the edge - is what the venue notes
+	call spending a generation on something arithmetic can fix.
+	"""
+	if dx == 0:
+		return a
+	out = np.empty_like(a)
+	if dx > 0:
+		out[:, dx:] = a[:, :-dx]
+		out[:, :dx] = a[:, :1]
+	else:
+		out[:, :dx] = a[:, -dx:]
+		out[:, dx:] = a[:, -1:]
+	return out
+
+
+def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool = False,
+		  half_shift: int = 0) -> str:
 	im = Image.open(src).convert("RGB")
 	if mirror:
 		# --mirror: take a FULL-FRAME painting's left half and mirror it, which is
@@ -174,6 +209,7 @@ def build(src: Path, write: bool, force: bool, half: bool = False, mirror: bool 
 		if im.size != (ART_W // 2, ART_H):
 			raise SystemExit(f"{src.name}: --from-half wants {ART_W//2}x{ART_H}, got {im.size}")
 		a = unsign(np.asarray(im).astype(np.uint8))
+		a = shift_half(a, half_shift)
 		full = np.concatenate([a, a[:, ::-1]], axis=1)
 		im = Image.fromarray(full, "RGB")
 	if im.size == (ART_W * 2, ART_H * 2):
@@ -203,10 +239,13 @@ def main() -> int:
 	if "--from-half" in sys.argv:
 		src = Path(sys.argv[sys.argv.index("--from-half") + 1])
 		half = True
+	half_shift = 0
+	if "--half-shift" in sys.argv:
+		half_shift = int(sys.argv[sys.argv.index("--half-shift") + 1])
 	if not src.exists():
 		raise SystemExit(f"missing {src} - capture it with:  godot --path . -- --menuref "
 						 f"--shot artifacts/menu_ref/menu.png --shotat 40")
-	print(build(src, write, force, half, mirror))
+	print(build(src, write, force, half, mirror, half_shift))
 	if not write:
 		print("(pass --write to apply)")
 	return 0

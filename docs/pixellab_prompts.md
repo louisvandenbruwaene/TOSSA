@@ -81,6 +81,61 @@ without "very deep dark ... almost maroon and black ... dimly lit ... few colour
 sat between palette entries and error diffusion sprayed the entire field. Steering the reds
 deeper took it to 0.000 in one re-roll. Same lesson as the teal sky: the fix is the prompt.
 
+## The title backdrop, rebuilt with SIDE CURTAINS (`ui/menu_backdrop`)
+
+2026-08-20, Louis: "regenerate the title card: i want side curtains". The closed-curtain
+version above is superseded; its own notes on brightness and on the noun still hold.
+
+`create_image_pixflux`, **320x360, one LEFT HALF, mirrored** - not pixen full-frame. Pixflux
+takes `color_image_base64`, so the locked 48 is forced at generation rather than snapped
+afterwards (the half came back with 36 colours and nothing off-palette), and the mirror is what
+makes a proscenium symmetric. Measured on the shipped bake: **0.0% of pixels differ from their
+own mirror**, against 46.9% for the 2026-08-13 full-frame painting.
+
+THE SHIPPED HALF IS ROLL A, and the three rolls are worth keeping because each failed
+differently and only one of the failures was the prompt's fault:
+
+  A  right composition - ONE curtain leg down the left, valance across the top, open stage
+     running off the right edge - but a bare lit lip with no lamps on it.
+  B  beautiful evenly-spaced footlight bulbs and flat boards, and a complete little proscenium
+     with a curtain leg on BOTH of its own edges. Mirrored, that is the DIPTYCH this file
+     already warns about: two stages side by side with a seam down the middle.
+  C  a curtain at the RIGHT edge, which mirrors into one dead centre, complete with a
+     duplicated tassel pair - plus two baked spotlight cones and two elliptical light pools on
+     the boards, in a prompt that forbade both.
+
+The clause that separates A from B and C is about where the picture ENDS, and both attempts to
+say it explicitly made things worse: B's bounded "to the right of that curtain the stage is
+OPEN and EMPTY" invited a matching right-hand leg, and C's emphatic "the stage RUNS OFF THE
+RIGHT EDGE and does not end" got a curtain there anyway. **A said it once, quietly, and it
+worked** - which is the same finding as the venue backdrops' "put the furniture somewhere":
+
+    ... To the right of the curtain the stage is OPEN and EMPTY: a plain dark back wall in
+    deep shadow catching a little warm light from below, dim wooden stage boards, and a row
+    of small warm footlights along the front lip. ... The RIGHT-HAND EDGE of the picture is
+    nothing but empty dark stage and plain back wall - no curtain, no object, no light, no
+    detail of any kind.
+
+**THE FOOTLIGHTS ARE NOT DECORATION ON THIS SCREEN.** `menu_house_light` deleted the title's
+spotlight cone on 2026-08-15 and replaced it with a wash rising off the footlights, allowed
+precisely because "they are real lamps in the picture". A half with no lamps puts the game back
+into the fault the cone was deleted for. A asked for "a row of small warm footlights" and got a
+lit lip; B asked for "small round glowing footlight bulbs, evenly spaced, each a warm amber dot
+with a little pool of light" and got real lamps - and a diptych with them.
+
+So the lamps were MOVED rather than re-rolled for: `scripts/add_footlights.py` cuts one bulb out
+of B by difference from B's own board tone (a rectangular patch would carry B's flat boards over
+A's lit wing-spill and cut a stripe) and stamps the row onto A. Same generator, same canvas, same
+forced palette, so nothing about it is a repaint. **The pitch is laid out from the MIRROR AXIS
+outward**, not from the left edge: a lamp at column c has a twin at 639-c, so a row spaced from
+the left leaves the centre gap wrong by up to a full pitch - the one irregularity in an even row,
+dead centre, where the eye already is.
+
+AND THE AXIS ITSELF IS CHOSEN, which `--half-shift` is for. The pelmet's gathers landed at x 112,
+160, 240 and 306, so the frame edge at 319 sat 13px past the last one on a falling arc - which
+mirrors into a shallow inverted V exactly as the title's own notes predict. `--half-shift 13`
+slides the gather onto the axis, where the slope is zero and the two halves join flat.
+
 ## Three venue backdrops, re-rolled (`bg/the_circus`, `bg/championship`, `bg/world_arena`)
 
 `create_image_pixen`, 640x360, `no_background: false`, 1 generation each. 2026-08-19, Louis:
