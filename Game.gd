@@ -6171,6 +6171,31 @@ func tut_feed_hand() -> int:
 	return h if not stack(h).is_empty() else -1
 
 
+func tut_open_hand() -> int:
+	# WHICH HAND STARTS A LESSON (2026-08-20, Louis: "the tutorials should always use the
+	# dominant to start throwing"). Every lesson already MEANT to open from the strong hand -
+	# tut_setup_step seeds tut_last_throw to the weak one precisely so tut_feed_hand's
+	# alternation begins at the strong one - and nothing enforced it, because the only thing
+	# that can refuse a press is a beat WITH THE WORLD FROZEN and the opening happens before
+	# the first beat opens. So the first hand the player happened to press became the start,
+	# and a deal that puts two props in the strong hand went on to teach the weak one to
+	# lead. It also mirrors for a left-hander, like every other hand rule here.
+	#
+	# It governs the OPENING ONLY - the throws that fill the air, which is the same span
+	# tut_open_gap already treats as its own thing. Once the pattern is up, the exchange owns
+	# the hand order and this returns -1.
+	if not tut_active or not tut_helped():
+		return -1
+	if not tut_hold.is_empty():
+		return -1   # a beat with the world stopped is the authority; it picked this hand
+	var g := String(tut_step_data().get("goal", ""))
+	if g.begins_with("throw_") or g.begins_with("catch_"):
+		return -1   # ...and a basics `do` beat names its own hand in its own goal
+	if balls_airborne() >= tut_air_target():
+		return -1
+	return tut_feed_hand()
+
+
 func tut_due_key(step: Dictionary) -> Array:
 	# the one key this step exists to teach, asked for only at a moment when pressing it
 	# would actually DO something - the same check that fixed the Spin prompt in
@@ -7688,8 +7713,16 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# (Louis: the keys are shown every single time, never assumed learned). It
 	# brightens when the step's whole point is that throw, stays calm otherwise.
 	var goal := String(step["goal"])
+	# ...AND THE OPENING SHOWS ONE KEY, NOT TWO (2026-08-20). While the air is still filling,
+	# only the hand tut_open_hand names may actually throw - so lighting the other hand's
+	# throw key is lighting a key that does nothing when pressed, which is worse than no
+	# prompt at all. A guided step lights both hands brightly (see `wants` below), so before
+	# this the very first thing a lesson said was "start with either one".
+	var open_h := tut_open_hand()
 	for hh: int in [LEFT, RIGHT]:
 		if not holding[hh]:
+			continue
+		if open_h >= 0 and hh != open_h:
 			continue
 		if beat and not tut_hold_names("throw", hh):
 			continue
@@ -10629,6 +10662,12 @@ func do_throw(h: int, hold: int) -> void:
 	# ...and the same guard at the choke point, because the autoplayer and the tutorial both
 	# call do_throw directly rather than through the press handler.
 	if not hand_can_throw(h):
+		return
+	# ...which is exactly why the opening-hand rule lives here too, and not in
+	# on_throw_press: the demo metronome throws straight through this function, so a gate up
+	# in the press handler would be one the harness could never verify. See tut_open_hand.
+	var open_h := tut_open_hand()
+	if open_h >= 0 and h != open_h:
 		return
 	sprint_record("throw_l:%d" % hold if h == LEFT else "throw_r:%d" % hold)
 	var b: Ball = stack(h).pop_front()
