@@ -120,6 +120,18 @@ Codex improvements:
   autoplayer catches into a hand the advanced style needs empty, lesson stalls at 45 of 59).
   The guard would freeze at that instant anyway and it can only ask for a CATCH, so the
   script's own throw has to win there.
+  **AND THE OLDER LESSONS' OWN BEAT NEEDED THE SAME THING, ONE RANK DOWN (2026-08-20,** Louis,
+  on the trick lessons: "the throw pause ... shows the ball still in the air, when it should be
+  in the hand and also follow the hands motion ... the ball should have been caught and then
+  paused and then animated to throw"). An ADVANCED `tut_hold` beat carries BOTH asks - catch at
+  rank 1, throw at rank 2 - and `tut_hold_mark` only released the world once the LAST was
+  banked, so the two resolved in one frozen tick: the prop teleported from 14 ticks up its arc
+  to the hand's outermost catch reach and the arm never closed on it. `tut_rank_ready` gives the
+  ranks the gap the beats already had. **THE GUARD ESCAPE IS WHAT MAKES IT SAFE AND WHAT SCOPES
+  IT**: a prop already inside the catch window cancels the gap, so BEGINNER's "J then K" (whose
+  prop is still flying after the throw) is byte-for-byte unchanged, high counts cut the gap
+  short by themselves, and nothing can ever land unguarded. Measured on `trick_btb`: one beat
+  line at t536 becomes a catch at t536 and a throw at t560, same 819-tick completion.
 - **A lesson's opening throw belongs to the STRONG HAND (2026-08-20,** Louis: "the tutorials
   should always use the dominant to start throwing"). Every lesson already meant to -
   `tut_setup_step` seeds `tut_last_throw` to the weak hand so `tut_feed_hand` starts at the
