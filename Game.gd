@@ -3115,8 +3115,28 @@ func _physics_process(delta: float) -> void:
 		_phys_us += Time.get_ticks_usec() - _phys_t0
 		_phys_n += 1
 	# screen shake decays toward rest (uses cosmetic RNG so the sim stays deterministic)
+	#
+	# ON THE ART GRID, AND THIS IS THE ONE PLACE IT WAS NOT (2026-08-20). The offset was a
+	# continuous `randf_range`, so for the ten-odd frames after every drop the WHOLE CANVAS
+	# sat at a fractional position and every sprite in the game - props, performer, HUD -
+	# was resampled off its own pixel grid. Measured with check_pixel_grid on the
+	# `stage_booed` target, whose act drops constantly: **73-95% of the frame off-grid**,
+	# against 5% for the same screen with the shake at rest, and it is the worst number any
+	# screen in the game has ever produced by a factor of seven.
+	#
+	# It is decision 1 of the pixel-art lock ("one art pixel is drawn as a 2x2 screen block,
+	# no resampling") broken at the single most-felt moment in the game, and it hid for as
+	# long as it did because a screenshot only catches it if the shake happens to be running
+	# in that frame - two of this session's three sweeps measured the same target at 5%.
+	# `art_snap` already exists for exactly this ("so a blitted sprite's source pixels stay
+	# square and stop crawling as the thing under them moves at sub-pixel speed"); the shake
+	# IS that motion, applied to everything at once.
+	#
+	# Snapping COSTS NOTHING AND READS BETTER. The shake starts at 5.0 and decays 0.82, so
+	# whole-art-pixel offsets give {-4,-2,0,2,4} falling to zero - a staccato rattle in
+	# chunky blocks rather than a smooth blur, which is what a drop should feel like.
 	if shake > 0.2:
-		position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake))
+		position = art_snap(Vector2(randf_range(-shake, shake), randf_range(-shake, shake)))
 		shake *= 0.82
 	elif position != Vector2.ZERO:
 		position = Vector2.ZERO
