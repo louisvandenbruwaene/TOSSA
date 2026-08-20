@@ -1000,6 +1000,32 @@ const TUT_CATCH_GUARD := 14    # THE CATCH GUARD (2026-07-30, Louis: "it should 
 const TUT_HOLD_GAP := 8        # ticks of real motion after a satisfied beat before the
 								# next one may stop the world - so the throw and the catch
 								# the player just made are actually SEEN happening
+const TUT_SETTLE := 24         # THE SAME RULE FOR THE BASICS' OWN `do` BEATS, which never had
+								# one (2026-08-20, Louis: after the pause for the catch "there
+								# should be a pause for throwing, right now the ball is still in
+								# the air, it should be in the hand for that pause").
+								#
+								# A `do` beat clears the instant its key lands (tut_check calls
+								# tut_advance itself), and the next step's freeze was gated on
+								# tut_speech_done() - which the catch guard SNAPS to finished the
+								# moment it stops the world. So a catch and the throw after it
+								# resolved inside ONE frozen tick, with nothing moving between
+								# them: measured on the basics with --tutlog, steps 47, 48, 49
+								# and 50 all opened at tick 3177, and the empty-hands opening
+								# launched two props in the same tick (43 and 44 both at 3107),
+								# which is not a cascade. The player pressed catch, the prompt
+								# changed to THROW under their finger, and the picture never
+								# moved - so the prop they had just caught still read as hanging
+								# in the air.
+								# 24 ticks (a fifth of a second) is the world running between two
+								# beats: long enough for the catch to arrive and the hand to draw
+								# in around it, short enough that the next prop - 84 ticks of
+								# airtime away, beats ~66 ticks apart - is nowhere near landing.
+								# IT GATES THE THROW HALF ONLY. A catch beat is about a prop
+								# already coming down and may never be postponed (the catch guard
+								# would take it anyway, one branch lower), which is also what
+								# keeps this out of the trap the note above tut_quiet_fx records:
+								# nothing else can step into a delay this never opens.
 const TUT_RELEASE_CLEAR := 20  # ...AND NO BEAT MAY FREEZE A PROP THAT HAS ONLY JUST LEFT A HAND
 								# (2026-08-19, Louis: "make sure they don't pause when the balls
 								# have only just left the hand, else the hand has gone to the
@@ -1971,6 +1997,8 @@ var tut_keys := 0         # command-key presses banked this step (the R and P te
 var tut_hold: Array = []  # entries {act, hand, rank, ok}; empty means the world runs
 var tut_hold_at := -1     # tick the current beat froze the world (its prompt eases in)
 var tut_hold_end := -999  # tick the last beat was satisfied (TUT_HOLD_GAP of motion after)
+var tut_beat_end := -999  # ...and the same for a basics `do` beat, which clears through
+						  # tut_check rather than tut_hold_mark (TUT_SETTLE of motion after)
 var tut_last_throw := LEFT   # which hand threw last, so feed throws alternate hands -
 							 # which is the whole reason a cascade crosses
 var tut_prev_prop := PROP_BALLS  # the prop equipped BEFORE a trick/count/pattern lesson
@@ -6400,6 +6428,32 @@ func tut_do_ready() -> bool:
 		# would mean this beat never fired at all. tut_snap_speech finishes the line
 		# instead, which is what tut_hold_update has always done for a beat that had to
 		# open early.
+		# THE PROP HAS TO BE IN THE HAND, AND HAVE BEEN SEEN ARRIVING THERE (2026-08-20,
+		# Louis: "there should be a pause for throwing, right now the ball is still in the
+		# air, it should be in the hand for that pause"). Both halves are needed and they
+		# fail for different reasons - see TUT_SETTLE for the measurement.
+		#   * stack empty: this beat is about a prop that has not landed yet. Freezing on it
+		#     asks for a key that cannot do anything, and the aura (tut_focus_ball) has no
+		#     prop to sit on either.
+		#   * no settle: the catch that filled the hand happened in THIS frozen tick, so
+		#     the world has not moved since the prompt said "catch" - the throw ask arrives
+		#     over an unchanged picture.
+		var th := LEFT if g == "throw_l" else RIGHT
+		if stack(th).is_empty():
+			return false
+		# ...AND A PROP ALREADY COMING DOWN IS THE LAST MOMENT, whatever else this beat was
+		# still waiting for. The catch guard is one branch below this one and would stop the
+		# world at exactly this instant anyway - but it can only ever ask for a CATCH, so
+		# every gate under here has to give way or the script's own throw is stepped over
+		# and the lesson runs out of order from there on. That is the trap the note above
+		# tut_quiet_fx records, met from the other side: the first cut of the settle gap
+		# below simply delayed the beat, the guard took the freeze, the autoplayer caught
+		# into a hand the advanced style needs empty, and the empty-hands cascade stalled at
+		# step 45 of 59 - the same failure, the same 14-tick window, a year of comments later.
+		if tut_guard_hand() >= 0:
+			return true
+		if not tut_settled():
+			return false
 		if bool(step.get("peak", false)):
 			return tut_at_peak()
 		# NOBODY IS ASKED FOR A KEY BEFORE THE LINE NAMING IT HAS ARRIVED (2026-08-19,
@@ -6430,6 +6484,14 @@ func tut_do_ready() -> bool:
 	if lb == null:
 		return false
 	return tick >= lb.land_tick - TUT_CATCH_GUARD
+
+
+func tut_settled() -> bool:
+	# has the world actually MOVED since the last beat was satisfied? See TUT_SETTLE.
+	# Asked only of a throw beat: a catch is about a prop already falling and postponing
+	# it drops the ball, which is the same reason tut_hold_update lets a landing beat
+	# through its own gap.
+	return tick - tut_beat_end >= TUT_SETTLE
 
 
 func tut_landing_ball(h: int) -> Ball:
@@ -6464,8 +6526,16 @@ func tut_focus_ball() -> Ball:
 	# first ball's own arrival lands inside the beat that is still asking for the second
 	# throw. Whatever the world stopped FOR is, by definition, "the ball that currently
 	# requires an action", so it takes the aura ahead of the beat's own subject.
+	# ...BUT ONLY WHEN THE GUARD IS WHAT ACTUALLY STOPPED THE WORLD (2026-08-20, Louis: at
+	# the pause for throwing "the ball is still in the air, it should be in the hand"). The
+	# aura has to name whatever the freeze is FOR, and _physics_process tries the script's
+	# own `do` beat one branch ABOVE the guard - so during a throw beat that opened because
+	# a prop was coming down (see tut_do_ready), the game stopped to ask for a THROW and
+	# then drew its yellow ring around a ball falling through the air. The player is being
+	# pointed at the wrong prop by the one mark whose entire job is pointing at the right
+	# one. This condition is now the same test, in the same order, as the freeze itself.
 	var gh := tut_guard_hand()
-	if gh >= 0 and tut_catch_hold():
+	if gh >= 0 and tut_catch_hold() and not (tut_do_step() and tut_do_ready()):
 		return tut_landing_ball(gh)
 	if tut_holding():
 		# an older lesson's multi-key beat: its lowest outstanding rank is the live ask
@@ -6532,8 +6602,27 @@ func tut_log_hold(why: String) -> void:
 	for b in balls:
 		if b.state == STATE_FLIGHT:
 			props += "  [age %d in %d]" % [tick - b.launch_tick, b.land_tick - tick]
-	print("tutlog t%5d  %-10s step %2d %-10s speech %s%s" % [tick, why, tut_step,
-		String(tut_step_data().get("goal", "")), "done" if tut_speech_done() else "typing", props])
+	print("tutlog t%5d  %-10s step %2d %-10s speech %s%s%s" % [tick, why, tut_step,
+		String(tut_step_data().get("goal", "")), "done" if tut_speech_done() else "typing",
+		tut_ask_text(), props])
+
+
+func tut_ask_text() -> String:
+	# WHICH HAND THE FROZEN BEAT IS ASKING FOR (dev, --tutlog). A basics `do` step names its
+	# own hand in its goal (`throw_l`), but an older lesson's beat is DERIVED from the live
+	# sim, so its hand order existed nowhere a log or a screenshot could show it - and hand
+	# order is the half of a scripted lesson that goes wrong invisibly, because the catch
+	# guard quietly covers for it (see the note above tut_quiet_fx). `dom` is printed with
+	# it: "throw-r" only means "the strong hand" once you know which one that is.
+	if tut_hold.is_empty():
+		return ""
+	var parts := PackedStringArray()
+	for e in tut_hold:
+		var h := int(e["hand"])
+		parts.append("%s%s%s" % [String(e["act"]),
+			"" if h < 0 else ("-l" if h == LEFT else "-r"),
+			"(done)" if bool(e.get("ok", false)) else ""])
+	return "  dom %s  ask %s" % ["l" if dominant_hand == LEFT else "r", " then ".join(parts)]
 
 
 # THE FREEZE IS NOT MOVED OUT OF THE RELEASE WINDOW; THE PICTURE IS FIXED AT ITS SOURCE.
@@ -6775,6 +6864,8 @@ func tut_check() -> void:
 		_: done = tut_count >= int(step["need"])
 	if done:
 		tut_advance_at = tick
+		tut_beat_end = tick   # ...and the world owes TUT_SETTLE ticks of real motion before
+							  # the next beat may stop it again - see tut_settled
 		# the beat that was frozen is over too: a WON step goes back to free play, so a
 		# player who wants to keep going is not stopped at every prop from here on
 		tut_hold_abort()
