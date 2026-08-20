@@ -109,7 +109,11 @@ done
 
 # --- 3. Seeded daily act -----------------------------------------------------
 log_head "3. Daily act (--daily --demo --booking)"
-run_headless 60 "$WORK/daily.log" --daily --demo --booking --prop 0 || true
+# 90, NOT 60, AND STEP 2 ABOVE ALREADY KNEW THAT (2026-08-20). These acts run the same demo
+# save to the same kind of resolution - measured, 7119 ticks, which at the fixed 120Hz is 59.3s
+# of wall clock - so a 60s ceiling was losing the race by a second or two and reporting it as a
+# missing receipt. Step 2 was raised to 90 at some point and the two below were not.
+run_headless 90 "$WORK/daily.log" --daily --demo --booking --prop 0 || true
 if grep -q "^${GAME_TITLE:-TOSSA} Daily " "$WORK/daily.log"; then
 	log_ok "Daily act resolved."
 else
@@ -119,7 +123,7 @@ scan_run_log "$WORK/daily.log" || FAIL=1
 
 # --- 3a. Demo ceiling transition --------------------------------------------
 log_head "3a. Demo-wall transition (--demowall --venue 2)"
-run_headless 60 "$WORK/demowall.log" --demowall --demo --booking --venue 2 --prop 0 || true
+run_headless 90 "$WORK/demowall.log" --demowall --demo --booking --venue 2 --prop 0 || true
 if grep -q '^ACT .*demowall=true' "$WORK/demowall.log"; then
   log_ok "Crossing the scoped demo ceiling armed the demo-wall card."
 else

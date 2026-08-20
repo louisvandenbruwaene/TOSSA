@@ -2502,6 +2502,17 @@ func _ready() -> void:
 			# already seen the card in an earlier run.
 			demo_wall_seen = false
 			pending_demo_wall = false
+			# ...AND IT HAS TO GUARANTEE THE PRECONDITION IT IS TESTING (2026-08-20).
+			# The wall arms on `venue_index_of(reputation) > DEMO_MAX_VENUE`, so the flag
+			# only ever worked while the demo save happened to sit above that tier - and it
+			# had drifted BELOW it: reputation 238 against the 260 that opens venue 2, i.e.
+			# 22 short, in a harness act that then loses 22 more for collapsing. Every run
+			# made the next one further away, so validate.sh's step 3a had become a ratchet
+			# that could not come back on its own, and it read as a code regression on every
+			# report. Resetting the two flags above without resetting the number they are
+			# gated on was only ever half a reset.
+			if DEMO_MAX_VENUE + 1 < VENUE_REP.size():
+				reputation = maxi(reputation, int(VENUE_REP[DEMO_MAX_VENUE + 1]))
 		var start_n := 3
 		var bi := ua.find("--balls")   # dev: force the ball count (audit even-count Cascade, e.g. 4/6)
 		if bi != -1 and bi + 1 < ua.size():
