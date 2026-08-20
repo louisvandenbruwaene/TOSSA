@@ -14608,8 +14608,26 @@ func art_glow_mask(key: String) -> String:
 	# shape again, because it IS the lit shape.
 	#
 	# WHITE, NOT PHOSPHOR, in the texture: the round props are already authored white and
-	# tinted (see the manifest's _AUTHORING note), so a white mask is the same contract and
+	# tinted (see the manifest's _AUTHORING note), so a white plate is the same contract and
 	# leaves the colour where the caller can still flicker it.
+	#
+	# **AND IT IS SHADED WHITE, NOT FLAT WHITE** (2026-08-20, Louis, of the Midnight Show:
+	# the props "still look bad, they should look like they do in the glow in the dark shop
+	# (just a green color to them)"). A flat mask is a featureless blob: every pixel inside
+	# the outline came out the identical green, so a charged ball had no roundness, a ring no
+	# thickness and a club no handle. The GLOW SHOP does not do that - it blits the prop's own
+	# portrait with the phosphor as a TINT, so the shading survives and the thing still reads
+	# as the object you are buying - and that is what he is asking the stage to look like.
+	#
+	# So the plate carries each source pixel's VALUE (max of r,g,b), normalised so the
+	# sprite's own brightest pixel is full phosphor. Value rather than luminance because this
+	# is a repaint, not a photograph: Rec.709 luminance would send a saturated red club to
+	# 0.3 and charge it a third as brightly as a white ball, where value says "this pixel is
+	# a highlight" whatever colour the lit prop happens to be. The normalisation is what lets
+	# one green read the same across seven props authored in seven palettes.
+	#
+	# The tint still multiplies, so the caller keeps the flicker and the per-ball hue nudge it
+	# already had, and a white-authored ball comes out exactly as the shop draws it.
 	#
 	# Built once per prop per art_boot and cached in the bank beside its source, so an F9
 	# variant swap regenerates it for free (art_boot clears the bank). A prop sprite is at
@@ -14630,14 +14648,26 @@ func art_glow_mask(key: String) -> String:
 	if w <= 0 or h <= 0:
 		return ""
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	# A HARD THRESHOLD, not the source alpha carried through. These sprites are reduced with
-	# a hard alpha cut already, so the only half-transparent pixels a mask could inherit are
-	# rounding - and a phosphor edge that fades out is the soft rim this whole function
-	# exists to delete.
+	# the brightest pixel in this sprite, so every prop charges to the same green whatever
+	# palette it was painted in
+	var top := 0.0
 	for y in h:
 		for x in w:
-			if src.get_pixel(x, y).a >= 0.5:
-				img.set_pixel(x, y, Color(1.0, 1.0, 1.0, 1.0))
+			var c := src.get_pixel(x, y)
+			if c.a >= 0.5:
+				top = maxf(top, maxf(c.r, maxf(c.g, c.b)))
+	if top <= 0.0:
+		return ""
+	# A HARD THRESHOLD on ALPHA, not the source alpha carried through. These sprites are
+	# reduced with a hard alpha cut already, so the only half-transparent pixels a plate could
+	# inherit are rounding - and a phosphor edge that fades out is the soft rim this whole
+	# function exists to delete. The VALUE inside that outline is what carries the shading.
+	for y in h:
+		for x in w:
+			var sc2 := src.get_pixel(x, y)
+			if sc2.a >= 0.5:
+				var v := clampf(maxf(sc2.r, maxf(sc2.g, sc2.b)) / top, 0.0, 1.0)
+				img.set_pixel(x, y, Color(v, v, v, 1.0))
 	art_bank[gk] = {"tex": ImageTexture.create_from_image(img), "pivot": e["pivot"],
 		"scale": e["scale"]}
 	return gk
