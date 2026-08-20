@@ -270,25 +270,37 @@ fi
 # --- 7. Windowed screenshot smoke test ---------------------------------------
 if [[ $QUICK -eq 0 ]]; then
   log_head "7. Focused windowed screenshot smoke tests"
+  # name : tick : expected `shot state` name : dev flags. The EXPECTED STATE is not
+  # decoration - screenshot.sh's own note records that a capture can come back a perfectly
+  # valid PNG of the wrong screen, and this step can now do it deliberately: Game.gd no
+  # longer quits out from under a pending --shot, so a booked act that collapses early
+  # leaves the run sitting on its results panel and photographs THAT at tick 700. Without
+  # the check that reads as a pass.
   declare -a SHOT_CASES=(
-    "stage:700:--demo --booking --venue 2 --prop 0"
-    "results:60:--results"
-    "demo_wall:60:--wallcard"
+    "stage:700:play:--demo --booking --venue 2 --prop 0"
+    "results:60:results:--results"
+    "demo_wall:60:demowall:--wallcard"
   )
   for shot_case in "${SHOT_CASES[@]}"; do
     shot_name="${shot_case%%:*}"
     shot_rest="${shot_case#*:}"
     shot_at="${shot_rest%%:*}"
+    shot_rest="${shot_rest#*:}"
+    shot_want="${shot_rest%%:*}"
     shot_flags="${shot_rest#*:}"
     shot="$WORK/${shot_name}.png"
     shot_log="$WORK/shot_${shot_name}.log"
     # shellcheck disable=SC2086
     run_windowed 45 "$shot_log" $shot_flags --shot "$shot" --shotat "$shot_at" || true
-    if [[ -s "$shot" ]]; then
-      log_ok "$shot_name: captured $(du -h "$shot" | cut -f1) with no draw errors."
-    else
+    shot_got="$(grep -m1 '^shot state: ' "$shot_log" | awk '{print $4}' || true)"
+    if [[ ! -s "$shot" ]]; then
       fail "$shot_name screenshot was not produced."
       tail -20 "$shot_log" | sed 's/^/    /'
+    elif [[ -n "$shot_want" && "$shot_got" != "$shot_want" ]]; then
+      fail "$shot_name photographed '$shot_got', wanted '$shot_want'."
+      grep -m1 '^ACT ' "$shot_log" | sed 's/^/    /' || true
+    else
+      log_ok "$shot_name: captured $(du -h "$shot" | cut -f1) with no draw errors."
     fi
     scan_run_log "$shot_log" || FAIL=1
   done
