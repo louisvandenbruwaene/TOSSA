@@ -138,11 +138,25 @@ const BALL_RADIUS_PX := 11.0  # the base drawn ball radius (px, before prop_hit_
 const TRAIL_STEP_SQ := 36.0   # (6px)^2: the closest two comet-trail samples may sit.
 							  # Anything tighter folds the tapered ribbon through itself -
 							  # see the sampler in update_sim for why that matters
-const BLACKOUT_UNLIT := 0.34  # how brightly an UNCHARGED prop glows through a Blackout,
-							   # against 1.0 for one carrying the Glow Kit. The shape is
-							   # legible either way (juggling blind was tried and rejected);
-							   # the Kit is the difference between reading a prop and
-							   # merely finding it.
+# HOW MUCH LIGHT AN UNCHARGED PROP KEEPS IN A DARK HOUSE, and it is TWO numbers because
+# the hand and the air are two different problems (2026-08-20, Louis: "the props have to be
+# barely visible in the hands and in the air they become almost completely invisible - even
+# less light to see them").
+#
+# ONE number was the previous answer and it made both halves wrong at once: 0.34 is bright
+# enough that a flying prop can be tracked comfortably, which costs the dark house the whole
+# reason it is dark, and dim enough that a prop sitting in the hand is a guess. Splitting
+# them says the real thing: you can see what you are HOLDING, and once it leaves you are
+# juggling on rhythm and memory until it lands.
+#
+# The numbers are set against a measured room, not chosen. A Midnight Show flight band reads
+# RGB (7,8,9) and the brightest ball is (255,209,89):
+#     hand 0.26 -> (66,54,23), some 7x the room, plainly an object in a dark hand
+#     air  0.09 -> (23,19,8),  about 2.5x, a smudge you find by knowing where it must be
+# Charged stock is unaffected and stays at full phosphor - that is what it is for, and the
+# gap between these two numbers and 1.0 is the whole value of the Glow Kit.
+const DARK_DIM_HAND := 0.26   # in the hand, on the boards: barely visible
+const DARK_DIM_AIR := 0.09    # in flight: almost completely invisible
 							  # Just past the apex, so the throw and the top of the arc
 							  # are always seen and only the descent is dark.
 
@@ -10905,22 +10919,17 @@ func full_dark_stage() -> bool:
 	return encore_on("blackout") or run_venue == MAX_VENUE
 
 
-func dark_props_hidden() -> bool:
-	# ...AND ONLY ONE OF THE TWO ERASES AN UNCHARGED PROP OUTRIGHT (2026-08-19, Louis, on
-	# the Midnight Show: "normal objects should be less visible, not invisible").
-	#
-	# This reverses HALF of the 2026-07-29 note quoted in the flight branch ("make normal
-	# objects completely invisible - so it is possible, but incredibly hard to juggle"), and
-	# the half it keeps is the half that instruction was actually about. BLACKOUT is an
-	# Encore: the house offers it, the player accepts it, and it cannot even be rolled until
-	# the save owns three glowing balls or torches, so invisibility there is a challenge
-	# taken on with the answer to it already in the bag. THE MIDNIGHT SHOW is a venue - the
-	# last one - and nobody opts into it. Handing mandatory content the same rule made a
-	# whole stage that is played by memory, which is what he is calling awful.
-	#
-	# So the Midnight Show goes dim (BLACKOUT_UNLIT) and Blackout stays black. If Blackout
-	# rolls AT the Midnight Show, the Encore wins: it was chosen.
-	return encore_on("blackout")
+# THE SPLIT BETWEEN THE TWO DARK HOUSES IS GONE, AND THE DIVISION MOVED (2026-08-20, Louis:
+# "i want dark challenges and the midnight show the props have to be barely visible in the
+# hands and in the air they become almost completely invisible").
+#
+# `dark_props_hidden()` lived here for one day. It made Blackout erase an uncharged prop and
+# the Midnight Show merely dim it, on the reasoning that one is a challenge you accept and
+# the other a venue you are simply sent to. That reasoning was sound and the line was in the
+# wrong place: the interesting difference is not between the two ROOMS, it is between a prop
+# you are HOLDING and a prop in the air. Both houses want the same rule now, and DARK_DIM_HAND
+# / DARK_DIM_AIR are it. Nothing asks which dark house it is standing in any more, which is
+# one fewer thing that can disagree with itself.
 
 
 func is_picky_crowd() -> bool:
@@ -17799,24 +17808,26 @@ func draw_balls_in_flight(behind: bool = false) -> void:
 			# is still the exception the Encore is built around: it carries its own fire.
 			if full_dark_stage():
 				var dark_pos := flight_pos(b)
-				# **AN UNLIT PROP IS NOT THERE UNDER BLACKOUT, AND IS MERELY FAINT AT THE
-				# MIDNIGHT SHOW** - see dark_props_hidden, which is where the split and its
-				# reasoning live. Short version: the 2026-07-29 instruction ("make normal
-				# objects completely invisible - so it is possible, but incredibly hard to
-				# juggle") was safe because Blackout cannot roll until the save owns three
-				# glowing balls or torches, so the challenge always arrives with its answer
-				# in the bag. The Midnight Show has no such gate - it is simply the last
-				# venue - and it got the same rule by sharing full_dark_stage().
+				# **AN UNLIT PROP IN THE AIR IS ALMOST GONE** - DARK_DIM_AIR, in both dark
+				# houses, and the note above that constant is where the reasoning lives.
+				# This is the shape the 2026-07-29 instruction ("make normal objects
+				# completely invisible - so it is possible, but incredibly hard to juggle")
+				# was reaching for, landed one step short of total: what is left is enough
+				# to confirm a prop you already know the position of and nowhere near enough
+				# to track one you do not.
 				# A TORCH IS THE EXCEPTION AND ONLY HALF AN EXCEPTION: the flame and its
 				# glow are always visible, because fire is fire, but the HANDLE under it
 				# vanishes with everything else unless the torch itself is a glowing one.
 				if prop_glows(b.kind):
 					draw_glow_in_dark(dark_pos, b.color, b.kind, prop_scale(b.kind),
 						prop_spin_angle(b), 1.0)
-				elif not dark_props_hidden():
-					draw_trail(b, BLACKOUT_UNLIT)
+				else:
+					# the trail takes the same dim, which at this level is arithmetically
+					# nothing (its own alphas top out at 0.20) - and that is the honest
+					# result rather than a special case: a prop this dark has no comet.
+					draw_trail(b, DARK_DIM_AIR)
 					draw_prop_rich(b.kind, dark_pos, b.color, prop_spin_angle(b),
-						prop_scale(b.kind), false, BLACKOUT_UNLIT)
+						prop_scale(b.kind), false, DARK_DIM_AIR)
 				if b.kind == PROP_TORCHES:
 					draw_flame_in_dark(b.kind, dark_pos, prop_spin_angle(b))
 				continue
@@ -18141,10 +18152,12 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		var bang := prop_spin_angle(b)
 		if prop_glows(b.kind):
 			draw_glow_in_dark(pos, b.color, b.kind, bsc, bang, 1.0)
-		elif not dark_props_hidden():
-			# faint, but there: the prop's own picture at BLACKOUT_UNLIT (see
-			# dark_props_hidden for which of the two dark houses gets this and why)
-			draw_prop_rich(b.kind, pos, b.color, bang, bsc, false, BLACKOUT_UNLIT)
+		else:
+			# THIS BRANCH IS THE HAND, and it is the brighter of the two levels. Every prop
+			# that is not in flight comes through draw_prop - held, and the moment before a
+			# throw and after a catch - so it is exactly the set the player is allowed to
+			# see. DARK_DIM_AIR takes over the instant it leaves (draw_balls_in_flight).
+			draw_prop_rich(b.kind, pos, b.color, bang, bsc, false, DARK_DIM_HAND)
 		if b.kind == PROP_TORCHES:
 			draw_flame_in_dark(b.kind, pos, bang)   # fire is fire, in the hand as in the air
 		return
@@ -29579,9 +29592,15 @@ func draw_falling() -> void:
 		if full_dark_stage():
 			if prop_glows(kind):
 				draw_glow_in_dark(p, d["col"], kind, sc, ang, a)
-			elif not dark_props_hidden():
+			else:
+				# A DROPPED PROP TAKES THE HAND'S LEVEL, NOT THE AIR'S, and it is the one
+				# case that has to be argued rather than derived: it is technically falling.
+				# But a prop on the boards is not something to catch, it is something to go
+				# and find, and it is only drawn for three seconds before it fades. Erasing
+				# it would mean the dark houses tell you a prop is gone without ever showing
+				# you where - which is a different game from a hard one.
 				_cap_a = a
-				draw_prop_rich(kind, p, d["col"], ang, sc, false, BLACKOUT_UNLIT)
+				draw_prop_rich(kind, p, d["col"], ang, sc, false, DARK_DIM_HAND)
 				_cap_a = 1.0
 			if kind == PROP_TORCHES:
 				draw_flame_in_dark(kind, p, ang)

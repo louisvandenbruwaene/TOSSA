@@ -1063,18 +1063,27 @@ review" for the accept/reject examples and why.
   `--assists on|off` pins both for one run so the state can be photographed, and deliberately never
   writes back to the SHARED settings file.
 
-- **A DARK HOUSE DIMS PROPS; ONLY THE ENCORE ERASES THEM (2026-08-19, Louis, on the Midnight
-  Show: "normal objects should be less visible, not invisible").** `full_dark_stage()` covers two
-  things that are not the same, and they had one rule between them. **Blackout is chosen** and
-  cannot even roll until the save owns three glowing balls or torches, so invisible props there
-  are a challenge that always arrives with its answer in the bag - the 2026-07-29 instruction
-  stands, and `dark_props_hidden()` is now that instruction, Blackout only. **The Midnight Show is
-  a venue**, the last one, opted into by nobody, and it got invisibility by sharing a predicate.
-  It now draws the uncharged prop at `BLACKOUT_UNLIT` (0.34) through a new `dim` argument on
-  `draw_prop_rich`, which rides the sprite TINT and so darkens the finished object for free; the
-  comet trail takes the same argument so a faint prop is still trackable. Held, flying and FALLEN
-  props all obey it - `draw_falling` drew at full brightness in a dark room, which made a mistake
-  the best-lit object in the house.
+- **A DARK HOUSE HAS TWO LIGHT LEVELS AND THEY ARE THE HAND AND THE AIR (2026-08-20, Louis:
+  "i want dark challenges and the midnight show the props have to be barely visible in the hands
+  and in the air they become almost completely invisible - even less light to see them").**
+  `DARK_DIM_HAND` (0.26) and `DARK_DIM_AIR` (0.09), through the `dim` argument on
+  `draw_prop_rich`, which rides the sprite TINT and so darkens the finished object for free.
+  Measured against a Midnight Show room of RGB (7,6,7): a held ball reads (59,32,14), about 8x
+  the room and plainly an object; the same ball in flight reads (21,16,7), about 2.5x - enough to
+  confirm a prop you already know the position of and nowhere near enough to track one you do
+  not. **One number could not do both jobs**: the 0.34 this replaced made a flying prop
+  comfortable to track, which costs the dark house the reason it is dark, and still left a held
+  one a guess. The comet trail takes the same argument, so at the air level it is arithmetically
+  nothing (its own alphas top out at 0.20) - which is the honest result, not a special case.
+  **THE DIVISION BETWEEN THE TWO DARK HOUSES IS GONE WITH IT.** `dark_props_hidden()` lived for
+  one day and made Blackout erase a prop outright while the Midnight Show dimmed it. The
+  reasoning (one is accepted, one is merely arrived at) was sound and the line was in the wrong
+  place: the interesting difference is not between the two ROOMS but between a prop you are
+  holding and a prop in the air. Nothing asks which dark house it is standing in any more.
+  A FALLEN prop takes the HAND level, and that one is argued rather than derived: it is
+  technically falling, but it is not something to catch, it is something to go and find, and it
+  fades after three seconds anyway. (`draw_falling` drew at FULL brightness in a dark room until
+  2026-08-19, which made a mistake the best-lit object in the house.)
 - **A CHARGED PROP IS THE PROP, NOT A DRAWING OF ONE (2026-08-19, Louis: "the glow in the dark
   objects render completely wrong").** `glow_silhouette` painted the phosphor shape with
   `draw_circle` and hand-written polygons that predate the art seam, so the one object a player
