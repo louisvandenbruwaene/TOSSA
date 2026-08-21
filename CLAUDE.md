@@ -234,6 +234,58 @@ Codex improvements:
    a screen-space snap means nothing: snap the transform's ORIGIN, publish `_cap_px` =
    `ART_PIXEL / k`, and use `cap_disc` / `cap_ell` / `cap_seg`.
 
+**THE ONE MODE NOBODY HAD EVER PHOTOGRAPHED (2026-08-21), AND IT IS THE ONE HE PLAYS IN.**
+`--shot` deliberately skips `apply_fullscreen()` so a capture stays at the windowed design
+size, "so screenshots are comparable and a dev capture never seizes the display". Both halves
+of that are right and the consequence was not: `pixeltossa_settings.cfg` says
+`fullscreen=true`, so every one of the 52 screens in the sweep was a picture of a mode Louis
+never sees, and the mode he does see had no capture path at all.
+
+macOS reports that framebuffer as **2560x1606** (the menu-bar strip is excluded from a Godot
+`WINDOW_MODE_FULLSCREEN`). Under the old `window/stretch/aspect="expand"` the viewport becomes
+the window's own shape at the smaller ratio - `min(2560/1280, 1606/720)` = 2.0, so
+**1280x803**. That number is already in this file, in `stage_center`'s note, where it was met
+from the other side: "measured at 1280x803 the props flew to a line 11px below his hands". The
+hand line was fixed by reading it off the painting. Nothing fixed the painting.
+
+**803 IS ODD, AND THE ART GRID CANNOT TILE AN ODD NUMBER.** Every venue backdrop is 640x360 and
+goes through `art_blit_rect`, which STRETCHES to its box: 1280 wide is an exact 2x, 803 tall is
+2.231x, so 83 of the painting's 360 source rows are drawn three screen pixels tall and the
+other 277 are drawn two. Measured on the Circus at tick 700: **5.17% off-grid at 1280x720,
+26.59% at 1280x803**, and the damage is purely vertical - 41% of block ROWS broken against 3.6%
+of block columns. The canopy's two-pixel dither, which is the whole texture of that painting,
+comes apart into noise.
+
+The fix is `aspect="keep"` plus `scale_mode="integer"`: the viewport is ALWAYS the 1280x720
+design size and the window scales it by a whole number. Measured after: 5.17% at 1280x803,
+5.22% at 900x600, 5.25% at 1280x720 - the shape of the window stopped mattering, which is the
+actual property worth having. On this display fullscreen lands on exactly 2.0, so an art pixel
+is exactly 4x4 device pixels. **The cost is stated rather than hidden: bars** (83 device px top
+and bottom here, in the near-black plum clear colour, about 5% of the height each) **and a
+1920x1080 screen now scales by 1 rather than 1.5**, because 1.5 would put the SCREEN-DENSITY
+text of decision 2 on half pixels. If that trade is ever revisited, revisit it as a player
+setting, not by loosening the lock.
+
+Three things follow and all three are load-bearing:
+- **A minimum window size is what integer scaling asks for in return.** Its floor is 1x, so a
+  window below 1280x720 no longer shrinks the frame - it CROPS it, and what it crops is the
+  outside edge of every screen. Measured at 900x600: viewport still 1280x720, scale still 1.0,
+  corners gone. `_ready` sets `window_set_min_size` from `ART_W * ART_PIXEL`, derived, never a
+  second copy of project.godot's two numbers.
+- **`--capsule` IS EXEMPT AND MUST STAY EXEMPT.** It is the one run that WANTS a wrong-shaped
+  window: `render_store.sh` renders six store slots at six aspect ratios and relies on the
+  window size becoming the viewport, because the key art lays itself out from
+  `k = min(s.x / 1280, s.y / 720)`. A locked viewport hands every slot the same 16:9 frame and
+  `sips` then squashes it to the target - distortion, which that script's own header calls the
+  one thing a capsule must not have. Three of its six slots (1848x696, 840x1006, 1920x620) are
+  also smaller than the design size on one axis, so they need the minimum lifted too. The
+  capsule screen draws vector key art and no pixel-grid chrome, so it has nothing to lose.
+- **The general lesson is the one this file keeps relearning, arriving from a new direction.**
+  A screen with no capture target is a screen nobody has looked at - and this time it was not a
+  screen, it was a WINDOW SHAPE. `validate.sh` step 7b now runs a capture at 1280x803 and
+  asserts the frame still comes back 1280x720, because a settings line is exactly the kind of
+  thing that gets changed back with no picture to contradict it.
+
 **THE GOAL STEM'S PAINTING KEEPS TIME WITH THE GOAL LADDER, AND THE MANIFEST IS WHERE THEY
 MEET (2026-08-19).** The growth cycle is 76 frames built in THREE STRETCHES, one per goal - a
 leafless sprout growing a stalk and two leaves and opening ONE side flower; the SECOND side

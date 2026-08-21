@@ -91,4 +91,30 @@ scan_run_log() {
   return $bad
 }
 
+# run_windowed_res SECONDS LOG_FILE WxH -- <dev flags>
+# Same as run_windowed, at a specific WINDOW size. `--resolution` is an ENGINE
+# flag, so it has to go before the bare '--' - putting it after makes it a
+# silent no-op, which is exactly the failure mode dev flags have without the
+# '--' in the first place.
+#
+# WHY A WINDOW SIZE IS WORTH TESTING (2026-08-21): the game's viewport used to
+# take the window's own shape (aspect "expand"), so the size of the window
+# changed what was drawn and how sharply. Fullscreen on a 2560x1606 framebuffer
+# gave a 1280x803 viewport and stretched every 640x360 painting 2.231x
+# vertically. It is now locked to the design size at every window shape, and
+# this helper is how that lock is checked.
+run_windowed_res() {
+  local secs="$1"; shift
+  local log="$1"; shift
+  local res="$1"; shift
+  require_godot; require_timeout
+  set +e
+  "$GTIMEOUT_BIN" --kill-after=5 "${secs}s" \
+    "$GODOT_BIN" "${AUDIO_FLAGS[@]}" --resolution "$res" --path "$PIXELTOSSA_ROOT" -- "$@" \
+    >"$log" 2>&1
+  local code=$?
+  set -e
+  return $code
+}
+
 timestamp() { date +%Y%m%d_%H%M%S; }

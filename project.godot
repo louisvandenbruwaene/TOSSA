@@ -21,7 +21,19 @@ config/icon="res://icon.svg"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
-window/stretch/aspect="expand"
+; KEEP, NOT EXPAND, AND INTEGER, NOT FRACTIONAL (2026-08-21) - this is decision 1 of the
+; pixel-art lock defended at the window seam. See CLAUDE.md, "THE ONE MODE NOBODY HAD
+; EVER PHOTOGRAPHED". With "expand" the viewport becomes the window's own shape, and
+; macOS reports a fullscreen framebuffer of 2560x1606, which gives a viewport of
+; 1280x803 - an ODD height the 2px art grid cannot tile. Every 640x360 venue painting is
+; then stretched 2.231x vertically, so a third of its source rows are drawn three screen
+; pixels tall and the rest two. Measured on the Circus: 5.17% off-grid at 1280x720,
+; 26.59% at 1280x803.
+window/stretch/aspect="keep"
+; "integer" floors the window scale to a whole number, so an art pixel is always a whole
+; number of device pixels and the SCREEN-DENSITY text (decision 2) never lands on a half
+; one. The cost is that a 1920x1080 screen scales by 1 rather than 1.5 - see CLAUDE.md.
+window/stretch/scale_mode="integer"
 
 [importer_defaults]
 
