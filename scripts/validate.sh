@@ -305,6 +305,44 @@ if [[ $QUICK -eq 0 ]]; then
     scan_run_log "$shot_log" || FAIL=1
   done
   shot="$WORK/stage.png"  # the live frame used by the art-grid advisory below
+
+  # --- 7b. The window shape a player actually runs in -----------------------
+  # THE ONE MODE NOBODY HAD EVER PHOTOGRAPHED (2026-08-21). Every other capture in this
+  # project is 1280x720 windowed, because Game.gd deliberately skips apply_fullscreen()
+  # under --shot. Louis's settings say fullscreen=true, and macOS reports that framebuffer
+  # as 2560x1606 - which under the old aspect "expand" made the VIEWPORT 1280x803, an odd
+  # height the 2px art grid cannot tile. Every 640x360 venue painting was stretched 2.231x
+  # vertically and a third of its rows drawn three screen pixels tall. Measured on the
+  # Circus: 5.17% off-grid at the design size, 26.59% at 1280x803, and no capture in the
+  # repo could see it.
+  #
+  # The lock is aspect "keep" + scale_mode "integer" in project.godot. This step is what
+  # holds it: run a window at the real fullscreen SHAPE and assert the frame still comes
+  # back at the design size. If someone sets "expand" again, the capture comes back
+  # 1280x803 and this fails - which is the only way a settings line gets noticed.
+  log_head "7b. Aspect lock at the fullscreen window shape (1280x803)"
+  fs_shot="$WORK/fsshape.png"
+  fs_log="$WORK/shot_fsshape.log"
+  run_windowed_res 45 "$fs_log" 1280x803 \
+    --demo --booking --venue 3 --shot "$fs_shot" --shotat 700 || true
+  if [[ ! -s "$fs_shot" ]]; then
+    fail "The fullscreen-shape capture was not produced."
+    tail -20 "$fs_log" | sed 's/^/    /'
+  elif [[ -x .venv/bin/python ]]; then
+    fs_size="$(.venv/bin/python -c "
+from PIL import Image
+import sys
+print('%dx%d' % Image.open(sys.argv[1]).size)" "$fs_shot")"
+    if [[ "$fs_size" == "1280x720" ]]; then
+      log_ok "A 1280x803 window still renders the 1280x720 design frame ($fs_size)."
+    else
+      fail "Aspect lock broken: a 1280x803 window rendered $fs_size, not 1280x720."
+      log_err "project.godot's window/stretch/aspect must stay \"keep\" - see its own note."
+    fi
+  else
+    log_warn "Skipped the size assertion - .venv/bin/python not found (run 'make setup')."
+  fi
+  scan_run_log "$fs_log" || FAIL=1
 else
   log_warn "7. Screenshot smoke test skipped (--quick)."
 fi

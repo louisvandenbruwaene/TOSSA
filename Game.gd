@@ -2428,6 +2428,29 @@ func _ready() -> void:
 	setup_font()
 	# a pad can arrive or vanish at any moment, and vanishing mid-set must pause
 	Input.joy_connection_changed.connect(_on_joy_connection)
+	# THE WINDOW MAY NEVER BE SMALLER THAN THE PICTURE (2026-08-21), which is the one thing
+	# integer stretch scaling asks for in return. The project stretches with aspect "keep"
+	# and scale_mode "integer" so an art pixel is always a whole number of device pixels
+	# (see project.godot's own note). Integer scaling has a floor of 1x, so a window BELOW
+	# the 1280x720 design size cannot shrink the frame to fit - it crops it, and what it
+	# crops is the outside edge of every screen: the score card, the stamina rail, the
+	# hint rows. Measured at 900x600: viewport still 1280x720, scale still 1.0, corners
+	# gone. Fractional scaling used to cover this by resampling the whole frame, which is
+	# the defect the switch exists to remove, so the honest fix is to refuse the size.
+	# The size is DERIVED, never a second copy of the two numbers in project.godot:
+	# the design viewport IS the authoring canvas at ART_PIXEL screen units each.
+	#
+	# ...AND --capsule IS EXEMPT, because it is the one run that WANTS a wrong-shaped
+	# window: render_store.sh asks for 1848x696, 840x1006 and 1920x620 among others, three
+	# of which are smaller than the design size on one axis, and a minimum would silently
+	# clamp them into the wrong ASPECT - the exact distortion that script exists to avoid.
+	# See the capsule branch below, which lifts the aspect lock for the same reason.
+	# is_debug_build gates the exemption for the same reason it gates every other flag: a
+	# shipped build must enforce the minimum no matter what a player types on the
+	# command line, and --capsule cannot parse there anyway.
+	if not (OS.is_debug_build() and ua.has("--capsule")):
+		DisplayServer.window_set_min_size(
+			Vector2i(int(ART_W * ART_PIXEL), int(ART_H * ART_PIXEL)))
 	if set_fullscreen and not ua.has("--shot"):
 		apply_fullscreen()                       # honour the remembered display mode
 												 # (a --shot capture run stays at the
@@ -2811,6 +2834,20 @@ func _ready() -> void:
 		game_state = ST_CAPSULE
 		if capi + 1 < ua.size() and not ua[capi + 1].begins_with("--"):
 			_capsule_variant = clampi(int(ua[capi + 1]), 0, 5)
+		# THE ONE CAPTURE THAT IS ALLOWED THE WINDOW'S OWN SHAPE (2026-08-21). The game
+		# locks its viewport to the 1280x720 design size at every window size, because a
+		# viewport that takes the window's shape stretches every 640x360 painting off the
+		# art grid (see project.godot's note on aspect "keep"). A STORE CAPSULE IS THE
+		# EXACT OPPOSITE JOB: render_store.sh renders six slots at six aspect ratios and
+		# relies on the window size becoming the viewport, because the key art lays itself
+		# out from k = min(s.x / 1280, s.y / 720) - so a locked viewport would hand every
+		# slot the same 16:9 frame and `sips` would then squash it to the target aspect.
+		# That is distortion, which the script's own header calls the one thing a capsule
+		# must not have. The capsule screen draws no sprite and no pixel-grid chrome, so
+		# it has nothing to lose by stretching: it is vector key art, already antialiased.
+		var w := get_window()
+		w.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+		w.content_scale_stretch = Window.CONTENT_SCALE_STRETCH_FRACTIONAL
 	var ti := ua.find("--tutorial")   # dev: jump into a hands-on lesson, e.g. --tutorial balls,
 	if ti != -1:                     # optionally --tutorial balls <step> to land on step N
 		var id := ua[ti + 1] if ti + 1 < ua.size() and not ua[ti + 1].begins_with("--") else "balls"
