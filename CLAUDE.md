@@ -285,6 +285,18 @@ Three things follow and all three are load-bearing:
   screen, it was a WINDOW SHAPE. `validate.sh` step 7b now runs a capture at 1280x803 and
   asserts the frame still comes back 1280x720, because a settings line is exactly the kind of
   thing that gets changed back with no picture to contradict it.
+- **TO SEE THE PRESENTATION AT ALL, GRAB THE DISPLAY, NOT THE VIEWPORT.** `--shot` reads
+  `get_viewport().get_texture()`, which is the 1280x720 frame - it cannot show the bars, the
+  scale, or whether the upscale is clean, because none of those exist yet at that point in the
+  pipeline. `screencapture -x -C out.png` after launching WITHOUT `--shot` (so the remembered
+  fullscreen applies) is the only way, and the numbers it gives are worth the trouble: the
+  game area measured exactly 2560x1440 inside bars of 141 and 83, and 141 - 83 = 58 is the
+  NOTCH strip, not a centring error - `WINDOW_MODE_FULLSCREEN` and
+  `WINDOW_MODE_EXCLUSIVE_FULLSCREEN` both report a 2560x1606 window here, so the window's own
+  bars are equal and there is nothing to fix. **Measure the frame with 4x4 device blocks, not
+  2x2**: at scale 2 one art pixel is 4x4 device pixels and a screen-density glyph pixel is
+  2x2, so a 4x4 sweep reads HIGHER than the windowed 2x2 number (9.69% against 7.45% on the
+  title) and that gap is decision 2 showing up in the measurement, not a defect.
 
 **THE GOAL STEM'S PAINTING KEEPS TIME WITH THE GOAL LADDER, AND THE MANIFEST IS WHERE THEY
 MEET (2026-08-19).** The growth cycle is 76 frames built in THREE STRETCHES, one per goal - a
