@@ -229,6 +229,20 @@ def gamut_fit(rgb: np.ndarray) -> float:
 	return far / len(flat)
 
 
+# HOW FAR TO SLIDE A PAINTING BEFORE REDUCING IT, per stem, in ART pixels (positive = right).
+# THIS IS ARITHMETIC, NOT A GENERATION, and `pixelise_menu.py --half-shift` learned it first:
+# "re-rolling until a gather happens to land on x=319 is spending a generation on arithmetic."
+# The Midnight Show's door came back at x 470, 460 and 470 across three rolls whose prompts
+# asked for it dead centre in three different ways, including "in the EXACT HORIZONTAL CENTRE
+# of the picture, equally far from the left edge and the right edge" - and an establishing card
+# puts a panel in each BOTTOM CORNER, so a hero at 470 sits under one. A wall of brick is the
+# one subject a horizontal roll is free on: it wraps into more of itself, nothing is thrown
+# away, and the seam lands on plain brick at the frame edge.
+# It is recorded HERE rather than done by hand precisely because artifacts/ is disposable: the
+# shipped asset has to be rebuildable from a prompt in docs/pixellab_prompts.md plus this line.
+SHIFT = {"ext_the_midnight_show": -150}
+
+
 def build(fam: str, name: str, write: bool, force: bool) -> str:
 	stem = name if fam in ("bg", "ui") else f"ext_{name}"
 	src = SRC / f"{stem}.png"
@@ -239,12 +253,17 @@ def build(fam: str, name: str, write: bool, force: bool) -> str:
 		raise SystemExit(f"{stem}: expected {ART_W}x{ART_H}, got {im.size}. These are "
 						 "authored at the art density and must never be resampled.")
 	src_rgb = np.asarray(im).astype(int)
+	dx = SHIFT.get(stem, 0)
+	if dx:
+		src_rgb = np.roll(src_rgb, dx, axis=1)
 	out = snap_diffused(src_rgb, load_palette())
 	# opaque by construction: both families cover the frame and are blitted full-rect
 	rgba = np.dstack([out, np.full(out.shape[:2], 255, np.uint8)])
 	cols = len(np.unique(out.reshape(-1, 3), axis=0))
 	fit = gamut_fit(src_rgb)
 	tag = f"{stem}: {cols} colours, gamut {fit:.3f}"
+	if dx:
+		tag += f", shifted {dx:+d}"
 	if fam == "ui":
 		# pale type runs straight down the middle of an end card; report how bright its ground is
 		tag += f", mid-lum {mid_lum(out):.2f}"
