@@ -2875,6 +2875,18 @@ func _ready() -> void:
 	if ua.has("--credits"):           # dev: jump straight to the credits roll for a screenshot
 		game_state = ST_CREDITS
 		cine_tick = 0
+		# ...AND OPTIONALLY PAST IT: `--credits <ticks>` PRE-ROLLS THE SCROLL (2026-08-24).
+		# The roll is deliberately about 100 seconds long and the HELD FINAL CARD - the
+		# wordmark, the ornament and "thank you for playing", which is the last thing the game
+		# ever says - only assembles after all of it. `--shotat` counts frames, so photographing
+		# that card meant waiting out the entire roll in real time on every capture, and
+		# consequently nobody had. That is this file's own standing rule arriving again: a
+		# screen with no capture target is a screen nobody has looked at. `cine_tick` IS the
+		# roll's only clock (scroll is `cine_tick * speed`), so seeding it is exact rather than
+		# an approximation of waiting.
+		var ci := ua.find("--credits")
+		if ci + 1 < ua.size() and ua[ci + 1].is_valid_int():
+			cine_tick = int(ua[ci + 1])
 	if ua.has("--stats"):             # dev: the records-and-history screen, for a screenshot
 		game_state = ST_STATS
 		cine_tick = 0
