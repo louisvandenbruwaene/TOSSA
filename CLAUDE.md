@@ -166,6 +166,34 @@ Codex improvements:
   is not a goal** - the free-practice card drew both rows unconditionally, so a single-target
   beat showed "catches  0 / 0" in the completed green; rows are built from the targets that
   exist and the card is sized to what it draws.
+- **A FROZEN FRAME HAS AN OWNER, AND THE AURA AND THE KEYS BOTH DESCRIBE IT (2026-08-24,**
+  Louis, on the two- and three-ball runs: the text and the awaited input are right, but "the
+  pauses (the moments) and which ball is highlighted is wrong ... the wrong popup button
+  appears"). Three separate things said the same wrong thing, and all three came from the same
+  place - `_physics_process` tries the script's own `do` beat ONE BRANCH ABOVE the catch guard,
+  so a throw beat wins the freeze the instant a prop enters the guard window, and nothing else
+  was asking who had won.
+  - **the moment.** A throw beat's three gates cannot all be met in the exchange: `TUT_SETTLE`
+    holds it 24 ticks, a short line takes ~50 more at `TUT_SPEECH_CPS`, and the next arrival is
+    only 36 ticks behind the catch that opened the beat. The speech gate therefore never
+    delivered a throw pause at all - the guard escape fired every time and `tut_snap_speech`
+    finished the line anyway. So the throw was asked for AT the next catch's instant and that
+    catch then opened in the same frozen tick: two asks, one frame, nothing moving between.
+    `tut_throw_crowded` gives a throw with something coming down the same exemption a peak and
+    a catch beat already have, and it opens on `settled`. **This can only move a beat EARLIER**,
+    which is why it cannot walk back into the trap above `tut_quiet_fx`. Throw beats opening on
+    the guard: 11 of 21 to 2.
+  - **the keys.** The catch prompt's guard exception asked whether a prop was LANDING rather
+    than whether the guard OWNED the freeze, while `do_goal` is set for every `do` beat either
+    way - so a throw beat lit a catch key too, and at three props both keys landed on the same
+    palm. It now asks `tut_focus_ball`'s question, in the same order.
+  - **the two remaining guard-owned throws are the empty-hands opening** and must stay: the
+    third throw genuinely coincides with the first prop landing, and moving the peak gate above
+    the guard escape is the documented stall.
+  **AND `--tutlog` NOW PRINTS `aura` AND `guard`**, because none of this was measurable before.
+  A screenshot cannot judge a freeze, and `--tutorial balls N` cannot stand in for one either:
+  setup deals a static table, so the airborne state a real playthrough has at that beat never
+  exists and every mid-sequence capture is of a position the lesson never reaches.
 - **Tonight's limiters are POST-WIN content (2026-08-20,** Louis), gated on `won` like The
   Midnight Show and the Purist Legend chase, and shown as **two struck-out marks under the
   stage name** rather than a panel of rows. `MARK_BAND_H` is a constant so the perform card
