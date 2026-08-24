@@ -22825,6 +22825,59 @@ func draw_routine_hud(font: Font, s: Vector2) -> void:
 #region CHARACTER SHEET SCREEN
 
 
+func stat_icon(id: String, c: Vector2, col: Color) -> void:
+	# ONE STAT'S MARK, tinted by the caller. The four talent columns and the two Records
+	# panels are the only menus in the game that were made of type alone (2026-08-24, Louis:
+	# "regenerate the stats menus with pixellab so that it looks better") - every other card
+	# menu here carries an object in a lit disc, and a screen of four identical rectangles
+	# next to those read as the oldest thing in the build.
+	#
+	# THE SPRITES ARE GREYSCALE AND THE TINT IS THE COLUMN, which is why one sprite can serve
+	# an active column and a dim one: `art_blit` multiplies, so the file stores a luminance
+	# ratio and the caller supplies the hue. Same architecture as the gear rack - see
+	# scripts/install_stat_icons.py.
+	#
+	# SPEED IS THE BOOT the play HUD used to wear for the speed assist, by the file (see the
+	# manifest's _STAT_ICONS note): Louis picked that mark, and his reason for it - a boot is
+	# a thing you WEAR - is an argument about a permanent invested stat rather than about a
+	# switch you flip mid-act.
+	if art_blit("ui/stat_" + id, c, 1.0, 0.0, col):
+		return
+	# THE SEAM'S FALLBACK, one shape each. Delete a ui/stat_* line from the manifest and this
+	# is what the screen draws instead - deliberately plain, because these exist to keep a
+	# build with no art honest rather than to compete with the paintings.
+	match id:
+		"acc":                                          # a target
+			draw_arc(c, 8.0, 0.0, TAU, 22, col, 2.0, true)
+			draw_arc(c, 4.4, 0.0, TAU, 16, Color(col.r, col.g, col.b, 0.8), 1.8, true)
+			draw_circle(c, 1.8, col)
+		"str":                                          # a strongman's weight
+			draw_circle(c + Vector2(0.0, 2.0), 6.6, col)
+			draw_arc(c + Vector2(0.0, -5.0), 3.6, PI, TAU, 12, col, 2.2, true)
+		"end":                                          # a heart
+			draw_circle(c + Vector2(-3.4, -2.6), 4.2, col)
+			draw_circle(c + Vector2(3.4, -2.6), 4.2, col)
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-7.4, -1.4), c + Vector2(7.4, -1.4), c + Vector2(0.0, 8.2)]), col)
+		"spd":                                          # a boot, in profile
+			draw_rect(Rect2(c.x - 4.0, c.y - 8.0, 4.0, 12.0), col)
+			draw_rect(Rect2(c.x - 4.0, c.y + 2.0, 9.0, 4.0), col)
+			draw_rect(Rect2(c.x - 6.0, c.y - 8.0, 6.0, 2.0), col)
+		"rec":                                          # a cup
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-6.0, -7.0), c + Vector2(6.0, -7.0),
+				c + Vector2(3.4, 1.6), c + Vector2(-3.4, 1.6)]), col)
+			draw_rect(Rect2(c.x - 1.4, c.y + 1.6, 2.8, 4.0), col)
+			draw_rect(Rect2(c.x - 5.0, c.y + 5.6, 10.0, 2.4), col)
+		"car":                                          # an open ledger
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(-8.0, -5.0), c + Vector2(-0.6, -3.0),
+				c + Vector2(-0.6, 6.0), c + Vector2(-8.0, 4.0)]), col)
+			draw_colored_polygon(PackedVector2Array([
+				c + Vector2(8.0, -5.0), c + Vector2(0.6, -3.0),
+				c + Vector2(0.6, 6.0), c + Vector2(8.0, 4.0)]), col)
+
+
 func draw_sheet_screen(font: Font, s: Vector2) -> void:
 	# the ONE call site every screen uses to open "the sheet" (Tab). It was the switch
 	# between the classic four cards and the growth columns while both existed; the
@@ -23067,7 +23120,22 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		# name, role, current value
 		draw_string(title_font(), Vector2(cx, coly + 32.0), String(b["name"]), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(17), bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.82))
 		draw_string(font, Vector2(cx, coly + 50.0), String(b["role"]), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(11), Color(0.72, 0.68, 0.62))
-		draw_string(title_font(), Vector2(cx, coly + 98.0), str(val), HORIZONTAL_ALIGNMENT_CENTER, colw, ps(42), Color(1.0, 0.95, 0.82))
+		# THE MARK SITS BESIDE THE NUMBER, WHICH COSTS THE COLUMN NO HEIGHT. Above the name
+		# there is no room (the card starts 32px over its own title), and between the role
+		# line and the number there are twenty pixels - so a band of its own would have to be
+		# taken out of the growth track, which is the one thing on this card that genuinely
+		# needs its length: Strength carries twelve gates and already drops distant labels to
+		# a 15px spacing floor. Disc and digits are measured as ONE GROUP and centred
+		# together, so the pair reads like the day hub's ledger cards rather than like a
+		# number knocked off centre.
+		var vstr := str(val)
+		var vw := title_font().get_string_size(vstr, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(42)).x
+		var grp_x := cx + (colw - (44.0 + vw)) * 0.5
+		var icc := Vector2(grp_x + 17.0, coly + 83.0)
+		icon_disc(icc, 17.0, Color(bcol.r, bcol.g, bcol.b, 0.16),
+			Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.32), 2.0)
+		stat_icon(String(b["id"]), icc, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.75))
+		draw_string(title_font(), Vector2(grp_x + 44.0, coly + 98.0), vstr, HORIZONTAL_ALIGNMENT_LEFT, vw + 8.0, ps(42), Color(1.0, 0.95, 0.82))
 		# the vertical GROWTH track: fills from the bottom up to val/cap, milestone pips
 		# at the real thresholds, the next one pulsing while a point is unspent
 		var trk_w := 15.0
@@ -28843,7 +28911,12 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	var career_rows := 9 if int(career.get("mastery", 0)) > 0 else 8
 	var panel_h := maxf(88.0 + 6.0 * 38.0, 88.0 + float(career_rows - 1) * 30.0)
 	hud_panel(Rect2(lx - 20.0, ly - 34.0, 460.0, panel_h))
-	draw_string(font, Vector2(lx, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.88, 0.55))
+	# a mark on each panel head, in the same gilt as its title: two blocks of plain rows was
+	# the whole screen, and this is the language every other card menu here already speaks
+	var lic := Vector2(lx + 14.0, ly - 6.0)
+	icon_disc(lic, 15.0, Color(1.0, 0.86, 0.45, 0.14), Color(1.0, 0.86, 0.45, 0.45), 1.5)
+	stat_icon("rec", lic, Color(1.0, 0.88, 0.55))
+	draw_string(font, Vector2(lx + 36.0, ly), "VENUE RECORDS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.88, 0.55))
 	draw_string(font, Vector2(lx + 230.0, ly), "best", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(13), Color(0.8, 0.74, 0.66))
 	draw_string(font, Vector2(lx + 330.0, ly), "purist", HORIZONTAL_ALIGNMENT_RIGHT, 90.0, ps(13), Color(0.82, 0.72, 0.85))
 	for i in 7:
@@ -28868,7 +28941,10 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	# right: the lifetime numbers
 	var rx := s.x * 0.5 + 30.0
 	hud_panel(Rect2(rx - 20.0, ly - 34.0, 460.0, panel_h))
-	draw_string(font, Vector2(rx, ly), "THE CAREER SO FAR", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.88, 0.55))
+	var ric := Vector2(rx + 14.0, ly - 6.0)
+	icon_disc(ric, 15.0, Color(1.0, 0.86, 0.45, 0.14), Color(1.0, 0.86, 0.45, 0.45), 1.5)
+	stat_icon("car", ric, Color(1.0, 0.88, 0.55))
+	draw_string(font, Vector2(rx + 36.0, ly), "THE CAREER SO FAR", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(17), Color(1.0, 0.88, 0.55))
 	var lines := [
 		["days on the road", str(int(career["days"]))],
 		["performances", str(int(career["perfs"]))],
