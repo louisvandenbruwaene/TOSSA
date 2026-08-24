@@ -6575,7 +6575,26 @@ func tut_do_ready() -> bool:
 		# rule (tut_hold_update has gated on tut_speech_done since 2026-08-08) finally
 		# applied to the basics - and only to the beats that CAN wait: a plain throw has no
 		# timing of its own, while a peak and a catch are both about a prop already flying.
-		return tut_speech_done()
+		#
+		# ...UNLESS AN ARRIVAL IS ABOUT TO CLOSE THE WINDOW, in which case this throw is a
+		# beat about a prop already flying too, and takes the same exemption a peak and a
+		# catch do (2026-08-24, Louis, on the two- and three-ball runs: the pauses "the
+		# moments" are wrong). A plain throw "has no timing of its own" only while nothing
+		# else is coming down. In the exchange it always is, and the three rules cannot all
+		# be met: TUT_SETTLE holds the beat 24 ticks, a short line takes ~50 more to type,
+		# and the next arrival is only 36 ticks behind the catch that opened the beat. So the
+		# speech gate never actually delivered a throw pause - the guard escape above fired
+		# every time instead, 14 ticks before the arrival, and snapped the sentence anyway.
+		# Measured with --tutlog on the two-ball run: the throw at step 13 opened at t1061,
+		# the exact tick the NEXT prop entered its catch window, and step 14's catch then
+		# opened in that same frozen tick. One stopped instant carrying two asks with nothing
+		# moving between them - the throw beat was eating the catch beat's moment, which is
+		# what "the wrong moment" is.
+		# Opening on `settled` instead gives the throw its own frame and leaves the arrival
+		# to the catch beat that owns it. Note this can only ever move a beat EARLIER, so it
+		# cannot walk back into the trap above tut_quiet_fx, where a DELAYED beat let the
+		# guard take the freeze and the lesson ran out of order.
+		return tut_speech_done() or tut_throw_crowded()
 	# A CATCH BEAT HOLDS AS THE PROP COMES IN, not once it has arrived. It used to be
 	# `tick >= b.land_tick`: the world ran at full speed for the whole flight and only stopped
 	# at the arrival tick itself, so every press a beginner made on the way in was read as a
@@ -6593,6 +6612,35 @@ func tut_do_ready() -> bool:
 	if lb == null:
 		return false
 	return tick >= lb.land_tick - TUT_CATCH_GUARD
+
+
+func tut_speech_left() -> int:
+	# TICKS OF TYPING STILL OWED on the live line. tut_speech_chars counts what has arrived;
+	# this is the same sum run the other way, so a gate can ask "can the sentence finish
+	# before X happens?" rather than only "has it finished?".
+	var txt := String(tut_step_data().get("text", ""))
+	var owed := txt.length() - tut_speech_chars()
+	if owed <= 0:
+		return 0
+	return int(ceil(float(owed) * 120.0 / TUT_SPEECH_CPS))
+
+
+func tut_throw_crowded() -> bool:
+	# IS A PROP GOING TO CLOSE THIS THROW'S WINDOW BEFORE THE LINE CAN FINISH? True when the
+	# soonest arrival reaches its catch guard within the typing time still owed - that is, when
+	# waiting for the sentence would hand the freeze to the guard instant and the throw would
+	# be asked for on top of a landing prop (see tut_do_ready for the measurement).
+	# Nothing in flight means nothing is crowding the beat, which is exactly the lesson's
+	# opening throws: they keep the speech gate in full.
+	var owed := tut_speech_left()
+	if owed <= 0:
+		return false
+	for b in balls:
+		if b.state != STATE_FLIGHT:
+			continue
+		if b.land_tick - tick <= TUT_CATCH_GUARD + owed:
+			return true
+	return false
 
 
 func tut_rank_ready() -> bool:
