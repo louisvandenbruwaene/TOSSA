@@ -5695,13 +5695,19 @@ func tut_lesson(id: String) -> Array:
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
 	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1, false, {"sequence": true}))
 	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true, {"sequence": true}))
-	# Exact right-dominant order requested: J F D F K J K J D F D F K J K J ...
-	# Hands and live bindings are substituted, so the same rhythm mirrors correctly.
+	# Exact right-dominant order requested: J F D F K J K J. Hands and live bindings are
+	# substituted, so the same rhythm mirrors correctly.
+	#
+	# ONE CYCLE, NOT TWO (2026-08-24, Louis, on the lesson's pace). The table used to run
+	# fourteen beats, and beats 9-14 were byte-for-byte beats 1-6 - a literal second lap of
+	# a drill the player has already done, on the EASIEST of the three loads, and the free
+	# beat immediately below already asks for six more throws and six more catches. Eight
+	# beats is the whole exchange: each hand catches twice and throws twice, and the run
+	# ends on the same side it started, so nothing about the rhythm is lost with the repeat.
+	# This was the longest guided stretch in the lesson and it taught the least.
 	var two_actions := [
 		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
 		["catch", dom], ["throw", dom], ["catch", off], ["throw", off],
-		["catch", off], ["throw", off], ["catch", dom], ["throw", dom],
-		["catch", dom], ["throw", dom],
 	]
 	for a2: Array in two_actions:
 		var ah2 := int(a2[1])
