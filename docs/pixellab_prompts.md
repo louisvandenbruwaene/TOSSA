@@ -224,3 +224,184 @@ alpha 0.72 over the finished backdrop, so most of this painting is invisible in 
 improvement is almost entirely in the source. That is still worth having - the flagged dither is
 gone, the palette fit is honest, and the picture underneath is correct if the wash is ever
 tuned - but expect the capture to look much like the old one.
+
+
+## The gilt menu ornaments (`ui/rule_flourish`, `ui/corner_*`, `ui/crown`)
+
+2026-08-24, Louis: everything has to look "sharp and pixellated", and the menus may be
+"better looking ... but don't exaggerate". These three replace the last vector strokes in the
+UI - `draw_ornament`'s diamond-on-a-line (twenty call sites), `draw_frame`'s corner ticks
+(eight), and the save slot's crown - all of which were 1-3 screen-pixel `draw_line` calls, i.e.
+HALF-BLOCK strokes at ART_PIXEL 2.
+
+`create_image_pixflux`, `color_image_base64` = `Resources/palette/palette.png`, `no_background`,
+1 generation each. `scripts/install_ornaments.py` reduces them.
+
+    rule_flourish  256x24, lineless, flat shading, medium detail, seed 5
+        a long horizontal decorative divider rule in antique gold, a thin straight line
+        running the full width with a small pointed diamond lozenge at the dead centre and a
+        tiny curl of acanthus scroll on each side of it, symmetric, elegant and sparse, on
+        nothing, no background, no box, no panel, no text
+
+    corner_scroll  40x40, selective outline, flat shading, low detail, seed 41
+        one small ornamental corner scroll in antique gold, a single curling acanthus leaf
+        volute that opens diagonally from the top left toward the bottom right, solid
+        confident gold shapes with a lighter gold highlight, compact and chunky, no straight
+        lines, no rules, no border, no frame, no box, no background, no text
+
+    crown          40x32, selective outline, flat shading, low detail, seed 7
+        a small gold crown seen straight on from the front, a plain band across the bottom
+        with five sharp points rising from it and one round jewel at the centre of the band,
+        solid chunky shapes, lit from the upper left, no head, no person, no cushion, no
+        ground, no shadow
+
+**GENERATE THE ORNAMENT, DRAW THE RULE.** The divider was first generated whole at 256px and
+that is the wrong shape for the job: twenty callers ask for half-widths from 120 to 300, so
+fitting one painting to each box resamples it by a different fraction every time. Only the
+ornamented CENTRE is a sprite (cropped to columns 88..152); the plain gold runs out to the
+caller's width in whole art pixels. The crop is centred on the RULE (source rows 11-12) rather
+than on the ink, so a 2-art-pixel flank on the sprite's own centre line joins it invisibly.
+
+**FILIGREE DOES NOT SURVIVE A REDUCTION**, and this is the general form of it. Reducing the
+64x24 crop 2:1 was tried first: the scrollwork averaged into gold speckle around a lozenge,
+because scrollwork IS small-detail-on-a-thin-field - the case `clean_ground.py`'s docstring
+already warns is the picture rather than the noise. Author ornaments at 1:1 art density and
+palette-snap them with no box filter at all.
+
+**AN ORNAMENT DRAWN THROUGH A TINT MUST BE A LUMINANCE RATIO.** Three of `draw_ornament`'s
+call sites are not gold (the unlock banner passes lavender, the demo wall card fades on `fin`,
+the Purist legend a dimmer amber), so shipping the generation's own gold gives a lavender
+ornament that is still brown. Measured on the first cut, the corner scroll read visibly
+muddier than the plain rule drawn beside it at the identical colour. The crown is the
+exception and states its own reason: it is drawn at ONE colour in ONE state, and its red
+jewels are the whole difference between a crown and a gold sawtooth.
+
+**AND A SHADED ORNAMENT NEEDS MORE ALPHA THAN A FLAT RULE.** A rule is one solid gold at the
+caller's alpha; an ornament is a shaded object, so most of its area is a fraction of white
+before the alpha halves it again. `draw_frame` asks for 0.5 and blits its scrolls at 1.7x
+that - the same PRESENCE, not the same number.
+
+
+## The eight gear icons and the two assist icons, re-rolled
+
+2026-08-24. `create_image_pixflux`, 40x40, `no_background`, selective outline, low detail;
+`scripts/install_gear_icons.py` / `install_assist_icons.py` reduce them 2:1 and band them.
+
+**THE FIRST BATCH LOST, AND WHY IS THE REUSABLE PART. A TINTED ICON NEEDS A MID-TONE SUBJECT,
+NOT A SILHOUETTE.** Asked for "a black silk top hat", "black gloves", "a crimson tailcoat" with
+`flat shading`, the model paints exactly that - and the reducer normalises every icon to its
+own brightest pixel, so a black object comes back as a flat white blob with no interior at all.
+Five of eight were worse than what they replaced. The clause that fixed it names a pale
+material AND both ends of the light:
+
+    a pale dove-grey tailcoat ... lit brightly from the upper left so the left side is near
+    white and the right side is a clearly darker grey, bold simple shape
+
+with `basic shading` rather than `flat shading`. Re-rolled and shipped on that: **coat, vest,
+assist watch, assist boot**, plus the **helmet** from the first batch (a hard cap with a can on
+one side reads at 20px where the old smudge did not). The other five keep their older sources,
+which already had the value structure.
+
+
+## The Small Theatre backdrop, repainted (`bg/small_theatre`)
+
+2026-08-24. It was the flattest painting in the game - a closed upstage curtain and a plank
+floor, with no depth, no architecture and nothing to look at - on the third venue of six.
+
+`create_image_pixen`, 640x360, `no_background: false`, highly detailed, view side. FIVE ROLLS,
+and four of them failed in the two ways this file already documents:
+
+  A  seed 3, "gilded pilasters at the far left and right, a brick back wall between them"
+     -> the DIPTYCH: two arches with a pillar dead centre. Any symmetric architecture invites
+        the split, exactly as the title screen's own notes say.
+  B  seed 3, "one curtain leg down each edge, a painted backcloth between"
+     -> beautiful, and a tied-back curtain leg dead centre with two moons.
+  C  seed 17, adding "nothing at all stands in the centre of the picture"
+     -> a curtain leg dead centre anyway. Forbidding it does not work; it never has.
+  E  seed 64, the shipped prompt, different seed -> a big tree dead centre.
+
+  D  seed 29 - SHIPPED. What separates it is the CAMERA, which is the fix
+     `scripts/clear_spine.py`'s own notes prescribe: make the middle distance a flat surface
+     and there is nowhere to hang anything.
+
+    An old painted theatre backcloth hanging flat across a small stage, seen straight on.
+    Across the very top of the frame runs a swagged pelmet of deep dark crimson velvet with
+    dull gold fringe. Down the very LEFT EDGE, mostly cut off by the frame, hangs the dark
+    edge of one crimson curtain, and the same at the very RIGHT EDGE. Everything between them
+    is ONE SINGLE FLAT PAINTED CLOTH, one unbroken sheet of canvas filling the whole width,
+    painted with a dim garden at night in deep indigo and dark umber: a big dark tree at the
+    far left, another at the far right, a small pale crescent moon high in the upper left, and
+    a low hedge of dim dark red roses running all the way along the bottom of the cloth. The
+    middle of the cloth is quiet and empty. Below it the LOWER THIRD, from about four fifths
+    of the way down to the bottom edge, is one wide continuous band of unpolished stage boards
+    running edge to edge, dim dark umber and ochre, falling away into shadow toward the front.
+    Dark and moody, low light, few colours, flat areas of solid colour. No curtain in the
+    middle, no gathered curtain, no tie-back, no tassel, no gap, no opening, no doorway, no
+    people, no furniture, no writing, no spotlight, no beam, no pool of light on the boards,
+    no dithering, no speckle, no noise, no grain.
+
+    -> 24 colours, gamut 0.019, floor 0.000, spine 0.834 on the source, mid-lum 0.20.
+
+**"A PAINTED CLOTH" IS THE PROMPT THAT BUYS THE EMPTY CENTRE, and it is worth having the
+words.** A backcloth is by definition one flat sheet, so the model has no depth to put an
+object into; a "stage" or a "theatre" has wings, and wings get filled. The interest moves to
+the two ends of the cloth (a tree at each edge, a moon in one corner) and along its bottom (a
+rose hedge), which is where a scene painter puts it anyway.
+
+**AND THE FLOOR BAND CAME BACK ON THE DOCUMENTED LINE.** The boards' back edge measures art y
+289 against the shipped painting's own 289..360, so `stand` stays 0.85 and nothing downstream
+moved. The room measures 32.7 behind the performer against the old painting's 32.9, so the
+default veil 0.42 is still right - which is the re-measure `venue_data`'s own note demands
+after any repaint, done rather than assumed.
+
+
+## Two exteriors, repainted (`ui/ext_street_corner`, `ui/ext_the_midnight_show`)
+
+2026-08-24. Both were legal under the exterior framing rule and empty of interest - a brick
+wall with one lit window for a venue whose whole name is a PLACE, and a blank stone wall with a
+small door for the bonus seventh house you only reach by winning. `create_image_pixen`,
+640x360, `no_background: false`, highly detailed, view side.
+
+    ext_street_corner  seed 12, shipped first roll
+        A gaslit street corner at night, seen from across the road. Filling the LOWER TWO
+        THIRDS of the picture and standing dead centre is the sharp corner of an old brick
+        building where two narrow streets meet, one shuttered shopfront on each of its two
+        faces, and one tall iron gas lamp on the pavement in front of it casting a warm amber
+        pool onto wet cobbles. The UPPER THIRD of the picture is a plain deep indigo night
+        sky, almost completely empty, with only the roofline crossing the very bottom of it.
+        Dark and moody, low light, few colours, flat areas of solid colour, warm amber
+        lamplight against deep indigo and dark umber. No people, no writing, no letters, no
+        signs, no text, no lettering of any kind, no dithering, no speckle, no noise, no grain.
+
+    -> 27 colours, gamut 0.008, mid-lum 0.149.
+
+**THE EXTERIOR FRAMING RULE IS WHAT MAKES THE PROMPT.** "Filling the LOWER TWO THIRDS ... the
+UPPER THIRD is a plain night sky, almost completely empty" is not scene-setting, it is the
+establishing card's own layout said out loud: the title crosses the top centre and two panels
+sit in the bottom corners. Say it and the hero arrives in the band that is left.
+
+    ext_the_midnight_show  seed 12, roll 2 of 4, SHIFTED -150 (see below)
+        A narrow unmarked doorway at the end of a dark alley, very late at night. Filling the
+        LOWER TWO THIRDS of the picture and standing dead centre is a low arched door of dark
+        studded wood set into a soot-black brick wall, with one small deep-red lamp burning on
+        a bracket above it, a worn stone step in front of it, and a sliver of heavy dark velvet
+        just visible through the door standing slightly ajar. The UPPER THIRD is more
+        soot-black brick with a thin strip of deep indigo sky above the roofline. Dark and
+        moody, very low light, few colours, flat areas of solid colour, one small pool of deep
+        red light against near-black brick. No people, no writing, no letters, no signs, no
+        text, no lettering of any kind, no dithering, no speckle, no noise, no grain.
+
+    -> 23 colours, gamut 0.006, mid-lum 0.09.
+
+**ITS DOOR IS ARITHMETIC, NOT A GENERATION.** Four rolls put the door at x 470, 460, 470 and
+470 - including one whose prompt said "in the EXACT HORIZONTAL CENTRE of the picture, equally
+far from the left edge and the right edge" and another that named the left and right thirds as
+empty. Roll 1 also gave two doors and rolls 3-4 two lamps; the shipped roll is the ONE-door,
+one-lamp one. `pixelise_paint.py` grew a recorded per-stem `SHIFT` (-150 art px here), which is
+the same call `pixelise_menu.py --half-shift` already made: "re-rolling until a gather happens
+to land on x=319 is spending a generation on arithmetic." **A wall of brick is the one subject
+a horizontal roll is free on** - it wraps into more of itself, nothing is thrown away, and
+measured on the finished asset the largest adjacent-column delta is the door's own edge at
+x 295, not the frame edge. The shift lives in the script rather than in a hand-edited file
+because `artifacts/` is disposable: the shipped asset must be rebuildable from the prompt above
+plus that one line.
