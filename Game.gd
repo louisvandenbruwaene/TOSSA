@@ -7217,8 +7217,20 @@ func draw_tut_tally(font: Font, s: Vector2, step: Dictionary) -> void:
 	var bw := TUT_SIDE_W
 	var bx := s.x * TUT_SIDE_X
 	var by := s.y * TUT_SIDE_Y
-	soft_card(Rect2(bx, by, bw, 74.0), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.45), 1.4, 12.0, 14.0)
-	var rows := [["throws", mini(tut_throws, need_t), need_t], ["catches", mini(tut_count, need_c), need_c]]
+	# A ROW THAT ASKS FOR NOTHING IS NOT A GOAL (2026-08-24). Both rows were always drawn,
+	# so a beat with only one target showed the other as "catches  0 / 0" - already green,
+	# already satisfied, and describing no ask at all. Every basics `free` beat happened to
+	# carry both numbers when this was written; the empty-hands practice beat asks only for
+	# throws, deliberately, so that it cannot reset under a beginner. The card is sized to
+	# what it actually draws rather than to a fixed two rows.
+	var rows: Array = []
+	if need_t > 0:
+		rows.append(["throws", mini(tut_throws, need_t), need_t])
+	if need_c > 0:
+		rows.append(["catches", mini(tut_count, need_c), need_c])
+	if rows.is_empty():
+		return
+	soft_card(Rect2(bx, by, bw, 48.0 + 26.0 * float(rows.size() - 1)), Color(0.10, 0.07, 0.09, 0.95), Color(1.0, 0.86, 0.55, 0.45), 1.4, 12.0, 14.0)
 	for i in rows.size():
 		var r: Array = rows[i]
 		var y := by + 28.0 + float(i) * 26.0
@@ -7404,7 +7416,10 @@ func draw_tutorial_banner(font: Font, s: Vector2) -> void:
 		draw_tut_speech(font, s, step)
 		if String(step["goal"]) == "hand":
 			draw_tut_hand_pick(font, s)
-		if String(step["goal"]) == "free" and int(step.get("throws", 0)) > 0:
+		# EITHER target is enough to earn the panel. This used to ask about throws alone, so
+		# a beat gated on catches only would have counted in silence; draw_tut_tally itself
+		# now decides which rows exist, and returns without a card when there are none.
+		if String(step["goal"]) == "free" and (int(step.get("throws", 0)) > 0 or int(step.get("need", 0)) > 0):
 			draw_tut_tally(font, s, step)
 		draw_tut_keyrow(font, s)
 		return
