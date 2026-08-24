@@ -64,6 +64,11 @@ ALPHA_CUT = 110
 # gap in the shape rather than a shadow on it.
 GREY_FLOOR = 0.26
 
+# How many discrete lighting steps a finished icon may use. Six is what the round props
+# already band to, and it is the density the painted props read at - enough for a lit face,
+# a mid tone, a shadow side and a rim, and few enough that every boundary is a hard edge.
+BANDS = 6
+
 
 def build(name: str, write: bool, force: bool) -> str:
 	src = SRC / f"{name}.png"
@@ -94,6 +99,18 @@ def build(name: str, write: bool, force: bool) -> str:
 	# icon that happened to be generated dark would simply be a dark icon for ever.
 	top = float(lum[keep].max())
 	ratio = np.clip(lum / max(top, 1e-6), 0.0, 1.0)
+	# BANDED, NOT RAMPED, AND THIS IS WHAT MAKES IT PIXEL ART (2026-08-24, Louis: everything
+	# has to look "sharp and pixellated"). A 4:1 or 2:1 box reduction of a generation is an
+	# AVERAGE, so what came out here was a continuous ratio - measured, 84 distinct grey
+	# levels inside a 20x20 boot and 56 inside a glove. At that size a smooth ramp has
+	# nowhere to be smooth: every one of those levels is one or two pixels, so the icon
+	# reads as a blurred photograph of an object rather than a drawing of one, which is
+	# exactly the fault `make_round_props.py` exists to avoid on the round props.
+	# Quantising to BANDS steps is the same decision that file already made ("shading is
+	# computed at final resolution and quantised to bands, so a band boundary lands on an
+	# exact pixel edge"), applied one stage later - here the ramp is measured rather than
+	# computed, but the cure is identical.
+	ratio = np.rint(ratio * (BANDS - 1)) / float(BANDS - 1)
 	ratio = GREY_FLOOR + (1.0 - GREY_FLOOR) * ratio
 	g = np.where(keep, np.rint(ratio * 255.0), 0).astype(np.uint8)
 	out = np.dstack([g, g, g, np.where(keep, 255, 0).astype(np.uint8)])
