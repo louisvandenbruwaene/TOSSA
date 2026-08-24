@@ -91,6 +91,11 @@ declare -a TARGETS=(
   "stem_bloom:700:play:--demo --booking --venue 2 --stem 1.0 0.9"
   "results:60:results:--results"
   "credits:60:credits:--credits"
+  # THE HELD FINAL CARD, which is the last thing the game ever shows and had no target:
+  # the roll runs about 100 seconds and only assembles the card after all of it, so a
+  # capture had to sit through the whole thing. `--credits <ticks>` seeds cine_tick, the
+  # roll's only clock, so the card is reached exactly rather than waited for.
+  "credits_card:60:credits:--credits 14600"
   # --- menus and meta screens ----------------------------------------------
   "settings:40:settings:--settings"
   "controls_keyboard:60:remap:--remap"
