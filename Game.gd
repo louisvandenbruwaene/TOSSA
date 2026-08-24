@@ -8783,7 +8783,6 @@ func draw_remap(font: Font, s: Vector2) -> void:
 		"Up / Down select     Enter rebind     Tab switch device     Esc back",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.78, 0.71, 0.63))
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 #endregion
@@ -25425,7 +25424,6 @@ func draw_day(font: Font, s: Vector2) -> void:
 		draw_rect(Rect2(0, 0, s.x, s.y), Color(0.01, 0.01, 0.04, seg_dark))
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.52))
 	draw_vignette(s, 0.55)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 	# header: which day it is. How much of it is LEFT is told by the hub's own
 	# background darkening (seg_dark, just above) and by the stamina card in the
@@ -28383,7 +28381,6 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 	var sfoot := "Left / Right    A to play    X to delete    B to go back" if pad_active() else "Left / Right    Enter to play    X to delete    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), sfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_settings_screen(font: Font, s: Vector2) -> void:
@@ -28481,7 +28478,6 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 	var tfoot := "Up / Down    Left / Right adjust    A to toggle    B to go back" if pad_active() else "Up / Down    Left / Right adjust    Enter to toggle    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 40.0), tfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(14), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_pill_toggle(x: float, y: float, w: float, h: float, on: bool) -> void:
@@ -28835,7 +28831,6 @@ func draw_difficulty_screen(font: Font, s: Vector2) -> void:
 	var foot := "Left / Right    A to continue    B to go back" if pad_active() else "Left / Right    Enter to continue    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), foot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_play_mode_screen(font: Font, s: Vector2) -> void:
@@ -28888,7 +28883,6 @@ func draw_play_mode_screen(font: Font, s: Vector2) -> void:
 	var foot := "Left / Right    A to play    B to go back" if pad_active() else "Left / Right    Enter to play    Esc to go back"
 	draw_string(font, Vector2(0, s.y - 42.0), foot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 func draw_stats(font: Font, s: Vector2) -> void:
@@ -28964,7 +28958,6 @@ func draw_stats(font: Font, s: Vector2) -> void:
 
 	draw_string(font, Vector2(0, s.y - 42.0), "Esc back", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
 	draw_vignette(s, 0.5)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
 
 # =============================================================================
@@ -29879,7 +29872,17 @@ func rule_pix(x0: float, y0: float, w: float, h: float, col: Color) -> void:
 
 
 func draw_frame(s: Vector2, inset: float, col: Color) -> void:
-	# a royal double gold border with a gilt scroll in each corner
+	# a royal double gold border with a gilt scroll in each corner.
+	#
+	# IT IS STORE ART NOW, AND NOTHING ELSE (2026-08-25, Louis: "the golden border around the
+	# screen is still there and it looks bad"). It used to ring seven live screens - the day
+	# hub, settings, slots, the difficulty and play-mode cards, the controls sheet and Records
+	# and History - and on every one of them it is a rectangle drawn ON TOP of a painting the
+	# screen is already framed by: the hub's venue exterior, the menu bake's own proscenium.
+	# The picture supplies the frame; a gold box laid over it reads as a sticker on a
+	# photograph, which is the same fault the hub's header ornament was deleted for.
+	# The one caller left is `draw_capsule_art`, where a dramatic gilt border IS the job - it
+	# is a poster, it has no room of its own, and nobody plays through it.
 	var r := Rect2(art_snap(Vector2(inset, inset)), Vector2.ZERO)
 	r.end = art_snap(Vector2(s.x - inset, s.y - inset))
 	var t := ART_PIXEL
