@@ -23129,12 +23129,26 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		# number knocked off centre.
 		var vstr := str(val)
 		var vw := title_font().get_string_size(vstr, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(42)).x
-		var grp_x := cx + (colw - (44.0 + vw)) * 0.5
-		var icc := Vector2(grp_x + 17.0, coly + 83.0)
-		icon_disc(icc, 17.0, Color(bcol.r, bcol.g, bcol.b, 0.16),
+		var grp_x := cx + (colw - (38.0 + vw)) * 0.5
+		# THE DISC IS SIZED TO THE MARK, NOT THE OTHER WAY ROUND. A ui/stat_* sprite is 20
+		# authored pixels blitted at exactly 20 screen px (manifest `scale` 0.5 x ART_PIXEL 2),
+		# and that number is not negotiable - any other size resamples it off the grid. So a
+		# 34px disc leaves seven pixels of empty ring all the way round and the mark reads as
+		# something small dropped into a big hole. 26px is the day hub's own proportion.
+		var icc := Vector2(grp_x + 14.0, coly + 83.0)
+		icon_disc(icc, 13.5, Color(bcol.r, bcol.g, bcol.b, 0.16),
 			Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.32), 2.0)
-		stat_icon(String(b["id"]), icc, bcol if active else Color(bcol.r, bcol.g, bcol.b, 0.75))
-		draw_string(title_font(), Vector2(grp_x + 44.0, coly + 98.0), vstr, HORIZONTAL_ALIGNMENT_LEFT, vw + 8.0, ps(42), Color(1.0, 0.95, 0.82))
+		# LIT TOWARD WHITE, NOT PAINTED IN THE COLUMN'S OWN COLOUR. `art_blit` multiplies, so a
+		# mid-tone tint costs the sprite its whole value range twice over: the file is already a
+		# luminance ratio floored at 0.26, and a 0.55-luminance blue over that leaves four bands
+		# inside a 20px mark spanning almost nothing. The target came back a plain disc and the
+		# strongman's weight a blob - both of them legible at 8x and gone at 1x. The two gilt
+		# emblems on Records and History never had the problem, because gold is nearly white
+		# already, which is the tell. Lerped 45% to white the mark keeps the column's hue and
+		# gets its highlights back.
+		var icol := bcol.lerp(Color(1.0, 1.0, 1.0), 0.45)
+		stat_icon(String(b["id"]), icc, icol if active else Color(icol.r, icol.g, icol.b, 0.75))
+		draw_string(title_font(), Vector2(grp_x + 38.0, coly + 98.0), vstr, HORIZONTAL_ALIGNMENT_LEFT, vw + 8.0, ps(42), Color(1.0, 0.95, 0.82))
 		# the vertical GROWTH track: fills from the bottom up to val/cap, milestone pips
 		# at the real thresholds, the next one pulsing while a point is unspent
 		var trk_w := 15.0
