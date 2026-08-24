@@ -573,7 +573,24 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   failure, which is about size rather than value: a dumbbell measured **89 of 400 pixels** and was
   a correct picture of a thing too thin to read at 20px (its bar is one pixel); a kettlebell says
   "weight" in one chunky silhouette at 143. **A tinted mark needs a mid-tone subject AND a compact
-  one** - both, or it is a smudge in a disc. `install_stat_icons.py` supplies paths and names to
+  one** - both, or it is a smudge in a disc.
+  **AND AT 20PX ONLY THE SILHOUETTE SURVIVES; INTERIOR DETAIL DOES NOT.** The accuracy mark took
+  three rolls to learn it. A plain archery target with concentric rings reduced to a flat pale disc
+  and read as a ball beside a heart and a boot - its rings are one art pixel each. Asking for
+  stronger ring CONTRAST failed the same way for a second reason worth knowing: **a coloured
+  generation cannot be judged by its colour contrast when the pipeline throws colour away.** The
+  model drew a proper red/blue/gold archery target, and red and blue land within a few levels of
+  each other in luminance, so all four rings arrived as one grey. What worked is the fix
+  `day_limiter_mark`'s own note already records for the same two objects at the same size: **change
+  the OUTLINE, not the middle.** Four crosshair spokes sticking out through the rim make a cross
+  rather than a circle, and a cross survives at any size.
+  **THE DISC IS SIZED TO THE MARK, NOT THE OTHER WAY ROUND.** These blit at exactly 20 screen px
+  (manifest `scale` 0.5 x ART_PIXEL 2) and no other size is available without resampling off the
+  grid, so a 34px disc leaves seven pixels of empty ring all round and the mark reads as something
+  small dropped in a hole. And `art_blit` MULTIPLIES: a mid-tone tint spends the sprite's value
+  range twice (the file is already a ratio floored at 0.26), which is why the two GILT emblems on
+  Records and History never had the problem and the four coloured stat marks did. Lerp the tint 45%
+  toward white and the mark keeps its hue and gets its highlights back. `install_stat_icons.py` supplies paths and names to
   `install_assist_icons.py`'s own reduction rather than copying it, so the two families cannot
   drift.
 - **THE MENUS' GILT IS GENERATED NOW, AND THE RULE IS DRAWN (2026-08-24, Louis: use "better
@@ -1100,6 +1117,16 @@ screen pixels tall and some three. Callers that place hands themselves must snap
 - **Godot serves a CACHED import, not your PNG.** Editing a sprite on disk changes nothing in the
   game until `make reimport`, so an art fix looks like it did nothing. Two byte-identical captures
   before and after a change is the tell.
+  **AND THE ONLY PROOF AN ART CHANGE LANDED IS A CAPTURE OF THE SCREEN THAT DRAWS IT (2026-08-25).**
+  Three trick cards were regenerated, installed, contact-sheeted from `Assets/UI/cards/`, committed
+  and pushed - and the running game drew the twelve-day-old cached import the whole time, because
+  no `make reimport` ran and the only card ever photographed in situ was the one card that had not
+  changed. Louis's verdict was "i don't see any difference". **A contact sheet built from the files
+  on disk proves the FILES; it cannot prove the game.** New files are worse, not better: they have
+  no import at all, so the seam silently falls back to the procedural drawing, which for
+  `ui/stat_*` looked close enough to the sprite to pass a screenshot. Reimport, then capture the
+  screen, then commit - and the `.png.import` sidecars a first import writes are part of the
+  commit, exactly like every other Assets file's.
 - **`scripts/artguard.py` protects hand edits.** A SHA ledger in `Assets/.generated.json`; any
   generator skips a file whose hash differs from what it last wrote, or that it has no record of
   at all. `--force` overwrites, `--relock` re-baselines.
@@ -1346,6 +1373,15 @@ review" for the accept/reject examples and why.
   themselves answer to. **Anything on these cards is measured against `s.y - 18`**, not against
   the row above it: a 22px keycap at the old baseline hung 14px below the card's own bottom edge,
   and the previous 70px card did the same by 2px, which is small enough to have shipped unnoticed.
+- **THE GILT FRAME IS STORE ART, NOT A MENU (2026-08-25, Louis: "the golden border around the
+  screen is still there and it looks bad").** `draw_frame` ringed seven live screens - the day hub,
+  settings, slots, the difficulty and play-mode cards, the controls sheet, Records and History - and
+  on every one it is a rectangle drawn ON TOP of a painting that already frames the screen: the
+  hub's venue exterior, the menu bake's own proscenium. **The picture supplies the frame.** A gold
+  box over it reads as a sticker on a photograph, which is the same fault the hub's header ornament
+  was deleted for one day earlier. The one caller left is `draw_capsule_art`, where a dramatic gilt
+  border IS the job - it is a poster, it has no room of its own, and nobody plays through it. The
+  `ui/corner_*` sprites stay live through that one caller, so nothing is orphaned.
 - **THE DAY HUB'S HEADER IS THE DAY NUMBER AND NOTHING ELSE (2026-08-24, Louis: "remove the
   golden border and the golden symbol ... and also get rid of those sentences, i don't like those
   extras").** A phase label (daylight / night / deep night), the gilt divider under it and a line

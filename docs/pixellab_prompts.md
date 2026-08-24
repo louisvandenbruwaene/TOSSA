@@ -513,10 +513,14 @@ reduces these the same way the gear rack and the assist pair are reduced: 40x40 
 `create_image_pixflux`, 40x40, `no_background`, `selective outline`, `basic shading`,
 `low detail`. **SPEED IS NOT HERE**: it is the assist BOOT, reused by the file.
 
-    acc   a round archery target seen face on, a pale dove-grey disc with three concentric
-          rings and a small dark bullseye dot at the dead centre, bold simple shape, lit
-          brightly from the upper left ... no arrow, no stand, no legs, no person, no ground,
-          no shadow                                                        (seed 7)
+    acc   a greyscale bullseye target seen face on filling the whole frame, drawn in ONLY pure
+          white and pure black with no other tone: a thick pure white outer ring, a thick pure
+          black ring inside it, a thick pure white ring inside that, and a solid pure black dot
+          at the dead centre. Four straight pure white crosshair spokes stick out beyond the
+          rim, one at the top, one at the bottom, one at each side, so the outline is a cross
+          rather than a plain circle. Hard edges, bold simple flat shape, no arrow, no stand,
+          no person, no ground, no shadow, no text, no grey, no colour
+                                                     (seed 55, flat shading)  THREE ROLLS:
     str   one LARGE heavy circus strongman's weight seen from the side, filling the whole frame
           from edge to edge: a big solid round pale dove-grey ball body taking up the lower two
           thirds of the frame with a thick arched handle rising from the top of it, bold simple
@@ -541,3 +545,19 @@ kettlebell says "weight" in one chunky silhouette and measures 143.
 the gear rack's "a tinted icon needs a mid-tone subject" one stage further on: mid-tone gets you
 interior shading, and a compact silhouette gets you a readable shape. Both, or the mark is a
 smudge in a disc.
+
+**THE TARGET TOOK THREE ROLLS AND EACH FAILURE IS A DIFFERENT RULE.**
+
+  seed 7   "a pale dove-grey disc with three concentric rings ... lit brightly from the upper
+           left" -> 4 grey levels, and in the game a FLAT PALE DISC. The rings are one art pixel
+           each at 20px; interior detail does not survive this size, whatever its contrast.
+  seed 31  "FOUR strongly contrasting concentric rings ... near-white / dark charcoal /
+           near-white / dark charcoal" -> the model drew a proper archery target, in RED, BLUE
+           and GOLD. **A coloured generation cannot be judged by its colour contrast when the
+           pipeline throws colour away**: red and blue sit within a few levels of each other in
+           luminance, so four contrasting rings arrived as one grey.
+  seed 55  SHIPPED. Pure black and white named as the only tones, AND four crosshair spokes
+           sticking out through the rim - which is the fix `day_limiter_mark` already records for
+           this exact pair of objects at this exact size: **change the OUTLINE, not the middle.**
+           A bullseye and a stopwatch are both "a circle with something small inside"; one grows
+           spokes and the other a crown, and that much survives being small.
