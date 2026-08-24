@@ -551,6 +551,61 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   venues (dispersed floodlights diffuse fine; a contiguous out-of-gamut sky does not) - it means
   "go and look at this one", and the fix is always the prompt, never the reducer. **The locked 48
   is a WARM theatre palette**: it has no mid-luminance teal, so ask for deep indigo skies.
+- **A REDUCED TINTABLE SPRITE MUST BE BANDED, OR IT IS A BLUR (2026-08-24, Louis: everything
+  has to look "sharp and pixellated").** Every gear and assist icon is a generation box-reduced
+  2:1 onto a 20x20 canvas, and a box reduction is an AVERAGE - so what shipped was a continuous
+  luminance ramp: measured, **84 distinct grey levels inside a 20x20 boot** and 56 inside a
+  glove. At that size a ramp has nowhere to be smooth; every level is one or two pixels, so the
+  icon reads as a blurred photograph of an object rather than a drawing of one.
+  `install_gear_icons.py` / `install_assist_icons.py` quantise to `BANDS = 6`, which is the
+  decision `make_round_props.py` already made one stage earlier ("quantised to bands, so a band
+  boundary lands on an exact pixel edge"). 4-6 levels per icon after, same silhouettes.
+  **AND THE SUBJECT HAS TO BE A MID-TONE, NOT A SILHOUETTE.** Re-rolling those sources, "a black
+  silk top hat" and "black gloves" came back exactly as asked - and the reducer normalises every
+  icon to its OWN brightest pixel, so a black object becomes a flat white blob with no interior.
+  Five of eight first-batch rolls were worse than what they replaced. Name a pale material and
+  both ends of the light ("pale dove-grey ... near white on the left, a clearly darker grey on
+  the right") with `basic shading`, not `flat shading`.
+- **THE MENUS' GILT IS GENERATED NOW, AND THE RULE IS DRAWN (2026-08-24, Louis: use "better
+  looking menus instead of the basic ones ... but don't exaggerate").** `draw_ornament` (twenty
+  call sites) and `draw_frame` (eight) were the last vector strokes in the UI - `draw_line` at
+  1, 2 and 3 screen px, i.e. HALF-BLOCK strokes at ART_PIXEL 2, on the thinnest objects on
+  screen, which is exactly where a half pixel is the whole line. `ui/rule_flourish` and
+  `ui/corner_{tl,tr,bl,br}` ride the seam with the old vectors as the fallback, and `rule_pix`
+  is the one place a straight gold run is drawn. Three things generalise:
+  - **GENERATE THE ORNAMENT, DRAW THE RULE.** One 256px divider fitted to twenty different
+    half-widths is twenty different fractional resamples. Only the ornamented CENTRE is a
+    sprite; the plain gold runs out to the caller's width in whole blocks, and the crop is
+    centred on the RULE (source rows 11-12) so the flank joins it invisibly.
+  - **FILIGREE DOES NOT SURVIVE A REDUCTION.** Reducing the crop 2:1 was tried first and gave
+    gold speckle around a lozenge - scrollwork IS small-detail-on-a-thin-field, the case
+    `clean_ground.py` already warns is the picture rather than the noise. Author at 1:1 art
+    density and palette-snap with no box filter.
+  - **AN ORNAMENT DRAWN THROUGH A TINT IS A LUMINANCE RATIO**, because three call sites are not
+    gold (lavender on the unlock banner, a fading amber on the demo wall card). `ui/crown` is
+    the stated exception: one colour, one state, and its red jewels are the whole difference
+    between a crown and a gold sawtooth. **And a shaded ornament needs more alpha than a flat
+    rule** - `draw_frame` asks 0.5 and blits its scrolls at 1.7x that, the same PRESENCE rather
+    than the same number.
+  `art_span` is new and deliberately narrow: it answers "how big would this blit be" ONLY for
+  the two callers that must lay out around a sprite. Everything else states its box and lets
+  `art_blit_size` fit the texture to it, which is what keeps layout out of the art's hands.
+- **"A PAINTED CLOTH" IS THE PROMPT THAT BUYS AN EMPTY CENTRE (2026-08-24,** repainting
+  `bg/small_theatre`, which was a closed curtain and a plank floor - the flattest picture in the
+  game, on the third venue of six). Five rolls: gilded pilasters gave the documented DIPTYCH, and
+  three separate rolls put a curtain leg or a tree dead centre INCLUDING one that said "nothing at
+  all stands in the centre of the picture". Forbidding it does not work; it never has. What worked
+  is the camera fix `clear_spine.py` already prescribes, stated as a noun: a BACKCLOTH is by
+  definition one flat sheet, so there is no depth to put an object into, and the interest moves to
+  the two ends of the cloth and along its bottom - which is where a scene painter puts it anyway.
+  Source gamut 0.019, floor 0.000, spine 0.834. **The floor band came back on the documented line
+  (art y 289 against the old 289..360), so `stand` stays 0.85 and the room measures 32.7 behind
+  the performer against 32.9 before** - so the veil re-measure `venue_data` demands after a repaint
+  was done rather than assumed, and 0.42 is still right.
+  **AND A MEASUREMENT IS ONLY AS GOOD AS ITS BOX.** The moon in that painting was "measured" at
+  150.7 against a prop's 131.3 and dimmed for it; the sample box had a BALL in its corner. The
+  moon was 100 all along, comfortably under the props' 150-235, and the dim was reverted. Sample
+  a backdrop where nothing is flying, or the thing you are measuring against is inside the reading.
 - **THE PAINTING IS THE FLOOR, AND EVERY ROOM PUTS IT SOMEWHERE ELSE** (2026-08-14, Louis:
   "he's often floating or not standing on the right place or there is no floor at all"). The
   standing line is per-venue DATA - `venue_data`'s `stand`, read by `stage_floor_y`, which
@@ -1514,6 +1569,17 @@ quality-led, tonal stingers only, no ambient crowd bed.
   **If a preview needs a number the sim has, take the sim's - and if the sim cannot answer for a
   hypothetical (three objects, when the run has seven), give its function a parameter rather than
   a second copy.**
+- **A LONG CAPTURE SESSION POISONS THE DEMO SAVE, AND VALIDATE THEN FAILS LIKE A REGRESSION
+  (2026-08-24).** `--demo` writes to `pixeltossa_demo.cfg`, so an afternoon of `--demo --booking`
+  captures - including the deliberately awful ones, `--boo` and `--eggbreak` - leaves that save
+  somewhere the harness's own acts cannot recover from. Step 3a came back
+  `collapsed=true reason=crowd score=0 tomatoes=10` and read exactly like a code fault; the same
+  command on a clean worktree of the previous commit passed, and then the SAME command on the
+  working tree passed too, byte-identical (score 10,196, 8,995 ticks). **The tell is that the two
+  trees share one userdata directory**, so a worktree A/B only exonerates the code if you re-run
+  the suspect tree afterwards - one pass each, in that order, or the second run is just reading
+  what the first one wrote. Run `make quick-validate` from a demo save that has not just been
+  driven into the ground, or restore it first.
 - **NO DEV-FLAG RUN MAY WRITE A REAL CAREER SLOT**, and the guard is `dev_unattended()`, not a
   hand-written `_demo or _shot` pair. It also keeps a headless audit from auto-pausing on focus
   loss. Anything that skips the title screen sets `_dev_boot` and is covered automatically; the
