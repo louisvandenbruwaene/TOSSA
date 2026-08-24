@@ -405,3 +405,30 @@ measured on the finished asset the largest adjacent-column delta is the door's o
 x 295, not the frame edge. The shift lives in the script rather than in a hand-edited file
 because `artifacts/` is disposable: the shipped asset must be rebuildable from the prompt above
 plus that one line.
+
+
+## The SLOTH difficulty card, re-rolled (`ui/difficulty_sloth`)
+
+2026-08-24. The three mascots are shown SIDE BY SIDE on the first choice a new career makes,
+so the set's shared treatment is the whole point - and the sloth was breaking it three ways at
+once: a dim cone where the other two have a bright amber one, a near-black ground, and a small
+gaunt figure beside a bear and an octopus that fill their cards.
+
+`create_image_pixflux`, 104x128, `color_image_base64` = `Resources/palette/palette.png`,
+`no_background: false`, selective outline, highly detailed. Three rolls, and each one moved
+exactly the thing its prompt named, which is worth recording because it means the set's clause
+is separable into parts you can fix one at a time:
+
+  seed 3   "...centred under a wide vertical cone of warm amber spotlight and standing in a
+            bright elliptical pool of warm light on a dark ground, filling the frame"
+           -> bright pool and a charming sloth, and a PALE PEACH-PINK cone. The locked 48's
+              warm mid-tones will drift to salmon unless the gold is named.
+  seed 3   + "of deep golden amber spotlight on a very dark maroon ground ... no pink, no
+              salmon, no pale peach"
+           -> cone matched the set exactly, and the sloth came back SMALL. "Filling the frame"
+              had been spent describing the light.
+  seed 19  + "a LARGE ... sloth ... filling most of the frame from top to bottom"  SHIPPED
+           -> 28 colours, 0 off-palette.
+
+**NAME THE GOLD AND NAME THE SCALE SEPARATELY.** "Filling the frame" attaches to whatever the
+sentence was last talking about; on a card whose subject is lit by a cone, that is the cone.
