@@ -5751,10 +5751,14 @@ func tut_lesson(id: String) -> Array:
 		out.append(tut_do("Catch into the empty hand." if String(ae[0]) == "catch" else "Throw it straight back.",
 			String(ae[0]), ahe, keye, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
 	out.append(tut_say("That full sequence is the empty-hands rhythm: all three up, then catch and immediately throw from the same hand."))
-	out.append(tut_say("That is enough for now. [%s] restarts this practice deal, and [%s] opens the game menu." % [String(k_restart()[0]), String(k_pause()[0])]))
+	# ONE CLOSING LINE, NOT TWO (2026-08-24, Louis, on the lesson's pace). This used to be a
+	# `say` naming R and Escape followed immediately by a `read` naming R again - the same
+	# key taught twice in a row, in the last two beats of the lesson, when the key row along
+	# the bottom of the screen has been spelling out "R restart" and "Esc game menu" since
+	# the very first frame. One line closes it.
 	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
 		"next": "finish the lesson", "say": true,
-		"text": "Tangled? [%s] starts you over, any time you are practising." % String(k_restart()[0])})
+		"text": "That is enough for now. Tangled at any point? [%s] re-deals the practice, and [%s] opens the game menu." % [String(k_restart()[0]), String(k_pause()[0])]})
 	return out
 
 
