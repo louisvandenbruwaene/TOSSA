@@ -7844,7 +7844,19 @@ func draw_tut_prompts(font: Font, s: Vector2, step: Dictionary) -> void:
 	# is stopped because a prop is landing at a hand the beat did NOT name, that hand still
 	# needs its key, or the player is staring at a frozen game with the only prompt on the
 	# wrong side and no way to learn what to press.
-	var guard_h := tut_guard_hand() if tut_catch_hold() else -1
+	#
+	# ...BUT ONLY WHEN THE GUARD IS WHAT ACTUALLY STOPPED THE WORLD (2026-08-24, Louis, on the
+	# two- and three-ball runs: "the wrong popup button appears"). This asked whether a prop
+	# was landing, and NOT whether the guard owned the freeze - while `do_goal` is set for
+	# every `do` beat regardless. _physics_process tries the script's own beat one branch
+	# ABOVE the guard, and a throw beat takes that branch the instant a prop enters the guard
+	# window (see tut_do_ready), so on a throw beat the game stopped to ask for a THROW and
+	# then lit a CATCH key on the other hand as well. Two keys, one sentence naming one of
+	# them - and at three props the two landed on the SAME hand, which is worse: a throw key
+	# and a catch key side by side over one palm.
+	# This is now the same test, in the same order, as tut_focus_ball's - the aura and the
+	# keys have to agree about who the freeze belongs to, because they are describing it.
+	var guard_h := tut_guard_hand() if (tut_catch_hold() and not (tut_do_step() and tut_do_ready())) else -1
 	for h: int in [LEFT, RIGHT]:
 		if soonest[h] > lead:
 			continue
