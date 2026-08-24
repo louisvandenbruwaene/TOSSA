@@ -14697,6 +14697,21 @@ func art_blit(key: String, pos: Vector2, sc: float = 1.0, ang: float = 0.0,
 	return true
 
 
+func art_span(key: String, sc: float = 1.0) -> Vector2:
+	# The size art_blit WOULD draw this key at, or ZERO when it has no sprite. Only a caller
+	# that has to LAY OUT AROUND a sprite needs this - draw_ornament runs its plain gold rules
+	# out from the flourish's own edge, and draw_frame hangs its corner scrolls off theirs -
+	# and both of those have a procedural fallback to fall into, so asking "how big" and
+	# asking "is there one" have to be the same question. Deliberately not a general size
+	# query: everything else in this file states its box and lets art_blit_size fit the
+	# texture to it, which is the rule that keeps layout out of the art's hands.
+	if not art_on or not art_bank.has(key):
+		return Vector2.ZERO
+	var e: Dictionary = art_bank[key]
+	var tex: Texture2D = e["tex"]
+	return Vector2(tex.get_size()) * ART_PIXEL * float(e["scale"]) * sc
+
+
 func art_blit_size(key: String, center: Vector2, size: Vector2, ang: float = 0.0,
 		tint: Color = Color.WHITE) -> bool:
 	# For elements whose on-screen size is decided by the GAME rather than by the art: the
@@ -28231,8 +28246,16 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 		# a small three-ball cascade motif as the card's art (a crown for a finished save)
 		var mc := Vector2(cx + cw * 0.5, cy + 74.0)
 		if crowned:
-			var cwn := PackedVector2Array([mc + Vector2(-24, 10), mc + Vector2(-24, -10), mc + Vector2(-10, 2), mc + Vector2(0, -16), mc + Vector2(10, 2), mc + Vector2(24, -10), mc + Vector2(24, 10)])
-			draw_colored_polygon(cwn, Color(1.0, 0.84, 0.4))
+			# A FINISHED CAREER GETS A REAL CROWN. This was a seven-point
+			# draw_colored_polygon - a flat gold sawtooth with two antialiased diagonals and
+			# no shading at all - and it is the ONE mark in the game that says the World
+			# Arena has been beaten, on the first screen a returning player sees. It keeps
+			# its own paint rather than taking a tint (see install_ornaments.py): the state
+			# it reports has no variations for a tint to carry, and its red jewels are the
+			# whole difference between a crown and a gold sawtooth.
+			if not art_blit("ui/crown", mc, 1.0, 0.0, Color(1, 1, 1, 1)):
+				var cwn := PackedVector2Array([mc + Vector2(-24, 10), mc + Vector2(-24, -10), mc + Vector2(-10, 2), mc + Vector2(0, -16), mc + Vector2(10, 2), mc + Vector2(24, -10), mc + Vector2(24, 10)])
+				draw_colored_polygon(cwn, Color(1.0, 0.84, 0.4))
 		else:
 			# THE SAME BALL THE GAME DRAWS (2026-07-30, Louis: "the game save file cards had a
 			# different, older, ball design"). It was a bare `draw_circle`, so this card was still
@@ -29731,22 +29754,95 @@ func draw_vignette(s: Vector2, strength: float = 0.55) -> void:
 	draw_gradient_h(Rect2(s.x - band, 0, band, s.y), clear, dk, 17)
 
 
+# THE TWO DECORATIONS EVERY MENU WEARS, AND BOTH WERE THE LAST VECTOR STROKES IN THE UI
+# (2026-08-24, Louis: everything has to look "sharp and pixellated", and the menus may be
+# "better looking ... but don't exaggerate"). `draw_frame` is on eight screens and
+# `draw_ornament` on twenty, so between them they are on every menu in the game - and both
+# were built out of `draw_line` and `draw_rect(..., false, w)` at widths of 1, 2 and 3 screen
+# pixels. At ART_PIXEL 2 the inner rule and the frame's corner ticks were therefore HALF-BLOCK
+# strokes, which is the one thing this density cannot draw: they are the thinnest objects on
+# screen, so a half-pixel is the whole line. A crisp bitmap title inside a soft vector frame,
+# on every screen, and nobody had looked at it because a frame is not what a screenshot is
+# taken for.
+#
+# The gilt is now generated art on the seam (see `scripts/install_ornaments.py`) and the RULES
+# are whole art pixels. The vector versions stay underneath as the manifest's fallback, which
+# is the architecture working rather than a hedge - delete the two lines from
+# art_manifest.json and every menu goes back to exactly the screens above.
+
+
+func rule_pix(x0: float, y0: float, w: float, h: float, col: Color) -> void:
+	# One gold rule, in whole art pixels. Both decorations below draw their straight runs
+	# through this, so neither can reinvent a half-pixel stroke.
+	var p := art_snap(Vector2(x0, y0))
+	var q := art_snap(Vector2(x0 + w, y0 + h))
+	if q.x - p.x < ART_PIXEL or q.y - p.y < ART_PIXEL:
+		return
+	draw_rect(Rect2(p, q - p), col)
+
+
 func draw_frame(s: Vector2, inset: float, col: Color) -> void:
-	# a royal double gold border with small corner ticks
-	var r := Rect2(inset, inset, s.x - 2.0 * inset, s.y - 2.0 * inset)
-	draw_rect(r, col, false, 2.0)
-	var r2 := r.grow(-6.0)
-	draw_rect(r2, Color(col.r, col.g, col.b, col.a * 0.5), false, 1.0)
-	var t := 16.0
-	for c in [r.position, Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), r.end]:
-		var sx := 1.0 if c.x < s.x * 0.5 else -1.0
-		var sy := 1.0 if c.y < s.y * 0.5 else -1.0
-		draw_line(c, c + Vector2(sx * t, 0), col, 3.0)
-		draw_line(c, c + Vector2(0, sy * t), col, 3.0)
+	# a royal double gold border with a gilt scroll in each corner
+	var r := Rect2(art_snap(Vector2(inset, inset)), Vector2.ZERO)
+	r.end = art_snap(Vector2(s.x - inset, s.y - inset))
+	var t := ART_PIXEL
+	var dim := Color(col.r, col.g, col.b, col.a * 0.5)
+	for pass_i in 2:
+		var b := r if pass_i == 0 else r.grow(-6.0)
+		var c := col if pass_i == 0 else dim
+		rule_pix(b.position.x, b.position.y, b.size.x, t, c)
+		rule_pix(b.position.x, b.end.y - t, b.size.x, t, c)
+		rule_pix(b.position.x, b.position.y, t, b.size.y, c)
+		rule_pix(b.end.x - t, b.position.y, t, b.size.y, c)
+
+	# THE SCROLL'S OWN INK IS INSET SIX ART PIXELS INSIDE ITS CANVAS (measured, not padded by
+	# hand: rows and columns 6..33 of 40), so the sprite is placed by its INK corner and not by
+	# its texture corner, or every ornament floats a block and a half off the rule it decorates.
+	var span := art_span("ui/corner_tl")
+	if span.x > 0.0:
+		var pad := 6.0 * ART_PIXEL
+		var h := span * 0.5
+		var keys := ["ui/corner_tl", "ui/corner_tr", "ui/corner_bl", "ui/corner_br"]
+		var ink := [r.position, Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), r.end]
+		# LIT HARDER THAN THE RULE IT DECORATES. A rule is one flat gold at the caller's alpha;
+		# an ornament is a SHADED object, so most of its area is a fraction of white before the
+		# alpha halves it again - side by side at the same colour, the scroll read as a smudge
+		# beside a bright line. The frame asks for 0.5 and the scroll needs the same PRESENCE,
+		# not the same number.
+		var oc := Color(col.r, col.g, col.b, minf(1.0, col.a * 1.7))
+		for i in 4:
+			var sx := 1.0 if i == 0 or i == 2 else -1.0
+			var sy := 1.0 if i < 2 else -1.0
+			art_blit(keys[i], (ink[i] as Vector2) + Vector2(sx * (h.x - pad), sy * (h.y - pad)), 1.0, 0.0, oc)
+		return
+	var tick := 16.0
+	for c2 in [r.position, Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), r.end]:
+		var sx2 := 1.0 if c2.x < s.x * 0.5 else -1.0
+		var sy2 := 1.0 if c2.y < s.y * 0.5 else -1.0
+		draw_line(c2, c2 + Vector2(sx2 * tick, 0), col, 3.0)
+		draw_line(c2, c2 + Vector2(0, sy2 * tick), col, 3.0)
 
 
 func draw_ornament(cx: float, y: float, half_w: float, col: Color) -> void:
-	# a thin rule with a centre diamond and end dots, a classic decorative flourish
+	# a thin rule with a centre flourish, a classic decorative divider
+	#
+	# THE SPRITE IS THE MIDDLE ONLY AND THE RULES ARE DRAWN, which is what lets one 64x16
+	# painting serve twenty call sites asking for half-widths from 120 to 300. Fitting the
+	# whole divider to each of those boxes would resample it by a different fraction every
+	# time - the one thing pixel art does not survive - so the ornament is blitted at 1:1 and
+	# the plain gold runs out to the caller's width in whole blocks. The flourish's own rule
+	# sits on its centre line (source rows 7-8 of 16), so a 2-art-pixel flank on that line is
+	# its thickness exactly and the join is invisible.
+	var yy := art_snap(Vector2(cx, y)).y
+	var span := art_span("ui/rule_flourish")
+	if span.x > 0.0 and half_w > span.x * 0.6:
+		art_blit("ui/rule_flourish", Vector2(cx, yy), 1.0, 0.0, col)
+		var gap := span.x * 0.5 - ART_PIXEL
+		var t := ART_PIXEL * 2.0
+		var run := half_w - gap
+		rule_pix(cx - half_w, yy - t * 0.5, run, t, col)
+		rule_pix(cx + gap, yy - t * 0.5, run, t, col)
+		return
 	draw_line(Vector2(cx - half_w, y), Vector2(cx - 10.0, y), col, 2.0)
 	draw_line(Vector2(cx + 10.0, y), Vector2(cx + half_w, y), col, 2.0)
 	draw_colored_polygon(PackedVector2Array([
