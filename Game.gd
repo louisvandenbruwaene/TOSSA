@@ -24464,8 +24464,23 @@ func skill_preview(is_trick: bool, idx: int) -> Dictionary:
 				return {"tracks": [{"legs": pv_cascade_legs(1.12, 0.35), "n": 3, "mark": true}],
 						"note": "round the back, out past the far hip"}
 			TR_SPIN:
-				return {"tracks": [{"legs": pv_cascade_legs(1.6), "n": 3}],
-						"note": "one full turn, caught blind", "spin": true}
+				# THROW HIGH FIRST, THEN TURN (2026-08-24, Louis: the spin animation "looks
+				# bad: throw three balls very high so that you have time to spin around").
+				# It was a 1.6 cascade with a turn spliced over it on a clock of its own, and
+				# the two never agreed: a 1.6 throw leaves every hand full for 0.30s three
+				# times a cycle, the turn ran for 1.3s, so most of every spin was taken with
+				# a prop sitting in a hand that was facing away from the audience. The
+				# picture said "he turns THROUGH his catches", which is the one thing a Spin
+				# cannot do - it locks both hands for its whole 44 ticks.
+				#
+				# 2.4 is the height that buys the time, and the turn is now timed off the
+				# throws rather than off a separate cycle (see pv_free_window): it starts
+				# when the last hand empties and finishes before the first prop comes down.
+				# `mark` for the same reason High Toss carries it - at 2.4 the arcs run out
+				# of a short box, and a prop that leaves the frame hands over to a top-edge
+				# marker rather than being clipped.
+				return {"tracks": [{"legs": pv_cascade_legs(2.4), "n": 3, "mark": true}],
+						"note": "thrown high, one full turn, caught blind", "spin": true}
 			_:
 				# ANY TRICK THIS FUNCTION HAS NOT BEEN TAUGHT: a plain cascade, which is
 				# every trick's underlying pattern and therefore the one picture that
@@ -24605,6 +24620,51 @@ func pv_total(legs: Array) -> float:
 	for leg in legs:
 		total += float(leg["d"])
 	return maxf(total, 0.001)
+
+
+func pv_free_window(legs: Array, n: int, spread: float, ph: float) -> Vector2:
+	"""The longest stretch of this track's loop in which EVERY prop is in the air.
+
+	Returned as (start, length) in loop seconds. A caller measures forward from `start`
+	with fposmod, so a window that runs past the end of the loop needs no special case.
+
+	WHAT IT IS FOR. A Spin locks both hands for its whole duration, so the only honest
+	place to draw one is a stretch where neither hand has anything to hold. A carry leg IS
+	the prop in the hand (see pv_state), so the busy stretches are exactly the carry legs -
+	each one shifted by its own prop's offset around the cycle, which is how the props are
+	sampled a few lines below. Everything outside them is free air.
+
+	Six intervals for a three-prop cascade, so this is a sort and a walk rather than a
+	sweep. WITH EVENLY SPREAD PROPS THE FREE WINDOWS ARE ALL THE SAME LENGTH, and the
+	strict `>` below is what then makes the turn happen ONCE per loop instead of at every
+	tie: the first window found wins and the rest are passed over."""
+	var total := pv_total(legs)
+	var busy := PackedVector2Array()      # (start, duration) of every full hand, in loop time
+	var acc := 0.0
+	for leg in legs:
+		var dur := float(leg["d"])
+		if bool(leg["carry"]):
+			for i in n:
+				# the prop is sampled at t + off, so this leg is busy at t = acc - off
+				var off := total * (ph + float(i) * spread)
+				busy.append(Vector2(fposmod(acc - off, total), dur))
+		acc += dur
+	if busy.is_empty():
+		return Vector2(0.0, total)
+	var order := Array(busy)
+	order.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.x < b.x)
+	var best := Vector2(0.0, 0.0)
+	for j in order.size():
+		var cur: Vector2 = order[j]
+		var nxt: Vector2 = order[(j + 1) % order.size()]
+		var s := cur.x + cur.y
+		var e: float = nxt.x if j + 1 < order.size() else nxt.x + total
+		if e - s > best.y:
+			best = Vector2(fposmod(s, total), e - s)
+	# A MARGIN AT BOTH ENDS. Starting the turn on the exact frame a hand empties, and
+	# finishing it on the frame the next prop arrives, draws a man who is still moving when
+	# he catches - which is the fault this whole change is fixing, one frame wide.
+	return Vector2(fposmod(best.x + best.y * 0.12, total), best.y * 0.76)
 
 
 func pv_leg_pos(leg: Dictionary, p: float) -> Vector2:
@@ -24988,10 +25048,25 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	var spin := bool(data.get("spin", false))
 	var turn := 0.0
 	if spin:
-		# one full turn per loop, held facing front either side of it, so the preview
-		# reads as "a turn happens here" rather than as a body that never stops spinning
-		var cyc := fposmod(t * 0.34, 1.0)
-		turn = clampf((cyc - 0.2) / 0.45, 0.0, 1.0)
+		# ONE FULL TURN, TAKEN WHILE THE AIR IS FULL, held facing front either side of it so
+		# the preview reads as "a turn happens here" rather than as a body that never stops
+		# spinning. The window is SOLVED from the choreography rather than pinned to a clock
+		# of its own (`fposmod(t * 0.34, 1.0)`, which was what let the figure turn through
+		# its own catches) - so raising or lowering the throw moves the turn with it.
+		var tr0: Dictionary = tracks[0]
+		var legs0: Array = tracks_legs(tr0)
+		var n0 := int(tr0["n"])
+		var win := pv_free_window(legs0, n0, float(tr0.get("spread", 1.0 / float(maxi(n0, 1)))),
+			float(tr0.get("phase", 0.0)))
+		# measured FORWARD from the window's start, which is what makes a window that wraps
+		# past the end of the loop need no special case at all
+		var into := fposmod(t - win.x, pv_total(legs0))
+		# ...AND OUTSIDE THE WINDOW HE IS PLAINLY 0, NOT 1. A full turn ends facing front, so
+		# clamping the tail of the loop to 1.0 draws the same picture - but `turn > 0.0` is
+		# what draw_mini_juggler reads to decide whether to lay its sweep streaks over him
+		# and whether to swap the whole body for a rotation frame. Held at 1.0 that is true
+		# for nine tenths of the loop: a man standing still inside a permanent blur.
+		turn = clampf(into / maxf(win.y, 0.001), 0.0, 1.0) if into <= win.y else 0.0
 	for pr in props:
 		if bool(pr["behind"]):
 			pv_draw_prop(pr, inner)
