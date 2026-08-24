@@ -18453,6 +18453,34 @@ func draw_targets() -> void:
 		var h := clampi(b.to_hand, 0, 1)
 		if soonest[h] == null or dd < soonest[h].land_tick - tick:
 			soonest[h] = b
+	# DURING A HELPED LESSON THE RING FOLLOWS THE LESSON, NOT THE SIM (2026-08-24, Louis: a beat
+	# "says: throw the ball (which should be circled), but then it circles the ball that will be
+	# caught right after this step").
+	#
+	# This is the loudest mark on the stage - a white-hot ring five pixels thick, the timing cue
+	# the whole game is played off - and it is drawn for ANY prop within 46 ticks of landing,
+	# which during a guided exchange is always the NEXT one in. So on a throw beat the lesson
+	# said "throw it back", put its soft aura on the prop in the hand, lit that hand's key... and
+	# then drew the brightest circle in the game around a completely different prop, the one the
+	# NEXT beat is about. The aura never had a chance: a 0.22-alpha glow does not compete with
+	# that ring, so the ring was the answer to "which ball" and it was the wrong one.
+	#
+	# `tut_focus_ball` already exists to answer "which prop is the lesson asking about", and the
+	# aura and the key prompts both go through it. The ring is the third thing describing the
+	# same ask and it was the only one still deriving its own answer. Routing it through the
+	# same function means `--tutlog`'s `aura` field now predicts the ring exactly: `hand-r` on a
+	# throw beat means no ring is drawn at all, which is right - the prop being thrown is in a
+	# hand, it has no landing to mark, and the aura plus the lit key are the whole prompt.
+	#
+	# ONLY WHILE HELPED. A `free` beat is real play with a real drop, so it keeps every ring the
+	# game normally gives, and so does the rest of the game - `tut_helped()` is false everywhere
+	# outside a lesson.
+	if tut_helped():
+		var focus := tut_focus_ball()
+		soonest[LEFT] = null
+		soonest[RIGHT] = null
+		if focus != null and focus.state == STATE_FLIGHT:
+			soonest[clampi(focus.to_hand, 0, 1)] = focus
 	for h in [LEFT, RIGHT]:
 		var b: Ball = soonest[h]
 		if b == null:
