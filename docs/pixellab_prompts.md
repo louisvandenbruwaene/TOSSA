@@ -35,7 +35,10 @@ Two things learned re-rolling it:
     doubled hand). "smooth plain dark brown background, no texture, no noise, no speckle"
     fixed it in one.
 
-Subjects (Louis's own metaphors, unchanged since 2026-08-07 - do not reinterpret them):
+Subjects (Louis's own metaphors, unchanged since 2026-08-07 - do not reinterpret them).
+**`btb`, `columns` and `tennis` WERE RE-ROLLED ON 2026-08-24 - see "Three trick cards,
+re-rolled" at the foot of this file for the prompts actually shipped; the one-liners below are
+the metaphors, not the current text.**
   btb         a circus ringmaster in a crimson tailcoat and black top hat seen from behind,
               one arm curled behind his back tossing a small ball
   cascade     a tall narrow waterfall of warm amber water pouring over warm reddish brown
@@ -432,3 +435,109 @@ is separable into parts you can fix one at a time:
 
 **NAME THE GOLD AND NAME THE SCALE SEPARATELY.** "Filling the frame" attaches to whatever the
 sentence was last talking about; on a card whose subject is lit by a cone, that is the cone.
+
+## Three trick cards, re-rolled (`btb`, `columns`, `tennis`)
+
+2026-08-24, Louis: "Regenerate the columns card, and the tennis card (which should look more
+realistic), and behind the back: which should actually hold something behind his back."
+
+Same call as the deck above - `create_image_pixflux`, 104x128, `color_image_base64` =
+`Resources/palette/palette.png`, `no_background: false` - plus `selective outline`,
+`highly detailed`, `view: side`. The subjects are still Louis's own metaphors; only `btb` had
+its POSE corrected, and that correction was the whole point of the re-roll.
+
+**THE BEHIND-THE-BACK CARD WAS NOT DRAWING THE TRICK.** The shipped version had the ringmaster
+seen from behind with his arm RAISED and the ball up beside his head - which is a man holding a
+ball, on the card for the one trick whose entire identity is where the hand goes. Two rolls:
+
+  seed 11  the documented clause + "one arm bent round BEHIND HIS BACK ... no ball in the air"
+           -> a small figure in the lower third, facing FRONT, with a ball floating overhead.
+              Both faults are in this file already: forbidding a thing summons it (the ball),
+              and "filling the frame" attaches to whatever the sentence last described.
+  seed 19  SHIPPED. Scale named on its own ("a LARGE circus ringmaster ... filling most of the
+           frame from top to bottom, his shoulders nearly as wide as the picture"), the ball
+           placed rather than forbidden ("the ball in his hand is the only ball in the
+           picture"), and `direction: north` to hold him facing away.
+
+**AND THE DECK'S GROUND IS NOW REPAIRED IN THE INSTALLER, NOT RE-ROLLED FOR.** `btb` came back
+on a speckled bright crimson and `columns` on a flat mid-crimson, against a deck sitting
+between (8,0,8) and (56,24,16). `install_cards.py` grew a `BG_FIX` table that flood-fills the
+background from the frame edge to `DECK_BG` - see its own comment for why connectivity, not
+colour, is what separates the speckles from the ringmaster's coat (they share a palette
+entry). Rolling until a flat field lands on the right palette entry is the arithmetic
+`pixelise_paint.py`'s SHIFT note already refuses to pay for.
+
+    btb      a LARGE circus ringmaster in a bright crimson tailcoat and a black top hat, seen
+             from directly BEHIND with his back turned to us, standing straight, filling most
+             of the frame from top to bottom, his shoulders nearly as wide as the picture. One
+             arm is bent round BEHIND HIS BACK so that his open hand rests at the small of his
+             back at waist height, and resting in that open hand is one single large white
+             juggling ball, big and bright against the crimson coat. The other arm hangs
+             straight down at his side. The ball in his hand is the only ball in the picture.
+             Lit warmly so the crimson coat and the white ball read bright, on a completely
+             flat solid dark reddish brown background of one single colour, smooth and plain,
+             no gradient, no texture, no noise, no speckle, no dithering, no spotlight, no
+             beam, no ground, no cast shadow, no face, no front view
+             (direction north, seed 19)  -> 27 colours, 0 off-palette, 9,719 px flattened.
+
+    columns  an ancient greek temple front seen straight on, exactly three tall fluted stone
+             columns standing side by side on a stepped stone base, each column with a carved
+             capital, holding up a heavy stone entablature and a wide triangular pediment above
+             them, warm honey coloured stone with deep shadow in the flutes and between the
+             columns, centred and filling the frame from top to bottom, [the shared clause]
+             (seed 11)  -> 14 colours, 0 off-palette, 4,373 px flattened. It draws FOUR columns
+             rather than the three asked for, which is the classic tetrastyle front and what the
+             old card had; the pattern's three lanes are not worth a re-roll over.
+
+    tennis   one realistic vintage wooden tennis racket standing upright seen face on, a
+             polished varnished golden brown wooden frame around a large oval head, a tight even
+             grid of taut pale cream strings filling the head, a solid wooden throat wedge below
+             the head, and a long straight handle below that wrapped in dark brown leather grip
+             tape, centred and filling the frame from top to bottom, [the shared clause]
+             (seed 11)  -> 17 colours, 0 off-palette, first roll, no repair needed (it landed on
+             (56,24,16) by itself).
+
+**"REALISTIC" IS A LIST OF PARTS, NOT AN ADJECTIVE.** The old racket was a tan loop with a
+coarse mesh on a stick. What made the new one read as a racket is naming the four things a
+racket HAS - frame, strings, throat, grip - and the material of each. The word "realistic" on
+its own moves nothing.
+
+
+## The four stat marks and two record emblems (`ui/stat_*`)
+
+2026-08-24, Louis: "regenerate the stats menus with pixellab so that it looks better". The
+talent sheet and Records and History were the last menus made of type alone. `install_stat_icons.py`
+reduces these the same way the gear rack and the assist pair are reduced: 40x40 generated,
+20x20 shipped, greyscale, six bands, tinted by the caller.
+
+`create_image_pixflux`, 40x40, `no_background`, `selective outline`, `basic shading`,
+`low detail`. **SPEED IS NOT HERE**: it is the assist BOOT, reused by the file.
+
+    acc   a round archery target seen face on, a pale dove-grey disc with three concentric
+          rings and a small dark bullseye dot at the dead centre, bold simple shape, lit
+          brightly from the upper left ... no arrow, no stand, no legs, no person, no ground,
+          no shadow                                                        (seed 7)
+    str   one LARGE heavy circus strongman's weight seen from the side, filling the whole frame
+          from edge to edge: a big solid round pale dove-grey ball body taking up the lower two
+          thirds of the frame with a thick arched handle rising from the top of it, bold simple
+          chunky shape with a fat outline ...                              (seed 7, view side)
+    end   one LARGE glossy valentine heart seen face on, filling the whole frame from edge to
+          edge, pale dove-grey, with a big bright near-white highlight on its upper left lobe,
+          a mid grey body, and a clearly darker grey shaded crease down its lower right side,
+          strong three tone shading ...                          (seed 23, medium shading)
+    rec   a two handled trophy cup seen face on ...                        (seed 7)
+    car   an open book lying flat seen from slightly above, a pale dove-grey ledger with two
+          facing pages and a visible spine down the middle ...              (seed 7)
+
+**A FLAT SILHOUETTE IS A FAILED ICON, AND THE REDUCER SAYS SO IN ONE NUMBER.** The install
+script prints the grey-level count of every finished sprite, and that is the whole test: the
+first heart came back at **1 grey level** - a pale object with no interior shading, which after
+normalise-to-own-brightest is a solid blob. Naming a highlight, a body tone AND a shaded crease
+took it to 5. The same number caught the first `str`: a dumbbell at **89 of 400 pixels**, which
+is a correct picture of a thing too thin to read at this size (the bar is one pixel). A
+kettlebell says "weight" in one chunky silhouette and measures 143.
+
+**AND THE SUBJECT HAS TO SURVIVE THE SIZE, NOT JUST THE PALETTE.** This is the same finding as
+the gear rack's "a tinted icon needs a mid-tone subject" one stage further on: mid-tone gets you
+interior shading, and a compact silhouette gets you a readable shape. Both, or the mark is a
+smudge in a disc.

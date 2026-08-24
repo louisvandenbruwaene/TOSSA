@@ -566,6 +566,16 @@ screen pixels tall and some three. Callers that place hands themselves must snap
   Five of eight first-batch rolls were worse than what they replaced. Name a pale material and
   both ends of the light ("pale dove-grey ... near white on the left, a clearly darker grey on
   the right") with `basic shading`, not `flat shading`.
+  **AND THE GREY-LEVEL COUNT THE SCRIPT PRINTS IS THE TEST, NOT A STATISTIC (2026-08-24, adding
+  `ui/stat_*` for the two stats screens).** A finished icon with **1 grey level** is a flat
+  silhouette - the mid-tone rule above, failed - and the first heart came back exactly that. Naming
+  a highlight, a body tone AND a shaded crease took it to 5. The same readout catches the OTHER
+  failure, which is about size rather than value: a dumbbell measured **89 of 400 pixels** and was
+  a correct picture of a thing too thin to read at 20px (its bar is one pixel); a kettlebell says
+  "weight" in one chunky silhouette at 143. **A tinted mark needs a mid-tone subject AND a compact
+  one** - both, or it is a smudge in a disc. `install_stat_icons.py` supplies paths and names to
+  `install_assist_icons.py`'s own reduction rather than copying it, so the two families cannot
+  drift.
 - **THE MENUS' GILT IS GENERATED NOW, AND THE RULE IS DRAWN (2026-08-24, Louis: use "better
   looking menus instead of the basic ones ... but don't exaggerate").** `draw_ornament` (twenty
   call sites) and `draw_frame` (eight) were the last vector strokes in the UI - `draw_line` at
@@ -1336,6 +1346,39 @@ review" for the accept/reject examples and why.
   themselves answer to. **Anything on these cards is measured against `s.y - 18`**, not against
   the row above it: a 22px keycap at the old baseline hung 14px below the card's own bottom edge,
   and the previous 70px card did the same by 2px, which is small enough to have shipped unnoticed.
+- **THE DAY HUB'S HEADER IS THE DAY NUMBER AND NOTHING ELSE (2026-08-24, Louis: "remove the
+  golden border and the golden symbol ... and also get rid of those sentences, i don't like those
+  extras").** A phase label (daylight / night / deep night), the gilt divider under it and a line
+  naming stamina as the day's limit stood over the venue painting, and all three said something the
+  screen was already saying better: the hub DARKENS as the segments burn, the stamina card carries
+  its own bar, its own numbers and its own "worn out" line, and every action stamina blocks prints
+  the reason on the row the cursor is standing on. `seg_name()` went with them - it had exactly one
+  caller. **Furniture that repeats a picture is not redundancy the player forgives, it is a caption
+  on a photograph.**
+- **A LESSON SWEEPS THE BOARDS, AND THAT IS A SECOND ENTRY POINT NOBODY HAD NOTICED (2026-08-24,
+  Louis: "in practice tutorials: there are flowers on the ground when there shouldn't be").**
+  `begin_tutorial` does not go through `start_run` - a lesson deals its own table - so the six
+  things `start_run` clears about the FLOOR (thrown props, the tomato stains, the four baked-pile
+  fields) survived into it, and a player who took a lesson after a good night stood in their own
+  ovation. It was invisible from the throwing side because `throw_step` already refuses to throw
+  anything while `tut_active`: the flowers were never thrown there, they were simply never swept
+  up. `clear_boards()` is that block as a function, called from both. **Two places start a stage;
+  a reset that lives inside only one of them is a list waiting to go stale.**
+- **A PREVIEW'S TURN IS SOLVED FROM ITS OWN CHOREOGRAPHY, NEVER PINNED TO A CLOCK BESIDE IT
+  (2026-08-24, Louis: the Skills screen's "spin animation card looks bad: throw three balls very
+  high so that you have time to spin around").** The Spin preview ran a 1.6 cascade and laid a
+  1.3-second turn over it on `fposmod(t * 0.34, 1.0)` - a cycle unrelated to the throws - so the
+  figure turned THROUGH its own catches, which is the one thing a Spin cannot do (it locks both
+  hands for its whole 44 ticks). The throw is 2.4 now, which is what buys the time, and
+  `pv_free_window` finds the longest stretch of the loop in which every prop is airborne by taking
+  the CARRY legs (a carry leg IS the prop in the hand) and shifting each by its own prop's offset -
+  six intervals for a three-prop cascade, so it is a sort and a walk, not a sweep. Raising or
+  lowering the throw now moves the turn with it. **Two things worth keeping**: with evenly spread
+  props every free window is the same length, so a strict `>` is what makes the turn happen ONCE
+  per loop rather than at every tie; and the resting state outside the window must be `turn = 0`,
+  not 1 - a full turn ends facing front so both draw the same picture, but `turn > 0` is what
+  `draw_mini_juggler` reads to decide whether to lay its sweep streaks over him and swap his body
+  for a rotation frame, so held at 1 he is a man standing still inside a permanent blur.
 - **Records/pay/rep:** per-venue assisted + Purist boards; pay scales with surviving score; rep
   swings on goals reached.
 - **THE TWO LIMITERS ARE BOOKED SEPARATELY, IN THE HUB, ON THEIR OWN ROWS (2026-08-19, Louis:
@@ -1351,6 +1394,16 @@ review" for the accept/reject examples and why.
   RECORD BOARD still asks for both** - half a booking is not a Purist act - so the perform card,
   the establishing card and the live HUD each name which limiters are on rather than saying
   "PURIST" for three different states. `--binds acc|spd|both|off` pins them for a capture.
+  **THE PAIR IS A SIDEWAYS CHOICE, NOT TWO STOPS ON THE WAY DOWN (2026-08-24, Louis: "left and
+  right when selecting either of them should switch between them (not moving up and down, which
+  should change between choosing a stage and selecting accuracy or slowmo)").** They are DRAWN as
+  two marks side by side, so the axis that moves between them has to be the axis they are laid out
+  on; walked vertically, a two-item setting cost as many presses as two whole errands and Down from
+  PERFORM took three to reach PRACTICE. `day_walk` collapses the band to ONE stop - both rows stay
+  in the list, in order, so `day_activate`, the drawn panel and `--binds` are untouched and only
+  the walk changed. Left/Right on PERFORM still moves the venue; the footer hint says which of the
+  two jobs the arrows are doing, because a hint naming the other row's job is an instruction that
+  does not work where it is printed.
 - **THE TWO ASSIST SWITCHES AND THE UNAIDED CLEAR (2026-08-19, Louis: "two small icons (a boot for
   speed, and a stopwatch for slowmo) ... when both are off and you beat the final goal of the
   stage, you get a reward").** Every slow-motion source falls into exactly one of two buckets and
@@ -1367,6 +1420,17 @@ review" for the accept/reject examples and why.
   stat points exist in a career and none of them is farmable, because the mark is what gates them.
   `--assists on|off` pins both for one run so the state can be photographed, and deliberately never
   writes back to the SHARED settings file.
+  **...AND THE TWO ICONS ARE OFF THE PLAY HUD (2026-08-24, Louis: "about the accuracy and slowmo
+  while you are on stage: remove those symbols, they are chosen before hand").** The argument for
+  putting them there - a control the player cannot see is a control they do not know they have -
+  was answered by the day hub: what you give up for the night is BOOKED there, on the row that
+  names the stage, under two struck-through marks that stay struck all evening. Two marks on stage
+  that look exactly like the two marks in the hub, doing a different and smaller job, read as the
+  booking following you onto the boards. **When two systems end up wearing the same picture, the
+  one the player MEETS FIRST owns it.** `B` and `T` still work and still persist; `draw_assist_row`
+  and `assist_icon` are deleted, and `unaided_now()` is now read only by the reward. The boot
+  sprite outlived them - it is the SPEED stat's mark on the talent sheet, by the file, on Louis's
+  own reasoning for choosing it ("a boot is a thing you WEAR").
 
 - **A DARK HOUSE HAS TWO LIGHT LEVELS AND THEY ARE THE HAND AND THE AIR (2026-08-20, Louis:
   "i want dark challenges and the midnight show the props have to be barely visible in the hands
@@ -1427,8 +1491,10 @@ review" for the accept/reject examples and why.
   the FOOT of its own box. Two smaller things make it read as one window rather than three:
   **`open` is not `selected`** (the perform card stays grown while the cursor is inside its panel,
   or the venue name and the record to beat vanish at the moment you are setting that act up), and
-  `day_perform_focus()` keeps Left/Right on the stage picker from inside the panel, because the
-  arrows are on screen the whole time.
+  the card stays lit while the cursor is inside it. `day_perform_focus()` is retired: it existed to
+  keep Left/Right on the stage picker from inside the panel, and the panel now owns that axis
+  itself (see the sideways-choice rule above). `day_row_id` answers "what is the cursor on" for
+  input, drawing and the footer alike, so the three can never disagree.
 
 ## Hard rules (see `docs/coding_guidelines.md` for the full checklist)
 
