@@ -5751,13 +5751,39 @@ func tut_lesson(id: String) -> Array:
 		out.append(tut_do("Catch into the empty hand." if String(ae[0]) == "catch" else "Throw it straight back.",
 			String(ae[0]), ahe, keye, 3, 2, false, {"style": TUT_ADVANCED, "sequence": true}))
 	out.append(tut_say("That full sequence is the empty-hands rhythm: all three up, then catch and immediately throw from the same hand."))
+	# ...AND THEN THEY GET TO TRY IT (2026-08-24, Louis, on the lesson's pace). Every other
+	# skill in this lesson is taught the same way twice over - guided beat by beat, then
+	# handed back on a `free` beat so the player feels it in their own hands - and the
+	# empty-hands cascade, the hardest thing here and the last thing taught, was the one
+	# that never got its second half. Thirteen stopped-world presses and then the lesson
+	# simply ended.
+	#
+	# GATED ON THROWS, NOT CATCHES, ON PURPOSE. This is the final beat of mandatory
+	# onboarding and it is the worst possible place to strand a beginner, so nothing here
+	# can reset: `tut_throws` only ever climbs within a step, and six throws is reachable by
+	# anyone who can lift a ball. `style` still rides along, so a player who slips back into
+	# the beginner exchange is TOLD so (see tut_on_catch) rather than left wondering - the
+	# coaching without the wall. A `free` beat never auto-advances either, so anyone who
+	# wants to stay and drill it can, and Enter is there the moment they are done.
+	var empty_free := tut_free("Now try it yourself: all three up, then catch and throw from the same hand.",
+		3, 6, 0, "Practise the empty-hands cascade. Enter when you are ready.", 2)
+	empty_free["style"] = TUT_ADVANCED
+	out.append(empty_free)
 	# ONE CLOSING LINE, NOT TWO (2026-08-24, Louis, on the lesson's pace). This used to be a
 	# `say` naming R and Escape followed immediately by a `read` naming R again - the same
 	# key taught twice in a row, in the last two beats of the lesson, when the key row along
 	# the bottom of the screen has been spelling out "R restart" and "Esc game menu" since
 	# the very first frame. One line closes it.
+	#
+	# `fresh` IS LOAD-BEARING HERE. The two `say` lines that used to close the lesson each
+	# carried `balls: 0`, which emptied the table as a side effect, so the last beat always
+	# dealt clean. The practice beat above ends with three props in the air on the same
+	# count, so the closing line would flow straight on from it and the catch guard would
+	# stop the world three times mid-sentence to save them (measured with --tutlog: t3320,
+	# t3322, t3323). The lesson's final beat should be still: props in the hands, one line,
+	# Enter. Asking for the deal outright is the rule; the old emptied table was a coincidence.
 	out.append({"goal": "read", "prop": PROP_BALLS, "balls": 3, "hand": dom, "stack": 2, "need": 0, "slow": 0.0,
-		"next": "finish the lesson", "say": true,
+		"next": "finish the lesson", "say": true, "fresh": true,
 		"text": "That is enough for now. Tangled at any point? [%s] re-deals the practice, and [%s] opens the game menu." % [String(k_restart()[0]), String(k_pause()[0])]})
 	return out
 
