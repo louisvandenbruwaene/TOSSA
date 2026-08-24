@@ -12751,7 +12751,9 @@ func toggle_assist(which: String) -> void:
 
 
 func unaided_now() -> bool:
-	# both switches off: the world is running at true speed. What the ICONS say.
+	# both switches off: the world is running at true speed. The play HUD no longer shows
+	# them (see draw_hud - the booking is made in the day hub), so this is read by the
+	# reward rather than by a pair of marks on the boards.
 	return not assist_speed and not assist_slow
 
 
@@ -12761,84 +12763,6 @@ func unaided_clear() -> bool:
 	return unaided_now() and not act_assisted
 
 
-func draw_assist_row(font: Font, x: float, y: float, w: float) -> void:
-	# THE TWO SWITCHES, as two icons and their keys. A BOOT for the Speed stat and a
-	# STOPWATCH for every other slow-motion source - Louis's own choice of mark for each, and
-	# they are good ones: a boot is a thing you WEAR, which is what a permanent invested stat
-	# is, and a stopwatch is a thing that RUNS OUT, which is what a pie and a burst are.
-	#
-	# LIT MEANS RUNNING. An icon at full strength with a warm ring is help that is switched
-	# on; a dimmed icon with no ring is help given up. That is the right way round for this
-	# game - the reward is for the DARK pair - but the alternative (lighting the ones you
-	# have refused) would make an ordinary player's HUD read as two warnings on a night where
-	# nothing is wrong.
-	# 30px apart, which is the mark's own width plus its lamp: any tighter and the two rings
-	# touch and read as one wide pill rather than as two switches
-	var bx := x + 14.0
-	var wx := bx + 30.0
-	assist_icon("boot", Vector2(bx, y - 5.0), assist_speed)
-	assist_icon("watch", Vector2(wx, y - 5.0), assist_slow)
-	var tx := wx + 22.0
-	if unaided_now():
-		# NAME THE PRIZE WHILE IT IS STILL WINNABLE, and say plainly when it has already been
-		# lost tonight. A reward the player only hears about after the fact cannot be aimed
-		# at, and "you had it and spent it" is the single most useful thing this row can say.
-		var clean := unaided_clear()
-		var pulse := 0.75 + 0.25 * sin(float(tick) * 0.06)
-		draw_fit_string(font, Vector2(tx, y), "UNAIDED" if clean else "unaided  -  lost tonight",
-			HORIZONTAL_ALIGNMENT_LEFT, w - (tx - x), 12,
-			Color(0.72, 0.96, 1.0, pulse) if clean else Color(0.78, 0.74, 0.70, 0.8))
-	else:
-		draw_fit_string(font, Vector2(tx, y), "B / T  assists", HORIZONTAL_ALIGNMENT_LEFT,
-			w - (tx - x), 12, Color(0.78, 0.76, 0.72, 0.78))
-
-
-func assist_icon(kind: String, c: Vector2, on: bool) -> void:
-	# One assist mark: a BOOT for the Speed stat, a STOPWATCH for everything temporary.
-	#
-	# GENERATED, THEN DERIVED - `scripts/install_assist_icons.py`, 40x40 from PixelLab reduced
-	# 2:1 to a 20x20 greyscale sprite and blitted through the manifest at `scale` 0.5, so one
-	# authored pixel lands on exactly one screen pixel and the mark is 20px wide. That route
-	# exists because 20x20 is four hundred pixels against PixelLab's 1024-pixel AREA floor:
-	# the size cannot be asked for directly, only derived, the same as every stage prop.
-	#
-	# THE SPRITE IS GREYSCALE BECAUSE THE TINT IS THE STATE. `art_blit_size` multiplies, and a
-	# multiply can only darken, so the file stores a luminance ratio normalised to its own
-	# brightest pixel - warm cyan at full strength when the assist is running, dim grey when
-	# the player has given it up. Colour painted into the file could express neither.
-	#
-	# The procedural pair below is the seam's fallback and is what a build with no manifest
-	# draws. Keep it honest: it is also the reason the shapes are what they are - at eight art
-	# pixels a boot built from two rectangles is the letter L, and the notch that makes it a
-	# boot IS the silhouette, which is what sent these to PixelLab in the first place.
-	var col := Color(0.72, 0.96, 1.0, 0.95) if on else Color(0.62, 0.58, 0.56, 0.55)
-	var p := ART_PIXEL
-	if on:
-		# the ring is the "running" signal, and it is the only part that is allowed to be
-		# soft: it reads as a lamp behind the mark rather than as part of the mark
-		draw_ring_pix(c, 11.0, 2.0, Color(col.r, col.g, col.b, 0.30))
-	# `art_blit`, NOT `art_blit_size`: the second FITS a texture to a box, and the only boxes
-	# these sprites can be fitted to without resampling are their own size and double it. At
-	# 20x20 authored, the manifest's 0.5 already puts one authored pixel on one screen pixel,
-	# so the natural blit is the correct one and the size is not a layout decision to make.
-	if art_blit("ui/assist_boot" if kind == "boot" else "ui/assist_watch", c, 1.0, 0.0, col):
-		return
-	if kind == "boot":
-		# A BOOT IN PROFILE IS AN L, and at eight art pixels it has to be exactly an L. The
-		# first version added an ankle block bridging the shaft and the foot, which is what a
-		# boot really looks like and which at this size simply filled the notch in - the mark
-		# came back a solid blob. **The notch IS the boot**; everything else is a rectangle.
-		var s := art_snap(c - Vector2(p * 2.5, p * 4.0))
-		draw_rect(Rect2(s, Vector2(p * 2.0, p * 6.0)), col)                          # the leg
-		draw_rect(Rect2(s + Vector2(0.0, p * 5.0), Vector2(p * 5.0, p * 2.0)), col)  # the foot
-		draw_rect(Rect2(s - Vector2(p, 0.0), Vector2(p * 3.0, p)), col)              # the cuff
-	else:
-		# a stopwatch: a dial, the crown on top, and one hand standing up out of the middle
-		var d := art_snap(c + Vector2(0.0, p * 0.5))
-		fill_disc_pix(d, p * 3.5, col)
-		fill_disc_pix(d, p * 2.0, Color(0.10, 0.09, 0.12, 0.92))
-		draw_rect(Rect2(art_snap(d - Vector2(p, p * 5.5)), Vector2(p * 2.0, p * 2.0)), col)  # crown
-		draw_rect(Rect2(art_snap(d - Vector2(p * 0.5, p * 2.0)), Vector2(p, p * 2.0)), col)  # hand
 
 
 func slow_target() -> float:
@@ -21067,16 +20991,18 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		# Encores out of the left stack without covering that second path would delete the
 		# only statement of a bind the player is actually playing under.
 		var pur_row := purist_run()
-		# THE TWO ASSIST SWITCHES ARE ALWAYS ON THIS CARD, on or off, in or out of a booking.
-		# Every other row here appears only when it has something to say, and that is right
-		# for a status; these are CONTROLS. A control the player cannot see is a control they
-		# do not know they have, and the whole point of the pair is that the player chooses
-		# to give the help up - which they can only do if the offer is in front of them.
+		# NO ASSIST SWITCHES ON THIS CARD ANY MORE (2026-08-24, Louis: "about the accuracy
+		# and slowmo while you are on stage: remove those symbols, they are chosen before
+		# hand"). What stood here was two 20px marks - a boot and a stopwatch - and the keys
+		# that flip them, argued for on the grounds that a control the player cannot see is
+		# a control they do not know they have. The argument was answered by the day hub:
+		# what you give up for the night is BOOKED there now, on the row that names the
+		# stage, with a mark under it that stays struck through all evening. Two marks on
+		# stage that look exactly like the two marks in the hub, doing a different and
+		# smaller job, read as the booking followed you onto the boards. B and T still work
+		# for anyone who knows them; they are simply no longer furniture in the act.
 		var status_rows := int(pts_row) + int(slow_row) + int(pur_row)
-		# ...plus the assist row, which is TALLER than a text row because it carries two 20px
-		# marks rather than a line of type
-		var extra_h := 26.0
-		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows) + extra_h), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
+		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows)), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
 		var sx := RX + 14.0
 		var sw := RW - 28.0
 		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
@@ -21094,8 +21020,6 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
 		draw_meter(sx, 44, sw, 11.0, sfrac, stcol)
 		var status_y := 74.0
-		draw_assist_row(font, sx, status_y + 4.0, sw)
-		status_y += 26.0
 		if slow_row:
 			var stext := "SLOW  %d%%" % int(round(slow * 100.0))
 			if pie_active:
@@ -25728,8 +25652,8 @@ func day_limiter_mark(icon: String, c: Vector2, on: bool, cur: bool) -> void:
 			var u := Vector2(cos(a), sin(a))
 			draw_line(c + u * 4.6, c + u * 10.4, col, 1.5)
 	else:
-		# SLOW MOTION: the same stopwatch the stage card wears for the clock assist, so the
-		# object means one thing everywhere in the game
+		# SLOW MOTION: a stopwatch - a thing that RUNS OUT, which is what a pie and an
+		# earned burst are. Louis's own mark for it, kept when the play HUD's copy went.
 		var d := c + Vector2(0.0, 1.4)
 		draw_arc(d, 7.0, 0.0, TAU, 22, col, 1.6, true)
 		draw_rect(Rect2(c.x - 2.0, c.y - 9.8, 4.0, 3.0), col)          # the crown
@@ -26003,9 +25927,9 @@ func day_icon(kind: String, c: Vector2, col: Color) -> void:
 			draw_circle(c, 1.6, col)
 			draw_line(c + Vector2(-7.5, 7.5), c + Vector2(7.5, -7.5), Color(1.0, 0.55, 0.48, 0.95), 2.0)
 		"watch":
-			# THE SLOW-MOTION LIMITER: the same stopwatch the stage card wears for the
-			# stopwatch assist (assist_icon), so the object means one thing everywhere -
-			# with the same bar through it.
+			# THE SLOW-MOTION LIMITER: a stopwatch, with a bar through it. It is the same
+			# object day_limiter_mark draws under the stage name, so the mark on the row
+			# and the mark on the picker are one thing seen at two sizes.
 			draw_arc(c + Vector2(0.0, 1.0), 7.0, 0.0, TAU, 22, col, 2.0, true)
 			draw_rect(Rect2(c.x - 1.6, c.y - 9.0, 3.2, 2.4), col)
 			draw_line(c + Vector2(0.0, 1.0), c + Vector2(0.0, -3.6), col, 1.8)
