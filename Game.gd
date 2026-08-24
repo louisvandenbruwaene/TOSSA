@@ -26163,6 +26163,17 @@ func draw_day_anim(font: Font, s: Vector2) -> void:
 
 #region MAIN MENU SCREEN
 const MENU_FLOOR := 0.80     # where the stage lip sits, so the menu rows can stand ON it
+# THE PAINTED BOARDS, measured off `ui/menu_backdrop` row by row (2026-08-24). MENU_FLOOR
+# names a LINE - where a menu row's feet go - and the credits screen needed the SURFACE, which
+# is a different thing and sits mostly above it. Art y 266..307 of 360 is wood, the footlight
+# bulbs burn at 296..299, and the seat backs start at 308.
+# The lip stops well SHORT of the bulbs on purpose: a flower is drawn from its centre and
+# carries a stem, so a band that ends at the lamps puts blooms ON them - measured, the first
+# pass hung roses over the burning bulbs, which is the one row of this picture that has to
+# stay clean. There is board in front of the lamps too, and it is about eight pixels deep;
+# scattering there is not worth burying a lamp for.
+const CREDITS_BOARDS_BACK := 0.740   # upstage edge of the lit boards (art y 266)
+const CREDITS_BOARDS_LIP := 0.802    # ...and where the scatter stops, clear of the bulbs
 # ONE ROW'S SIZE, named because THREE places measure off it: menu_rows draws with it, draw_menu
 # sizes the block from it, and the block's clearance above the stage lip is half of it. Written as
 # literals in two of those three for one commit, which is how a "lift it by half a card" note
@@ -29382,27 +29393,35 @@ func draw_establish(font: Font, s: Vector2) -> void:
 
 func draw_credits(font: Font, s: Vector2) -> void:
 	var cx := s.x * 0.5
-	# SEAM: the house AFTER the show (2026-08-13). This screen is the payoff for the whole
-	# game and it was a two-stop vertical gradient - the same "lit void" the title screen was
-	# called out for and fixed in July. The painting is the same room the player has been
-	# working towards all career, seen the moment it goes right: curtains swept open, the
-	# boards under a scatter of thrown bouquets, the front row on its feet. Same split as
-	# every other bake here - the SCENERY is the sprite, and the cone, the dust and the
-	# cascade stay live over it, so the light is still moving.
-	if not art_blit_rect("ui/victory", Rect2(Vector2.ZERO, s)):
-		# the royal backdrop shared with the menu
-		draw_gradient_v(Rect2(0, 0, s.x, s.y), Color(0.10, 0.05, 0.07), Color(0.02, 0.015, 0.025), 24)
-	else:
-		# the roll SCROLLS up the middle of this screen for its whole length, so it needs the
-		# reading column more than the three static cards do, not less - measured on the first
-		# capture, "every stage, conquered" landed on lit boards and thrown bouquets and all
-		# but disappeared. Laid down before the cone on purpose: the cone is only 0.08 and
-		# putting the light back over the scrim is the point, not a conflict.
-		draw_read_column(s)
-	draw_spotlight_cone(s, cx, 0.08)
-	draw_dust(s, 26, Color(1.0, 0.85, 0.55))
-	# the calm cascade keeps watch up high while the roll climbs beneath it
-	draw_menu_cascade(Vector2(cx, s.y * 0.12), 0.8)
+	# THE ROOM IS THE TITLE SCREEN'S ROOM (2026-08-24, Louis: "just use the same screen as the
+	# title screen, but now with flowers and overlayed with thanks for playing - remove the
+	# golden border and the 3 juggling balls").
+	#
+	# This used to be its own painting, `ui/victory`, and the swap is worth more than a tidy-up.
+	# The ending is the last frame of the same evening the title screen opens on, so the two
+	# should be the SAME PLACE - you walked out of this room at the start and you are standing in
+	# it again at the end, and the only thing that has changed is what is lying on the boards.
+	# A second painting of a different theatre says the opposite.
+	# It also inherits three decisions that were argued once on the title screen and had to be
+	# argued again here, badly, because this screen was drawing its own furniture:
+	#   * NO GOLD FRAME. `draw_frame` gave this screen a ruled rectangle inside a picture that
+	#     already has a proscenium - a pelmet across the top and a leg down each side, in
+	#     perspective, out of the set itself. Louis had that removed from the title in July for
+	#     exactly this reason; a second frame around the first reads as a stray line.
+	#   * NO CONE. `draw_spotlight_cone` was legal on `ui/victory` because that painting has a
+	#     lit chandelier directly above the apex - light must name a source the picture contains.
+	#     The menu bake has no ceiling at all (the velvet runs off the top edge), which is the
+	#     worst case for a hung beam and the reason the title's cone was deleted. `menu_backdrop`
+	#     brings `menu_house_light` with it: an up-wash off the footlights that ARE painted in.
+	#   * NO SCRIM. `draw_read_column` was laid down because the victory painting's boards are
+	#     lit from inside and the opening lines disappeared into them. The menu bake's middle is
+	#     deliberately an empty stage, and every row here already carries `draw_text_shout`'s
+	#     outline, which is the rule: reach for the outline first, the scrim only for a block.
+	# And no `draw_dust`/`draw_menu_cascade` either - the backdrop draws its own dust, and the
+	# three balls arcing over the top are the ornament the title screen dropped when the mark
+	# became alive. Here they were competing with the roll itself.
+	menu_backdrop(s)
+	draw_credits_flowers(s)
 
 	# assemble the roll as a stack of rows in content space. Each row sits a fixed
 	# gap below the one before it, and cine_tick scrolls the whole stack upward. It
@@ -29433,7 +29452,12 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 84.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
 	cur += 84.0;  rows.append({"y": cur, "kind": "line", "a": "made in Godot, every picture and sound", "b": "drawn and synthesised in code"})
 	cur += 90.0;  rows.append({"y": cur, "kind": "line", "a": "built with the help of Claude", "b": ""})
-	cur += 118.0; rows.append({"y": cur, "kind": "thanks", "a": "thank you for playing", "b": ""})
+	# THE THANKS IS NOT A ROW ANY MORE (2026-08-24, Louis: the ending should be the title
+	# screen "overlayed with thanks for playing"). It used to scroll past like every other line
+	# and then the held card underneath said the same thing again a moment later - the last
+	# thing the game says, said twice, once in motion and once at rest. It belongs to the card,
+	# which is the frame the player actually sits on.
+	cur += 118.0
 	var last_y := cur
 
 	# the scroll: slow enough that the whole roll takes about 100 seconds. cine_tick
@@ -29487,8 +29511,6 @@ func draw_credits(font: Font, s: Vector2) -> void:
 					draw_text_shout(font, Vector2(0, ry + 28.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(0.92, 0.86, 0.76, a))
 			"win":
 				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.86, 0.42, a))
-			"thanks":
-				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, a))
 
 	# once the last line has climbed past centre the roll settles into a held final
 	# title card, which waits, unmoving, for any key. The scrolling text is above it
@@ -29496,13 +29518,78 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	var last_sy := base + last_y - scroll
 	if last_sy < s.y * 0.30:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
-		var fy := s.y * 0.42
+		var fy := s.y * 0.40
 		draw_wordmark(fy - 58.0 * MARK_RISE, 58, Color(1.0, 0.9, 0.55, fa), s)
 		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
-		draw_string(font, Vector2(0, fy + 86.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.72, 0.6, 0.65 * fa))
+		# THE LAST THING THE GAME SAYS, and it takes the outline like every other row on this
+		# screen: the card settles low enough that this line sits over the lit boards and the
+		# flowers on them, which is precisely where a flat colour disappears.
+		draw_text_shout(font, Vector2(0, fy + 92.0), "thank you for playing", HORIZONTAL_ALIGNMENT_CENTER, s.x, 30, Color(1.0, 0.9, 0.6, fa))
+		draw_string(font, Vector2(0, fy + 132.0), "press any key", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.82, 0.72, 0.6, 0.65 * fa))
 
-	draw_vignette(s, 0.55)
-	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
+	draw_vignette(s, 0.5)   # the title screen's own strength, and no frame - see the top
+
+
+func draw_credits_flowers(s: Vector2) -> void:
+	# WHAT THE ROOM LEFT ON THE BOARDS. The title screen's stage is swept; this is the same
+	# stage after the act that won the game, so the tribute is the whole difference between the
+	# two pictures - Louis asked for the title screen "but now with flowers".
+	#
+	# THE BAND IS MEASURED OFF THE BAKE, NOT GUESSED FROM `MENU_FLOOR` (2026-08-24, Louis:
+	# "there should be a variety of flowers and bouquets on the wooden floor of the podium, not
+	# below it"). The first cut scattered from `MENU_FLOOR` down to the bottom of the screen,
+	# which sounds like "the floor" and is not: `MENU_FLOOR` (0.80) is the LIP - the line the
+	# menu rows stand on - and everything below it in `ui/menu_backdrop` is the house, so the
+	# whole tribute landed in the front row's seats. Scanned row by row, the painted boards run
+	# art y 266..307 of 360, with the footlight bulbs burning at 296..299: bright wood behind
+	# the lamps, a narrow strip of apron in front of them, and the dark seat backs from 308.
+	# Those four numbers are the four constants below. **A fraction that names a line is not a
+	# fraction that names a surface**, and this screen needed the surface.
+	#
+	# DETERMINISTIC, because a credits roll is a held picture and a scatter reseeded every frame
+	# would crawl. One fixed seed, laid down identically every frame and every run.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260824
+	var back := s.y * CREDITS_BOARDS_BACK
+	var lip := s.y * CREDITS_BOARDS_LIP
+	# THE MAIN SCATTER, on the lit boards behind the footlights. In perspective: a flower
+	# further upstage is smaller and dimmer, so the pile reads as lying on a receding surface
+	# rather than as stickers on a wall.
+	for i in 38:
+		# sqrt WEIGHTS THE SCATTER DOWNSTAGE, which is what perspective does to a real floor:
+		# an even spread in `t` is an even spread in SCREEN rows, and the near half of a
+		# receding surface owns more of them. A flat random `t` piled the flowers along the
+		# upstage edge in a line.
+		var t := sqrt(rng.randf())    # 0 upstage, 1 at the front of the boards
+		var y := lerpf(back, lip, t)
+		var x := rng.randf_range(-30.0, s.x + 30.0)
+		var sc := lerpf(0.68, 1.12, t)
+		draw_flower(Vector2(x, y), credits_flower_tier(rng, t), sc,
+			rng.randf_range(0.0, TAU), lerpf(0.80, 1.0, t), rng.randf_range(7.0, 13.0))
+	# LOOSE PETALS, smaller and thicker on the ground than the blooms. A thrown bouquet sheds,
+	# and a floor of intact flowers alone reads as a florist's display rather than as the
+	# aftermath of an ovation.
+	for i in 34:
+		var t := sqrt(rng.randf())
+		draw_flower(Vector2(rng.randf_range(-20.0, s.x + 20.0), lerpf(back, lip, t)),
+			0, lerpf(0.22, 0.40, t), rng.randf_range(0.0, TAU), lerpf(0.55, 0.85, t))
+
+
+func credits_flower_tier(rng: RandomNumberGenerator, t: float) -> int:
+	# ALL FOUR TIERS, IN VARIETY (Louis: "a variety of flowers and bouquets"). The first cut
+	# drew tier 0 about six times in ten, so the boards were a wash of identical pink stems with
+	# an occasional rose - the four designs exist precisely so a pile can be read at a glance
+	# and only one of them was on screen. The weights are even enough that every tier is
+	# obviously present, with the BOUQUET biased downstage: it is the biggest object of the
+	# four, so it belongs where the picture is biggest, and it is what a big house throws.
+	var r := rng.randf()
+	if r < 0.30:
+		return 0                       # single stems
+	if r < 0.55:
+		return 1                       # posies
+	if r < 0.78:
+		return 2                       # gold roses
+	return FLOWER_BOUQUET if t > 0.35 else 2
 
 
 #endregion
