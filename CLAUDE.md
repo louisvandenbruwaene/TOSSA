@@ -140,6 +140,32 @@ Codex improvements:
   governs that window only and stands aside for an open beat, a basics `do` step and free play.
   The gate is in `do_throw`, at the choke point: the demo metronome bypasses `on_throw_press`,
   so a gate up there is one the harness could never verify.
+- **EVERY SKILL IN THE BASICS IS TAUGHT TWICE - GUIDED, THEN HANDED BACK (2026-08-24,** Louis:
+  the tutorial should "work very smoothly and explain all concepts at a reasonable pace"). The
+  lesson's shape is a `do` run that walks the player through a skill beat by beat, then a `free`
+  beat that gives it back to them, and the two halves are what make a skill stick. Auditing it
+  against that shape found the pace faults, not the mechanics - the lesson has walked end to end
+  under `--demo --tutorial balls --tutcheck --tutlog` since the August freeze work:
+  - **the empty-hands cascade had no second half.** Thirteen stopped-world presses on the
+    hardest thing the lesson teaches, a summary line, and it was over. It has a practice beat
+    now, and that beat is gated on **throws, not catches**, because it is the last beat of
+    mandatory onboarding and the worst place in the game to strand a beginner: `tut_throws`
+    only climbs within a step, so the gate cannot reset, while `style` still rides along so a
+    slip back into the beginner exchange is named out loud (`tut_on_catch`).
+  - **the two-ball table ran the same six beats twice.** Beats 9-14 were byte-for-byte 1-6, on
+    the easiest load, ahead of a free beat already asking for six throws and six catches. Eight
+    beats is the whole exchange and the run still ends on the side it started.
+  - **the last two beats both taught R.** A `say` naming R and Escape, then a `read` naming R
+    again - while the key row along the bottom has spelled out both since the first frame.
+  Net: 58 steps to 52, one of them new practice. **A CLOSING BEAT MUST ASK FOR ITS OWN DEAL.**
+  The two `say` lines that used to close carried `balls: 0`, so the table emptied as a side
+  effect and the last line always dealt clean; with a practice beat above it on the same count
+  the closing line flowed on with three props falling and the catch guard stopped the world
+  three times mid-sentence to save them (`--tutlog`: t3320, t3322, t3323). `fresh` states the
+  rule the old emptied table only happened to satisfy. **And a tally row that asks for nothing
+  is not a goal** - the free-practice card drew both rows unconditionally, so a single-target
+  beat showed "catches  0 / 0" in the completed green; rows are built from the targets that
+  exist and the card is sized to what it draws.
 - **Tonight's limiters are POST-WIN content (2026-08-20,** Louis), gated on `won` like The
   Midnight Show and the Purist Legend chase, and shown as **two struck-out marks under the
   stage name** rather than a panel of rows. `MARK_BAND_H` is a constant so the perform card
