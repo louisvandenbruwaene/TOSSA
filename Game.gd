@@ -4578,16 +4578,6 @@ func check_dead_end() -> void:
 		cine_tick = 0
 
 
-func seg_name() -> String:
-	# the day's beats (Louis): wake to DAYLIGHT, work into NIGHT and DEEP NIGHT.
-	# ("daylight" not "day": next to the day NUMBER it read as a stutter, "day 1,
-	# day".) The clock is flavour; only running out of STAMINA says sleep.
-	if too_tired():
-		return "time to sleep"
-	var names := ["daylight", "night", "deep night"]
-	return names[clampi(seg_used, 0, 2)]
-
-
 func next_venue_rep() -> int:
 	# the Reputation the NEXT stage opens at, or 0 when there is nowhere higher
 	# left to climb (mirrors venue_index_of's ladder). At the World Arena this
@@ -25328,7 +25318,7 @@ func draw_day(font: Font, s: Vector2) -> void:
 	ext_center = false
 	# the hub darkens as the day's segments burn: DAY is open, NIGHT draws in,
 	# DEEP NIGHT is nearly black and plainly the moment to sleep. seg_used runs
-	# 0..SEG_PER_DAY (4 values for 3 named phases, see seg_name): the 4th entry
+	# 0..SEG_PER_DAY (4 values for 3 phases of the evening): the 4th entry
 	# is "all segments spent", which just repeats DEEP NIGHT's darkness rather
 	# than going darker still - there is nowhere further for the hub to dim to.
 	var seg_dark: float = [0.0, 0.16, 0.32, 0.32][clampi(seg_used, 0, 3)]
@@ -25338,25 +25328,19 @@ func draw_day(font: Font, s: Vector2) -> void:
 	draw_vignette(s, 0.55)
 	draw_frame(s, 22.0, Color(0.82, 0.62, 0.34, 0.5))
 
-	# header: which day it is, and how much of it is left told two ways below -
-	# the seg_name() label (daylight / night / deep night) and the hub's own
-	# background darkening (seg_dark, just above); the ornament here is only the
-	# plain divider used under every screen title, not a segment counter
+	# header: which day it is. How much of it is LEFT is told by the hub's own
+	# background darkening (seg_dark, just above) and by the stamina card in the
+	# ledger column, not by a caption.
+	# THE TITLE IS THE WHOLE HEADER (2026-08-24, Louis: "remove the golden border and the
+	# golden symbol ... and also get rid of those sentences, i don't like those extras").
+	# What stood here was a phase label (daylight / night / deep night), the gilt divider
+	# under it, and a line naming stamina as the day's limit - three pieces of furniture
+	# over the venue painting, all of them saying something the screen says elsewhere and
+	# better. The hub DARKENS as the segments burn (seg_dark, just above), which is the
+	# phase told as picture rather than as a caption; the stamina card carries its own bar,
+	# its own numbers and its own "worn out" line; and every action that stamina blocks
+	# prints the reason on the row the cursor is standing on. Nothing was lost with them.
 	draw_title_glow(font, s.y * 0.055, "DAY %d" % day, 40, Color(1.0, 0.88, 0.5), s)
-	# THESE TWO RIDE OVER THE VENUE PICTURE, so they are outlined, not plain (2026-07-28).
-	# The header sits on the live exterior - a lit skyline, a marquee, a floodlit bowl -
-	# and a lit window landing behind a word swallows it whole: caught on a Street Corner
-	# hub, where a window sat exactly between "stamina" and "lasts". The DAY number was
-	# already safe (draw_title_glow carries its own), and the same rule the stage's
-	# popups follow applies to anything else drawn over paint that moves.
-	draw_text_shout(font, Vector2(0, s.y * 0.055 + 66.0), seg_name(), HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.9, 0.8, 0.62))
-	draw_ornament(s.x * 0.5, s.y * 0.055 + 86.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
-	# under the clock: what actually limits the day, said plainly (Louis: it was
-	# unclear when and why the day was spent)
-	var limit_line := "you can work while stamina lasts"
-	if too_tired():
-		limit_line = "stamina is spent  -  sleep to start tomorrow"
-	draw_text_shout(font, Vector2(0, s.y * 0.055 + 112.0), limit_line, HORIZONTAL_ALIGNMENT_CENTER, s.x, 13, Color(1.0, 0.7, 0.5, 0.95) if too_tired() else Color(0.78, 0.74, 0.66, 0.95))
 
 	# the ledger card: purse, reputation, stamina, and the road to the next meal
 	# bonus. It sits high on the left so the stage picture keeps the middle.
