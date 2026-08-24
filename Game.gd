@@ -4918,17 +4918,26 @@ func day_input(kc: int) -> void:
 	var rows := day_rows()
 	var n := rows.size()
 	day_sel = clampi(day_sel, 0, n - 1)
+	var selid := day_row_id(rows)
 	match kc:
 		KEY_UP, KEY_W:
-			day_sel = (day_sel + n - 1) % n
+			day_sel = day_walk(rows, -1)
 			play_sfx("ui", -14.0)
 		KEY_DOWN, KEY_S:
-			day_sel = (day_sel + 1) % n
+			day_sel = day_walk(rows, 1)
 			play_sfx("ui", -14.0)
 		KEY_LEFT, KEY_RIGHT:
-			# choosing tonight's stage is free, any venue reputation has unlocked.
-			# The picker STOPS at both ends (Louis: left to right, never wrapping).
-			if day_perform_focus(rows):
+			if selid.begins_with("bind_"):
+				# THE TWO LIMITERS ARE A SIDEWAYS PAIR (2026-08-24, Louis: "left and right
+				# when selecting either of them should switch between them"). They are drawn
+				# as two marks side by side under the stage name, so the axis that moves
+				# between them is the axis they are laid out on. With only two of them,
+				# Left and Right do the same thing - there is nowhere else to go.
+				day_sel = day_row_index(rows, "bind_spd" if selid == "bind_acc" else "bind_acc")
+				play_sfx("ui", -14.0)
+			elif selid == "perform":
+				# choosing tonight's stage is free, any venue reputation has unlocked.
+				# The picker STOPS at both ends (Louis: left to right, never wrapping).
 				var dir := 1 if kc == KEY_RIGHT else -1
 				var np := clampi(play_venue() + dir, 0, venue_index())
 				if np != play_venue():
@@ -4936,8 +4945,8 @@ func day_input(kc: int) -> void:
 					play_sfx("ui2", -14.0)
 			elif kc == KEY_LEFT and day_group != "":
 				day_close_drawer()   # left is also "out of this drawer", like a file tree
-			elif kc == KEY_RIGHT and String(rows[day_sel]["id"]).begins_with("grp:"):
-				day_activate(String(rows[day_sel]["id"]), true, "")   # right opens one
+			elif kc == KEY_RIGHT and selid.begins_with("grp:"):
+				day_activate(selid, true, "")   # right opens one
 		KEY_P:
 			# the whole PURIST booking in one key: both limiters on, or both off. The two
 			# marks under the stage name are where either one is set on its own.
@@ -4964,16 +4973,43 @@ func day_input(kc: int) -> void:
 			play_sfx("ui", -12.0)
 
 
-func day_perform_focus(rows: Array[Dictionary]) -> bool:
-	# is the cursor ON the perform row, or INSIDE it? The limiter switches are drawn in the
-	# perform card's own box and the card stays open behind them, so the stage picker is on
-	# screen and lit the whole time the cursor is down there. Left/Right has to keep moving
-	# it, or the arrows either side of the venue name are a control that stopped working for
-	# no reason the player can see.
+func day_row_id(rows: Array[Dictionary]) -> String:
+	# what the cursor is standing on, by id. Everything that behaves differently per row -
+	# which axis the arrows drive, which hint the footer prints - asks this rather than
+	# re-deriving the row, so drawing and input can never disagree about where the cursor is.
 	if rows.is_empty():
-		return false
-	var r: Dictionary = rows[clampi(day_sel, 0, rows.size() - 1)]
-	return String(r["id"]) == "perform" or bool(r.get("inset", false))
+		return ""
+	return String(rows[clampi(day_sel, 0, rows.size() - 1)]["id"])
+
+
+func day_row_index(rows: Array[Dictionary], id: String) -> int:
+	for i in rows.size():
+		if String(rows[i]["id"]) == id:
+			return i
+	return clampi(day_sel, 0, maxi(0, rows.size() - 1))
+
+
+func day_walk(rows: Array[Dictionary], dir: int) -> int:
+	# UP AND DOWN WALK THE HUB'S ACTIONS, AND THE LIMITER PAIR IS ONE OF THEM (2026-08-24,
+	# Louis: Left/Right switches between the two limiters, "not moving up and down, which
+	# should change between choosing a stage and selecting accuracy or slowmo"). The pair
+	# used to be two separate stops, so a two-item setting cost as many presses as two whole
+	# errands, and Down from PERFORM took three presses to reach PRACTICE.
+	#
+	# The band is COLLAPSED rather than removed: both rows stay in the list, in order, so
+	# day_activate, the drawn panel and the --binds capture are untouched. Only the walk
+	# changes - it enters the band at its first mark and leaves from either one.
+	var n := rows.size()
+	if n == 0:
+		return 0
+	var i := clampi(day_sel, 0, n - 1)
+	if String(rows[i]["id"]) == "bind_spd":
+		i = day_row_index(rows, "bind_acc")   # leave the band from where it was entered
+	for _step in n:
+		i = posmod(i + dir, n)
+		if String(rows[i]["id"]) != "bind_spd":
+			return i
+	return i
 
 
 func day_close_drawer() -> void:
@@ -25398,16 +25434,22 @@ func draw_day(font: Font, s: Vector2) -> void:
 	# a SWITCH row says "toggle" rather than "do it": Enter does not spend the evening
 	# there, and a row that reads like an errand invites the player not to touch it
 	var doing := "open" if selid.begins_with("grp:") else ("toggle" if bool(rows[day_sel].get("toggle", false)) else "do it")
-	var perf_focus := day_perform_focus(rows)
+	# WHAT LEFT AND RIGHT DO DEPENDS ON THE ROW, so the hint has to as well: on PERFORM they
+	# walk the venue ladder, and on a limiter mark they move between the two marks. One hint
+	# naming the other row's job is worse than no hint - it is an instruction that does not
+	# work where it is printed.
+	var on_perf := selid == "perform"
+	var on_bind := selid.begins_with("bind_")
+	var lr_note := "stage" if on_perf else "which limiter"
 	if pad_active():
 		var hints := [[["Stick"], "choose"], [k_finish(), doing], [k_sheet(), "sheet"], [k_pause(), esc_note]]
-		if perf_focus:
-			hints.insert(1, [["Dpad"], "stage"])
+		if on_perf or on_bind:
+			hints.insert(1, [["Dpad"], lr_note])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
 	else:
 		var hints := [[["Up", "Down"], "choose"], [["Enter"], doing], [["Tab"], "sheet"], [["Esc"], esc_note]]
-		if perf_focus:
-			hints.insert(1, [["Left", "Right"], "stage"])
+		if on_perf or on_bind:
+			hints.insert(1, [["Left", "Right"], lr_note])
 			if won:
 				hints.insert(2, [["P"], "release purist" if purist else "purist"])
 		draw_hints_row(font, s.x * 0.5, s.y - 52.0, hints)
