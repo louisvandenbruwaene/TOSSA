@@ -203,6 +203,31 @@ Codex improvements:
   icons at all), and they may not reuse `day_icon`'s pair, which draw their red bar always
   because there the bar meant "limiter" rather than "booked". `--binds` keeps its capture path
   through run-local `_binds_dev`, never a forced `won`, because that flag writes to the save.
+- **THE ENDING IS THE TITLE SCREEN'S ROOM, AFTER THE SHOW (2026-08-24,** Louis: "just use the
+  same screen as the title screen, but now with flowers and overlayed with thanks for playing -
+  remove the golden border and the 3 juggling balls"). `draw_credits` used to paint its own
+  house (`ui/victory`) and consequently had to re-argue three decisions the title screen had
+  already settled, and lost all three: a `draw_frame` rectangle inside a picture that already has
+  a proscenium; a `draw_spotlight_cone` (legal over `ui/victory`, which paints a lit chandelier
+  above the apex, and illegal over the menu bake, whose velvet runs clean off the top edge -
+  `menu_backdrop` brings `menu_house_light` instead); and a `draw_read_column` scrim that only
+  existed because the victory boards are lit from inside. **A screen that borrows a room borrows
+  its rules**, which is most of the argument for borrowing it. The thanks moved off the roll and
+  onto the held card - it used to scroll past and then be repeated by the card a moment later.
+  - **A FRACTION THAT NAMES A LINE IS NOT A FRACTION THAT NAMES A SURFACE.** The flowers were
+    first scattered from `MENU_FLOOR` (0.80) to the bottom of the screen, which sounds like "the
+    floor" and is the LIP - the line a menu row's feet stand on - so the whole tribute landed in
+    the front row's seats. Scanned row by row, `ui/menu_backdrop`'s boards are art y 266..307 of
+    360 with the footlight bulbs at 296..299, and `CREDITS_BOARDS_BACK/LIP` are those numbers.
+    The scatter stops well short of the bulbs because a flower is drawn from its centre and
+    carries a stem, so a band ending at the lamps hangs blooms over them.
+  - **An even random `t` across a receding surface piles up upstage**, because it is even in
+    SCREEN rows and the near half of the floor owns more of them; `sqrt` weights it downstage.
+    All four flower tiers are drawn in variety (Louis: "a variety of flowers and bouquets") -
+    the first cut was six-in-ten single stems, so three of the four designs were off screen.
+  - **`--credits <ticks>` seeds `cine_tick`** so the held final card can be photographed at all.
+    The roll is ~100s and the card assembles only after it, so the last thing the game ever
+    shows had no capture target and nobody had looked at it.
 - **Flight and collision audits share pure geometry:** parabolic position/velocity and edge
   clearance live in `scripts/TossaGeometry.gd`, with contract tests. The live wrappers retain
   domain names; the audit must not grow a second copy of the clearance formula.
