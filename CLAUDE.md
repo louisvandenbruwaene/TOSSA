@@ -190,6 +190,20 @@ Codex improvements:
   - **the two remaining guard-owned throws are the empty-hands opening** and must stay: the
     third throw genuinely coincides with the first prop landing, and moving the peak gate above
     the guard escape is the documented stall.
+  - **the circle was a THIRD answer, and the loudest one (2026-08-24,** Louis: a beat "says:
+    throw the ball (which should be circled), but then it circles the ball that will be caught
+    right after this step"). The mark he means is not the aura at all - it is `draw_targets`'
+    LANDING RING, five pixels of white-hot gold and the timing cue the whole game is played
+    off, drawn for any prop within 46 ticks of landing. During a guided exchange that is always
+    the NEXT prop in, so a throw beat lit its hand's key, glowed the prop in that hand, and then
+    circled a different prop entirely. **A 0.22-alpha aura cannot argue with that ring**, so the
+    ring was the answer to "which ball" and it was deriving its own. It goes through
+    `tut_focus_ball` now, but only while `tut_helped()` - a `free` beat is real play with a real
+    drop, and nothing outside a lesson changes. On a throw beat the subject is IN A HAND, so no
+    landing ring is drawn at all, which is correct: a prop being thrown has no landing to mark.
+    That also makes `--tutlog`'s `aura` field predict the ring exactly, which is how it is
+    checked - across the basics, every throw beat's subject is in a hand and every catch beat's
+    is the incoming prop.
   **AND `--tutlog` NOW PRINTS `aura` AND `guard`**, because none of this was measurable before.
   A screenshot cannot judge a freeze, and `--tutorial balls N` cannot stand in for one either:
   setup deals a static table, so the airborne state a real playthrough has at that beat never
