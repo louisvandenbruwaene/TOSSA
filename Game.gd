@@ -6054,6 +6054,8 @@ func begin_tutorial(id: String) -> void:
 	collapsing = false
 	results_open = false
 	falling.clear()
+	clear_boards()   # ...and the boards are swept: a lesson opens on a bare stage, not on
+					 # the flowers the last performance earned (see clear_boards)
 	# the key that ACTIVATED the lesson (Space or Enter on the hub row) is still held
 	# right now. Without seeding, the first play frame read that held Space as a fresh
 	# edge and fired the trick BEFORE the player saw step one - the step then cleared
@@ -10310,13 +10312,7 @@ func start_run(n: int) -> void:
 	last_streak_tick = -999
 	freeze = 0
 	parts.clear()
-	thrown.clear()      # a fresh act starts on clean boards: nothing at the feet yet
-	tomato_stains.clear()   # ...and a clean costume, whatever last night did to it
-	_pile_pts.clear()   # ...and the baked pile goes with it, or last night's flowers
-	_pile_cols.clear()  # would still be drawn under this one's feet
-	_pile_idx.clear()
-	_pile_bake_tick = -1000000
-	_pile_dirty = true
+	clear_boards()      # a fresh act starts on clean boards and a clean costume
 	run_flowers = 0
 	run_tomatoes = 0
 	paused = false
@@ -30026,6 +30022,26 @@ func ovation_step() -> void:
 		results_stamped = false
 		if _demo_quit_after_ovation:
 			get_tree().quit()
+
+
+func clear_boards() -> void:
+	# NOTHING THE LAST ACT LEFT ON THE FLOOR SURVIVES INTO THE NEXT ONE: the flowers and
+	# tomatoes at the feet, the baked pile they are drawn from, and the stains on the coat.
+	#
+	# IT IS A FUNCTION BECAUSE TWO PLACES START A STAGE, and only one of them knew (2026-08-24,
+	# Louis: "in practice tutorials: there are flowers on the ground when there shouldn't be").
+	# start_run cleared all six of these; begin_tutorial does NOT go through start_run - a
+	# lesson deals its own table - so a player who took a lesson after a good night walked into
+	# it over their own ovation. throw_step already refuses to throw anything during a lesson,
+	# which is exactly why this was invisible from the throwing side: the flowers were never
+	# thrown there, they were simply never swept up.
+	thrown.clear()
+	tomato_stains.clear()
+	_pile_pts.clear()   # the baked pile goes with them, or last night's flowers would
+	_pile_cols.clear()  # still be drawn under this act's feet
+	_pile_idx.clear()
+	_pile_bake_tick = -1000000
+	_pile_dirty = true
 
 
 func rain_flower() -> void:
