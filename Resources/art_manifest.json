@@ -321,6 +321,24 @@
   "ui/rosette": {
     "path": "res://Assets/UI/rosette.png"
   },
+  "ui/rule_flourish": {
+    "path": "res://Assets/UI/ornament/rule_flourish.png"
+  },
+  "ui/corner_tl": {
+    "path": "res://Assets/UI/ornament/corner_tl.png"
+  },
+  "ui/corner_tr": {
+    "path": "res://Assets/UI/ornament/corner_tr.png"
+  },
+  "ui/corner_bl": {
+    "path": "res://Assets/UI/ornament/corner_bl.png"
+  },
+  "ui/corner_br": {
+    "path": "res://Assets/UI/ornament/corner_br.png"
+  },
+  "ui/crown": {
+    "path": "res://Assets/UI/ornament/crown.png"
+  },
   "stem/bloom": {
     "path": "res://Assets/UI/flower/bloom.png"
   },
