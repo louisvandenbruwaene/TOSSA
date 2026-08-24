@@ -249,12 +249,35 @@
   "ui/gear_glow_suit": {
     "path": "res://Assets/UI/gear/glow_suit.png"
   },
-  "ui/assist_boot": {
+  "_STAT_ICONS": [
+    "The four talent-sheet marks and the two Records panel emblems (2026-08-24).",
+    "20x20 greyscale, tinted by the caller - see scripts/install_stat_icons.py.",
+    "stat_spd IS the old assist boot, by the file: Louis chose that mark for Speed and the",
+    "reason he gave for it ('a boot is a thing you WEAR') is a reason about the STAT. The two",
+    "ui/assist_* keys it used to be reached by are gone with the play HUD's assist row."
+  ],
+  "ui/stat_acc": {
+    "path": "res://Assets/UI/stat/acc.png",
+    "scale": 0.5
+  },
+  "ui/stat_str": {
+    "path": "res://Assets/UI/stat/str.png",
+    "scale": 0.5
+  },
+  "ui/stat_end": {
+    "path": "res://Assets/UI/stat/end.png",
+    "scale": 0.5
+  },
+  "ui/stat_spd": {
     "path": "res://Assets/UI/assist/boot.png",
     "scale": 0.5
   },
-  "ui/assist_watch": {
-    "path": "res://Assets/UI/assist/watch.png",
+  "ui/stat_rec": {
+    "path": "res://Assets/UI/stat/rec.png",
+    "scale": 0.5
+  },
+  "ui/stat_car": {
+    "path": "res://Assets/UI/stat/car.png",
     "scale": 0.5
   },
   "ui/difficulty_sloth": {
