@@ -6741,9 +6741,31 @@ func tut_log_hold(why: String) -> void:
 	for b in balls:
 		if b.state == STATE_FLIGHT:
 			props += "  [age %d in %d]" % [tick - b.launch_tick, b.land_tick - tick]
-	print("tutlog t%5d  %-10s step %2d %-10s speech %s%s%s" % [tick, why, tut_step,
+	print("tutlog t%5d  %-10s step %2d %-10s speech %s  aura %s  guard %s%s%s" % [tick, why, tut_step,
 		String(tut_step_data().get("goal", "")), "done" if tut_speech_done() else "typing",
-		tut_ask_text(), props])
+		tut_aura_text(), tut_guard_text(), tut_ask_text(), props])
+
+
+func tut_aura_text() -> String:
+	# WHICH PROP THE YELLOW RING IS ON, at the instant the world stopped (dev, --tutlog).
+	# tut_focus_ball answers it for the drawing; printing the same answer here is what makes
+	# "the wrong ball is emphasised" a measurement instead of a squint at a screenshot.
+	var b := tut_focus_ball()
+	if b == null:
+		return "none"
+	if b.state != STATE_FLIGHT:
+		return "hand-%s" % ("l" if stack(LEFT).has(b) else "r")
+	return "air->%s(in %d)" % ["l" if b.to_hand == LEFT else "r", b.land_tick - tick]
+
+
+func tut_guard_text() -> String:
+	# WHETHER THE CATCH GUARD IS WHAT STOPPED THE WORLD, and at which hand (dev, --tutlog).
+	# A `do` beat that opens on the guard is asking for one thing while the world stopped for
+	# another, which is the disagreement this pair of fields exists to expose.
+	var gh := tut_guard_hand()
+	if gh < 0 or not tut_catch_hold():
+		return "-"
+	return "l" if gh == LEFT else "r"
 
 
 func tut_ask_text() -> String:
