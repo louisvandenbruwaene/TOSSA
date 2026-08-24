@@ -84,6 +84,60 @@ def round_corners(rgba: np.ndarray, radius: int) -> np.ndarray:
 	return out
 
 
+# THE DECK'S OWN GROUND, and the two cards that had to be argued onto it (2026-08-24).
+# `docs/pixellab_prompts.md` records the shared clause - "a completely flat solid dark reddish
+# brown background of one single colour" - and the re-rolls of `btb` and `columns` ignored the
+# TONE half of it: they came back on a bright crimson (144,48,48) and a mid crimson (112,32,32)
+# against a deck whose other six sit between (8,0,8) and (56,24,16). Laid out in a row on the
+# Skills screen that is the same uniformity break the whole 2026-08-13 regeneration existed to
+# remove, so it is repaired here rather than re-rolled for: the tone is one palette entry, and
+# spending generations until a flat field happens to land on the right one is the arithmetic
+# `pixelise_paint.py`'s own SHIFT note already refuses to pay for.
+#
+# `btb` ALSO CAME BACK SPECKLED, which is the documented "flat solid -> NOISE TEXTURE" failure,
+# and it is why this is a FLOOD FILL from the frame edge rather than a colour swap. The speckle
+# colour (204,56,61) is also the lit red of the ringmaster's own coat - a global swap would
+# repaint him - but every speckle is part of the background REGION, and none of his coat is.
+# Connectivity separates them where colour cannot. Measured on the shipped bake: 9,719 of
+# 13,312 pixels filled, with the figure, the hat, the white ball and the boots untouched.
+DECK_BG = (56, 24, 16)
+
+# card -> the background colours to flood from the frame edge. Everything reachable from an
+# edge THROUGH these colours becomes DECK_BG; anything else (the cast shadow behind the temple,
+# the pool under the boots) is left exactly as painted.
+BG_FIX = {
+	"btb": [(144, 48, 48), (204, 56, 61)],
+	"columns": [(112, 32, 32)],
+}
+
+
+def flatten_bg(rgba: np.ndarray, seeds: list[tuple[int, int, int]]) -> np.ndarray:
+	"""Repaint the border-connected background to DECK_BG."""
+	from collections import deque
+
+	out = rgba.copy()
+	h, w = out.shape[:2]
+	want = {tuple(c) for c in seeds}
+	seen = np.zeros((h, w), bool)
+	q: deque = deque()
+	edge = [(y, x) for x in range(w) for y in (0, h - 1)] + [(y, x) for y in range(h) for x in (0, w - 1)]
+	for y, x in edge:
+		if tuple(out[y, x, :3]) in want and not seen[y, x]:
+			seen[y, x] = True
+			q.append((y, x))
+	while q:
+		y, x = q.popleft()
+		# FOUR-CONNECTED, not eight: a diagonal step can cross a one-pixel outline, which is
+		# exactly what stands between this fill and the inside of the coat.
+		for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+			ny, nx = y + dy, x + dx
+			if 0 <= ny < h and 0 <= nx < w and not seen[ny, nx] and tuple(out[ny, nx, :3]) in want:
+				seen[ny, nx] = True
+				q.append((ny, nx))
+	out[seen, :3] = DECK_BG
+	return out
+
+
 def off_palette(rgb: np.ndarray) -> int:
 	"""How many pixels are not exactly on the locked 48.
 
@@ -103,9 +157,16 @@ def build(name: str, write: bool, force: bool) -> str:
 	if im.size != (CARD_W, CARD_H):
 		raise SystemExit(f"{name}: expected {CARD_W}x{CARD_H}, got {im.size}")
 	a = np.asarray(im).copy()
+	filled = 0
+	if name in BG_FIX:
+		before = a[..., :3].copy()
+		a = flatten_bg(a, BG_FIX[name])
+		filled = int((a[..., :3] != before).any(axis=2).sum())
 	bad = off_palette(a[..., :3])
 	a = round_corners(a, CORNER_R)
 	tag = f"{name}: {len(np.unique(a[..., :3].reshape(-1, 3), axis=0))} colours, {bad} off-palette"
+	if filled:
+		tag += f", {filled} px flattened to the deck ground"
 	if not write:
 		return tag + "  (pass --write to apply)"
 	return tag + " [" + artguard.save_guarded(
