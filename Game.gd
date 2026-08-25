@@ -8682,7 +8682,6 @@ func draw_remap(font: Font, s: Vector2) -> void:
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.76))
 	draw_title_glow(font, s.y * 0.06, "CONTROLS", 36, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(s.x * 0.5, s.y * 0.06 + 62.0, 170.0, Color(0.82, 0.62, 0.34, 0.85))
 	var kb_focus := remap_col == 0
 	var pad_focus := remap_col == 1
 	var card_y := 132.0
@@ -21348,7 +21347,6 @@ func draw_pause_cards(font: Font, s: Vector2) -> void:
 	var py := s.y * 0.5 - ph * 0.5
 	soft_card(Rect2(px, py, pw, ph), Color(0.10, 0.06, 0.075, 0.99), Color(0.9, 0.6, 0.35, 0.5), 2.0, 18.0, 26.0)
 	draw_string(title_font(), Vector2(px, py + 46.0), "PAUSED", HORIZONTAL_ALIGNMENT_CENTER, pw, ps(28), Color(1.0, 0.86, 0.5))
-	draw_ornament(px + pw * 0.5, py + 62.0, 120.0, Color(0.82, 0.62, 0.34, 0.7))
 
 	var opts := [
 		{"name": "Resume", "note": "right where it froze", "col": Color(0.55, 0.88, 0.52), "icon": "play"},
@@ -22578,8 +22576,6 @@ func draw_unlock_card(font: Font, s: Vector2) -> void:
 			var nsz := fit_size(title_font(), nm, namew, int(maxf(10.0, 27.0 * grow)), 11)
 			draw_string(title_font(), Vector2(r.position.x + 15.0 * grow, art.position.y + art.size.y + 34.0 * grow),
 				nm, HORIZONTAL_ALIGNMENT_CENTER, namew, ps(nsz), Color(1.0, 0.96, 0.86, a))
-			draw_ornament(cx, art.position.y + art.size.y + 46.0 * grow, vw * 0.52,
-				Color(kindcol.r, kindcol.g, kindcol.b, 0.7 * a))
 			# what it actually does, wrapped into the room that is left above the footer
 			var dtop := art.position.y + art.size.y + 58.0 * grow
 			var dbox := Rect2(r.position.x + 18.0 * grow, dtop, vw - 36.0 * grow,
@@ -27007,7 +27003,6 @@ func draw_menu(font: Font, s: Vector2) -> void:
 	var mark_top := maxf(divider_y - 16.0 - mark_height(float(msz)), 6.0)
 	var mark_bot := mark_top + mark_height(float(msz))
 	draw_wordmark(mark_top, msz, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(cx, divider_y, 300.0, Color(0.82, 0.62, 0.34, 0.85))
 	menu_rows(font, s, oy)
 	var mfoot := "Up / Down to choose    A to select" if pad_active() else "Up / Down to choose    Enter to select"
 	draw_string(font, Vector2(0, s.y - 40.0), mfoot, HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.7, 0.66, 0.6))
@@ -28327,7 +28322,6 @@ func draw_slots_cards(font: Font, s: Vector2) -> void:
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.66))
 	draw_string(title_font(), Vector2(0, s.y * 0.15), "SAVE FILES", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(44), Color(1.0, 0.86, 0.5))
-	draw_ornament(s.x * 0.5, s.y * 0.15 + 40.0, 200.0, Color(0.82, 0.62, 0.34, 0.85))
 
 	var gap := 26.0
 	var cw := 262.0
@@ -28415,7 +28409,6 @@ func draw_settings_cards(font: Font, s: Vector2) -> void:
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.72))
 	draw_title_glow(font, s.y * 0.10, "SETTINGS", 40, Color(1.0, 0.86, 0.5), s)
-	draw_ornament(s.x * 0.5, s.y * 0.10 + 56.0, 200.0, Color(0.82, 0.62, 0.34, 0.85))
 
 	var rows := [
 		{"kind": "slider", "name": "Music", "val": set_music, "note": "", "col": Color(0.95, 0.75, 0.4)},
@@ -28525,7 +28518,6 @@ func draw_gameover(font: Font, s: Vector2) -> void:
 		draw_read_column(s)
 	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.22, "THE ROAD ENDS HERE", 42, Color(0.9, 0.55, 0.4, fin), s)
-	draw_ornament(s.x * 0.5, s.y * 0.22 + 68.0, 220.0, Color(0.7, 0.45, 0.3, 0.8 * fin))
 	draw_string(font, Vector2(0, s.y * 0.40), "Too tired to work. Too poor for a bed. The city keeps what it takes.",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(18), Color(0.85, 0.78, 0.66, fin))
 	var lines := [
@@ -28562,7 +28554,6 @@ func draw_demo_wall(font: Font, s: Vector2) -> void:
 		draw_read_column(s)
 	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.20, "THAT'S THE DEMO", 42, Color(1.0, 0.86, 0.5, fin), s)
-	draw_ornament(s.x * 0.5, s.y * 0.20 + 68.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
 	draw_string(font, Vector2(0, s.y * 0.34),
 		"You've earned your way past what this demo has to give. The full climb keeps going.",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(0.88, 0.8, 0.68, fin))
@@ -28604,7 +28595,6 @@ func draw_purist_legend(font: Font, s: Vector2) -> void:
 		draw_read_column(s)
 	var fin := clampf(float(cine_tick) / 60.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.14, "PURIST LEGEND", 42, Color(0.86, 0.78, 1.0, fin), s)
-	draw_ornament(s.x * 0.5, s.y * 0.14 + 68.0, 220.0, Color(0.7, 0.6, 0.9, 0.85 * fin))
 	draw_string(font, Vector2(0, s.y * 0.27),
 		"No gear. No stats. No help. A record stands at every stage on your own hands alone.",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(16), Color(0.88, 0.84, 0.94, fin))
@@ -28680,7 +28670,6 @@ func draw_tutdone(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.6))
 	var fin := clampf(float(cine_tick) / 50.0, 0.0, 1.0)
 	draw_title_glow(font, s.y * 0.20, "YOU CAN JUGGLE", 42, Color(1.0, 0.88, 0.5, fin), s)
-	draw_ornament(s.x * 0.5, s.y * 0.20 + 66.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
 	draw_string(font, Vector2(0, s.y * 0.34), "Throw, catch, and keep it flying. The rest is a career.",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(18), Color(0.88, 0.8, 0.68, fin))
 
@@ -28752,7 +28741,6 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 	]
 	var page: Dictionary = pages[clampi(menutour_page, 0, pages.size() - 1)]
 	draw_title_glow(font, s.y * 0.14, String(page["title"]), 34, Color(1.0, 0.88, 0.5, fin), s)
-	draw_ornament(s.x * 0.5, s.y * 0.14 + 56.0, 220.0, Color(0.82, 0.62, 0.34, 0.85 * fin))
 
 	var pw := 560.0
 	var px := s.x * 0.5 - pw * 0.5
@@ -28813,7 +28801,6 @@ func draw_difficulty_screen(font: Font, s: Vector2) -> void:
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.66))
 	draw_string(title_font(), Vector2(0, s.y * 0.11), "CHOOSE YOUR PACE", HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(38), Color(1.0, 0.86, 0.5))
-	draw_ornament(s.x * 0.5, s.y * 0.11 + 40.0, 220.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.11 + 58.0), "How forgiving should catching be? You can change this later in Settings.",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), Color(0.85, 0.8, 0.7, 0.9))
 
@@ -28854,7 +28841,6 @@ func draw_play_mode_screen(font: Font, s: Vector2) -> void:
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.68))
 	draw_string(title_font(), Vector2(0, s.y * 0.14), "CHOOSE YOUR RUN",
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(38), Color(1.0, 0.86, 0.5))
-	draw_ornament(s.x * 0.5, s.y * 0.14 + 42.0, 220.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_string(font, Vector2(0, s.y * 0.14 + 62.0), "%s difficulty" % DIFF_NAMES[difficulty],
 		HORIZONTAL_ALIGNMENT_CENTER, s.x, ps(15), difficulty_accent(difficulty))
 
@@ -28907,7 +28893,6 @@ func draw_stats(font: Font, s: Vector2) -> void:
 	view_venue = -1
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.03, 0.68))
 	draw_title_glow(font, s.y * 0.06, "RECORDS AND HISTORY", 36, Color(1.0, 0.88, 0.5), s)
-	draw_ornament(s.x * 0.5, s.y * 0.06 + 62.0, 210.0, Color(0.82, 0.62, 0.34, 0.85))
 
 	# left: the venue record boards, assisted and Purist
 	var lx := s.x * 0.5 - 470.0
@@ -29463,7 +29448,6 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	draw_text_shout(font, Vector2(0, s.y * 0.10), stage_tag, HORIZONTAL_ALIGNMENT_CENTER, s.x, 16, Color(0.9, 0.78, 0.55, 0.85 * tagA))
 	var vn := String(venue_data(establish_venue)["name"]).to_upper()
 	draw_title_glow(font, s.y * 0.12 + 12.0, vn, 52, Color(1.0, 0.9, 0.55), s)
-	draw_ornament(s.x * 0.5, s.y * 0.12 + 72.0, 190.0, Color(0.82, 0.62, 0.34, 0.85))
 	draw_text_shout(font, Vector2(0, s.y * 0.12 + 96.0), venue_blurb(establish_venue), HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.86, 0.78, 0.66, 0.8 * tagA))
 	var flavour := venue_flavour(establish_venue)
 	draw_text_shout(font, Vector2(0, s.y * 0.12 + 116.0), "RIVAL  %s  ·  they want %s" % [String(flavour["rival"]).to_upper(), String(flavour["taste"])], HORIZONTAL_ALIGNMENT_CENTER, s.x, 12, Color(0.86, 0.72, 0.9, 0.78 * tagA))
@@ -29597,14 +29581,14 @@ func draw_credits(font: Font, s: Vector2) -> void:
 	cur += 44.0;  rows.append({"y": cur, "kind": "sub", "a": "every stage, conquered", "b": ""})
 	if sprint_active and sprint_finished_ms >= 0:
 		cur += 44.0; rows.append({"y": cur, "kind": "sub", "a": "SPRINT FINISH   %s" % sprint_clock_text(), "b": ""})
-	cur += 60.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 60.0   # the divider that used to sit here is gone - see draw_ornament
 	cur += 78.0;  rows.append({"y": cur, "kind": "line", "a": "best score   %s" % score_text(float(career["best_score"])), "b": "%d day%s on the road" % [day, "" if day == 1 else "s"]})
-	cur += 90.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 90.0
 	cur += 82.0;  rows.append({"y": cur, "kind": "role", "a": "design", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "code", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "art", "b": "Louis Vandenbruwaene"})
 	cur += 66.0;  rows.append({"y": cur, "kind": "role", "a": "music", "b": "Louis Vandenbruwaene"})
-	cur += 84.0;  rows.append({"y": cur, "kind": "orn", "a": "", "b": ""})
+	cur += 84.0
 	cur += 84.0;  rows.append({"y": cur, "kind": "line", "a": "made in Godot, every picture and sound", "b": "drawn and synthesised in code"})
 	cur += 90.0;  rows.append({"y": cur, "kind": "line", "a": "built with the help of Claude", "b": ""})
 	# THE THANKS IS NOT A ROW ANY MORE (2026-08-24, Louis: the ending should be the title
@@ -29655,8 +29639,6 @@ func draw_credits(font: Font, s: Vector2) -> void:
 			# to have scrolled to, which on a roll is every part of the picture in turn.
 			"sub":
 				draw_text_shout(font, Vector2(0, ry), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 24, Color(0.9, 0.8, 0.68, a))
-			"orn":
-				draw_ornament(cx, ry, 150.0, Color(0.82, 0.62, 0.34, 0.8 * a))
 			"role":
 				draw_text_shout(font, Vector2(0, ry - 8.0), atxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 17, Color(0.82, 0.7, 0.52, 0.85 * a))
 				draw_text_shout(font, Vector2(0, ry + 22.0), btxt, HORIZONTAL_ALIGNMENT_CENTER, s.x, 27, Color(gold.r, gold.g, gold.b, a))
@@ -29675,7 +29657,6 @@ func draw_credits(font: Font, s: Vector2) -> void:
 		var fa := clampf((s.y * 0.30 - last_sy) / 140.0, 0.0, 1.0)
 		var fy := s.y * 0.40
 		draw_wordmark(fy - 58.0 * MARK_RISE, 58, Color(1.0, 0.9, 0.55, fa), s)
-		draw_ornament(cx, fy + 44.0, 175.0, Color(0.82, 0.62, 0.34, 0.85 * fa))
 		# THE LAST THING THE GAME SAYS, and it takes the outline like every other row on this
 		# screen: the card settles low enough that this line sits over the lit boards and the
 		# flowers on them, which is precisely where a flat colour disappears.
@@ -29939,6 +29920,20 @@ func draw_frame(s: Vector2, inset: float, col: Color) -> void:
 
 func draw_ornament(cx: float, y: float, half_w: float, col: Color) -> void:
 	# a thin rule with a centre flourish, a classic decorative divider
+	#
+	# **DO NOT ADD ANOTHER ONE** (2026-08-25, Louis, pointing at the last of them under the
+	# title: "there is still a golden symbol on the title screen just below tossa. (remember to
+	# never use those again)"). It had eighteen live call sites - a divider under the title of
+	# almost every screen in the game - and one by one they are all gone. The standing rule is
+	# the one the gilt frame left a day earlier and this is its other half: **a title does not
+	# need underlining, and a divider between two things the layout has already separated is
+	# decoration answering a question nobody asked.** Space, alignment and the screen's own
+	# painting do that work; a gold squiggle on top of them is a fourth voice saying it again.
+	#
+	# The one caller left is `draw_capsule_art`, on the same grounds `draw_frame` keeps its
+	# border there: a storefront capsule is a poster, it has no room of its own to be framed
+	# by, and nobody plays through it. That single caller is also what keeps `ui/rule_flourish`
+	# alive in the manifest - delete it and the sprite is orphaned with it.
 	#
 	# THE SPRITE IS THE MIDDLE ONLY AND THE RULES ARE DRAWN, which is what lets one 64x16
 	# painting serve twenty call sites asking for half-widths from 120 to 300. Fitting the
