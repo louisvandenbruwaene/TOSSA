@@ -249,6 +249,16 @@
   "ui/gear_glow_suit": {
     "path": "res://Assets/UI/gear/glow_suit.png"
   },
+  "_GAUGE": {
+    "pivot": [0.5, 1.0],
+    "bezel_in": 47.3,
+    "outer": 55.6
+  },
+  "ui/gauge_face": {
+    "path": "res://Assets/UI/gauge_face.png",
+    "scale": 0.5,
+    "pivot": [0.5, 1.0]
+  },
   "_STAT_ICONS": [
     "The four talent-sheet marks and the two Records panel emblems (2026-08-24).",
     "20x20 greyscale, tinted by the caller - see scripts/install_stat_icons.py.",
