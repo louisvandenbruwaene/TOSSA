@@ -14423,6 +14423,11 @@ const ART_PIXEL := 2.0                 # screen units per authored art pixel (12
 const ART_W := 640                     # the authoring canvas, and the eventual viewport
 const ART_H := 360
 const ART_MANIFEST := "res://Resources/art_manifest.json"
+var gauge_art: Dictionary = {}    # the crowd dial's painted bezel geometry, from a manifest's
+								   # _GAUGE block: where the scale band and the brass ring sit
+								   # in the PAINTING, so the drawn zones can be laid into them.
+								   # Empty = no painted bezel, and draw_gauge falls back to the
+								   # instrument it drew from primitives before there was one.
 var torch_flame: Dictionary = {}  # the torch sprite's flame geometry, from a manifest's
                                   # _TORCH block. EMPTY means the sprite carries its own fire
                                   # (or there is no sprite) and nothing is drawn over it.
@@ -14484,6 +14489,7 @@ func art_boot() -> void:
 	fig_arms.clear()          # ...and its arm bank
 	fig_spin.clear()          # ...and its turnaround
 	torch_flame.clear()       # ...and the torch's live-fire geometry
+	gauge_art.clear()         # ...and the crowd dial's painted bezel geometry
 	art_read_manifest(art_manifest_path, true)
 	# ...then lay each chosen VARIANT over the top. Option 0 is the shipped default and has
 	# no file, so a release build reads exactly one manifest and this loop does nothing.
@@ -14530,6 +14536,13 @@ func art_read_manifest(path: String, quiet_if_missing: bool) -> void:
 		# art_blit_prop), so the game needs the painting's own idea of where the fire sits
 		# and how big it is - the card's proportions, not the vector drawing's.
 		torch_flame = (pd["_TORCH"] as Dictionary).duplicate(true)
+	if pd.has("_GAUGE") and typeof(pd["_GAUGE"]) == TYPE_DICTIONARY:
+		# THE CROWD DIAL'S PAINTED BEZEL, and the radii the painting actually has. A generator
+		# will not land a groove on a number chosen in this file, so the fit runs the other
+		# way: scripts/install_gauge.py measures the roll's own scale band and bezel and
+		# publishes them here, and draw_gauge lays its live zones into that groove. Same
+		# contract as _TORCH, and the same hazard - a stale block draws the bands off the ring.
+		gauge_art = (pd["_GAUGE"] as Dictionary).duplicate(true)
 	if pd.has("_GROW") and typeof(pd["_GROW"]) == TYPE_DICTIONARY:
 		# THE GOAL STEM'S GROWTH: one painted frame per step of the plant's life, in growth
 		# order. Read rather than counted off the key names for the same reason _SPIN is -
@@ -20365,6 +20378,31 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# crisp bitmap numbers looking like a screenshot of a different game. See draw_arc_pix
 	# and draw_spoke_pix; the rasteriser is unchanged, only what is asked of it.
 	var ap := float(ART_PIXEL)
+	# THE PAINTED BEZEL, AND THE RADII THAT COME WITH IT (2026-08-25, Louis: "also regenerate a
+	# prettier happiness meter with pixellab"). The ring is a generation; everything inside it
+	# is still drawn, because everything inside it MOVES - the zones light as the needle passes
+	# them and the hub takes the live zone's colour, and a baked instrument answers nothing.
+	#
+	# THE PAINTING OWNS THE SCALE, so the numbers below come from `_GAUGE` rather than from the
+	# radius the caller asked for: `r` describes the drawn instrument, and the two cannot both
+	# be right about where the groove is. `band` is the centre of the scale channel and `bw`
+	# its thickness, both measured off the roll by scripts/install_gauge.py.
+	var painted := gauge_art.has("bezel_in") and art_bank.has("ui/gauge_face")
+	var band := r + 1.0
+	var bw := 9.0
+	var plate_r := r - 3.0
+	if painted:
+		# THE PAINTING OWNS THE RIM; THE GAME OWNS ITS OWN SCALE. Laying the zones into the
+		# groove the roll happened to paint (30.4..40.8 of a 50.4 radius) was the obvious
+		# reading and the wrong one: it put the coloured arc at 60-81% of the radius where the
+		# drawn instrument had it at 74-90%, so the one thing a player reads mid-set came out
+		# smaller and further from the edge than before, inside a prettier ring. `bezel_in` is
+		# the real constraint the art imposes - where the metal starts - and everything else is
+		# this file's business. The band is hung off that edge and made BOLDER than the drawn
+		# one was, which is what the painting buys: a chunky scale inside a real rim.
+		bw = 13.0
+		band = float(gauge_art["bezel_in"]) - 1.5 - bw * 0.5
+		plate_r = float(gauge_art["bezel_in"]) + 1.0
 	# THE FACE IS A SOLID PLATE, NOT AN ANNULUS, and that is the single biggest thing
 	# separating "an instrument" from "four coloured strokes". The dial used to be a ring
 	# with the card showing through the middle, so the needle swept an empty hole and the
@@ -20372,13 +20410,13 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# also reads as a dashed diagonal, because that is what a one-pixel oblique line IS.
 	# draw_arc_pix spans centre-radius +/- half its thickness, so a thickness equal to the
 	# radius and a centre at half of it fills the whole upper half disc.
-	var plate := r - 3.0
+	var plate := plate_r
 	draw_arc_pix(c, plate * 0.5, plate, a0, a1, Color(0.12, 0.095, 0.105, 0.96))
 	# the ring the zones are inlaid into, a touch wider than they are on both sides.
 	# DRAWN BEFORE THE BEZEL, and that ordering is the whole reason the bezel exists
 	# visibly: a face 15 art px thick reaches r+7.5, so a rim laid down first is painted
 	# over.
-	draw_arc_pix(c, r, 15.0, a0, a1, Color(0.09, 0.07, 0.08, 0.92))
+	draw_arc_pix(c, band, bw + 6.0, a0, a1, Color(0.09, 0.07, 0.08, 0.92))
 	# each zone as one segment, cut from its neighbours by a hair of the face showing
 	# through. Zones already passed burn bright, the rest are dim - a fuel gauge lights the
 	# part of the scale you have used up, so which band the needle is in reads twice.
@@ -20387,7 +20425,7 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 		var to := float(z["to"])
 		var zc: Color = z["col"]
 		var lit := frac >= from - 0.001
-		draw_arc_pix(c, r + 1.0, 9.0,
+		draw_arc_pix(c, band, bw,
 			lerpf(a0, a1, from) + (GAUGE_GAP if from > 0.0 else 0.0),
 			lerpf(a0, a1, to) - (GAUGE_GAP if to < 1.0 else 0.0),
 			Color(zc.r, zc.g, zc.b, GAUGE_LIT if lit else GAUGE_DIM))
@@ -20404,27 +20442,31 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	var edges := {0.0: true}
 	for z2 in GAUGE_ZONES:
 		edges[snappedf(float(z2["to"]), 0.001)] = true
+	var tick_out := band - bw * 0.5 - 2.0
 	for e in edges:
-		draw_spoke_pix(c, lerpf(a0, a1, float(e)), r - 7.0, r - 4.0, ap * 2.0,
+		draw_spoke_pix(c, lerpf(a0, a1, float(e)), tick_out - 3.0, tick_out, ap * 2.0,
 			Color(0.86, 0.78, 0.70, 0.7))
-	draw_arc_pix(c, r - 7.5, 1.5, a0, a1, Color(0.40, 0.32, 0.30, 0.55))   # the face's inner lip
+	draw_arc_pix(c, tick_out - 3.5, 1.5, a0, a1, Color(0.40, 0.32, 0.30, 0.55))   # the face's inner lip
 	# the BEZEL, over the face's outer edge: a warm lip and a dark ring outside it, so the
 	# dial reads as an instrument set into the card rather than as four coloured strokes
 	# lying on it.
-	draw_arc_pix(c, r + 6.5, 1.5, a0, a1, Color(0.58, 0.45, 0.38, 0.85))
-	draw_arc_pix(c, r + 9.0, 4.0, a0, a1, Color(0.15, 0.11, 0.12, 0.95))
+	if not art_blit("ui/gauge_face", c):
+		draw_arc_pix(c, r + 6.5, 1.5, a0, a1, Color(0.58, 0.45, 0.38, 0.85))
+		draw_arc_pix(c, r + 9.0, 4.0, a0, a1, Color(0.15, 0.11, 0.12, 0.95))
 	# THE BEST THE ROOM EVER GOT THIS ACT: a pin standing in the RIM, so a memory mark can
 	# never be read as the live needle - it used to be a spoke straight through the
 	# coloured band, which is the same mistake the divisions were making.
 	if peak > 0.0:
-		draw_spoke_pix(c, lerpf(a0, a1, clampf(peak, 0.0, 1.0)), r + 5.5, r + 10.5, ap * 1.5,
+		draw_spoke_pix(c, lerpf(a0, a1, clampf(peak, 0.0, 1.0)),
+			band + bw * 0.5 + 1.5, band + bw * 0.5 + 6.5, ap * 1.5,
 			Color(1.0, 0.97, 0.85, 0.85))
 	# THE NEEDLE: a slim tapered blade off a hub, with a short counterweight behind the
 	# pivot. A dark under-blade first, so it reads against a lit zone too.
 	var na := lerpf(a0, a1, frac)
 	var tipc := gauge_color(frac)
-	draw_spoke_pix(c, na, -9.0, r + 2.0, 11.0, Color(0.05, 0.04, 0.045, 0.95))
-	draw_spoke_pix(c, na, -7.0, r - 1.0, 8.0, Color(1.0, 0.96, 0.90))
+	var tip := band + bw * 0.5 - 1.0
+	draw_spoke_pix(c, na, -9.0, tip + 1.0, 11.0, Color(0.05, 0.04, 0.045, 0.95))
+	draw_spoke_pix(c, na, -7.0, tip - 2.0, 8.0, Color(1.0, 0.96, 0.90))
 	# ...and a HUB big enough to be one. At three art pixels the old cap rounded into a
 	# four-pixel square sitting on the needle rather than a boss the needle turns on; the
 	# rings have to be a couple of art pixels apart each to read as rings at all.
@@ -20442,7 +20484,7 @@ func draw_gauge(c: Vector2, r: float, frac: float, peak: float, label: String, f
 	# in the red, the band itself pulses: the one number in the game that kills a set
 	if frac <= float(GAUGE_ZONES[0]["to"]):
 		var warn := 0.35 + 0.35 * sin(float(tick) * 0.16)
-		draw_arc_pix(c, r + 1.0, 9.0, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])) - GAUGE_GAP,
+		draw_arc_pix(c, band, bw, a0, lerpf(a0, a1, float(GAUGE_ZONES[0]["to"])) - GAUGE_GAP,
 			Color(1.0, 0.35, 0.28, warn))
 
 
