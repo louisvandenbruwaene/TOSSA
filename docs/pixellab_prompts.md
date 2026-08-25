@@ -586,3 +586,57 @@ smudge in a disc.
            this exact pair of objects at this exact size: **change the OUTLINE, not the middle.**
            A bullseye and a stopwatch are both "a circle with something small inside"; one grows
            spokes and the other a crown, and that much survives being small.
+
+
+## The crowd gauge's bezel (`ui/gauge_face`)
+
+2026-08-25, Louis: "also regenerate a prettier happiness meter with pixellab". THE CROWD dial
+was drawn entirely from primitives, and had already been rebuilt once by hand for the same
+complaint - a good VECTOR gauge, which is exactly why it still read as one.
+
+`create_image_pixflux`, 112x64, `no_background`, `selective outline`, `basic shading`,
+`low detail`. `scripts/install_gauge.py` cuts everything inside the rim, snaps the rest to the
+locked 48, and publishes `_GAUGE` (**copy that block into the manifest by hand - nothing syncs
+them**, same hazard as `_TORCH`).
+
+**WHAT IS PAINTED IS THE PART THAT DOES NOT MOVE, AND THAT IS THE WHOLE DESIGN.** Painted: the
+rim. Drawn: the four coloured zones, the graduation ticks, the needle, the peak pin, the hub.
+Everything inside the rim changes state - the zones light as the needle passes them and the hub
+takes the live zone's colour - and a baked instrument answers nothing.
+
+THREE ROLLS, and the two failures are the reusable part:
+
+  seed 3   the full ornate instrument: a thick antique brass bezel, a dark face, the red ->
+           orange -> yellow -> green scale in the right order, ticks, a pivot boss - and a
+           needle, after being told not to draw one (same family as the unlit torch). A
+           beautiful picture and the WRONG ONE. Keeping the housing and repainting only the
+           scale channel gave a face carrying the generation's own baked shading, a streak of
+           needle no colour test could separate from the ticks, and a brass gone muddy through
+           the palette snap. **The generator is good at a chunky ring of lit metal and bad at a
+           large flat dark surface** - the same division the props already record.
+  seed 17  a full ROUND speedometer with green on the left and red on the right. Asking for
+           "the upper half of a round dial" gets a whole dial; models do not draw partial
+           shapes.
+  seed 9   SHIPPED, first roll of its prompt. Ask only for what is being kept:
+
+    the upper half of a round analogue gauge seen straight on, filling the whole frame: a THIN
+    bright polished gold rim, only a few pixels thick, curving around the outer edge with one
+    tiny round rivet at each end, and inside it a very large plain deep black dial face taking
+    up almost all of the picture. The gold rim is evenly bright all the way round, warm and
+    clean. Nothing else at all inside the face: no needle, no pointer, no hand, no coloured
+    band, no numbers, no letters, no ticks, no glass, no glare, no background
+
+    -> 112x63 ring, bezel from 47.3, outer 55.6, 9 colours.
+
+**AND THE PAINTING OWNS THE RIM, NOT THE SCALE.** The first wiring laid the game's zones into
+the groove seed 3 had painted, on the reasoning that the art should own its own geometry. The
+result was measurably worse: the coloured arc landed at 60-81% of the radius where the drawn
+instrument had it at 74-90%, so the one thing a player reads mid-set came out smaller and
+further from the edge, inside a prettier ring. `bezel_in` - where the metal starts - is the only
+constraint a rim can impose. Everything inside it is the game's business.
+
+**A CENTRE IS SOLVED, NOT MEASURED.** "The middle of the widest row" reads the bezel's flat
+bottom, which the model draws a few pixels below the true centre and thicker on one side than
+the other; three pixels of error puts the drawn scale visibly off the painted rim. Fit the
+(cx, cy) that minimises the spread of the rim's own radii - and fit it on the RIM rather than on
+a coloured band, because the rim is the one thing every roll has.
