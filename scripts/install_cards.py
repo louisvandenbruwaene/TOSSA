@@ -102,26 +102,35 @@ def round_corners(rgba: np.ndarray, radius: int) -> np.ndarray:
 # 13,312 pixels filled, with the figure, the hat, the white ball and the boots untouched.
 DECK_BG = (56, 24, 16)
 
-# card -> the background colours to flood from the frame edge. Everything reachable from an
-# edge THROUGH these colours becomes DECK_BG; anything else (the cast shadow behind the temple,
-# the pool under the boots) is left exactly as painted.
+# card -> the background colours to flood from the frame edge, and any enclosed POCKET of
+# background the edge cannot reach. Everything reachable through these colours becomes DECK_BG;
+# anything else (the cast shadow behind the temple, the pool under the boots) is left as painted.
+#
+# A POCKET IS RECORDED, NOT DETECTED (2026-08-25). The rabbit roll of `btb` shows daylight
+# between the performer's legs, and that gap is walled off from the frame edge by one row of his
+# own boots - so the edge fill left a bright crimson pillar standing under him from the coat hem
+# to the bottom of the card. It cannot be found by colour, because the pillar is the same palette
+# entry as the lit side of his coat, and it should not be found by size or position either: a
+# rule that fills "small leftover components" would eventually eat a highlight. One coordinate
+# per card, written down beside the prompt that produced it, is the same call `pixelise_paint.py`
+# makes with its per-stem SHIFT - the asset stays rebuildable from the prompt plus one line.
 BG_FIX = {
-	"btb": [(144, 48, 48), (204, 56, 61)],
-	"columns": [(112, 32, 32)],
+	"btb": {"cols": [(144, 48, 48), (204, 56, 61)], "seeds": [(52, 122)]},
+	"columns": {"cols": [(112, 32, 32)]},
 }
 
 
-def flatten_bg(rgba: np.ndarray, seeds: list[tuple[int, int, int]]) -> np.ndarray:
-	"""Repaint the border-connected background to DECK_BG."""
+def flatten_bg(rgba: np.ndarray, fix: dict) -> np.ndarray:
+	"""Repaint the background to DECK_BG, from the frame edge and any recorded pocket."""
 	from collections import deque
 
 	out = rgba.copy()
 	h, w = out.shape[:2]
-	want = {tuple(c) for c in seeds}
+	want = {tuple(c) for c in fix["cols"]}
 	seen = np.zeros((h, w), bool)
 	q: deque = deque()
 	edge = [(y, x) for x in range(w) for y in (0, h - 1)] + [(y, x) for y in range(h) for x in (0, w - 1)]
-	for y, x in edge:
+	for y, x in edge + [(py, px) for px, py in fix.get("seeds", [])]:
 		if tuple(out[y, x, :3]) in want and not seen[y, x]:
 			seen[y, x] = True
 			q.append((y, x))
