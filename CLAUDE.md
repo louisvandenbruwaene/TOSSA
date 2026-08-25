@@ -1373,6 +1373,20 @@ review" for the accept/reject examples and why.
   themselves answer to. **Anything on these cards is measured against `s.y - 18`**, not against
   the row above it: a 22px keycap at the old baseline hung 14px below the card's own bottom edge,
   and the previous 70px card did the same by 2px, which is small enough to have shipped unnoticed.
+- **THE CROWD DIAL HAS A PAINTED RIM AND A DRAWN EVERYTHING-ELSE (2026-08-25, Louis: "also
+  regenerate a prettier happiness meter with pixellab").** `ui/gauge_face` is a thin gold bezel
+  arc and nothing more; the four coloured zones, the ticks, the needle, the peak pin and the hub
+  are still drawn, because every one of them changes state. **Paint what does not move.**
+  Two things are worth keeping from getting there. **The generator is good at a chunky ring of
+  lit metal and bad at a large flat dark surface** - a roll that drew the whole instrument
+  (bezel, face, scale, ticks, boss, and a needle it was told not to draw) gave a face carrying
+  its own baked shading and a brass that went muddy through the palette snap, and measured worse
+  than the primitives it replaced. And **the painting owns the RIM, not the SCALE**: wiring the
+  game's zones into the groove that roll had painted put the coloured arc at 60-81% of the
+  radius where the drawn instrument had it at 74-90%, so the thing a player reads mid-set came
+  out smaller inside a prettier ring. `_GAUGE` therefore publishes two numbers - where the metal
+  starts and how far it reaches - and Game.gd decides its own scale. Same hand-copy hazard as
+  `_TORCH`: nothing syncs `scripts/install_gauge.py`'s printed block into the manifest.
 - **AND SO IS THE GILT DIVIDER - DO NOT ADD ANOTHER (2026-08-25, Louis, on the last one left,
   under the title: "there is still a golden symbol on the title screen just below tossa.
   (remember to never use those again)").** `draw_ornament` had eighteen live call sites: a rule
