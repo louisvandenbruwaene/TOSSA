@@ -497,6 +497,31 @@ entry). Rolling until a flat field lands on the right palette entry is the arith
              (seed 11)  -> 17 colours, 0 off-palette, first roll, no repair needed (it landed on
              (56,24,16) by itself).
 
+**AND THE BALL BECAME A RABBIT (2026-08-25, Louis: "regenerate the behind the back card: the
+fingers and legs look wrong; perhaps make him hold something funny like a rabbit").** He was right
+about both faults - the gripping hand was a pale blob with no readable fingers, and the trousers
+came back patched and holed, because a 104x128 figure spends about 30 rows on two legs and the
+model fills them with detail there is no room for. The rabbit answers the hand directly: **an
+object big enough to see is also an object big enough to hide a hand inside**, so there are no
+fingers left to draw wrong. The legs were fixed by asking for less, not more - "plain smooth dark
+trousers with no patches and no holes, two straight legs".
+
+    btb (rabbit)  ...One arm is bent round BEHIND HIS BACK at waist height and in that hand he
+                  holds a WHITE RABBIT by the scruff of its neck, the rabbit hanging calmly with
+                  its two long ears flopping down and its little back feet dangling, big and
+                  bright against the crimson coat. ... Clean simple shapes: plain smooth dark
+                  trousers with no patches and no holes, two straight legs, one simple closed fist
+                  gripping the rabbit. ...  (direction north, seed 19, first roll)
+                  -> 24 colours, 0 off-palette, 9,844 px flattened.
+
+**A FIGURE WITH ITS LEGS APART NEEDS A POCKET SEED.** This roll shows daylight between the legs,
+and that gap is walled off from the frame edge by one row of his own boots - so the edge flood
+fill left a bright crimson PILLAR standing under him from the coat hem to the bottom of the card.
+It cannot be found by colour (the pillar is the same palette entry as the lit side of his coat)
+and it must not be found by size (a rule that eats "small leftover components" eventually eats a
+highlight). `BG_FIX` takes one recorded coordinate per card, which is the same call the venue
+paintings' per-stem `SHIFT` makes: the asset stays rebuildable from the prompt plus one line.
+
 **"REALISTIC" IS A LIST OF PARTS, NOT AN ADJECTIVE.** The old racket was a tan loop with a
 coarse mesh on a stick. What made the new one read as a racket is naming the four things a
 racket HAS - frame, strings, throat, grip - and the material of each. The word "realistic" on

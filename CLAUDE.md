@@ -1373,6 +1373,17 @@ review" for the accept/reject examples and why.
   themselves answer to. **Anything on these cards is measured against `s.y - 18`**, not against
   the row above it: a 22px keycap at the old baseline hung 14px below the card's own bottom edge,
   and the previous 70px card did the same by 2px, which is small enough to have shipped unnoticed.
+- **AND SO IS THE GILT DIVIDER - DO NOT ADD ANOTHER (2026-08-25, Louis, on the last one left,
+  under the title: "there is still a golden symbol on the title screen just below tossa.
+  (remember to never use those again)").** `draw_ornament` had eighteen live call sites: a rule
+  with a centre flourish under the title of almost every screen in the game, plus three spacer
+  rows in the credits roll. **A title does not need underlining, and a divider between two things
+  the layout has already separated is decoration answering a question nobody asked** - space,
+  alignment and the screen's own painting do that work, and a gold squiggle on top of them is a
+  fourth voice repeating it. The credits keep the vertical advances their divider rows carried, so
+  the roll's spacing is unchanged and only the flourish is gone.
+  `draw_capsule_art` keeps this one too, for the poster reason above, and that single caller is
+  what keeps `ui/rule_flourish` from being orphaned.
 - **THE GILT FRAME IS STORE ART, NOT A MENU (2026-08-25, Louis: "the golden border around the
   screen is still there and it looks bad").** `draw_frame` ringed seven live screens - the day hub,
   settings, slots, the difficulty and play-mode cards, the controls sheet, Records and History - and
