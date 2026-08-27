@@ -22965,30 +22965,27 @@ func stat_goal(which: String, val: int) -> Dictionary:
 			return {"from": previous, "to": previous,
 				"label": "ready for every move", "done": true}
 		"str":
-			# Finish the next set of the prop in hand, one prop's ladder at a time, in
-			# weight order. Once a prop's own fifteen fit, move on to the next heavier
-			# prop's own ladder - NEVER hop to whichever prop's target is numerically
-			# closest right now, which is what the previous version did (`best_to`
-			# compared raw target numbers across every prop from the one in hand
-			# upward). Measured on the Ball ladder: at Strength 90, still eleven points
-			# short of finishing Torches (which need 120), that comparison found the
-			# Chainsaw's 7th unit at 91 - one point closer than Torch's own next rung -
-			# and the road jumped to "7 Chainsaws" out of nowhere, then jumped BACK to
-			# Torches the very next point once that coincidence passed. A player
-			# investing steadily through Torches saw an unrelated, far-more-expensive
-			# prop flash up as "almost there" for one tick. Stopping at the FIRST
-			# not-yet-complete prop in catalog order can never do that: the road can
-			# only ever advance through the ladder it is already on.
-			var current_unit := prop_str_unit()
-			for kind in range(prop_type, PROPS.size()):
+			# Whichever prop's next object slot is SOONEST, whatever prop that is - not
+			# only the one in hand (Louis: "show whichever prop set is closest: 7 rings
+			# or 4 balls, whatever is next"). Every prop is a candidate; the one needing
+			# the fewest more points wins, and since every candidate's count is already
+			# "what you don't yet own", the smallest TARGET is the smallest remaining
+			# distance from the same `val`.
+			var best_to := cap + 1
+			var best_from := 0
+			var best_label := ""
+			for kind in PROPS.size():
 				var unit := prop_str_unit(kind)
-				if unit < current_unit:
-					continue
 				var count := maxi(MIN_BALLS, int(val / unit) + 1)
 				if count > MAX_BALLS_HARD:
-					continue   # this prop's ladder is already complete - the next heavier one is next
+					continue   # already own the max of this one; it can't be the next goal
 				var target := unit * count
-				return {"from": target - unit, "to": target, "label": "%d %s" % [count, prop_plural(kind)]}
+				if target < best_to:
+					best_to = target
+					best_from = target - unit
+					best_label = "%d %s" % [count, prop_plural(kind)]
+			if best_to <= cap:
+				return {"from": best_from, "to": best_to, "label": best_label}
 			return {"from": mini(val, STR_CAP - STR_FRAME_LAST),
 				"to": mini(val, STR_CAP - STR_FRAME_LAST),
 				"label": "ready for every set", "done": true}
