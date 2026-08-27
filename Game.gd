@@ -22971,19 +22971,47 @@ func stat_goal(which: String, val: int) -> Dictionary:
 			# the fewest more points wins, and since every candidate's count is already
 			# "what you don't yet own", the smallest TARGET is the smallest remaining
 			# distance from the same `val`.
+			# Ball's unit is 1, the smallest in the catalog, so its own next count is
+			# NEVER further away than any other prop's - at best every other prop can only
+			# TIE it (its multiple happens to land on the same target Ball always hits a
+			# point early). A strict "<" left Ball winning every one of those ties simply
+			# for being checked first, which meant a real coincidence - hitting 3 rings
+			# for the first time at the exact Strength that would also buy a 9th ball -
+			# was invisible: the road only ever announced "9 balls" and the new prop
+			# unlocking alongside it went unmentioned. On a tie, the heavier prop wins.
+			# A ONE-POINT STEP HAS NO METER TO SHOW (Louis: "if the next goal is only one
+			# extra, include the next one also - eg 4, 5, 6 for balls: just show 4, 5 and
+			# then 5, 6"). Ball's unit is 1, so `from` (= target - unit) always lands
+			# exactly on `val` itself - the bar's fill fraction is (val-from)/(to-from) =
+			# 0/1 on every single tick, for the entire Ball and Egg ladder. It can never
+			# show a half-full state; investing the one point that completes it also
+			# instantly recomputes a new goal with the same zero-width problem. Widening
+			# a unit-1 step to cover TWO real counts (round the target count UP to the
+			# next even number) gives the bar an actual two-point span to fill through:
+			# 0%, 50%, 100%, instead of flicking between two states that are both 0%.
 			var best_to := cap + 1
 			var best_from := 0
 			var best_label := ""
+			var best_unit := 0
 			for kind in PROPS.size():
 				var unit := prop_str_unit(kind)
 				var count := maxi(MIN_BALLS, int(val / unit) + 1)
+				var step := 1
+				if unit < 2:
+					var widened := ((count + 1) / 2) * 2
+					if widened <= MAX_BALLS_HARD:
+						count = widened
+						step = 2
+					# else: `count` is already the final, unpairable rung - leave it as
+					# a normal one-wide goal rather than rounding it past the ceiling.
 				if count > MAX_BALLS_HARD:
 					continue   # already own the max of this one; it can't be the next goal
 				var target := unit * count
-				if target < best_to:
+				if target < best_to or (target == best_to and unit > best_unit):
 					best_to = target
-					best_from = target - unit
+					best_from = target - unit * step
 					best_label = "%d %s" % [count, prop_plural(kind)]
+					best_unit = unit
 			if best_to <= cap:
 				return {"from": best_from, "to": best_to, "label": best_label}
 			return {"from": mini(val, STR_CAP - STR_FRAME_LAST),
