@@ -29,10 +29,6 @@ work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the 
 
 Codex improvements:
 
-- **The stat sheet is a set of short roads, not four career-length rulers:** each panel keeps
-  its established layout but fills only toward the next useful goal. Accuracy points toward
-  the next Accuracy-gated move, Strength toward the next object set, Endurance advances in
-  ten-point bands, and Speed advances one whole percent of slow motion at a time.
 - **New-career tutorial persistence:** the initial `"balls"` lesson marker is saved before the
   lesson starts. Closing the game during onboarding must never reopen that slot past the tutorial.
 - **Actionable validation failures:** `scripts/validate.sh` removes temporary logs after a pass but
