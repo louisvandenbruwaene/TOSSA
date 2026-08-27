@@ -1512,8 +1512,8 @@ var ante: Array[int] = [0, 0, 0, 0, 0, 0, 0]   # complete acts per venue: the st
 # progression / stats (persisted per save slot, see save_file())
 var accuracy := 5         # lands throws closer; low Accuracy forces Perfect catches
 var strength := 6         # quicker high throws; gates ball count and hard tricks
-var endurance := 0        # raises max Stamina (200 base + 8 each, to 1000); gates heavy props later
-var speed := 0            # the Speed stat: every 4 points slows the world 1% (cap 100 = 25%)
+var endurance := 0        # raises max Stamina by 8 per point (200 base, 1,800 at the cap)
+var speed := 0            # every 10 points adds 1% permanent slow motion (20% at the cap)
 var pie_count := 0        # Uncle Dan's Pies in the pantry (bought in the shop)
 var pie_active := false   # a pie eaten in the hub works until you SLEEP
 var amazing_until := -999999   # real-frame deadline of the Amazing! burst
@@ -22932,164 +22932,80 @@ func stat_cap(which: String) -> int:
 		_: return ACC_CAP
 
 
-func stat_milestones(which: String) -> Array[Dictionary]:
-	# THE one list of what a stat's points actually BUY. Every reader of it - the growth
-	# columns' pips, the "next point buys" line - uses this and nothing else, so no two
-	# places on screen can disagree about what a point is worth.
-	#
-	# Every entry is a threshold the GAME ITSELF gates on, read out of the real tables
-	# (PATTERNS/TRICKS' own acc/str fields, PROP_STR_UNIT) or computed from the real
-	# real formula - never a decorative number. Louis, 2026-07-27: Speed had a line
-	# saying what its points do and the others did not, so nobody could tell what
-	# Accuracy or Strength were for.
+const ENDURANCE_GOAL_STEP := 10
+
+
+func stat_goal(which: String, val: int) -> Dictionary:
+	# Each column is a short road to ONE useful result, not a career-long ruler. Once the
+	# result is reached this function advances the road and the same panel starts filling
+	# again. `from` is the preceding real threshold, so partial progress survives reopening
+	# the sheet and every invested point visibly moves the bar.
 	var cap := stat_cap(which)
-	var by_val: Dictionary = {}
-	# WHICH VALUES NAME A SKILL, tracked as it is built (2026-07-30). `stat_pips` thins this
-	# list for display and a skill must never be the entry it drops: "Half Shower" is why a
-	# player is looking at the Accuracy track at all, where "+3 catch frames" is one rung of a
-	# ladder that has five of them.
-	var skill_at: Dictionary = {}
-	var add := func(v: int, s: String, is_skill := false) -> void:
-		if v <= 0 or v > cap:
-			return
-		by_val[v] = String(by_val.get(v, "")) + (", " if by_val.has(v) else "") + s
-		if is_skill:
-			skill_at[v] = true
-	# the skills each stat gates, straight from their own tables. EVERY stat is asked
-	# now, not just acc/str: the tricks carry Speed and Endurance walls since 2026-07-27
-	# and a wall nobody can see is a wall nobody plans around.
-	for p in PATTERNS:
-		if p.has(which):
-			add.call(int(p[which]), String(p["name"]), true)
-	for t in TRICKS:
-		if t.has(which):
-			add.call(int(t[which]), String(t["name"]), true)
+	if val >= cap:
+		return {"from": cap, "to": cap, "label": "mastered", "done": true}
 	match which:
 		"acc":
-			# THE TWO FOCUS STAGES, and they no longer overlap: 101-150 is the stamina
-			# discount, 151-200 is the timing, five frames one at a time.
-			add.call(100, "Focus: less stamina")
-			add.call(150, "cheapest throws")
-			for f in range(1, FOCUS_WINDOW_MAX + 1):
-				add.call(150 + f * int(FOCUS_WINDOW_PER), "+%d catch frame%s" % [f, "" if f == 1 else "s"])
+			# Accuracy points unlock named moves. Patterns and tricks share the Skills menu,
+			# so both are goals here; mechanical Focus sub-steps no longer crowd the road.
+			var by_val: Dictionary = {}
+			for table: Array in [PATTERNS, TRICKS]:
+				for move: Dictionary in table:
+					if move.has("acc"):
+						var at := int(move["acc"])
+						by_val[at] = String(by_val.get(at, "")) \
+							+ (", " if by_val.has(at) else "") + String(move["name"])
+			var thresholds := by_val.keys()
+			thresholds.sort()
+			var previous := 0
+			for raw_at in thresholds:
+				var at := int(raw_at)
+				if at > val:
+					return {"from": previous, "to": at, "label": String(by_val[at])}
+				previous = at
+			return {"from": previous, "to": previous,
+				"label": "ready for every move", "done": true}
 		"str":
-			# WHAT RAW MUSCLE OPENS, straight off the one rule (PROP_STR_UNIT x count) rather
-			# than the old BALL_GATES table. Only the prop IN HAND is listed, because the
-			# answer is different for every prop now - fifteen balls is 15 points and fifteen
-			# chainsaws is 195, and a single ladder cannot say both. The shop cards carry each
-			# prop's own arithmetic at the point of choice.
-			var unit := prop_str_unit()
-			for n in range(MIN_BALLS, MAX_BALLS_HARD + 1):
-				add.call(unit * n, "%d %s" % [n, prop_plural()])
-			# ...AND WHAT A HEAVIER PROP WOULD ASK, which is what puts anything at all in the top
-			# of this track (2026-07-30). The count ladder for the prop IN HAND covers the bottom
-			# of it and nothing else - a full fifteen clubs is Strength 60 of 200, fifteen balls
-			# is 15 - so however the pips were thinned, Strength stayed a cluster at the foot with
-			# one mark at the ceiling. That is not a display problem, it is missing content: the
-			# reason to push Strength past a full set of what you hold is to hold something
-			# HEAVIER, and it is the same rule (PROP_STR_UNIT x count) either way, so the numbers
-			# are as real as the ones below them. With clubs in hand this adds 15 knives at 90,
-			# 15 torches at 120 and 15 chainsaws at 195, and the track finally reads end to end.
-			# Only heavier props, and only their FULL set: one row per prop, never a second
-			# thirteen-rung ladder.
-			for pk in PROPS.size():
-				if prop_str_unit(pk) > unit:
-					add.call(prop_str_unit(pk) * MAX_BALLS_HARD,
-						"%d %s" % [MAX_BALLS_HARD, prop_plural(pk)])
-			add.call(STR_CAP - STR_FRAME_LAST, "+1 catch frame")
+			# Finish the next set of the prop in hand, one prop's ladder at a time, in
+			# weight order. Once a prop's own fifteen fit, move on to the next heavier
+			# prop's own ladder - NEVER hop to whichever prop's target is numerically
+			# closest right now, which is what the previous version did (`best_to`
+			# compared raw target numbers across every prop from the one in hand
+			# upward). Measured on the Ball ladder: at Strength 90, still eleven points
+			# short of finishing Torches (which need 120), that comparison found the
+			# Chainsaw's 7th unit at 91 - one point closer than Torch's own next rung -
+			# and the road jumped to "7 Chainsaws" out of nowhere, then jumped BACK to
+			# Torches the very next point once that coincidence passed. A player
+			# investing steadily through Torches saw an unrelated, far-more-expensive
+			# prop flash up as "almost there" for one tick. Stopping at the FIRST
+			# not-yet-complete prop in catalog order can never do that: the road can
+			# only ever advance through the ladder it is already on.
+			var current_unit := prop_str_unit()
+			for kind in range(prop_type, PROPS.size()):
+				var unit := prop_str_unit(kind)
+				if unit < current_unit:
+					continue
+				var count := maxi(MIN_BALLS, int(val / unit) + 1)
+				if count > MAX_BALLS_HARD:
+					continue   # this prop's ladder is already complete - the next heavier one is next
+				var target := unit * count
+				return {"from": target - unit, "to": target, "label": "%d %s" % [count, prop_plural(kind)]}
+			return {"from": mini(val, STR_CAP - STR_FRAME_LAST),
+				"to": mini(val, STR_CAP - STR_FRAME_LAST),
+				"label": "ready for every set", "done": true}
 		"end":
-			# no named skill: labelled with the stamina pool it reaches, which IS the effect
-			for frac in [0.25, 0.5, 0.75, 1.0]:
-				var ev := int(round(float(cap) * frac))
-				add.call(ev, "%d stamina" % int(round(TOSSA_BALANCE.stamina_capacity(ev))))
+			var target := mini(cap, (int(val / ENDURANCE_GOAL_STEP) + 1) * ENDURANCE_GOAL_STEP)
+			return {"from": maxi(0, target - ENDURANCE_GOAL_STEP), "to": target,
+				"label": "%d stamina" % int(round(TOSSA_BALANCE.stamina_capacity(target)))}
 		"spd":
-			# every whole percent of slow motion is its own step: SPEED_PER_PCT points buys
-			# one, and it accrues CONTINUOUSLY (see slow_target) - a point is never wasted
-			# waiting for a milestone, the pips just mark where the number ticks over
-			for pct in [2, 5, 10, 15, 20]:
-				add.call(pct * SPEED_PER_PCT, "%d%% slow" % pct)
-	var out: Array[Dictionary] = []
-	var vals := by_val.keys()
-	vals.sort()
-	for v in vals:
-		out.append({"val": int(v), "label": String(by_val[v]), "skill": skill_at.has(int(v))})
-	# THE SYNTHETIC "MAX" ONLY EARNS A ROW IF IT IS CLEAR OF THE LAST REAL ONE. Strength's top
-	# milestone is the catch frame at STR_CAP - STR_FRAME_LAST, which is 195 against a cap of
-	# 200: two rows five points apart, drawn as two pips five PIXELS apart at the top of the
-	# track. "MAX" says nothing the track's own ceiling does not already say, so where it would
-	# crowd a real milestone it simply is not added.
-	if out.is_empty() or float(cap) - float(out[out.size() - 1]["val"]) >= float(cap) * STAT_PIP_GAP:
-		out.append({"val": cap, "label": "MAX", "skill": false})
-	return out
-
-
-const STAT_PIP_GAP := 0.075   # the closest two PIPS may sit, as a fraction of the stat's cap.
-							  # 15 points of 200 is 16px on the growth column's track, and a
-							  # label needs 15 of those - so this is really the label's spacing
-							  # floor promoted to where the pips are chosen, rather than left
-							  # to the drawing to paper over after the fact.
-
-func stat_pips(which: String) -> Array[Dictionary]:
-	# THE MILESTONES A COLUMN DRAWS, which is deliberately not all of them (2026-07-30, Louis:
-	# the stat milestones "look ugly and cramped ... the rest you should choose what to show or
-	# not"). Strength offers one threshold per count from 3 to 15 of the prop in hand, and with
-	# clubs that is thirteen pips inside the bottom 30% of the track: measured, a solid smear of
-	# white dots with four labels next to it, because the DRAWING already had a 15px spacing
-	# floor for labels and none at all for the pips it drew them beside. That mismatch is the
-	# whole bug - the screen was quietly admitting the list was too dense for the space and then
-	# drawing it anyway.
-	#
-	# What survives, in order of priority:
-	#   - anything that names a SKILL. That is what a player is climbing toward.
-	#   - the TOP milestone, so the ceiling always has a mark. If it lands within the gap of a
-	#     kept non-skill row, it takes that row's place rather than crowding it.
-	#   - a full set of the prop in hand (Strength's most aspirational number).
-	#   - whatever else clears STAT_PIP_GAP from the last row kept.
-	#
-	# THIS LIST MUST NEVER ANSWER "WHAT DOES MY NEXT POINT BUY", and that is the reason it is a
-	# second function rather than a filter inside stat_milestones. Thin the list the "next: X at
-	# N (+M)" line reads and the screen starts lying about the game: with clubs at Strength 20
-	# the true next threshold is 24 for a sixth club, and a thinned list would report 28 for a
-	# seventh. The pips are a summary; that line is a fact.
-	var full := stat_milestones(which)
-	if full.size() <= 2:
-		return full
-	var cap := stat_cap(which)
-	var min_gap := maxf(float(cap) * STAT_PIP_GAP, 1.0)
-	var top_val := int(full[full.size() - 1]["val"])
-	# the prop in hand fielded in full - Strength only, since it is the one stat whose rows are
-	# counts rather than effects
-	var keep_val := -1
-	if which == "str":
-		keep_val = prop_str_unit() * MAX_BALLS_HARD
-	var out: Array[Dictionary] = []
-	var last := -1.0e9
-	for nd: Dictionary in full:
-		var v := int(nd["val"])
-		var must := bool(nd.get("skill", false)) or v == top_val or v == keep_val
-		if not must and float(v) - last < min_gap:
-			continue
-		# a forced row that would crowd the previous one REPLACES it, unless that previous row
-		# is a skill - a named skill outranks a count and outranks the word MAX
-		if must and out.size() > 0 and float(v) - last < min_gap \
-				and not bool(out[out.size() - 1].get("skill", false)):
-			out[out.size() - 1] = nd
-			last = float(v)
-			continue
-		out.append(nd)
-		last = float(v)
-	return out
-
-
-func talent_nodes(which: String) -> Array[Dictionary]:
-	return stat_milestones(which)   # the tree and the sheet read the same list
+			var target := mini(cap, (int(val / SPEED_PER_PCT) + 1) * SPEED_PER_PCT)
+			return {"from": maxi(0, target - SPEED_PER_PCT), "to": target,
+				"label": "%d%% slow motion" % int(target / SPEED_PER_PCT)}
+	return {"from": val, "to": cap, "label": "mastery"}
 
 
 func draw_talent_tree(font: Font, s: Vector2) -> void:
-	# THE STAT SCREEN (shipped 2026-07-27; it replaced a set of four flat cards): four
-	# GROWTH COLUMNS that fill upward as you invest, each milestone pip a REAL PATTERNS/
-	# TRICKS threshold. Same sheet_sel / invest() / caps as the classic sheet - only the
-	# picture differs, so the two can never disagree on what a point is worth.
+	# Four short growth columns. Each keeps the established panel and controls, but fills
+	# toward the next goal returned by stat_goal() instead of the distant 200-point cap.
 	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.03, 0.02, 0.035, 0.9))
 	var pw := minf(1080.0, s.x - 48.0)
 	var ph := minf(662.0, s.y - 26.0)
@@ -23150,7 +23066,11 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		var val := int(b["val"])
 		var cap := int(b["cap"])
 		var cx := tx + float(bi) * (colw + gap)
-		var frac := clampf(float(val) / float(maxi(1, cap)), 0.0, 1.0)
+		var goal := stat_goal(String(b["id"]), val)
+		var goal_from := int(goal["from"])
+		var goal_to := int(goal["to"])
+		var goal_done := bool(goal.get("done", false))
+		var frac := TOSSA_BALANCE.goal_bucket_fill(val, goal_from, goal_to, goal_done)
 		# the column card: tinted and brighter-bordered when it is the active branch
 		var cardfill := Color(bcol.r * 0.14, bcol.g * 0.14, bcol.b * 0.16, 0.92) if active else Color(0.11, 0.09, 0.12, 0.85)
 		soft_card(Rect2(cx, coly, colw, colh), cardfill, Color(bcol.r, bcol.g, bcol.b, 0.9 if active else 0.28), 2.0 if active else 1.0, 13.0, 14.0)
@@ -23160,9 +23080,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		# THE MARK SITS BESIDE THE NUMBER, WHICH COSTS THE COLUMN NO HEIGHT. Above the name
 		# there is no room (the card starts 32px over its own title), and between the role
 		# line and the number there are twenty pixels - so a band of its own would have to be
-		# taken out of the growth track, which is the one thing on this card that genuinely
-		# needs its length: Strength carries twelve gates and already drops distant labels to
-		# a 15px spacing floor. Disc and digits are measured as ONE GROUP and centred
+		# taken out of the growth track. Disc and digits are measured as ONE GROUP and centred
 		# together, so the pair reads like the day hub's ledger cards rather than like a
 		# number knocked off centre.
 		var vstr := str(val)
@@ -23187,14 +23105,11 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		var icol := bcol.lerp(Color(1.0, 1.0, 1.0), 0.45)
 		stat_icon(String(b["id"]), icc, icol if active else Color(icol.r, icol.g, icol.b, 0.75))
 		draw_string(title_font(), Vector2(grp_x + 38.0, coly + 98.0), vstr, HORIZONTAL_ALIGNMENT_LEFT, vw + 8.0, ps(42), Color(1.0, 0.95, 0.82))
-		# the vertical GROWTH track: fills from the bottom up to val/cap, milestone pips
-		# at the real thresholds, the next one pulsing while a point is unspent
+		# The vertical growth track fills only from the preceding goal to the next one. A
+		# three-point Strength road to four rings should feel like three points, not 12 / 200.
 		var trk_w := 15.0
-		# the track sits LEFT of centre, not on it (2026-07-27, Louis: "make sure their
-		# descriptions are readable also and not cut off"). Centred, every pip label had
-		# less than half the column to live in and the useful half of each one was
-		# ellipsed away - "Focus: cheaper stam...". At 32% across, the labels get roughly
-		# 60% of the width and the whole ladder reads.
+		# The track sits left of centre so its one goal label gets roughly 60% of the card,
+		# enough for a move or object-set name without clipping.
 		var trk_x := cx + colw * 0.32 - trk_w * 0.5
 		var trk_top := coly + 122.0
 		var trk_bot := coly + colh - 76.0
@@ -23213,65 +23128,25 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 			trf.set_corner_radius_all(int(trk_w * 0.5))
 			trf.anti_aliasing = true
 			draw_style_box(trf, Rect2(trk_x, trk_bot - fh, trk_w, fh))
-		# TWO LISTS, AND THEY ARE NOT THE SAME LIST (2026-07-30 - see stat_pips). `nodes` is the
-		# complete truth and drives the "next: X at N (+M)" line under the track, because that
-		# line is a fact about the game. `pips` is the thinned ladder that gets drawn, because
-		# thirteen count thresholds do not fit in 215px however honest they are.
-		var nodes := talent_nodes(String(b["id"]))
-		var pips := stat_pips(String(b["id"]))
-		var next_i := -1
-		for ni in nodes.size():
-			if int(nodes[ni]["val"]) > val:
-				next_i = ni
-				break
-		# ...and the pip that PULSES is the next unreached one on the drawn ladder, which is not
-		# always the same threshold. It is not labelled "next" - it just shows which way the
-		# track is heading - and the exact figure sits immediately under it either way.
-		var next_pip := -1
-		for ni in pips.size():
-			if int(pips[ni]["val"]) > val:
-				next_pip = ni
-				break
-		var last_label_y := 1.0e9   # pips are labelled top-down with a spacing floor
-		for ni in pips.size():
-			var nd: Dictionary = pips[ni]
-			var nf := clampf(float(nd["val"]) / float(maxi(1, cap)), 0.0, 1.0)
-			var ppos := Vector2(trk_x + trk_w * 0.5, trk_bot - trk_h * nf)
-			var reached: bool = val >= int(nd["val"])
-			var isnext := ni == next_pip
-			if reached:
-				draw_circle(ppos, 5.0, Color(1.0, 1.0, 0.96, 0.95))
-			else:
-				icon_disc(ppos, 4.5, Color(0.09, 0.08, 0.10, 1.0),
-					Color(bcol.r, bcol.g, bcol.b, 0.95 if isnext else 0.45), 2.0)
-				if isnext and active and points > 0:
-					var pp := 0.5 + 0.5 * sin(float(tick) * 0.15)
-					draw_arc(ppos, 7.0 + 3.0 * pp, 0.0, TAU, 18, Color(bcol.r, bcol.g, bcol.b, 0.55 * (1.0 - pp)), 2.0, true)
-			# EVERY pip carries its label now (2026-07-27, Louis: Accuracy and Strength
-			# needed "the milestones like speed... that way the player knows what their
-			# points are doing"). They used to be bare on acc/str because their old
-			# labels were skill names at thresholds too close together to print; now
-			# stat_milestones gives them real EFFECTS too (the Focus stages, the props
-			# and counts Strength opens), and a spacing floor keeps a crowded column -
-			# Strength carries twelve ball gates - from printing through itself. The
-			# list is walked from the FOOT of the track upward, so the nearest
-			# thresholds always win the space and only distant ones are ever dropped.
-			if String(nd["label"]) != "" and last_label_y - ppos.y >= 15.0:
-				last_label_y = ppos.y
-				var plc := Color(0.9, 0.87, 0.78) if reached else (Color(bcol.r, bcol.g, bcol.b, 0.95) if isnext else Color(0.64, 0.61, 0.56, 0.85))
-				# the width is measured to the CARD's inner edge, not half the column:
-				# the track sits centred, so a label starting at its right side has
-				# only (colw/2 - the track's own half-width - padding) to live in
-				draw_fit_string(font, Vector2(trk_x + trk_w + 7.0, ppos.y + 4.0), String(nd["label"]), HORIZONTAL_ALIGNMENT_LEFT, cx + colw - 8.0 - (trk_x + trk_w + 7.0), 10, plc)
-		# what the NEXT point in this column works toward - a named skill for acc/str, the
-		# effect it reaches for end/spd (their pips are effect-labelled above). Uniform now.
-		var nl1 := ""
-		var nl2 := ""
-		if next_i >= 0:
-			nl1 = "next: %s" % (String(nodes[next_i]["label"]) if String(nodes[next_i]["label"]) != "" else "the cap")
-			nl2 = "at %d  (+%d)" % [int(nodes[next_i]["val"]), int(nodes[next_i]["val"]) - val]
+		# There is exactly one pip: the result this short road buys. The precise threshold
+		# and remaining points sit below it, so the label never has to compete with history.
+		var ppos := Vector2(trk_x + trk_w * 0.5, trk_top)
+		if goal_done:
+			draw_circle(ppos, 5.0, Color(1.0, 1.0, 0.96, 0.95))
 		else:
-			nl1 = "at the cap"
+			icon_disc(ppos, 4.5, Color(0.09, 0.08, 0.10, 1.0), bcol, 2.0)
+			if active and points > 0:
+				var pp := 0.5 + 0.5 * sin(float(tick) * 0.15)
+				draw_arc(ppos, 7.0 + 3.0 * pp, 0.0, TAU, 18,
+					Color(bcol.r, bcol.g, bcol.b, 0.55 * (1.0 - pp)), 2.0, true)
+		draw_fit_string(font, Vector2(trk_x + trk_w + 7.0, ppos.y + 4.0),
+			String(goal["label"]), HORIZONTAL_ALIGNMENT_LEFT,
+			cx + colw - 8.0 - (trk_x + trk_w + 7.0), 10,
+			Color(0.9, 0.87, 0.78) if goal_done else bcol)
+		var remaining := maxi(0, goal_to - val)
+		var nl1 := "goal complete" if goal_done else "%d point%s to go" % [
+			remaining, "" if remaining == 1 else "s"]
+		var nl2 := "" if goal_done else "goal at %d" % goal_to
 		draw_string(font, Vector2(cx + 6.0, trk_bot + 16.0), nl1, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, ps(11), Color(0.86, 0.82, 0.74))
 		if nl2 != "":
 			draw_string(font, Vector2(cx + 6.0, trk_bot + 31.0), nl2, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, ps(11), Color(0.66, 0.62, 0.58))
@@ -23294,7 +23169,7 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 		"acc": eff = "ACCURACY: off-Perfect catches hold more often. Past 100 it becomes Focus - a wider Perfect window and cheaper stamina."
 		"str": eff = "STRENGTH: heavier props fly cleaner and sit steadier in the hand, and higher object counts open up."
 		"end": eff = "ENDURANCE: raises your maximum stamina, the fuel every throw and catch spends."
-		"spd": eff = "SPEED: bends the whole act toward slow motion, so every catch window stretches (capped at 25%)."
+		"spd": eff = "SPEED: bends the whole act toward slow motion, so every catch window stretches (capped at 20%)."
 	var dy := py + ph - 62.0
 	draw_string(font, Vector2(tx, dy), eff, HORIZONTAL_ALIGNMENT_CENTER, innerw, ps(12), Color(0.82, 0.79, 0.72))
 	if debug_mode:
