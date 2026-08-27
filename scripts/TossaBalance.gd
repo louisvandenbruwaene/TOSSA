@@ -102,3 +102,12 @@ static func stamina_capacity(endurance: int) -> float:
 static func migrate_legacy_stamina(saved_stamina: float, endurance: int) -> float:
 	var old_capacity := 100.0 + 9.0 * float(maxi(0, endurance))
 	return clampf(saved_stamina / old_capacity, 0.0, 1.0) * stamina_capacity(endurance)
+
+
+static func goal_bucket_fill(value: int, bucket_start: int, bucket_goal: int,
+		complete: bool = false) -> float:
+	# Every stat card uses this same small-bucket rule: empty at this leg's start, full
+	# at its goal. A completed content ladder remains full even if passive stat points remain.
+	if complete or bucket_goal <= bucket_start:
+		return 1.0
+	return clampf(float(value - bucket_start) / float(bucket_goal - bucket_start), 0.0, 1.0)

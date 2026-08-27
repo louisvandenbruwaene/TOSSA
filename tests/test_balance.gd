@@ -66,6 +66,13 @@ func _init() -> void:
 			or not is_equal_approx(TOSSA_BALANCE.migrate_legacy_stamina(50.0, 0), 100.0):
 		push_error("Old saves must preserve their stamina percentage on the new curve.")
 		failed += 1
+	# Stat tracks are local buckets, never fractions of the 200-point career cap.
+	if not is_zero_approx(TOSSA_BALANCE.goal_bucket_fill(10, 10, 20)) \
+			or not is_equal_approx(TOSSA_BALANCE.goal_bucket_fill(15, 10, 20), 0.5) \
+			or not is_equal_approx(TOSSA_BALANCE.goal_bucket_fill(20, 10, 20), 1.0) \
+			or not is_equal_approx(TOSSA_BALANCE.goal_bucket_fill(150, 150, 150, true), 1.0):
+		push_error("Every stat goal bucket must be empty at its start and full at its end.")
+		failed += 1
 	# THE TRICK FACTOR IS UPSIDE, NOT A LADDER OF ITS OWN. This is the contract the
 	# 2026-08-19 rewrite exists to hold: before it, three tricks at the BACKYARD scored
 	# 1.26e34 - seven orders of magnitude past the Midnight Show's own final goal - because
