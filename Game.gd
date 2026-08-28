@@ -1420,10 +1420,11 @@ var hand_parked := [false, false]         # this hand caught while already holdi
                                           # a CATCHING hand now and may not throw again this
                                           # run - see catch_full_on / on_catch / on_throw_press
 var catch_flash := [-999, -999]
-var throw_from := [Vector2.ZERO, Vector2.ZERO]   # where each hand's last throw actually left
-												 # it - the release point, which is not always
-												 # a slot (a Behind the Back leaves from behind
-												 # the far hip). See hand_target's follow-through.
+var throw_from := [Vector2.ZERO, Vector2.ZERO]   # where each VISIBLE hand starts its release
+											 # follow-through. Usually the prop's from_pos;
+											 # Behind the Back is deliberately different because
+											 # its hidden far-hip launch has no painted arm pose.
+											 # See hand_target's follow-through and do_throw.
 var throw_kick := [-999, -999]            # tick of last throw, for the reach-up
 var last_drop_tick := -999               # for the juggler's wince expression
 
@@ -10105,11 +10106,20 @@ func hand_target(h: int) -> Vector2:
 	# been abandoned rather than thrown.
 	#
 	# The fix is a FOLLOW-THROUGH, not a slower hand: the target blends out of the real
-	# release point (throw_from, which is the prop's own from_pos, so it is right for a lane,
-	# a shower's outer launch and a Behind the Back's far hip alike) over the same 14 ticks
-	# the upward kick below already runs for, so the two are one gesture. Nothing about
+	# release point (throw_from, normally the prop's own from_pos, so it is right for a lane
+	# and a shower's outer launch) over the same 14 ticks the upward kick below already ran
+	# for, so the two are one gesture. Nothing about
 	# where a hand ENDS up changes, and there is time to spare - the next arrival at this
 	# hand is 70-odd ticks away and the ease itself takes about ten.
+	#
+	# BEHIND THE BACK IS THE DELIBERATE EXCEPTION (2026-08-28, Louis: "the hand looks bad,
+	# something jitters"). That throw's prop starts behind the opposite hip and is drawn
+	# behind the torso, but the painted arm bank contains only same-side juggling reaches.
+	# Sending hpos after the hidden release made the lookup run down to its innermost pose,
+	# cross FIG_PALM_MAX, swap to a detached fallback palm, then swap back: --handlog measured
+	# a 52px palm residual against the ordinary 1-4px. The prop keeps the far-hip launch; the
+	# visible hand follows from where it really was on the release frame, so no unsupported
+	# cross-body arm is invented and no renderer boundary is crossed.
 	#
 	# AND IT REPLACES THE UPWARD KICK RATHER THAN JOINING IT. There used to be a 22px lift
 	# here for the same 14 ticks, to "sell the release" - and a lift is the one thing this
@@ -11298,7 +11308,11 @@ func do_throw(h: int, hold: int) -> void:
 		if tg > _touch_throw:
 			_touch_throw = tg
 			_touch_throw_at = "%s, %s hand, t%d" % [String(PATTERNS[pattern]["name"]), hand_side(h), tick]
-	throw_from[h] = b.from_pos   # ...and the hand leaves from there too (see hand_target)
+	# The prop's hidden far-hip start is not a pose the front-facing painted arm bank owns.
+	# Keep that point for the BALL, but start the visible hand's follow-through where the hand
+	# actually was. Otherwise the arm lookup crosses its fallback boundary twice per throw,
+	# which is the Behind-the-Back hand jitter documented above hand_target.
+	throw_from[h] = hpos[h] if this_trick == TR_BTB else b.from_pos
 	throw_kick[h] = tick
 	charging[h] = false
 	if not started:
@@ -25056,9 +25070,12 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	#
 	# A CARRY LEG IS THE PROP IN THE HAND. It runs from the catch point to the throw point and
 	# is the pattern's own statement of when a hand is holding something, so a hand placed on
-	# its carried prop is right by construction, for every pattern and every trick, including
-	# the ones whose carry dips below the hand line (Behind the Back) or rides a lane at dead
-	# centre (Columns). Nothing here needs to know which pattern it is drawing.
+	# its carried prop is right by construction, for every VISIBLE carry. Behind the Back is
+	# deliberately hidden: its cross-body carry has no pose in the same-side painted arm bank,
+	# so driving the arm with it makes the reach collapse to the bank floor and grow again -
+	# the same unsupported lookup and visual jitter fixed on stage. The hidden prop still runs
+	# the full far-hip path behind the body; the visible front arm waits at the carry's outer
+	# start. Columns and every other visible carry still drive the hand directly.
 	var hp := [o + Vector2(-PV_OUTER, 0.0), o + Vector2(PV_OUTER, 0.0)]
 	var held := [false, false]
 	var hold_rem := [INF, INF]
@@ -25067,6 +25084,8 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		var pr: Dictionary = props[i]
 		if not bool(pr.get("carry", false)):
 			continue
+		if bool(pr.get("behind", false)):
+			continue   # no front-facing arm pose exists for a hand hidden behind the torso
 		# THE SIDE COMES FROM THE LEG'S OWN START, not from where the prop is this instant. A
 		# carry crosses toward the centre and a Behind-the-Back one crosses past it, so reading
 		# the live x hands the prop to the wrong arm halfway through every carry - which is a
@@ -25090,7 +25109,8 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	var stacked := [0, 0]
 	for i in props.size():
 		var pr2: Dictionary = props[i]
-		if not bool(pr2.get("carry", false)) or i == front[LEFT] or i == front[RIGHT]:
+		if not bool(pr2.get("carry", false)) or bool(pr2.get("behind", false)) \
+				or i == front[LEFT] or i == front[RIGHT]:
 			continue
 		var h2 := LEFT if float(pr2.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
 		stacked[h2] += 1
@@ -25115,7 +25135,7 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 			continue
 		soonest[h2] = float(pr["rem"])
 		hp[h2] = o + land
-	# ...AND IT LEAVES WITH THE PROP IT THREW. hand_target eases a stage hand out of its own
+	# ...AND IT LEAVES WITH THE VISIBLE PROP IT THREW. hand_target eases a stage hand out of its own
 	# release point over HAND_FOLLOW ticks so the arm goes WITH the object instead of
 	# flicking away from it; without the same easing here a preview hand is already out at
 	# the next catch slot on the frame after a release, which is the "abandoned rather than
@@ -25123,13 +25143,13 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	# touch the hand" that the carry legs cannot cover: at the instant of release the hand
 	# is exactly ON the prop, by construction.
 	for pr in props:
-		# ...INCLUDING A PROP THAT IS STILL BEHIND THE FIGURE. `behind` is a drawing ORDER,
-		# not a fact about the hand: a Behind the Back release IS behind the body, and the
-		# hand that made it is behind there with it. Skipping those left the throwing hand
-		# snapped back to its outer rest on the very frame of the release - measured at
-		# 78.5px by --touchcheck, the single worst gap in any preview, and the one pattern
-		# where the hand had visibly just been at the release point a frame earlier.
+		# A Behind-the-Back release is still hidden here. Its far-hip point names where the
+		# prop emerges, not a pose the front-facing arm can wear; asking the arm to follow it
+		# is what made the preview fold inward, hit its reach floor, and unfold every cycle.
+		# Keep the visible arm at its same-side rest while the hidden prop does the trick.
 		if bool(pr.get("carry", false)):
+			continue
+		if bool(pr.get("behind", false)):
 			continue
 		var el := float(pr.get("el", PV_FOLLOW))
 		if el >= PV_FOLLOW:
@@ -25152,6 +25172,8 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 			if bool(pr.get("carry", false)):
 				continue
 			if float(pr.get("el", 1.0)) <= edge:
+				if bool(pr.get("behind", false)):
+					continue   # hidden far-hip release: no visible hand seam to audit
 				# a release: the hand is the one that CARRIED it, which `prev` names (see
 				# pv_state - a behind-the-back release is past the far hip and its own x
 				# names the wrong arm)
