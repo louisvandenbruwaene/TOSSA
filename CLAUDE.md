@@ -1213,6 +1213,15 @@ review" for the accept/reject examples and why.
   pose in it. `--handlog` at three balls: follow-through WITH the kick left the painted palm past
   `FIG_PALM_MAX` on 13% of frames at a mean 5.4px; without it, 0% and 2.5px, against a 2.9px
   baseline with no follow-through at all. Every pattern at 3 and 5 measures 0% / 1.5-3.1px.
+- **A HIDDEN RELEASE IS NOT A PAINTED HAND TARGET (2026-08-28,** Louis, on Behind the Back:
+  "the hand looks bad, something jitters"). The trick's prop still starts behind the opposite
+  hip and stays behind the torso for the opening of its flight, but `throw_from` keeps the visible
+  hand at its actual release-frame position. The arm bank contains only same-side juggling reaches;
+  chasing the far hip drove its lookup through `FIG_PALM_MAX`, swapped a detached fallback palm in
+  and out, and measured a 52px raw palm residual against the ordinary 1-4px. Drawing order may hide
+  a prop; it does not manufacture an arm pose the bank does not own. The Skills preview follows the
+  same rule: the hidden carry and hidden opening of the flight still run behind the mini figure, but
+  they do not drive its front-facing arm down to the bank's reach floor and back every cycle.
 - **Difficulty (added 2026-08-16):** SLOTH / BEAR / OCTOPUS, picked once on a brand new career
   (`ST_DIFFICULTY`, between the slot screen and the basics tutorial - three PixelLab mascot
   cards) and changeable any time after from Settings. A single shared seam each:
