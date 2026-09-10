@@ -1751,3 +1751,10 @@ quality-led, tonal stingers only, no ambient crowd bed.
   `--touchcheck --skills` run during the 2026-08-20 work, each wrote their scratch progress
   straight over career slot 0. **Back up `~/Library/Application Support/Godot/app_userdata/TOSSA/`
   before running any new harness** - that is what made the second one recoverable.
+
+### Optional routine challenge (2026-09-10)
+
+After Spin unlocks, compatible patterns offer six clean catches, a deliberately held higher
+throw, an all-props-airborne Spin while that throw remains aloft, six clean recovery catches,
+and a controlled finish. Edges/drops reset the sequence; rewards cap at 20 XP per run.
+It never changes flight timing or score multipliers. Transient progress is not saved.

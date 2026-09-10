@@ -3786,6 +3786,7 @@ func _input(event: InputEvent) -> void:
 				if running and not tut_active:
 					running = false
 					_prev_running = false
+					routine_event("finish")
 					on_round_end()
 				enter_day()
 		KEY_R:
@@ -4050,6 +4051,8 @@ func finish_performance() -> void:
 	# the running->false edge, where resolve_act() settles the night.
 	if mode != MODE_PERFORM or not running or tut_active:
 		return
+	if goals_hit > 0:
+		routine_event("finish")
 	play_sfx("streak", -6.0)   # a short rising flourish to close the act
 	running = false
 
@@ -10319,6 +10322,9 @@ func count_air_scale() -> float:
 
 #region ROUND START, CATCHING, GOALS
 func start_run(n: int) -> void:
+	routine_progress = TOSSA_ROUTINE.fresh()
+	routine_rewarded = 0
+	routine_high_tick = -1
 	coach_catches = 0
 	last_mistake = ""
 	if not available(prop_type):
@@ -10635,6 +10641,8 @@ func on_catch(h: int) -> void:
 	# (Louis: juggling is at least one prop airborne at all times; anything else is
 	# throwing one thing and catching it). Asked here, before the ball is put away.
 	var juggled := juggling_catch(best)
+	if juggled:
+		routine_event("catch" if best_d <= good_window() else "edge")
 	# DOES THIS CATCH COUNT TOWARDS THE SEGMENT AT ALL? The load's own reward (pattern,
 	# count, prop) is not here any more - it is the segment's s and its exponent, applied
 	# once to the whole stretch rather than per catch. What survives at this choke point is
@@ -11401,6 +11409,8 @@ func do_throw(h: int, hold: int) -> void:
 	# Keep that point for the BALL, but start the visible hand's follow-through where the hand
 	# actually was. Otherwise the arm lookup crosses its fallback boundary twice per throw,
 	# which is the Behind-the-Back hand jitter documented above hand_target.
+	if hold >= int(float(HOLD_MAX) * 0.20) and b.over_tap >= 0.20:
+		routine_event("height")
 	throw_from[h] = hpos[h] if this_trick == TR_BTB else b.from_pos
 	throw_kick[h] = tick
 	charging[h] = false
@@ -12275,6 +12285,55 @@ func drop_illegal_toggle() -> void:
 	play_sfx("ui", -16.0)
 
 
+const TOSSA_ROUTINE = preload("res://scripts/TossaRoutine.gd")
+var routine_progress := TOSSA_ROUTINE.fresh()
+var routine_rewarded := 0
+var routine_high_tick := -1
+
+func routine_available() -> bool:
+	return not tut_active and trick_unlocked(TR_SPIN) and trick_pattern_ok(TR_SPIN, pattern)
+
+func routine_event(event: String) -> void:
+	if not routine_available():
+		return
+	var previous := int(routine_progress["phase"])
+	if event == "height" and previous == 1:
+		routine_high_tick = tick
+	if event == "spin":
+		var high_in_flight := false
+		for b in balls:
+			if b.state == STATE_FLIGHT and b.over_tap >= 0.20 and b.launch_tick >= routine_high_tick:
+				high_in_flight = true
+		if balls_airborne() != num_balls or not high_in_flight:
+			return
+	routine_progress = TOSSA_ROUTINE.advance(routine_progress, event)
+	if previous != 4 and int(routine_progress["phase"]) == 4 and routine_rewarded < 1:
+		routine_rewarded = 1
+		warm_room(0.08)
+		add_xp(8)
+		set_trick_msg("ROUTINE LANDED - finish in control")
+		play_sfx("streak", -8.0)
+	elif previous == 4 and int(routine_progress["phase"]) == 5 and routine_rewarded < 2:
+		routine_rewarded = 2
+		add_xp(12)
+		play_sfx("cheer", -10.0)
+
+func draw_routine_challenge(font: Font, s: Vector2) -> void:
+	if results_open or not routine_available():
+		return
+	var r := Rect2(s.x - 298, 402, 280, 192)
+	var gold := Color(1.0, 0.86, 0.55)
+	hud_card(r, gold)
+	draw_string(font, r.position + Vector2(16, 28), "OPTIONAL ROUTINE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), gold)
+	draw_wrap_fit(font, TOSSA_ROUTINE.prompt(routine_progress), Rect2(r.position + Vector2(16, 42), Vector2(248, 70)), 20, Color(0.94, 0.87, 0.74))
+	if mode == MODE_PERFORM:
+		var flavour := venue_flavour(run_venue)
+		draw_fit_string(font, r.position + Vector2(16, 128), String(flavour["rival"]), HORIZONTAL_ALIGNMENT_LEFT, 248, 16, gold)
+		draw_wrap_fit(font, String(flavour["taste"]), Rect2(r.position + Vector2(16, 138), Vector2(248, 48)), 16, Color(0.85, 0.79, 0.72))
+	else:
+		draw_wrap_fit(font, "Clean means Perfect or Good. A miss or edge catch starts a new sequence.", Rect2(r.position + Vector2(16, 124), Vector2(248, 62)), 16, Color(0.85, 0.79, 0.72))
+
+
 func on_trick() -> void:
 	# The TRICK key (Space) is the one-shot powerup. With an arm trick selected it
 	# primes exactly the next throw (pressing again waves it off); with Spin selected
@@ -12319,6 +12378,8 @@ func on_trick() -> void:
 				return
 			if spinning():
 				return   # already turning: the lockout below is the limiter, not a mash guard
+			if balls_airborne() == num_balls:
+				routine_event("spin")
 			spin_until = tick + SPIN_TICKS
 			spin_scored = false
 			trick_ready = tick + TRICK_COOLDOWN
@@ -14074,6 +14135,7 @@ func drop_ball(b: Ball, why: String) -> void:
 		return
 	var drop_pos := flight_pos(b)
 	coach_catches = 0
+	routine_event("miss")
 	last_mistake_hand = b.to_hand
 	var side := "Left" if b.to_hand == LEFT else "Right"
 	match why.to_lower():
@@ -20986,6 +21048,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 	if performing and not results_open and not encore_scores_run():
 		draw_wrap_fit(font, "This audience rejects your routine. Bow out and prepare another.", Rect2(34, 548, 248, 64), 16, gold)
 
+	draw_routine_challenge(font, s)
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
 	# is announced once by the card and then quietly reinforced where the hands are
@@ -21101,6 +21164,8 @@ func draw_coach_hands(font: Font) -> void:
 			draw_rect(Rect2(x + 54 + t * 56, y + 3, 4, 12), Color(1.0, 0.94, 0.75, a))
 
 func result_headline() -> String:
+	if int(routine_progress["phase"]) == 5:
+		return "A clean routine and a confident bow"
 	if goals_hit >= NUM_GOALS and dropped == 0:
 		return "Your first clean show" if int(career.get("perfs", 0)) <= 1 else "A clean show, start to finish"
 	if goals_hit >= NUM_GOALS:
