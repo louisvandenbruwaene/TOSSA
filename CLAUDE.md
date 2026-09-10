@@ -29,6 +29,15 @@ work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the 
 
 Codex improvements:
 
+- **Stage readability and rendering (2026-09-10):** the HUD groups progress/cash-in on the
+  left and stamina/crowd on the right, with readable gate status and explicit career return.
+  A StageScenery child caches the painting and static veil; the foreground, light and sim
+  still update live. The scenery shader reduces central contrast on the 2px grid. Compare
+  `--original-scenery`; this is transient. Long dark props have a fine silhouette edge.
+  `--fps` now includes p95/max frame intervals. Muted Dummy-driver runs skip audio setup
+  (audio export still synthesises on demand), avoiding unnecessary startup and MP3 leaks.
+
+
 - **Predictable catches (2026-09-10, requested playability review):** Good/edge timing always
   secures outside explicit Perfect-only challenges; edge catches cost 1–3 extra stamina,
   reduced by Accuracy/gear. Perfect/Good/edge scoring stays 3/2/1. `--legacy-catches` is a
