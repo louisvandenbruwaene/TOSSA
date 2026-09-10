@@ -2411,6 +2411,7 @@ func _ready() -> void:
 	#   --shot <path>  capture one frame to <path> then quit
 	var ua := OS.get_cmdline_user_args()
 	legacy_random_catches = ua.has("--legacy-catches")
+	scenery_original = ua.has("--original-scenery")
 	# THE WINDOW SAYS WHICH BUILD IT IS (2026-07-28, Louis: "rename the app to tossa and
 	# tossa debug"). project.godot's config/name is the shipped name and cannot vary, so
 	# the debug marker goes on at runtime. Worth having: a debug run keeps its own save
@@ -2995,7 +2996,75 @@ func _ready() -> void:
 #endregion
 
 #region MAIN LOOP & INPUT ROUTING
+# Static scenery owns its cached draw commands. Lighting and juggling stay on Main.
+class StageScenery extends Node2D:
+	var texture: Texture2D
+	var extent := Vector2.ZERO
+	var floor_y := 0.0
+	var veil := 0.0
+	var veil_colour := Color.BLACK
+	func _draw() -> void:
+		if texture == null:
+			return
+		draw_texture_rect(texture, Rect2(Vector2.ZERO, extent), false)
+		for i in 24:
+			var y0 := floorf(float(i) / 24.0 * floor_y / 2.0) * 2.0
+			var y1 := floorf(float(i + 1) / 24.0 * floor_y / 2.0) * 2.0
+			var colour := veil_colour
+			colour.a = lerpf(minf(1.0, veil * 1.55), veil, float(i) / 23.0)
+			draw_rect(Rect2(0, y0, extent.x, y1 - y0), colour)
+		var lip := minf(72.0, extent.y - floor_y)
+		for i in 16:
+			var y0 := floorf((floor_y + float(i) / 16.0 * lip) / 2.0) * 2.0
+			var y1 := floorf((floor_y + float(i + 1) / 16.0 * lip) / 2.0) * 2.0
+			var colour := veil_colour
+			colour.a = veil * (1.0 - float(i) / 15.0)
+			draw_rect(Rect2(0, y0, extent.x, y1 - y0), colour)
+
+var scenery: StageScenery
+var scenery_key := ""
+var scenery_original := false
+var frame_sample_ms: Array[float] = []
+
+func update_scenery() -> void:
+	if scenery == null:
+		scenery = StageScenery.new()
+		scenery.show_behind_parent = true
+		var shader_material := ShaderMaterial.new()
+		shader_material.shader = preload("res://Resources/stage_readability.gdshader")
+		scenery.material = shader_material
+		add_child(scenery)
+	var v := venue_data(cur_venue())
+	var key := "bg/" + str(v["name"]).to_lower().replace(" ", "_")
+	scenery.visible = game_state == ST_PLAY and art_on and art_bank.has(key) and not _bgref and not _charref and _propref == "" and not _markref and not _menuref and _extref < 0
+	if not scenery.visible:
+		return
+	var tex: Texture2D = art_bank[key]["tex"]
+	var size := get_viewport_rect().size
+	if key == scenery_key and tex == scenery.texture and size == scenery.extent:
+		return
+	scenery_key = key
+	scenery.texture = tex
+	scenery.extent = size
+	scenery.floor_y = stage_floor_y()
+	scenery.veil = float(v.get("veil", 0.42))
+	var glow: Color = v["glow"]
+	scenery.veil_colour = Color((glow.r * 0.10 + 0.02) * 0.4, (glow.g * 0.09 + 0.02) * 0.4, (glow.b * 0.10 + 0.03) * 0.5)
+	(scenery.material as ShaderMaterial).set_shader_parameter("strength", 0.0 if scenery_original else 1.0)
+	(scenery.material as ShaderMaterial).set_shader_parameter("stage_size", size)
+	scenery.queue_redraw()
+
+func _exit_tree() -> void:
+	# MP3 looping playback retains its stream on shutdown unless explicitly stopped.
+	for player in [mus, mus2] + sfx_pool:
+		if is_instance_valid(player):
+			player.stop()
+			player.stream = null
+	_audio_ready = false
+
+
 func _process(delta: float) -> void:
+	update_scenery()
 	# ONE DRAW PER PRESENTED FRAME, and this single line is the largest performance
 	# finding in the project's history (2026-07-28). Every `queue_redraw()` used to sit
 	# in `_physics_process`, which runs at 120Hz - and `queue_redraw()` is not a request
@@ -3033,6 +3102,7 @@ func _process(delta: float) -> void:
 	# throttle an unfocused window's presentation, so `engine fps` from a backgrounded
 	# run is still a soft number - but it is not a fabricated one, and a drop that
 	# scales with the number of props on stage is real work, not a windowing artefact.
+	frame_sample_ms.append(delta * 1000.0)
 	var fps := Engine.get_frames_per_second()
 	_fps_frames += 1
 	_fps_sum += fps
@@ -3059,6 +3129,10 @@ func _process(delta: float) -> void:
 		_fps_t = 0.0
 		_fps_frames = 0
 		_fps_sum = 0.0
+		frame_sample_ms.sort()
+		if not frame_sample_ms.is_empty():
+			print("FRAME p95=%.2fms max=%.2fms samples=%d" % [frame_sample_ms[mini(frame_sample_ms.size() - 1, int(frame_sample_ms.size() * 0.95))], frame_sample_ms.back(), frame_sample_ms.size()])
+		frame_sample_ms.clear()
 		_fps_lines += 1
 
 
@@ -15518,71 +15592,72 @@ func draw_backdrop(s: Vector2) -> void:
 		draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
 		draw_venue_dressing(s, vi, fy, glow)
 		return
-	if not art_blit_rect(bg_key, Rect2(Vector2.ZERO, s)):
-		draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
-		# the venue's own set dressing sits behind the light, then a dark veil pushes it
-		# back into the depth, so the escalating ladder is FELT without ever competing
-		# with the props (ART pillars 1 and 4)
-		draw_venue_dressing(s, vi, fy, glow)
-	# THE VEIL IS PER-VENUE (2026-07-27, Louis: some stages are "some blurry line in the
-	# dark ... most stages do fine: like the circus. but some don't; like the midnight
-	# event"). This flat 42% wash exists to push the set behind the props, and on a bright
-	# set - the Circus canopy, the Arena bowl - that is exactly right. On an already-dark
-	# set it is applied to dressing that had no brightness to spare, and what survives is
-	# a faint smudge: the Midnight Show's clock, moon window and candles were all being
-	# drawn and then wiped off. Each venue now says how much push-back its own set can
-	# take (`veil`), so a dark house keeps its detail without any venue losing its depth.
-	# ...AND IT IS TOP-WEIGHTED, NOT FLAT (2026-08-08, Louis: "make it logical that the
-	# juggler has his back to the background of the stage, people there won't see that
-	# much"). Five of the seven backdrops paint tiered SEATING behind the performer, and a
-	# flat wash lit all of it evenly - so the far side of the house read as a second
-	# audience, watching an act that has its back to them, as brightly as the one in front.
-	# Nothing on a stage is lit that way: the lamps point down at the performer, the back
-	# wall is the darkest thing in the building, and the people up there are the ones who
-	# paid least and see least.
-	#
-	# So the veil now deepens toward the top - the same average push-back each venue was
-	# tuned for, redistributed. It costs nothing but a stacked gradient, it makes those seats
-	# read as a dim gallery rather than a front row, and it separates the performer from the
-	# painting behind him, which is the thing the whole veil exists to do.
-	var veil := float(v.get("veil", 0.42))
-	var veil_c := Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5, 1.0)
-	# ...and the bottom of the ramp is the venue's OWN veil, never less. Grading it down
-	# there as well (0.55x was tried) redistributes the wash honestly and still gets it
-	# wrong, because the performer stands at the bottom: it makes the set immediately behind
-	# him BRIGHTER than it was, which is the one place the veil was earning its keep. The
-	# ramp only ever adds darkness, going up.
-	draw_gradient_v(Rect2(0, 0, s.x, fy),
-		Color(veil_c.r, veil_c.g, veil_c.b, minf(1.0, veil * 1.55)),
-		Color(veil_c.r, veil_c.g, veil_c.b, veil), 24)
-	# ...AND IT DOES NOT STOP DEAD AT HIS FEET (2026-08-15, Louis: "there is a too obvious
-	# cutoff below the characters feet: like dark above and light right under it").
-	#
-	# The veil ran from the top of the frame to `fy` and then simply ended, so the row above
-	# the standing line carried the venue's full wash and the row below it carried none. That
-	# is a hard step in one row, across the entire width of the screen, a few pixels under the
-	# performer - measured on a Circus capture, (125,100,82) to (185,165,145), a jump of 60 per
-	# channel. It reads as the floor being a separate brighter object pasted under him, which
-	# is exactly the "vector stage" look deleting the podium was supposed to end.
-	#
-	# THE LEVELS ARE UNCHANGED AND THAT IS THE CONSTRAINT (Louis: "keep the same light
-	# levels"). Nothing above the line moves at all, and no new brightness target is invented:
-	# the veil simply CONTINUES at the value it already reached and decays to nothing over the
-	# next 72px. So the row below the line now matches the row above it - which is what removes
-	# the step - and the floor comes up to its painted brightness gradually instead of in one
-	# jump. It also happens to be right about depth for free: the boards at the back of the
-	# band are further away than the boards at the front, so they should carry more of the
-	# room's air, and this is the same near-bright/far-dark reading draw_preview_floor builds
-	# by hand for the two panels that have no painting to lean on.
-	#
-	# The other direction was tried and is recorded above: grading the veil DOWN toward the
-	# floor removes the step by brightening the set immediately behind the performer, which is
-	# the one place the veil is earning its keep.
-	var lip := minf(72.0, maxf(0.0, s.y - fy))
-	if lip > 0.0:
-		draw_gradient_v(Rect2(0, fy, s.x, lip),
-			Color(veil_c.r, veil_c.g, veil_c.b, veil),
-			Color(veil_c.r, veil_c.g, veil_c.b, 0.0), 16)
+	if scenery == null or not scenery.visible:
+		if not art_blit_rect(bg_key, Rect2(Vector2.ZERO, s)):
+			draw_gradient_v(Rect2(0, 0, s.x, s.y), sky_top, sky_bot, 22)
+			# the venue's own set dressing sits behind the light, then a dark veil pushes it
+			# back into the depth, so the escalating ladder is FELT without ever competing
+			# with the props (ART pillars 1 and 4)
+			draw_venue_dressing(s, vi, fy, glow)
+		# THE VEIL IS PER-VENUE (2026-07-27, Louis: some stages are "some blurry line in the
+		# dark ... most stages do fine: like the circus. but some don't; like the midnight
+		# event"). This flat 42% wash exists to push the set behind the props, and on a bright
+		# set - the Circus canopy, the Arena bowl - that is exactly right. On an already-dark
+		# set it is applied to dressing that had no brightness to spare, and what survives is
+		# a faint smudge: the Midnight Show's clock, moon window and candles were all being
+		# drawn and then wiped off. Each venue now says how much push-back its own set can
+		# take (`veil`), so a dark house keeps its detail without any venue losing its depth.
+		# ...AND IT IS TOP-WEIGHTED, NOT FLAT (2026-08-08, Louis: "make it logical that the
+		# juggler has his back to the background of the stage, people there won't see that
+		# much"). Five of the seven backdrops paint tiered SEATING behind the performer, and a
+		# flat wash lit all of it evenly - so the far side of the house read as a second
+		# audience, watching an act that has its back to them, as brightly as the one in front.
+		# Nothing on a stage is lit that way: the lamps point down at the performer, the back
+		# wall is the darkest thing in the building, and the people up there are the ones who
+		# paid least and see least.
+		#
+		# So the veil now deepens toward the top - the same average push-back each venue was
+		# tuned for, redistributed. It costs nothing but a stacked gradient, it makes those seats
+		# read as a dim gallery rather than a front row, and it separates the performer from the
+		# painting behind him, which is the thing the whole veil exists to do.
+		var veil := float(v.get("veil", 0.42))
+		var veil_c := Color(sky_bot.r * 0.4, sky_bot.g * 0.4, sky_bot.b * 0.5, 1.0)
+		# ...and the bottom of the ramp is the venue's OWN veil, never less. Grading it down
+		# there as well (0.55x was tried) redistributes the wash honestly and still gets it
+		# wrong, because the performer stands at the bottom: it makes the set immediately behind
+		# him BRIGHTER than it was, which is the one place the veil was earning its keep. The
+		# ramp only ever adds darkness, going up.
+		draw_gradient_v(Rect2(0, 0, s.x, fy),
+			Color(veil_c.r, veil_c.g, veil_c.b, minf(1.0, veil * 1.55)),
+			Color(veil_c.r, veil_c.g, veil_c.b, veil), 24)
+		# ...AND IT DOES NOT STOP DEAD AT HIS FEET (2026-08-15, Louis: "there is a too obvious
+		# cutoff below the characters feet: like dark above and light right under it").
+		#
+		# The veil ran from the top of the frame to `fy` and then simply ended, so the row above
+		# the standing line carried the venue's full wash and the row below it carried none. That
+		# is a hard step in one row, across the entire width of the screen, a few pixels under the
+		# performer - measured on a Circus capture, (125,100,82) to (185,165,145), a jump of 60 per
+		# channel. It reads as the floor being a separate brighter object pasted under him, which
+		# is exactly the "vector stage" look deleting the podium was supposed to end.
+		#
+		# THE LEVELS ARE UNCHANGED AND THAT IS THE CONSTRAINT (Louis: "keep the same light
+		# levels"). Nothing above the line moves at all, and no new brightness target is invented:
+		# the veil simply CONTINUES at the value it already reached and decays to nothing over the
+		# next 72px. So the row below the line now matches the row above it - which is what removes
+		# the step - and the floor comes up to its painted brightness gradually instead of in one
+		# jump. It also happens to be right about depth for free: the boards at the back of the
+		# band are further away than the boards at the front, so they should carry more of the
+		# room's air, and this is the same near-bright/far-dark reading draw_preview_floor builds
+		# by hand for the two panels that have no painting to lean on.
+		#
+		# The other direction was tried and is recorded above: grading the veil DOWN toward the
+		# floor removes the step by brightening the set immediately behind the performer, which is
+		# the one place the veil is earning its keep.
+		var lip := minf(72.0, maxf(0.0, s.y - fy))
+		if lip > 0.0:
+			draw_gradient_v(Rect2(0, fy, s.x, lip),
+				Color(veil_c.r, veil_c.g, veil_c.b, veil),
+				Color(veil_c.r, veil_c.g, veil_c.b, 0.0), 16)
 	draw_stage_grade(s, fy, glow)
 
 	# THE SPOTLIGHT CONE IS GONE (2026-08-15, Louis: "none of the stages should have a cone
@@ -18951,6 +19026,9 @@ func draw_prop(b: Ball, pos: Vector2) -> void:
 		# the stage rather than as light coming off the prop, which is what it did before
 		# and what a hard pixel edge only made more obvious
 		draw_glow_pix(pos, 17.0 * sc, Color(1.0, 0.85, 0.5, 0.30))
+	if b.state == STATE_FLIGHT and b.kind in [PROP_CLUBS, PROP_KNIVES, PROP_CHAINSAW]:
+		for edge in [Vector2(-1, 0), Vector2(1, 0), Vector2(0, -1), Vector2(0, 1)]:
+			glow_silhouette(pos + edge, b.kind, sc, prop_spin_angle(b), Color(0.72, 0.64, 0.46, 0.9))
 	draw_prop_body(b, pos, prop_spin_angle(b), sc)
 	if glow_props_lit():
 		# Charged stock is green material, not a light source: overlay its clean silhouette
@@ -20819,343 +20897,81 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			draw_multiline_string(font, Vector2(s.x * 0.25, cy + 28.0), String(cft[1]),
 				HORIZONTAL_ALIGNMENT_CENTER, s.x * 0.5, ps(14), 2, Color(0.96, 0.82, 0.74, 0.92))
 
-	# ============================ LEFT RAIL: the contest ============================
+	# A quiet stage, with progress on the left and all immediate risks on the right.
 	var LX := 18.0
-	var LW := 300.0
+	var LW := 280.0
+	var RX := s.x - 298.0
+	var RW := 280.0
 	if performing and not results_open:
-		# --- the act header: venue, THE ACT, and one dot per goal reached ---
-		hud_card(Rect2(LX, 16, LW, 52), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 0)
-		draw_fit_string(font, Vector2(LX + 14, 40), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, LW - 80.0, 18, gold)
-		var setline := "THE ACT"
-		if purist:
-			setline += "   PURIST"
-		draw_string(font, Vector2(LX + 14, 60), setline, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), warm)
-		if sprint_active:
-			draw_string(font, Vector2(LX + 126, 60), "SPRINT  " + sprint_clock_text(), HORIZONTAL_ALIGNMENT_RIGHT, LW - 140.0, ps(12), Color(0.72, 0.92, 1.0))
-		for i in NUM_GOALS:
-			var dotc := Vector2(LX + LW - 20.0 - float(NUM_GOALS - 1 - i) * 18.0, 34.0)
-			if i < goals_hit:
-				draw_circle(dotc, 6.0, gold)
-			else:
-				draw_circle(dotc, 5.0, Color(0.35, 0.28, 0.24, 0.8))
-
-		# --- the GOALS card: the hero. The score on the left, THE HAT on the right. ---
-		# Louis, 2026-07-27: the requirement should be a thing that fills, "a sort of hat
-		# of money being filled", with real effects once it overflows. The old horizontal
-		# meter is gone; the hat carries the same information on the same concave curve.
-		var target := next_goal()
-		var tcard_y := 78.0
-		var tcard_h := 196.0
-		hud_card(Rect2(LX, tcard_y, LW, tcard_h), Color(1.0, 0.82, 0.4, 0.4), show_guide_step == 2)
-		draw_string(font, Vector2(LX + 14, tcard_y + 24), "SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.85, 0.72, 0.55))
-		draw_string(title_font(), Vector2(LX + 14, tcard_y + 56), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(26), Color(1.0, 0.94, 0.76))
-		# the record chase, top-right of the card
-		if run_venue >= 0 and run_venue < rec_table().size() and rec_table()[run_venue] > 0:
-			if record_broken:
-				var ra := 0.7 + 0.3 * sin(float(tick) * 0.12)
-				draw_string(font, Vector2(LX + 14, tcard_y + 78), "NEW RECORD", HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), Color(1.0, 0.86, 0.42, ra))
-			else:
-				draw_string(font, Vector2(LX + 14, tcard_y + 78), "best  %s" % score_text(rec_table()[run_venue]), HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), dim)
-		# THE HAT runs the WHOLE act - zero to the final goal - with a mark on the crown
-		# at each goal line, so where you are and what is left both read at a glance. It
-		# rises on the same concave curve (goal_bar_pos) the horizontal meter used, so
-		# nothing about the PACING of an act changed here, only the picture of it.
-		var g_final := goal_for(run_venue, NUM_GOALS - 1)
-		var tfrac := goal_bar_pos(score, g_final)
-		var marks := PackedFloat32Array()
-		for gi in NUM_GOALS - 1:
-			marks.append(goal_bar_pos(goal_for(run_venue, gi), g_final))
-		var over := 0.0 if score <= g_final else clampf((score - g_final) / maxf(g_final, 1.0), 0.0, 1.0)
-		# THE CROWD SHOWS THE GOAL, so the rail does not have to (Louis). A money hat
-		# that filled up used to live here; the pile of flowers at the juggler's feet
-		# says the same thing far better, on the stage itself, where the player is
-		# already looking. The rail keeps only what the stage cannot say: the climb
-		# toward the goal as a slim stem, and TONIGHT'S TAKINGS, which the hat never
-		# showed at all.
-		# ...stopping clear of the cash-in line along the card's bottom edge
-		# ...and while the first show's guide is explaining this exact thing, the stem SHOWS
-		# what it does instead of being pointed at (2026-07-31, Louis: "emphasize the flower
-		# in a better way - instead of a dumb circle around it, make it fill up very fast and
-		# run out again at the same speed; that shows how the meter is supposed to fill up
-		# repeatedly"). `live` is false for the demo so the waypoint and gold bonuses cannot
-		# fire off an animation.
-		# THE STALK'S COLUMN RUNS TO THE CARD'S RIGHT MARGIN NOW (2026-08-19). It used to be
-		# a 34px slot with the takings column beside it; the takings moved UNDER it (three
-		# short lines, see below) and the plant took the width. Anchored off LW rather than
-		# a literal, so the card and the plant cannot drift apart.
-		# INSET DOWN THE CARD, not hung from its top: the tip is where the bloom opens, so
-		# the inset IS the headroom the celebration needs (see STEM_SHED_R).
-		var stem_box := Rect2(LX + LW - 8.0 - STEM_BOX_W, tcard_y + STEM_BOX_TOP, STEM_BOX_W, STEM_BOX_H)
+		hud_card(Rect2(LX, 16, LW, 66), gold, show_guide_step == 0)
+		draw_fit_string(font, Vector2(LX + 16, 43), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 24, gold)
+		var act_label := "SPRINT  " + sprint_clock_text() if sprint_active else "THE ACT"
+		draw_fit_string(font, Vector2(LX + 16, 68), act_label, HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 16, warm)
+		hud_card(Rect2(LX, 94, LW, 324), gold, show_guide_step == 2)
+		draw_string(font, Vector2(LX + 16, 120), "YOUR PROGRESS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
+		draw_fit_string(font, Vector2(LX + 16, 154), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 32, Color(1.0, 0.94, 0.76))
+		var final_goal := goal_for(run_venue, NUM_GOALS - 1)
+		var marks := PackedFloat32Array([1.0 / 3.0, 2.0 / 3.0])
+		var fraction := goal_bar_pos(score, final_goal)
+		var demo_fraction := guide_stem_demo()
 		if show_guide_step < 0 or show_guide_step >= 2:
-			var gdemo := guide_stem_demo()
-			if gdemo >= 0.0:
-				draw_goal_stem(stem_box, gdemo, 0.0, marks,
-					Color(venue_data(run_venue)["glow"]), false)
-			else:
-				draw_goal_stem(stem_box, tfrac, over, marks,
-					Color(venue_data(run_venue)["glow"]))
-		# the ask, and the gamble, in the card's left column beside the hat
-		var goal_head := "FIRST GOAL"
-		if goals_hit >= NUM_GOALS:
-			goal_head = "ALL CLEARED"
-		elif goals_hit > 0:
-			goal_head = "NEXT GOAL"
-		draw_string(font, Vector2(LX + 14, tcard_y + 110), goal_head, HORIZONTAL_ALIGNMENT_LEFT, 140.0, ps(11), Color(0.85, 0.72, 0.55))
+			draw_goal_stem(Rect2(LX + 128, 170, 136, 150), demo_fraction if demo_fraction >= 0.0 else fraction,
+				maxf(0.0, fraction - 1.0), marks, gold, demo_fraction < 0.0)
+		for gi in NUM_GOALS:
+			var y := 208.0 + float(gi) * 32.0
+			var reached := gi < goals_hit
+			draw_string(font, Vector2(LX + 16, y), "%s GOAL %d" % ["+" if reached else "-", gi + 1], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), gold if reached else warm)
+		var status := "All three goals secured"
 		if goals_hit < NUM_GOALS:
-			# A goal banks on score, clock, AND a sustained run. All three stay visible: a full
-			# score stem with no explanation looks broken, especially when a trick supplied the
-			# number long before the player's actual juggling earned the house.
-			var clock_left := goal_clock_left(goals_hit)
-			var run_have := best_run_x() / CATCH_WEIGHT[0]
-			var run_need := goal_run_required(run_venue, goals_hit) / CATCH_WEIGHT[0]
-			var run_line := "run  %.0f / %.0f" % [minf(run_have, run_need), run_need]
-			if score >= target and clock_left <= 0.0 and run_have < run_need:
-				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), "RUN  %.0f / %.0f" % [run_have, run_need],
-					HORIZONTAL_ALIGNMENT_LEFT, 140.0, 19, Color(1.0, 0.82, 0.46))
-				draw_string(font, Vector2(LX + 14, tcard_y + 150), "hold one clean stretch",
-					HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(1.0, 0.82, 0.46, 0.9))
-			elif score >= target and clock_left > 0.0:
-				var cp := 0.65 + 0.35 * sin(float(tick) * 0.12)
-				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), "%.1fs" % clock_left,
-					HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(0.72, 0.95, 0.68, cp))
-				draw_string(font, Vector2(LX + 14, tcard_y + 150), run_line,
-					HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(10), Color(0.72, 0.95, 0.68, 0.85))
+			if score < next_goal():
+				status = "%d%% to goal %d" % [mini(100, int(score / maxf(1.0, next_goal()) * 100.0)), goals_hit + 1]
+			elif goal_clock_left(goals_hit) > 0.0:
+				status = "Score ready - hold %.0fs" % ceil(goal_clock_left(goals_hit))
 			else:
-				draw_fit_string(font, Vector2(LX + 14, tcard_y + 134), score_text(target), HORIZONTAL_ALIGNMENT_LEFT, 132.0, 20, Color(1.0, 0.88, 0.5))
-				if clock_left > 0.0:
-					draw_string(font, Vector2(LX + 14, tcard_y + 150), "%s  ·  %.0fs" % [run_line, clock_left],
-						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(12), Color(0.84, 0.78, 0.68, 0.9))
-				else:
-					draw_string(font, Vector2(LX + 14, tcard_y + 150), run_line,
-						HORIZONTAL_ALIGNMENT_LEFT, 150.0, ps(12), Color(0.84, 0.78, 0.68, 0.9))
+				status = "Score ready - build a clean run"
+		draw_wrap_fit(font, status, Rect2(LX + 16, 330, LW - 32, 44), 20, gold)
+		if goals_hit < NUM_GOALS:
+			var have_run := best_run_x() / CATCH_WEIGHT[0]
+			var need_run := goal_run_required(run_venue, goals_hit) / CATCH_WEIGHT[0]
+			var detail := "Clean credit %.0f / %.0f" % [minf(have_run, need_run), need_run]
+			draw_fit_string(font, Vector2(LX + 16, 394), detail, HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 16, warm)
 		else:
-			draw_string(font, Vector2(LX + 14, tcard_y + 132), "the record is all", HORIZONTAL_ALIGNMENT_LEFT, 132.0, ps(12), Color(1.0, 0.88, 0.5))
-		# the standing offer: from the first goal on, the cash-in is always open
-		if goals_hit >= 1:
-			var pl := 0.7 + 0.3 * sin(float(tick) * 0.14)
-			draw_fit_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s or catch them all:  cash in  %s" % [String(k_finish()[0]), score_text(score)],
-				HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 11, Color(0.75, 0.95, 0.7, pl))
-		else:
-			# This is an actionable instruction, not decoration.  At 10px it was the
-			# least readable line in the whole score card at the shipped 1280x720.
-			draw_string(font, Vector2(LX + 14, tcard_y + tcard_h - 12.0), "%s: bow out" % String(k_finish()[0]), HORIZONTAL_ALIGNMENT_RIGHT, LW - 28.0, ps(12), Color(0.82, 0.76, 0.66, 0.88))
-
-		# --- the CROWD (patience clock) and the DROP limit ---
-		var ccard_y := 286.0
-		# THE DIAL CLEARS ITS OWN TITLE (2026-07-27, Louis: it must not overlap the word
-		# CROWD). The instrument is wider than the arc: the peak pin stands proud to
-		# r + 9, so at the old r 48 on a centre 74 down it reached y+65, while the
-		# 12pt label sits on a baseline of y+22 and hangs to about y+25. They were
-		# crossing by several pixels whenever the act had a peak worth marking. The
-		# dial is a little smaller and sits lower, and the card grew to keep the
-		# readout under the hub off its own bottom border.
-		# 116 -> 152: the card took on TONIGHT's takings and the mood word (see below).
-		var ccard_h := 152.0
-		hud_card(Rect2(LX, ccard_y, LW, ccard_h), Color(0.95, 0.5, 0.4, 0.35), show_guide_step == 3)
-		draw_string(font, Vector2(LX + 14, ccard_y + 22), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.9, 0.72, 0.62))
-		# the DIAL on the left, the drops you have left on the right
-		draw_gauge(Vector2(LX + 80.0, ccard_y + 82.0), 44.0, applause, peak_applause,
-			"%d%%" % int(round(applause * 100.0)), font)
-		draw_string(font, Vector2(LX + 164.0, ccard_y + 52.0), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(1.0, 0.72, 0.64, 0.92))
-		draw_drop_marks(LX + 178.0, ccard_y + 68.0, drop_limit(), dropped)
-		# TONIGHT'S TAKINGS AND THE ROOM'S MOOD LIVE WITH THE CROWD NOW (2026-08-19).
-		# They used to be a column beside the goal stem, and that column is what kept the
-		# stalk down to 34px: the bloom is deliberately wider than its own box, so anything
-		# level with it had to start clear of STEM_BLOOM_REACH and the two shared 140px
-		# badly. Moving them is not just room-making - it is where they belonged. The pile
-		# of flowers IS the crowd's answer, and the mood word was already documented as
-		# being coloured "in the SAME bands the crowd dial is coloured in, so the word and
-		# the needle can never disagree". They are one instrument; now they are one card.
-		var col_x := LX + 164.0
-		var col_w := LW - 14.0 - (col_x - LX)
-		var fc := Color(0.98, 0.60, 0.72)
-		draw_string(font, Vector2(col_x, ccard_y + 96.0), "TONIGHT", HORIZONTAL_ALIGNMENT_LEFT, col_w, ps(11), Color(0.85, 0.72, 0.66))
-		# THROUGH draw_coin_mark, LIKE EVERY OTHER PRICE IN THE GAME (2026-08-19, Louis:
-		# "the flower icon in the juggling stage (current earned flowers) is uglier than the
-		# shop flower icon and it should also rotate ... make sure that every single flower
-		# icon (currency) in the entire game looks like those in the shop"). This was the
-		# ONE currency mark calling draw_flower directly, and it therefore missed both
-		# things draw_coin_mark adds: the glyph resolution (grid 1.0 - on the art grid a
-		# 7px mark rounds into a berry, see draw_flower's own note) and `turning`. So the
-		# live HUD's mark was a coarser, dead version of the one on every shop card.
-		# r = 8.5 is the same mark at the same size: draw_coin_mark divides by 5 to reach
-		# draw_flower's scale, and this was drawn at 1.7.
-		draw_coin_mark(Vector2(col_x + 9.0, ccard_y + 118.0), 8.5, Color(1, 1, 1, 0.95), true)
-		# the night's take SHRINKS to fit, never trims: fit_text would render a good
-		# night's 12,400 as "12,4...", and a truncated number is not a number
-		var take := commafy(run_flowers)
-		var take_x := col_x + 23.0
-		draw_string(title_font(), Vector2(take_x, ccard_y + 124.0), take, HORIZONTAL_ALIGNMENT_LEFT, -1,
-			ps(fit_size(title_font(), take, LX + LW - 14.0 - take_x, 24, 14)), fc)
-		# and how the room is FEELING, in the one word the pile is saying
-		var mood := "waiting"
-		var mc := Color(0.70, 0.66, 0.62)
-		if applause <= TOMATO_RED:
-			mood = "turning on you"
-			mc = Color(1.0, 0.45, 0.38)
-		elif applause >= 0.92:
-			mood = "on their feet"
-			mc = Color(0.75, 0.95, 0.72)
-		elif applause >= FLOWER_GREEN:
-			mood = "throwing flowers"
-			mc = Color(0.65, 0.92, 0.62)
-		elif applause >= 0.50:
-			mood = "with you"
-			mc = Color(0.96, 0.86, 0.42)
-		elif applause >= FLOWER_FLOOR:
-			mood = "restless"
-			mc = Color(0.96, 0.62, 0.30)
-		# the longest of them ("throwing flowers") is wider than the column, so it steps
-		# down a size or two rather than losing the word that carries the meaning
-		draw_string(font, Vector2(col_x, ccard_y + 140.0), mood, HORIZONTAL_ALIGNMENT_LEFT, col_w,
-			ps(fit_size(font, mood, col_w, 13, 11)), mc)
-
-		# --- the CHALLENGE condition, live for the whole act when one was rolled ---
-		if not encores.is_empty():
-			# ONE CARD PER CHALLENGE, stacked (2026-07-29): a Purist night can carry four at
-			# once, and one card listing four names with four descriptions run together is
-			# unreadable. Each keeps its own box and its own height, and the box still grows
-			# to whatever its description wraps to (36 of chrome plus a 15px line each) so a
-			# longer challenge is never clipped by its own border.
-			var ec := Color(1.0, 0.55, 0.42)
-			# ...and the stack sits under the crowd card, whose own height is a variable
-			# (the dial is taller than the bar it replaced), so this follows it
-			var eay := ccard_y + ccard_h + 8.0
-			# THE COLUMN HAS A FLOOR AND THE STACK DID NOT KNOW ABOUT IT (2026-08-13).
-			#
-			# The note above is careful that each card grows to fit its OWN description, "so a
-			# longer challenge is never clipped by its own border" - and that part works. What
-			# nothing checked is the TOTAL: four cards at 66-81px each, under a 116px crowd card,
-			# run off the bottom of the screen. Measured on a four-stat Purist night at the
-			# Midnight Show, the fourth card lands underneath draw_routine_hud's own panel and the
-			# two sets of text print through each other. Now that Purist stats are PLAYER-PICKED
-			# rather than only house-rolled, four at once is something somebody chooses rather
-			# than a rare roll, so this is reachable in ordinary play.
-			#
-			# COMPACT IS NAME-ONLY, and the description is the right thing to drop - not a smaller
-			# font, which this density cannot afford, and not a shorter wrap, which truncates
-			# mid-sentence. The full text was already read once on the establishing card
-			# immediately before the act; what the live HUD owes the player mid-run is WHICH
-			# challenges are on, not what they mean again. One box per challenge survives either
-			# way, which was the whole point of splitting them up in the first place.
-			var e_floor := s.y - FOOT_CARD_TOP - 8.0   # draw_routine_hud's panel top, less a gap
-			# ...AND THE PURIST PAIR IS NOT IN THIS STACK. It is stated once, in one line, on
-			# the top-right card (see `pur_row`), because it is one indivisible booking
-			# rather than two of tonight's challenges. Both loops filter through the same
-			# helper so the heights and the cards can never disagree about what is shown.
-			var e_hi: Array[float] = []
-			var e_tot := 0.0
-			for e in encores:
-				if not encore_in_stack(e):
-					continue
-				var eln := _wrap_lines(font, String(ENCORES[e]["desc"]), LW - 28, 12).size()
-				e_hi.append(36.0 + 16.0 * float(maxi(eln, 2)))
-				e_tot += e_hi[e_hi.size() - 1] + 6.0
-			var e_tight := eay + e_tot > e_floor
-			var ei := 0
-			for e in encores:
-				if not encore_in_stack(e):
-					continue
-				var edesc := String(ENCORES[e]["desc"])
-				var ehh := 32.0 if e_tight else e_hi[ei]
-				ei += 1
-				hud_card(Rect2(LX, eay, LW, ehh), Color(ec.r, ec.g, ec.b, 0.5))
-				draw_fit_string(font, Vector2(LX + 14, eay + 22.0), String(ENCORES[e]["name"]).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, LW - 28.0, 14, ec)
-				if not e_tight:
-					_wrap_text(font, edesc, LX + 14, eay + 40.0, LW - 28, 12, Color(0.94, 0.86, 0.76, 0.94))
-				eay += ehh + 6.0
+			draw_fit_string(font, Vector2(LX + 16, 394), "Clean finish earns the ovation", HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 16, warm)
+		hud_card(Rect2(LX, 430, LW, 54), gold)
+		draw_fit_string(font, Vector2(LX + 16, 464), "%s  %s" % [k_finish()[0], "Cash in / catch them all" if goals_hit > 0 else "Bow out"], HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 20, gold)
+		# Conditions were explained before the show; the live reminder names each one.
+		var ey := 496.0
+		for e in encores:
+			if not encore_in_stack(e):
+				continue
+			draw_fit_string(font, Vector2(LX + 16, ey + 20), String(ENCORES[e]["name"]), HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 16, warm)
+			ey += 24.0
 	elif not performing:
-		# training: no contest, just the mode. The prop and pattern are NOT repeated
-		# here (Louis: no redundancy) - the routine card at the foot of the stage
-		# owns them, along with the keys that switch them.
-		var nb := next_ball_strength()
-		hud_card(Rect2(LX, 16, LW, 94.0 if nb > 0 else 74.0))
-		var tl := "PRACTICE" + ("   -   DEBUG" if debug_mode else "")
-		draw_string(font, Vector2(LX + 14, 40), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), Color(0.72, 0.82, 0.9))
-		draw_string(font, Vector2(LX + 14, 60), "no crowd, no pay", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), warm)
-		# the count keys, said once here; the bottom-left card counts the load itself
-		draw_string(font, Vector2(LX + 14, 78), "%s  %s  step the count" % [String(k_count()[0]), String(k_count()[1])], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.72, 0.66, 0.56, 0.85))
-		if nb > 0:
-			draw_string(font, Vector2(LX + 14, 94), "next ball at Strength %d" % nb, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(0.72, 0.66, 0.56, 0.85))
-
-	# ============================ RIGHT RAIL: you ============================
-	# hidden during the results panel so it never lingers, dimmed, beside the card
+		hud_card(Rect2(LX, 16, LW, 112), Color(0.72, 0.82, 0.9))
+		draw_string(font, Vector2(LX + 16, 46), "PRACTICE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(24), Color(0.82, 0.9, 1.0))
+		draw_string(font, Vector2(LX + 16, 74), "Find your rhythm", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
+		draw_fit_string(font, Vector2(LX + 16, 106), "%s  Return to career" % k_finish()[0], HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 20, gold)
 	if not results_open:
-		var RW := 264.0
-		var RX := s.x - 18.0 - RW
-		# STATE: only what actually moves or matters DURING a run (Louis: the play
-		# HUD is not a character sheet). Stamina drains live, so it stays; unspent
-		# stat points are actionable (Tab), so they get one pulsing line. Gold,
-		# Reputation, and the LV/XP bar never change mid-run - they live in the
-		# day hub, the sheet, and the results card instead of being repeated here.
-		var pts_row := points > 0
-		var slow_row := slow > 0.005
-		# PURIST IS ONE LINE UP HERE, NOT TWO CARDS DOWN THERE (2026-08-19, Louis: "put p
-		# binds accuracy + speed on the top right to save space for the rest of the text").
-		# A Purist night rolls purist_acc and purist_spd, and the encore stack drew each as
-		# its own 76px card in the LEFT rail - 152px, a quarter of the column, spent saying
-		# one thing twice. It is one indivisible pair by design ("Individual binds do not
-		# exist"), so it is one line, and it belongs with the other things that are true of
-		# the whole act rather than in the list of what the house asked for tonight.
-		# ...and it must answer for BOTH paths to a Purist night, which are separate systems
-		# that happen to share the name: `purist` is the player's own P toggle in the day
-		# hub, while the HOUSE can roll purist_acc / purist_spd as Encores. Filtering the
-		# Encores out of the left stack without covering that second path would delete the
-		# only statement of a bind the player is actually playing under.
-		var pur_row := purist_run()
-		# NO ASSIST SWITCHES ON THIS CARD ANY MORE (2026-08-24, Louis: "about the accuracy
-		# and slowmo while you are on stage: remove those symbols, they are chosen before
-		# hand"). What stood here was two 20px marks - a boot and a stopwatch - and the keys
-		# that flip them, argued for on the grounds that a control the player cannot see is
-		# a control they do not know they have. The argument was answered by the day hub:
-		# what you give up for the night is BOOKED there now, on the row that names the
-		# stage, with a mark under it that stays struck through all evening. Two marks on
-		# stage that look exactly like the two marks in the hub, doing a different and
-		# smaller job, read as the booking followed you onto the boards. B and T still work
-		# for anyone who knows them; they are simply no longer furniture in the act.
-		var status_rows := int(pts_row) + int(slow_row) + int(pur_row)
-		hud_card(Rect2(RX, 16, RW, 48.0 + 18.0 * float(status_rows)), Color(0.95, 0.66, 0.4, 0.30), show_guide_step == 1)
-		var sx := RX + 14.0
-		var sw := RW - 28.0
-		var sfrac := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
-		# a colorblind pass (Still open): the green-to-red lerp below was the one
-		# unverified spot, since the number readout beside it is small and easy to
-		# miss mid-set. Under STAM_LOW the label itself now says so and pulses, a
-		# second, non-color signal right where the eye already is (Louis's pattern
-		# elsewhere: the last drop mark and the capped streak label both do the same).
-		var stam_low := sfrac < STAM_LOW
-		var stam_a := 0.55 + 0.45 * sin(float(tick) * 0.3) if stam_low else 0.85
-		draw_string(font, Vector2(sx, 38), "STAMINA  -  LOW" if stam_low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(11), Color(1.0, 0.55, 0.42, stam_a) if stam_low else Color(0.85, 0.9, 0.85, 0.85))
-		draw_string(font, Vector2(sx + sw - 80.0, 38), "%d / %d" % [int(round(stamina)), int(stamina_max)], HORIZONTAL_ALIGNMENT_RIGHT, 80.0, ps(11), Color(0.85, 0.9, 0.85, 0.85))
-		var stcol := Color(0.55, 0.80, 0.6)
-		if stam_low:
-			stcol = stcol.lerp(Color(0.95, 0.35, 0.25), clampf((STAM_LOW - sfrac) / STAM_LOW, 0.0, 1.0))
-		draw_meter(sx, 44, sw, 11.0, sfrac, stcol)
-		var status_y := 74.0
-		if slow_row:
-			var stext := "SLOW  %d%%" % int(round(slow * 100.0))
-			if pie_active:
-				stext += "  ·  PIE"
-			if _frames < perfect_burst_until:
-				stext += "  ·  %ds" % int(ceil(float(perfect_burst_until - _frames) / 120.0))
-			draw_fit_string(font, Vector2(sx, status_y), stext, HORIZONTAL_ALIGNMENT_LEFT, sw, 12,
-				Color(0.68, 0.92, 1.0, 0.96))
-			status_y += 18.0
-		if pur_row:
-			# ...and it names WHICH binds are live. The pair is bookable one at a time now
-			# (see the two limiter rows in the day hub), so a flat "PURIST" would be wrong
-			# about two of the three states it can be in.
-			var ptxt := "PURIST  -  Accuracy + Speed bound"
-			if not purist_stat("acc"):
-				ptxt = "SLOW MOTION BOUND  -  full speed"
-			elif not purist_stat("spd"):
-				ptxt = "ACCURACY BOUND  -  a beginner's hands"
-			draw_fit_string(font, Vector2(sx, status_y), ptxt,
-				HORIZONTAL_ALIGNMENT_LEFT, sw, 12, Color(0.86, 0.76, 1.0, 0.96))
-			status_y += 18.0
-		if pts_row:
-			var pa := 0.75 + 0.25 * sin(float(tick) * 0.08)
-			draw_string(font, Vector2(sx, status_y), "+%d stat point%s  -  %s" % [points, "" if points == 1 else "s", k_sheet()[0]], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), Color(0.7, 0.95, 0.7, pa))
+		hud_card(Rect2(RX, 16, RW, 106), Color(0.65, 0.85, 0.70), show_guide_step == 1)
+		var fraction := clampf(stamina / maxf(1.0, stamina_max), 0.0, 1.0)
+		var low := fraction < STAM_LOW
+		draw_string(font, Vector2(RX + 16, 44), "STAMINA LOW" if low else "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(20), Color(1.0, 0.65, 0.45) if low else warm)
+		draw_meter(RX + 16, 58, RW - 32, 16, fraction, Color(0.95, 0.55, 0.35) if low else Color(0.55, 0.80, 0.6))
+		draw_fit_string(font, Vector2(RX + 16, 100), "%d / %d" % [int(stamina), int(stamina_max)], HORIZONTAL_ALIGNMENT_LEFT, RW - 32, 16, warm)
+		if performing:
+			hud_card(Rect2(RX, 134, RW, 188), Color(1.0, 0.72, 0.5), show_guide_step == 3)
+			draw_string(font, Vector2(RX + 16, 163), "THE CROWD", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(20), warm)
+			draw_gauge(Vector2(RX + 76, 224), 44, applause, peak_applause, "%d%%" % int(applause * 100), font)
+			draw_string(font, Vector2(RX + 144, 202), "DROPS LEFT", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
+			draw_drop_marks(RX + 158, 224, drop_limit(), dropped)
+			draw_fit_string(font, Vector2(RX + 16, 296), "Tonight: %s flowers" % commafy(run_flowers), HORIZONTAL_ALIGNMENT_LEFT, RW - 32, 16, gold)
+		var sy := 350.0 if performing else 152.0
+		if slow > 0.005:
+			draw_fit_string(font, Vector2(RX + 16, sy), "Slow time %d%%" % int(slow * 100), HORIZONTAL_ALIGNMENT_LEFT, RW - 32, 16, Color(0.68, 0.92, 1.0))
+			sy += 24.0
+		if purist_run():
+			var binds := "Accuracy + Speed bound" if purist_stat("acc") and purist_stat("spd") else ("Accuracy bound" if purist_stat("acc") else "Speed bound")
+			draw_fit_string(font, Vector2(RX + 16, sy), binds, HORIZONTAL_ALIGNMENT_LEFT, RW - 32, 16, warm)
 
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
@@ -21193,7 +21009,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var tnames := "( %s or %s )" % [kt[0], kt[1]]
 			draw_text_shout(font, Vector2(0, s.y * 0.22), "press a THROW  %s  to %s" % [tnames, verb],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 21, Color(1.0, 0.86, 0.55, pa2))
-			draw_text_shout(font, Vector2(0, s.y * 0.22 + 26.0), "bookings and rest live in the day  -  Esc, then End the session",
+			draw_text_shout(font, Vector2(0, s.y * 0.22 + 26.0), "%s  %s" % [k_finish()[0], "Bow out when you are ready" if performing else "Return to career for shows and rest"],
 				HORIZONTAL_ALIGNMENT_CENTER, s.x, 14, Color(0.85, 0.75, 0.6, 0.8))
 		elif not running:
 			# training keeps the plain end-of-run line (a booking goes straight to results)
@@ -28755,7 +28571,7 @@ func draw_show_guide(font: Font, s: Vector2) -> void:
 	# line is up, so the explanation and the object explained are the same picture. All that
 	# is left here is a soft wash of light behind it, to carry the eye across.
 	if show_guide_step == 2:
-		var stem_c := Vector2(18.0 + 152.0 + 17.0, 78.0 + 12.0 + 74.0)
+		var stem_c := Vector2(214.0, 246.0)
 		var wash := 0.5 + 0.5 * sin(atick() * 0.05)
 		draw_glow(stem_c, 96.0 + 10.0 * wash, Color(1.0, 0.88, 0.5, 0.10 + 0.06 * wash))
 
@@ -29073,6 +28889,10 @@ func draw_stats(font: Font, s: Vector2) -> void:
 
 #region AUDIO SYNTHESIS (SFX)
 func setup_audio() -> void:
+	# Muted harnesses need no synthesis or MP3 playback. In particular the Dummy driver
+	# cannot drain looping MP3 playback on exit; loading it there leaked both music streams.
+	if AudioServer.get_driver_name() == "Dummy":
+		return
 	gen_sfx()
 	for _i in 8:                       # a round-robin pool for overlapping one-shots
 		var p := AudioStreamPlayer.new()
@@ -29462,6 +29282,8 @@ func gen_sfx() -> void:
 
 
 func dump_audio(dir: String) -> void:
+	if sfx.is_empty():
+		gen_sfx()
 	# dev: write every sound to <dir> as .wav, for verification and preview.
 	# The music is Louis's own track now, so only the procedural SFX are dumped.
 	for name in sfx:
