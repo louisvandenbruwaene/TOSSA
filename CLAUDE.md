@@ -29,6 +29,15 @@ work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the 
 
 Codex improvements:
 
+- **Predictable catches (2026-09-10, requested playability review):** Good/edge timing always
+  secures outside explicit Perfect-only challenges; edge catches cost 1–3 extra stamina,
+  reduced by Accuracy/gear. Perfect/Good/edge scoring stays 3/2/1. `--legacy-catches` is a
+  transient comparison switch. Drop feedback names the hand and timing direction. Catch
+  sounds use a subtle left/right pitch distinction. `test_catch_comfort.gd` exercises actual
+  catches on both hands and the bounded comfort cost. This supersedes older chance-based
+  catch descriptions below; no saves are migrated.
+
+
 - **New-career tutorial persistence:** the initial `"balls"` lesson marker is saved before the
   lesson starts. Closing the game during onboarding must never reopen that slot past the tutorial.
 - **Actionable validation failures:** `scripts/validate.sh` removes temporary logs after a pass but
