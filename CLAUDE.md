@@ -1765,3 +1765,8 @@ A short, quantised arm fold renders behind the torso after an empty-hand BTB rel
 during the hidden carry in skill previews. Held props and imminent catches keep the normal
 contact pose. This is a visual mesh over the existing atlas, never a flight or hand-target change.
 `--fps` samples wall-clock frame intervals for p95/max, so stalled frames are not delta-clamped.
+
+### Named pattern validation fixtures (2026-09-10)
+
+`--pattern` accepts catalog IDs (`cascade`, `halfshower`, `columns`), not numeric indices.
+Validation fixtures must use those IDs so they do not silently test the saved selection.

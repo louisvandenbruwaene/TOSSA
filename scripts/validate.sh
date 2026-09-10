@@ -185,9 +185,9 @@ if [[ $QUICK -eq 0 ]]; then
   log_head "4. Collision sweep (--collcheck --latecatch 5)"
   # Combo from AUDIT_2026-07-26.md's own verified reproduction command.
   declare -a COMBOS=(
-    "--balls 4 --pattern 2 --prop 4"
-    "--balls 4 --pattern 0 --prop 0"
-    "--balls 6 --pattern 1 --prop 2"
+    "--balls 4 --pattern halfshower --prop 4"
+    "--balls 4 --pattern cascade --prop 0"
+    "--balls 6 --pattern columns --prop 2"
   )
   for combo in "${COMBOS[@]}"; do
     log="$WORK/coll_$(echo "$combo" | tr -d ' -').log"
