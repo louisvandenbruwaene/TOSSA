@@ -640,3 +640,110 @@ bottom, which the model draws a few pixels below the true centre and thicker on 
 the other; three pixels of error puts the drawn scale visibly off the painted rim. Fit the
 (cx, cy) that minimises the spread of the rim's own radii - and fit it on the RIM rather than on
 a coloured band, because the rim is the one thing every roll has.
+
+## The gauge bezel, re-rolled (2026-08-28)
+
+Same prompt as above, seed 33, `no_background: true` this time (the shipped seed-9 roll left
+`no_background` unset and got a filled black face the script discards anyway). Framed as "only
+the TOP HALF... like a dome or an arch - the bottom half is completely cut off flat by the
+bottom edge" rather than "the upper half of a round gauge": the first re-roll attempt (seed 21,
+same wording as the shipped prompt) came back a **full circle centred in the canvas**, which
+`install_gauge.py`'s centre-fit cannot handle - it searches for the rim centre within 8px of the
+image's OWN bottom edge, on the assumption the source is a half-ring sitting on it, and a
+centred full circle sent that search into empty space (`bezel_in: 2.0`, nonsense). Naming the
+shape as an arch sitting on the bottom edge, not just "half of" something, is what got a second
+roll to actually crop there. Ticks appeared again despite "no ticks" (same family as the unlit
+torch and the undrawn needle) - harmless, since the script discards everything inside the rim by
+position, not by asking the model to leave it out.
+
+    {"pivot": [0.5, 1.0], "bezel_in": 41.8, "outer": 49.7}  (112x59 ring, 11 colours)
+
+## The five stat marks, re-rolled (2026-08-28)
+
+Same five subjects as the shipped set, closely paraphrased (the doc above only kept `acc`
+verbatim - the others were summarised with "..."). All five passed the script's own bar
+(>=5 grey levels, no floor-thinness) on the FIRST roll this time, no re-rolls needed:
+
+    acc  (verbatim, seed 55 shipped -> seed 61 here, unchanged text, flat shading): 109/400px, 5 levels
+    str  "one LARGE heavy circus strongman's weight seen from the side, filling the whole frame
+         edge to edge: a big solid round pale dove-grey ball body taking up the lower two thirds
+         of the frame with a thick arched handle rising from the top of it, bold simple chunky
+         shape with a fat outline, basic shading with a bright highlight and a darker shaded
+         side, no person, no ground, no shadow, no text, no colour"
+         (seed 7, view side, basic shading): 128/400px, 5 levels
+    end  "one LARGE glossy valentine heart seen face on, filling the whole frame from edge to
+         edge, pale dove-grey, with a big bright near-white highlight on its upper left lobe, a
+         mid grey body, and a clearly darker grey shaded crease down its lower right side, strong
+         three tone shading, bold simple chunky shape, no person, no ground, no shadow, no text,
+         no colour" (seed 23, medium shading): 170/400px, 5 levels
+    rec  "one LARGE two-handled trophy cup seen face on, filling the whole frame edge to edge,
+         pale dove-grey, with a bright highlight along its front curve and a darker shaded side,
+         bold simple chunky shape with a fat outline, basic shading, no person, no ground, no
+         shadow, no text, no colour" (seed 7, basic shading): 150/400px, 5 levels
+    car  "one LARGE open book lying flat seen from slightly above, filling the whole frame edge
+         to edge, a pale dove-grey ledger with two facing pages and a visible spine down the
+         middle, a bright highlight on the near page and a darker shaded far page, bold simple
+         chunky shape, basic shading, no person, no ground, no shadow, no text, no colour"
+         (seed 7, basic shading): 240/400px, 5 levels
+
+All `create_image_pixflux`, 40x40, `no_background: true`, `selective outline`.
+
+## The trick and pattern card backs (`ui/card_trick`, `ui/card_skill`) (2026-08-28)
+
+These two keys were named in the manifest's `_KEYS` doc block since the deck existed but never
+actually wired to art - `draw_card_frame`'s OLDER, non-v2 branch checked `art_bank.has(...)` for
+them, but `card_v2` (which uses `draw_skill_card_back_v2` instead) defaults on and never called
+that branch, so the check was dead code for as long as it stood. `draw_skill_card_back_v2` now
+checks `art_bank.has("ui/card_trick" / "ui/card_skill")` first, same idiom as
+`draw_skill_card_art`'s front-face painting (blit against the full card rect, return before the
+vector fallback).
+
+The back has to stay generic on pain of spoiling the deal - "no prop, no arc, no silhouette
+belonging to any single skill" (see `draw_skill_card_back_v2`'s own comment) - so these are
+ORNAMENTAL patterns, not subjects, echoing the two motifs the vector back already used (a
+radiating rosette for tricks, an interlocking wave lattice for patterns) rather than inventing a
+new visual language for the reveal mechanic.
+
+`create_image_pixflux`, 104x128, `color_image_base64` = the locked palette (forces the 48),
+`no_background: false`, `selective outline`.
+
+    trick    "An ornamental card-back pattern for a playing card, filling the whole frame edge
+             to edge: a symmetric radiating medallion of thin golden rays and concentric rings
+             centred on the card, with a smaller matching rosette repeated near the top and near
+             the bottom. On a completely flat solid dark reddish-brown background of one single
+             colour, no gradient, no scene, no floor, no ground, no cast shadow, no object, no
+             figure, no person, no prop, no letters, no numbers, no border frame. Fine repeating
+             linework in warm gold and amber, symmetric top to bottom and left to right, like the
+             back of an ornate antique playing card. Smooth plain background, no texture, no
+             noise, no speckle." (seed 11)
+    pattern  same clause, subject swapped for "a symmetric woven lattice of interlocking golden
+             wave lines running in seven horizontal bands down the card, each band a smooth wave
+             interlocking with the ones above and below it, with a small round medallion at the
+             very centre where the bands cross" (seed 11)
+
+**BOTH CAME BACK WITH A DIAGONAL SHADOW GRADIENT DESPITE "no gradient, no cast shadow"** -
+the same "generator is bad at a large flat dark surface" finding the gauge bezel already
+recorded, showing up on a much bigger flat field than that one ever tested. The rosette (seed 11)
+was additionally SPECKLED across the background, and the lattice (seed 11) drew a full playing-
+card border plus small corner flourishes despite "no border frame" - two more instances of the
+model reaching for real-world playing-card conventions (a rounded frame, corner pips) that this
+deck's own identity does not use.
+
+**RE-ROLLING WITH STRONGER NEGATIVES FIXED THE SPECKLE AND THE BORDER, NOT THE GRADIENT.** A
+second pass ("no texture, no noise, no grain, no speckle, no dither, no stars, no dots scattered
+anywhere", flat shading, new seed) gave a clean flat-shaded medallion and a border-free lattice,
+but both STILL carried a diagonal light-to-dark division - not noise this time, a real gradient,
+confirming it is a compositional habit rather than a texture-prompt gap.
+
+**WHAT ACTUALLY FIXED THE GRADIENT WAS `edit_image` ON PIXELLAB'S OWN OUTPUT URL, NOT ANOTHER
+`create_image_pixflux` ROLL.** `edit_image(image_urls: [<the create_image_pixflux download url>],
+description: "Make the background a single perfectly flat solid dark reddish-brown colour ...
+Keep the [medallion/lattice] exactly as it is, unchanged")` - since the source is PixelLab's own
+hosted result, no local hosting or base64 was needed at all. One pass fixed the rosette
+completely; the lattice needed a second edit_image pass naming the specific direction of the
+remaining drift ("the top is lighter... the bottom is darker... make the whole pattern one
+consistent colouring") before it read as fully uniform. **`edit_image` does NOT force the locked
+palette the way `color_image_base64` does on `create_image_pixflux`** - every edited pixel came
+back off-palette (measured: 100%) even though the visible colours barely moved (111,31,30) vs
+the original (112,32,32) - so an edit_image pass always needs an Oklab palette-snap afterward,
+same as any other route into this deck.
