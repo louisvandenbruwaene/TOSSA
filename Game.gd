@@ -3016,6 +3016,7 @@ class StageScenery extends Node2D:
 var scenery: StageScenery
 var scenery_key := ""
 var scenery_original := false
+var frame_previous_us := 0
 var frame_sample_ms: Array[float] = []
 
 func update_scenery() -> void:
@@ -3094,7 +3095,10 @@ func _process(delta: float) -> void:
 	# throttle an unfocused window's presentation, so `engine fps` from a backgrounded
 	# run is still a soft number - but it is not a fabricated one, and a drop that
 	# scales with the number of props on stage is real work, not a windowing artefact.
-	frame_sample_ms.append(delta * 1000.0)
+	var frame_now := Time.get_ticks_usec()
+	if frame_previous_us > 0:
+		frame_sample_ms.append(float(frame_now - frame_previous_us) / 1000.0)
+	frame_previous_us = frame_now
 	var fps := Engine.get_frames_per_second()
 	_fps_frames += 1
 	_fps_sum += fps
@@ -9691,6 +9695,48 @@ func draw_figure_design(cx: float, floor_y: float, tint: Color, px: float = ART_
 		pos, pos + Vector2(sz.x, 0.0), pos + sz, pos + Vector2(0.0, sz.y)]), tint, art_uv, tex)
 
 
+# A brief empty-hand follow-through, behind the torso. Simulation palms stay fixed.
+var preview_btb_fold := [0.0, 0.0]
+func btb_arm_fold(h: int) -> float:
+	if not stack(h).is_empty() or tick < spin_until:
+		return 0.0
+	var incoming := incoming_ball(h)
+	if incoming != null and incoming.land_tick - tick < 28:
+		return 0.0
+	for b in balls:
+		if b.state == STATE_FLIGHT and b.trick == TR_BTB and b.thrown_from == h:
+			var age := tick - b.launch_tick
+			if age > 0 and age < 24:
+				return roundf(sin(float(age) / 24.0 * PI) * 4.0) / 4.0
+	return 0.0
+
+func draw_folded_arm(e: Dictionary, org: Vector2, tint: Color, px: float, fold: float) -> void:
+	if e.is_empty() or not art_bank.has("char/juggle_arms"):
+		return
+	var tex: Texture2D = art_bank["char/juggle_arms"]["tex"]
+	var ts := Vector2(tex.get_size())
+	var cols := maxi(1, int(fig_arms.get("atlas_cols", 8)))
+	var aw := float(fig_arms["atlas_w"])
+	var ah := float(fig_arms["atlas_h"])
+	var slot := int(e["slot"])
+	var uv_org := Vector2(float(slot % cols) * aw, float(slot / cols) * ah)
+	var palm_x := float(e["px"])
+	var inward := (float(fig_arms["body_cx"]) - palm_x) * fold
+	var base := org + Vector2(float(e["ox"]), float(e["oy"])) * px
+	# Four joined strips pin the shoulder and fold the forearm around the waist.
+	# Integer source-pixel offsets retain the painted atlas's pixel density.
+	for i in 4:
+		var t0 := float(i) / 4.0
+		var t1 := float(i + 1) / 4.0
+		var y0 := roundf(ah * t0)
+		var y1 := roundf(ah * t1)
+		var p0 := base + Vector2(roundf(inward * t0 * t0), y0 + roundf(6.0 * fold * t0 * t0)) * px
+		var p1 := base + Vector2(roundf(inward * t1 * t1), y1 + roundf(6.0 * fold * t1 * t1)) * px
+		var width := Vector2(aw * px, 0)
+		draw_colored_polygon(PackedVector2Array([p0, p0 + width, p1 + width, p1]), tint,
+			PackedVector2Array([(uv_org + Vector2(0, y0)) / ts, (uv_org + Vector2(aw, y0)) / ts,
+			(uv_org + Vector2(aw, y1)) / ts, (uv_org + Vector2(0, y1)) / ts]), tex)
+
 func draw_figure_arms(cx: float, floor_y: float, tint: Color, px: float = ART_PIXEL,
 		want_l: float = -1.0, want_r: float = -1.0) -> void:
 	# THE PERFORMER IN THREE PIECES: a body that never moves, and two arms that do.
@@ -9709,6 +9755,12 @@ func draw_figure_arms(cx: float, floor_y: float, tint: Color, px: float = ART_PI
 	var btex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
 	var org := fig_body_origin(cx, floor_y, px)
 	var bsz := Vector2(btex.get_size()) * px
+	var folds := [btb_arm_fold(LEFT), btb_arm_fold(RIGHT)] if want_l < 0.0 else preview_btb_fold
+	for h in [LEFT, RIGHT]:
+		if folds[h] > 0.0:
+			var want := want_l if h == LEFT else want_r
+			var pick := fig_arm_pick(h, cx) if want < 0.0 else fig_arm_pick_at(h, want)
+			draw_folded_arm(pick, org, tint, px, folds[h])
 	draw_colored_polygon(PackedVector2Array([
 		org, org + Vector2(bsz.x, 0.0), org + bsz, org + Vector2(0.0, bsz.y)]), tint, art_uv, btex)
 	# A PREVIEW DRIVES ITS OWN ARMS. Passing the wanted reach explicitly is what lets the
@@ -9717,7 +9769,8 @@ func draw_figure_arms(cx: float, floor_y: float, tint: Color, px: float = ART_PI
 	for h in [LEFT, RIGHT]:
 		var want := want_l if h == LEFT else want_r
 		var pick := fig_arm_pick(h, cx) if want < 0.0 else fig_arm_pick_at(h, want)
-		draw_figure_arm(pick, org, tint, px)
+		if folds[h] <= 0.0:
+			draw_figure_arm(pick, org, tint, px)
 
 
 func draw_figure_arm(e: Dictionary, org: Vector2, tint: Color, px: float = ART_PIXEL) -> void:
@@ -18491,6 +18544,8 @@ func draw_mitt(pos: Vector2, close: float, inward: float) -> void:
 			fill_ellipse(pos + Vector2(-3.6, -4.6 - stretch * 0.4), 4.2, 2.8, Color(1, 1, 1, 0.30))
 
 func draw_hand(h: int) -> void:
+	if fig_anim_live() and btb_arm_fold(h) > 0.0:
+		return   # the empty palm is tucked behind the torso
 	var pos: Vector2 = fig_hand_pos(h)
 	var close: float = hclose[h]
 	var inward := 1.0 if h == LEFT else -1.0          # +x points toward centre for L
@@ -25151,7 +25206,16 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	for pr in props:
 		if bool(pr["behind"]):
 			pv_draw_prop(pr, inner)
+	preview_btb_fold = [0.0, 0.0]
+	for pr in props:
+		if bool(pr.get("behind", false)) and bool(pr.get("carry", false)):
+			var h := LEFT if float(pr.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
+			if not held[h]:
+				var elapsed := float(pr.get("el", 0.0))
+				var span := maxf(0.001, elapsed + float(pr.get("rem", 0.0)))
+				preview_btb_fold[h] = roundf(sin(clampf(elapsed / span, 0.0, 1.0) * PI) * 4.0) / 4.0
 	draw_mini_juggler(o, hp[LEFT], hp[RIGHT], turn)
+	preview_btb_fold = [0.0, 0.0]
 	# A CARRIED PROP FOLLOWS THE PAINTED PALM, exactly as it does on stage (fig_hand_pos).
 	# The arm bank only holds the reaches it holds, so the arm drawn for a wanted reach puts
 	# its palm a pixel or two off the simulated hand - and at this size a ball floating two

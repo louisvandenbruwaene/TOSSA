@@ -1758,3 +1758,10 @@ After Spin unlocks, compatible patterns offer six clean catches, a deliberately 
 throw, an all-props-airborne Spin while that throw remains aloft, six clean recovery catches,
 and a controlled finish. Edges/drops reset the sequence; rewards cap at 20 XP per run.
 It never changes flight timing or score multipliers. Transient progress is not saved.
+
+### Behind-the-back pose and frame timings (2026-09-10)
+
+A short, quantised arm fold renders behind the torso after an empty-hand BTB release and
+during the hidden carry in skill previews. Held props and imminent catches keep the normal
+contact pose. This is a visual mesh over the existing atlas, never a flight or hand-target change.
+`--fps` samples wall-clock frame intervals for p95/max, so stalled frames are not delta-clamped.
