@@ -29,6 +29,15 @@ work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the 
 
 Codex improvements:
 
+- **Learning and preparation (2026-09-10):** practice/free-lesson hand cues fade over twelve
+  catches and return after a miss; they do not move inputs or slow the simulation. The opening
+  lesson copy starts with the rhythm. Results lead with the accomplishment, one coaching line,
+  and the next unlock, with large keyboard/pad/mouse actions. P/D-Right opens focused practice
+  with the same load and the normal one-segment cost; exhaustion, Sprint and special endings
+  remain gated. Shop portraits reserve space for traits and actual owned/Strength readiness,
+  using whole-pixel fitting. `test_practice_result.gd` checks navigation and economy boundaries.
+
+
 - **Stage readability and rendering (2026-09-10):** the HUD groups progress/cash-in on the
   left and stamina/crowd on the right, with readable gate status and explicit career return.
   A StageScenery child caches the painting and static veil; the foreground, light and sim

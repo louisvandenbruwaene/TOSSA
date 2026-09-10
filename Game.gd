@@ -2630,17 +2630,6 @@ func _ready() -> void:
 			# already seen the card in an earlier run.
 			demo_wall_seen = false
 			pending_demo_wall = false
-			# ...AND IT HAS TO GUARANTEE THE PRECONDITION IT IS TESTING (2026-08-20).
-			# The wall arms on `venue_index_of(reputation) > DEMO_MAX_VENUE`, so the flag
-			# only ever worked while the demo save happened to sit above that tier - and it
-			# had drifted BELOW it: reputation 238 against the 260 that opens venue 2, i.e.
-			# 22 short, in a harness act that then loses 22 more for collapsing. Every run
-			# made the next one further away, so validate.sh's step 3a had become a ratchet
-			# that could not come back on its own, and it read as a code regression on every
-			# report. Resetting the two flags above without resetting the number they are
-			# gated on was only ever half a reset.
-			if DEMO_MAX_VENUE + 1 < VENUE_REP.size():
-				reputation = maxi(reputation, int(VENUE_REP[DEMO_MAX_VENUE + 1]))
 		var start_n := 3
 		var bi := ua.find("--balls")   # dev: force the ball count (audit even-count Cascade, e.g. 4/6)
 		if bi != -1 and bi + 1 < ua.size():
@@ -2654,6 +2643,9 @@ func _ready() -> void:
 				won = true   # The Midnight Show also gates on `won`, not Reputation alone
 			reputation = VENUE_REP[vn]
 			venue_pick = vn
+		if ua.has("--demowall"):
+			# After --venue overrides, stay above the demo ceiling even on a failed act.
+			reputation = maxi(reputation, int(VENUE_REP[DEMO_MAX_VENUE + 1]) + REP_SWING)
 		var pfi := ua.find("--prop")    # dev: juggle prop N (0..5) with enough owned + Strength
 		if pfi != -1 and pfi + 1 < ua.size():
 			var pn := clampi(int(ua[pfi + 1]), 0, PROPS.size() - 1)
@@ -3406,6 +3398,14 @@ func _input(event: InputEvent) -> void:
 				bind_action(String(REMAP_ACTS[remap_sel][0]), kc)
 				play_sfx("ui2", -12.0)
 			return
+	elif event is InputEventMouseButton:
+		if not event.pressed or event.button_index != MOUSE_BUTTON_LEFT or not results_open or ovation_left > 0 or sheet_open or shop_open or paused:
+			return
+		for action in result_actions(get_viewport_rect().size):
+			if (action["rect"] as Rect2).has_point(get_local_mouse_position()):
+				kc = int(action["key"])
+		if kc < 0:
+			return
 	elif event is InputEventJoypadButton:
 		# joypad events carry no echo flag, so a held table drops any duplicate
 		# press a driver might deliver while the button is already down
@@ -3678,7 +3678,7 @@ func _input(event: InputEvent) -> void:
 			return
 		match kc:
 			KEY_R, KEY_SPACE:
-				if not too_tired():
+				if can_practise_result():
 					# "go again" books a WHOLE fresh booking (a new establishing card and a
 					# new Encore), not a bare set, so it costs a day segment like any booking
 					seg_used += 1
@@ -3688,6 +3688,8 @@ func _input(event: InputEvent) -> void:
 				else:
 					play_sfx("whiff", -10.0)   # out of stamina: sleep first (the
 											   # card's footer says so in words)
+			KEY_P:
+				practise_result()
 			KEY_TAB:
 				sheet_open = true
 			KEY_S:
@@ -4679,6 +4681,7 @@ func next_venue_rep() -> int:
 
 #region DAY HUB LOGIC
 func enter_day() -> void:
+	practice_focus = ""
 	game_state = ST_DAY
 	day_sel = 0
 	day_group = ""    # a new day always opens at the top level, never mid-drawer
@@ -5794,13 +5797,13 @@ func tut_lesson(id: String) -> Array:
 	var CD := tut_kc(dom)     # catch, dominant hand      (K)
 	var CO := tut_kc(off)     # catch, other hand         (D)
 	var out: Array = []
-	out.append(tut_say("Hello, this is a game about juggling. If you want to learn it, you've come to the right place!"))
+	out.append(tut_say("Let's find your rhythm: throw, catch, repeat."))
 	out.append({"goal": "hand", "prop": PROP_BALLS, "balls": 0, "need": 0, "slow": 0.0, "say": true,
 		"text": "Let's start with one ball in your strong hand.", "next": "one ball"})
 	# ONE BALL, hand to hand. Four presses, each one named and waited for.
-	out.append(tut_do("Great! Now throw it to your other hand in an arc.", "throw", dom, TD, 1, 1))
+	out.append(tut_do("Throw to your other hand.", "throw", dom, TD, 1, 1))
 	out.append(tut_do("Now catch it.", "catch", off, CO, 1, 1))
-	out.append(tut_do("Amazing! Now throw it back.", "throw", off, TO, 1, 1))
+	out.append(tut_do("Throw it back.", "throw", off, TO, 1, 1))
 	out.append(tut_do("Catch it.", "catch", dom, CD, 1, 1))
 	out.append(tut_say("The catch words are timing grades: PERFECT is centred, GOOD earns less, an edge catch costs extra stamina, and a miss drops the prop."))
 	out.append(tut_free("That's it! Feel free to master one ball before moving on.", 1, 0, 0,
@@ -10316,6 +10319,8 @@ func count_air_scale() -> float:
 
 #region ROUND START, CATCHING, GOALS
 func start_run(n: int) -> void:
+	coach_catches = 0
+	last_mistake = ""
 	if not available(prop_type):
 		prop_type = PROP_BALLS   # not enough of that prop owned, or not strong enough for
 								  # three of it: fall back to balls
@@ -10691,6 +10696,7 @@ func on_catch(h: int) -> void:
 	sprint_record("catch_l" if h == LEFT else "catch_r")
 	catch_flash[h] = tick
 	caught += 1
+	coach_catches += 1
 	career["catches"] = int(career["catches"]) + 1
 	if tut_active:
 		tut_hold_mark("catch", h)   # the beat's catch has landed; the world may move again
@@ -14067,6 +14073,7 @@ func drop_ball(b: Ball, why: String) -> void:
 	if not balls.has(b):
 		return
 	var drop_pos := flight_pos(b)
+	coach_catches = 0
 	last_mistake_hand = b.to_hand
 	var side := "Left" if b.to_hand == LEFT else "Right"
 	match why.to_lower():
@@ -15412,6 +15419,7 @@ func _draw_screen() -> void:
 			draw_routine_hud(font, s)
 	else:
 		draw_hud(font, s)
+	draw_coach_hands(font)
 	draw_show_guide(font, s)   # the first show's own guide, over the live HUD it explains
 	draw_popups(font)
 	if results_open and not tut_active:
@@ -19814,7 +19822,7 @@ func prop_spin_angle(b: Ball) -> float:
 const PROP_ICON_MAG := [3.00, 2.80, 2.40, 1.78, 1.90, 1.72, 1.30]
 const PROP_ICON_OFF := [0.0, 0.0, 0.0, -4.2, -5.2, -8.0, -2.0]
 
-func draw_glow_shop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
+func draw_glow_shop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false, sprite_scale: float = 1.0) -> void:
 	# The reverse of a shop card uses the same large PixelLab-authored portrait as its
 	# ordinary face, now treated as phosphorescent stock: a clean blue charged portrait in
 	# a dark niche. This keeps both sides recognisably the same physical object.
@@ -19822,9 +19830,9 @@ func draw_glow_shop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool =
 	fill_ellipse(pos + Vector2(0.0, 42.0 * mag), 28.0 * mag, 6.0 * mag, Color(0.0, 0.0, 0.0, 0.5))
 	var bkey := "prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower()
 	var ang := (-0.34 + 0.20 * sin(atick() * 0.016)) if bool(PROPS[kind]["spins"]) and live else (-0.34 if bool(PROPS[kind]["spins"]) else 0.0)
-	if art_blit(bkey, pos, 1.0, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse)):
+	if art_blit(bkey, pos, sprite_scale, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse)):
 		if kind == PROP_TORCHES:
-			draw_sprite_torch_flame(bkey, "card", pos, ang, 1.0, 1, true)
+			draw_sprite_torch_flame(bkey, "card", pos, ang, sprite_scale, 1, true)
 		return
 	var sc: float = PROP_ICON_MAG[kind] * mag
 	glow_silhouette(pos, kind, sc, ang, Color(GLOW_PHOS.r, GLOW_PHOS.g, GLOW_PHOS.b, pulse))
@@ -19832,7 +19840,7 @@ func draw_glow_shop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool =
 		draw_torch_flame(pos, ang, sc, false, true)
 
 
-func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false) -> void:
+func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = false, sprite_scale: float = 1.0) -> void:
 	# the prop as SHOP GOODS: the very same shape the stage draws (never a second art
 	# style for the same object), set in a small lit niche with a shadow under it, hung
 	# on its own centre, and tilted the way a prop reads in the air rather than standing
@@ -19902,13 +19910,13 @@ func draw_prop_icon(kind: int, pos: Vector2, mag: float = 1.0, live: bool = fals
 	# actually left, expressly so a prop cannot "grow out through its own card", and that
 	# `mag` only ever reached the procedural path.
 	var bkey := "prop_big/" + str((PROPS[kind] as Dictionary)["name"]).to_lower()
-	if art_blit(bkey, pos + Vector2(0.0, bob), 1.0, ang, col if big_tinted else Color.WHITE):
+	if art_blit(bkey, pos + Vector2(0.0, bob), sprite_scale, ang, col if big_tinted else Color.WHITE):
 		# A CARD IS A STILL PORTRAIT OF AN OBJECT, AND FIRE IS NOT AN OBJECT. Same seam, same
 		# fix as the stage torch: the sprite is the handle and the flame is drawn live over it,
 		# so a torch burns wherever it is shown - the shop, the skills preview, anywhere else
 		# that reaches this one function.
 		if kind == PROP_TORCHES:
-			draw_sprite_torch_flame(bkey, "card", pos + Vector2(0.0, bob), ang, 1.0, 1)
+			draw_sprite_torch_flame(bkey, "card", pos + Vector2(0.0, bob), ang, sprite_scale, 1)
 		return
 	draw_prop_rich(kind, at, col, ang, sc)
 
@@ -20973,6 +20981,11 @@ func draw_hud(font: Font, s: Vector2) -> void:
 			var binds := "Accuracy + Speed bound" if purist_stat("acc") and purist_stat("spd") else ("Accuracy bound" if purist_stat("acc") else "Speed bound")
 			draw_fit_string(font, Vector2(RX + 16, sy), binds, HORIZONTAL_ALIGNMENT_LEFT, RW - 32, 16, warm)
 
+	if mode == MODE_TRAIN and practice_focus != "" and not results_open:
+		draw_wrap_fit(font, practice_focus, Rect2(322, 96, s.x - 644, 56), 20, warm, HORIZONTAL_ALIGNMENT_CENTER)
+	if performing and not results_open and not encore_scores_run():
+		draw_wrap_fit(font, "This audience rejects your routine. Bow out and prepare another.", Rect2(34, 548, 248, 64), 16, gold)
+
 	# a freshly unlocked trick announces itself, non-blocking, only while juggling
 	# the small in-play toast now only runs AFTER the card has had its say, so an unlock
 	# is announced once by the card and then quietly reinforced where the hands are
@@ -21020,6 +21033,92 @@ func draw_hud(font: Font, s: Vector2) -> void:
 #endregion
 
 #region RESULTS CARD, PAUSE MENU, TRICK/ROUTINE HUD
+# Coaching is transient: cues return after a miss, and fade after a clean sequence.
+var coach_catches := 0
+var practice_focus := ""
+
+func can_practise_result() -> bool:
+	return results_open and not too_tired() and not sprint_active and not post_lesson_show \
+		and not pending_win and not pending_demo_wall and not pending_purist_legend
+
+func practise_result() -> void:
+	if not can_practise_result():
+		play_sfx("whiff", -12.0)
+		return
+	var focus_line := last_mistake if last_mistake != "" else "Build one clean sequence, then finish in control"
+	var old_pattern := pattern
+	var old_count := num_balls
+	# Exactly the same day/economy cost as entering practice through the hub.
+	seg_used += 1
+	career["practices"] = int(career["practices"]) + 1
+	results_open = false
+	booking_active = false
+	daily_active = false
+	encores.clear()
+	mode = MODE_TRAIN
+	pattern_once = old_pattern
+	if mini(max_count(), have(prop_type)) < MIN_BALLS:
+		prop_type = PROP_BALLS
+		focus_line += " - practising with your available balls"
+	start_run(old_count)
+	practice_focus = focus_line
+	save_progress()
+
+func draw_coach_hands(font: Font) -> void:
+	if results_open or paused or sheet_open or shop_open or spinning() or collapsing:
+		return
+	var free_lesson := tut_active and String(tut_step_data().get("goal", "")) == "free"
+	if not free_lesson and mode != MODE_TRAIN:
+		return
+	if tut_active and not free_lesson:
+		return
+	if coach_catches >= 12:
+		return
+	var a := clampf(1.0 - float(coach_catches) / 12.0, 0.0, 1.0)
+	for h in [LEFT, RIGHT]:
+		var b := incoming_ball(h)
+		var action := ""
+		var key := ""
+		if not stack(h).is_empty() and hand_can_throw(h):
+			action = "THROW"
+			key = tut_kt(h)
+		elif b != null:
+			action = "CATCH" if absi(b.land_tick - tick) <= late_window() else "WATCH"
+			key = tut_kc(h)
+		if action == "":
+			continue
+		var palm := fig_hand_pos(h)
+		var x := clampf(palm.x + (-130.0 if h == LEFT else 22.0), 310.0, 840.0)
+		var y := clampf(palm.y + 28.0, 360.0, 544.0)
+		draw_fit_string(font, Vector2(x, y), "[%s] %s" % [key, action], HORIZONTAL_ALIGNMENT_LEFT, 126.0, 20,
+			Color(1.0, 0.91, 0.66, a))
+		if b != null and stack(h).is_empty():
+			# A short arrival rail teaches timing without catching or altering the flight.
+			var t := clampf(float(tick - b.land_tick) / float(COMMIT), -1.0, 1.0)
+			draw_rect(Rect2(x, y + 8, 112, 2), Color(0.7, 0.65, 0.55, a * 0.6))
+			var band := float(perfect_window()) / float(COMMIT) * 56.0
+			draw_rect(Rect2(x + 56 - band, y + 5, band * 2, 8), Color(0.7, 0.9, 0.6, a * 0.6))
+			draw_rect(Rect2(x + 54 + t * 56, y + 3, 4, 12), Color(1.0, 0.94, 0.75, a))
+
+func result_headline() -> String:
+	if goals_hit >= NUM_GOALS and dropped == 0:
+		return "Your first clean show" if int(career.get("perfs", 0)) <= 1 else "A clean show, start to finish"
+	if goals_hit >= NUM_GOALS:
+		return "You won the room"
+	if goals_hit > 0:
+		return "%d goal%s secured" % [goals_hit, "" if goals_hit == 1 else "s"]
+	return "A rhythm worth practising"
+
+func next_unlock_hint() -> String:
+	for t in TRICKS.size():
+		if not trick_unlocked(t):
+			return "Still to discover: %s - %s" % [TRICKS[t]["name"], skill_req_text(TRICKS[t])]
+	for p in pattern_order():
+		if not pattern_unlocked(p):
+			return "Still to discover: %s - %s" % [PATTERNS[p]["name"], skill_req_text(PATTERNS[p])]
+	return "Next challenge: create height, spin, and recover without a drop"
+
+
 func _result_row(font: Font, lx: float, rx: float, y: float, label: String, value: String, vc: Color, a: float = 1.0,
 		currency: bool = false) -> void:
 	if a <= 0.0:
@@ -21079,150 +21178,56 @@ func draw_ovation(font: Font, s: Vector2) -> void:
 		draw_coin_mark(Vector2(bx + tw * 0.5 + 2.0, by - 8.0), 9.0, Color(1, 1, 1, a), true)
 
 
+func result_actions(s: Vector2) -> Array:
+	var simple := pending_win or pending_demo_wall or pending_purist_legend or post_lesson_show or sprint_active or too_tired()
+	var labels := ["Continue"] if simple else ["Try again", "Practise", "Career"]
+	var keys := [KEY_ENTER] if simple else [KEY_R, KEY_P, KEY_ENTER]
+	var hints := [String(k_finish()[0])] if simple else [String(k_trick()[0]) if pad_active() else "R", "D-Right" if pad_active() else "P", String(k_finish()[0])]
+	var out: Array = []
+	var width := 716.0 / float(labels.size())
+	for i in labels.size():
+		out.append({"rect": Rect2(s.x * 0.5 - 358 + float(i) * width, s.y * 0.5 + 240, width - 8, 40), "label": labels[i], "key": keys[i], "hint": hints[i]})
+	return out
+
+
 func draw_results(font: Font, s: Vector2) -> void:
-	# the end-of-performance card: the grade, the numbers, the pay and rep swing, and
-	# the venue record to chase. It REVEALS itself: rows slide in one by one while
-	# the score counts up, then the grade stamps down. Anticipation is the payoff.
 	var age := results_age()
-	var card_a := clampf(float(age) / 14.0, 0.0, 1.0)
-	draw_rect(Rect2(0, 0, s.x, s.y), Color(0.04, 0.02, 0.03, 0.82 * card_a))
-	var pw := 580.0
-	var ph := 500.0   # tall enough that the footer hints breathe below the XP row
-	var px := s.x * 0.5 - pw * 0.5
-	var py := s.y * 0.5 - ph * 0.5 + (1.0 - card_a) * 24.0
-	soft_card(Rect2(px, py, pw, ph), Color(0.12, 0.07, 0.08, 0.98 * card_a), Color(0.9, 0.6, 0.35, 0.5 * card_a), 2.0, 16.0, 22.0 * card_a)
-	if card_a < 1.0:
-		return
-	var lx := px + 34.0
-	var rx := px + pw - 34.0
-
-	# header: the night's outcome and venue; the grade badge stamps in later
-	var complete := goals_hit >= NUM_GOALS
-	var htag := "THE ACT  -  ALL THREE GOALS" if complete else ("THE ACT  -  %d of %d goals" % [goals_hit, NUM_GOALS])
-	var htc := Color(1.0, 0.86, 0.45) if complete else Color(0.9, 0.72, 0.55)
-	draw_string(font, Vector2(lx, py + 40.0), htag, HORIZONTAL_ALIGNMENT_LEFT, -1, ps(15), htc)
-	draw_string(title_font(), Vector2(lx, py + 74.0), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(30), Color(1.0, 0.86, 0.5))
-	# WHY the night ended, right under its name, whenever it did not end in a win: the
-	# card used to show only what was scored and left the player to guess the cause.
-	# The grade badge sits far right, so this line has the left of the card to itself.
-	var ft := fail_text()
-	if sprint_active and complete:
-		draw_string(font, Vector2(lx, py + 96.0), "SPRINT TIME  " + sprint_clock_text(), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(0.72, 0.92, 1.0))
-	elif not complete and String(ft[0]) != "":
-		draw_string(font, Vector2(lx, py + 96.0), String(ft[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(13), Color(1.0, 0.55, 0.42))
-	if age >= 64:
-		var k := clampf(float(age - 64) / 9.0, 0.0, 1.0)
-		var g := run_grade()
-		var gc := grade_color(g)
-		var bc := Vector2(rx - 42.0, py + 56.0)
-		# THE PRIZE IS A PRIZE, AND ONLY WHEN ONE IS WON (2026-08-19). The badge was a
-		# draw_circle plus a draw_arc - two antialiased rims - inside a draw_set_transform
-		# whose scale ran continuously from 2.1 to 1.0, which is the exact pair of things
-		# pixel art cannot take: a soft edge, and a fractional scale. It also handed a
-		# bottom grade the same laurel as a flawless one.
-		# A rosette is a theatre award and it is EARNED, so S/A/B get the sprite and C/D
-		# keep a plain grid ring. The letter stays procedural on the sprite's own darkened
-		# plaque - text is screen density by decision 2, and a grade is a letter.
-		var won := g == "S" or g == "A" or g == "B"
-		# WHERE THE LETTER GOES IS MEASURED OFF THE SPRITE, NOT GUESSED. The rosette's
-		# plaque is 20 of its 34x56 art pixels across, centred at (-0.5, -11.5) from the
-		# sprite's own centre - so at ART_PIXEL 2, and with the sprite hung 8px low to
-		# leave its ribbon tails room, the plaque lands at bc + (-1, -15) and is 40 screen
-		# pixels wide. A 58pt letter was sized for the 84px circle this replaced and
-		# overflowed the plaque by half its own height.
-		var lc := bc
-		var big := 44
-		var rest := 32
-		if won and art_blit("ui/rosette", bc + Vector2(0.0, 8.0), 1.0, 0.0,
-				Color(gc.r, gc.g, gc.b, 0.55 + 0.45 * k)):
-			lc = bc + Vector2(-1.0, -15.0)
-		else:
-			draw_glow_pix(bc, 46.0, Color(gc.r, gc.g, gc.b, (0.14 * k + 0.06)))
-			draw_ring_pix(bc, 42.0, 4.0, Color(gc.r, gc.g, gc.b, 0.85 * k + 0.15))
-			big = 78
-			rest = 58
-		# THE STAMP SNAPS, IT DOES NOT EASE. The old beat was a draw_set_transform whose
-		# scale ran continuously 2.1 -> 1.0, which is the one thing pixel art cannot take.
-		# Two whole steps read as a HARDER impact than the ease did - which is the point of
-		# a stamp - and both sizes are multiples of 4, where this font is crisp.
-		var gsz := rest if k >= 0.34 else big
-		draw_string(font, Vector2(lc.x - 42.0, lc.y + float(gsz) * 0.34), g,
-			HORIZONTAL_ALIGNMENT_CENTER, 84.0, ps(gsz), gc)
-	draw_line(Vector2(lx, py + 104.0), Vector2(rx, py + 104.0), Color(0.9, 0.6, 0.35, 0.3), 1.0)
-
-	# stat rows, each fading in a beat after the last; the score value counts up
-	var t_count := clampf(float(age - 8) / 46.0, 0.0, 1.0)
-	var eased := 1.0 - pow(1.0 - t_count, 3.0)
-	var shown_score := score * eased
-	var ra := func(i: int) -> float: return clampf(float(age - 10 - i * 7) / 10.0, 0.0, 1.0)
-	var y := py + 140.0
-	var rowh := 40.0
-	_result_row(font, lx, rx, y, "Booking score", score_text(shown_score), Color(1.0, 0.92, 0.72), ra.call(0))
-	if age > 54:
-		var rec := "NEW VENUE RECORD" if results_record else "best here   %s" % score_text(rec_table()[run_venue])
-		if purist:
-			rec = "PURIST  -  " + rec
-		var recc := Color(1.0, 0.86, 0.42) if results_record else Color(0.68, 0.62, 0.54)
-		if results_record:
-			recc.a = 0.7 + 0.3 * sin(float(tick) * 0.1)
-		draw_string(font, Vector2(rx - 300.0, y + 15.0), rec, HORIZONTAL_ALIGNMENT_RIGHT, 300.0, ps(13), recc)
-	y += rowh + 8.0
-	var pct := int(round(100.0 * run_clean()))
-	_result_row(font, lx, rx, y, "Caught  /  Dropped", "%d  /  %d    (%d%%)" % [caught, dropped, pct], Color(0.86, 0.9, 0.82), ra.call(1)); y += rowh
-	_result_row(font, lx, rx, y, "Best streak", str(best_streak), Color(0.9, 0.82, 0.6), ra.call(2)); y += rowh
-	# the trick total is a SCORE, so it gets the same thousands separators the booking
-	# score two rows above it has (it read "+42600" beside "951,875")
-	var tval := "%d   (+%s)" % [tricks_landed, commafy(trick_score)] if trick_score > 0 else str(tricks_landed)
-	_result_row(font, lx, rx, y, "Tricks landed", tval, Color(0.93, 0.8, 0.99), ra.call(3)); y += rowh
-	draw_line(Vector2(lx, y - 6.0), Vector2(rx, y - 6.0), Color(0.9, 0.6, 0.35, 0.2), 1.0)
-	_result_row(font, lx, rx, y + 20.0, "Pay", "+%s" % commafy(last_pay), Color(1.0, 0.86, 0.45), ra.call(4), true); y += rowh
-	var rsign := "+" if last_rep_delta >= 0 else ""
-	var rcol := Color(0.7, 0.95, 0.7) if last_rep_delta >= 0 else Color(1.0, 0.55, 0.45)
-	_result_row(font, lx, rx, y + 20.0, "Reputation", "%s%d    %s" % [rsign, last_rep_delta, rep_tier()], rcol, ra.call(5)); y += rowh
-	_result_row(font, lx, rx, y + 20.0, "XP gained", "+%s" % commafy(run_xp), Color(0.82, 0.9, 0.7), ra.call(6)); y += rowh
-
-	# ...and the reason spelled out, in the clear space above the footer: the headline
-	# by the venue name says WHAT happened, this says what to do about it. Last to
-	# arrive, so it reads as the card's closing word rather than competing with the
-	# count-up. A complete booking has no reason to give (nothing failed).
-	# the slot is the gap between the last row and the footer, and it is drawn as a BOX
-	# so a long line stops inside it instead of running down into the footer
-	var word_box := Rect2(px + 34.0, py + ph - 74.0, pw - 68.0, 36.0)
-	if first_show_reaction != "" and age > 74:
-		# THE FIRST SHOW'S CLOSING REACTION (2026-07-31, Louis) takes this slot over
-		# everything else it would normally hold - it is a one-time event, and outranks
-		# the ordinary fail/coach lines below for exactly this one card.
-		draw_wrap_fit(font, first_show_reaction, word_box, 13, Color(1.0, 0.9, 0.72, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
-	elif not complete and String(ft[1]) != "" and age > 74:
-		draw_wrap_fit(font, String(ft[1]), word_box, 12, Color(0.86, 0.72, 0.64, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
-	elif not set_collapsed and age > 74:
-		# a survived act (all goals, or a chosen bow) gets a coaching line in the same
-		# closing-word slot - what to work on next, drawn from this night's real numbers
-		var coach := coach_text()
-		if coach != "":
-			draw_wrap_fit(font, coach, word_box, 12, Color(0.74, 0.86, 0.72, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
-
-	# footer: how to continue, breathing gently once everything is revealed. every
-	# slot in this footer has a real pad button - the pad footer names only
-	# buttons it can actually press, via the remap-aware k_* hint helpers.
-	if age > 80:
-		var fa := 0.7 + 0.3 * sin(float(tick) * 0.05)
-		var foot := ""
-		if pending_win:
-			# the top stage just fell: the first key rolls into the victory screen
-			foot = "you have conquered the final stage  -  any key"
-		elif too_tired():
-			# the reason R will not work, in words, right where the player looks
-			foot = "too tired to go again  -  %s back to the day, then sleep" % String(k_finish()[0])
-		else:
-			var kgo := String(k_trick()[0]) if pad_active() else "R"
-			var kshop := String(k_shop()[0])
-			var ksheet := String(k_sheet()[0])
-			var kmenu := String(k_finish()[0])
-			foot = "%s  go again      %s  shop      %s  back to the day" % [kgo, kshop, kmenu]
-			if points > 0:
-				foot = "%s  go again      %s  +%d point%s      %s  shop      %s  back to the day" % [kgo, ksheet, points, "" if points == 1 else "s", kshop, kmenu]
-		draw_string(font, Vector2(px, py + ph - 26.0), foot, HORIZONTAL_ALIGNMENT_CENTER, pw, ps(15), Color(0.86, 0.78, 0.64, fa))
+	var reveal := clampf(float(age) / 24.0, 0.0, 1.0)
+	draw_rect(Rect2(Vector2.ZERO, s), Color(0.04, 0.02, 0.03, 0.85))
+	var r := Rect2(s.x * 0.5 - 390, s.y * 0.5 - 300, 780, 600)
+	var gold := Color(1.0, 0.86, 0.55)
+	var warm := Color(0.90, 0.82, 0.72)
+	hud_card(r, gold)
+	var x := r.position.x + 32
+	var right := r.end.x - 32
+	var y := r.position.y
+	draw_fit_string(title_font(), Vector2(x, y + 46), result_headline(), HORIZONTAL_ALIGNMENT_LEFT, 620, 32, gold)
+	draw_fit_string(font, Vector2(x, y + 76), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 620, 20, warm)
+	var grade := run_grade()
+	if grade in ["S", "A", "B"]:
+		art_blit("ui/rosette", Vector2(right - 24, y + 90), 1.0, 0.0, grade_color(grade))
+	draw_string(font, Vector2(right - 48, y + 82), grade, HORIZONTAL_ALIGNMENT_CENTER, 48, ps(28), gold)
+	draw_fit_string(title_font(), Vector2(x, y + 136), score_text(score * reveal), HORIZONTAL_ALIGNMENT_LEFT, 520, 40, gold)
+	draw_string(font, Vector2(x, y + 164), "NEW VENUE RECORD" if results_record else "BOOKING SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
+	_result_row(font, x, right, y + 208, "Best clean streak", str(best_streak), gold)
+	_result_row(font, x, right, y + 244, "Catches / drops", "%d / %d" % [caught, dropped], warm)
+	_result_row(font, x, right, y + 280, "Tricks landed", str(tricks_landed), warm)
+	_result_row(font, x, right, y + 326, "Flowers earned", "+%s" % commafy(last_pay), gold, 1.0, true)
+	_result_row(font, x, right, y + 362, "Reputation / XP", "%+d / +%s" % [last_rep_delta, commafy(run_xp)], warm)
+	var coach := last_mistake if dropped > 0 and last_mistake != "" else coach_text()
+	if set_collapsed and fail_reason == "spent":
+		coach = "Rest before the next show; finish while you still have catching energy."
+	if first_show_reaction != "":
+		coach = first_show_reaction
+	if coach == "":
+		coach = "Aim for one controlled sequence, then bring every prop safely home."
+	draw_wrap_fit(font, coach, Rect2(x, y + 392, 716, 68), 20, warm)
+	draw_wrap_fit(font, next_unlock_hint(), Rect2(x, y + 466, 716, 52), 16, gold)
+	for action in result_actions(s):
+		var box: Rect2 = action["rect"]
+		var hover := box.has_point(get_local_mouse_position())
+		hud_card(box, gold if hover else Color(0.65, 0.55, 0.4))
+		draw_fit_string(font, box.position + Vector2(8, 27), "[%s] %s" % [action["hint"], action["label"]], HORIZONTAL_ALIGNMENT_CENTER, box.size.x - 16, 20, gold)
 
 
 func draw_pause_screen(font: Font, s: Vector2) -> void:
@@ -24030,6 +24035,21 @@ func draw_shop_prop_card(font: Font, i: int, r: Rect2, sel: bool) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
+func shop_portrait_scale(kind: int, area: Vector2) -> float:
+	var key := "prop_big/" + str(PROPS[kind]["name"]).to_lower()
+	if not art_bank.has(key):
+		return 0.5
+	var entry: Dictionary = art_bank[key]
+	var size := Vector2((entry["tex"] as Texture2D).get_size())
+	# Allow for the portrait's sway and the torch's live flame; retain whole source pixels.
+	if bool(PROPS[kind]["spins"]):
+		size = Vector2(size.x + size.y * 0.65, size.y + size.x * 0.65)
+	if kind == PROP_TORCHES:
+		area.y -= 64.0
+	var pixels := maxf(1.0, floorf(minf(area.x / size.x, area.y / size.y)))
+	return minf(1.0, pixels / (ART_PIXEL * float(entry.get("scale", 1.0))))
+
+
 func draw_shop_prop_face(font: Font, i: int, r: Rect2, sel: bool, glow_face: bool) -> void:
 	# THE CARD IS THE OBJECT (2026-07-30, Louis: "I want the entire card to be the objects
 	# picture. Right above it should be a small cardlike window with its price").
@@ -24068,13 +24088,20 @@ func draw_shop_prop_face(font: Font, i: int, r: Rect2, sel: bool, glow_face: boo
 	# ...and the goods, filling everything under it. `mag` comes off the space actually left
 	# rather than a fixed number, so the same card body works at the grid's 250px and at the
 	# fallback row's 141 without a prop growing out through its own card.
-	var pic := Rect2(r.position.x + 6.0, chip.end.y + 4.0, r.size.x - 12.0, r.end.y - chip.end.y - 12.0)
+	var pic := Rect2(r.position.x + 6.0, chip.end.y + 4.0, r.size.x - 12.0, r.end.y - chip.end.y - 66.0)
+	var sprite_scale := shop_portrait_scale(i, pic.size)
+	var portrait_pos := pic.get_center() + Vector2(0.0, pic.size.y * 0.06 + (20.0 if i == PROP_TORCHES else 0.0))
 	var mag := clampf(minf(pic.size.x / 132.0, pic.size.y / 106.0), 0.62, 1.72)
 	if glow_face:
-		draw_glow_shop_icon(i, pic.get_center() + Vector2(0.0, pic.size.y * 0.06), mag, sel)
+		draw_glow_shop_icon(i, portrait_pos, mag, sel, sprite_scale)
 	else:
-		draw_prop_icon(i, pic.get_center() + Vector2(0.0, pic.size.y * 0.06), mag, sel)
+		draw_prop_icon(i, portrait_pos, mag, sel, sprite_scale)
 
+	var traits := ["Light and steady", "Fragile - one drop breaks", "Light, narrow silhouette", "More forgiving timing", "Thrills the crowd", "Light for dark stages", "Tight timing, high stamina"]
+	draw_fit_string(font, Vector2(r.position.x + 10, r.end.y - 38), String(traits[i]), HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 20, 16, Color(0.94, 0.86, 0.72))
+	var can := mini(max_count(i), have(i))
+	var readiness := "You can juggle %d" % can if can >= MIN_BALLS else ("Need Strength %d" % prop_req(i, MIN_BALLS) if max_count(i) < MIN_BALLS else "Own %d / %d to start" % [have(i), MIN_BALLS])
+	draw_fit_string(font, Vector2(r.position.x + 10, r.end.y - 14), readiness, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 20, 16, Color(1.0, 0.88, 0.5))
 
 func draw_shop_row(font: Font, tx: float, py: float, innerw: float) -> void:
 	# ---------------- PROPS: one card per prop, in one row ----------------

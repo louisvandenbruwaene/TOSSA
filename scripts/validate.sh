@@ -57,10 +57,10 @@ fi
 # regression or a reordered persisted pattern is easy to miss in a screenshot and
 # too important to leave to visual review alone.
 log_head "1b. Extracted pure contracts"
-for test_script in tests/test_format.gd tests/test_catalog.gd tests/test_replay.gd tests/test_save_schema.gd tests/test_geometry.gd tests/test_rewards.gd tests/test_balance.gd tests/test_catch_comfort.gd; do
+for test_script in tests/test_format.gd tests/test_catalog.gd tests/test_replay.gd tests/test_save_schema.gd tests/test_geometry.gd tests/test_rewards.gd tests/test_balance.gd tests/test_catch_comfort.gd tests/test_practice_result.gd; do
   log="$WORK/$(basename "$test_script" .gd).log"
   if "$GODOT_BIN" --headless --path "$PIXELTOSSA_ROOT" --script "$test_script" >"$log" 2>&1; then
-    grep -E 'TossaFormat:|TossaCatalog:|TossaReplay:|TossaSaveSchema:|TossaGeometry:|TossaRewards:|TossaBalance:|TossaCatch:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
+    grep -E 'TossaFormat:|TossaCatalog:|TossaReplay:|TossaSaveSchema:|TossaGeometry:|TossaRewards:|TossaBalance:|TossaCatch:|TossaPractice:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
   else
     cat "$log" | sed 's/^/    /'
     fail "Pure contract failed: $test_script"
@@ -277,7 +277,7 @@ if [[ $QUICK -eq 0 ]]; then
   # leaves the run sitting on its results panel and photographs THAT at tick 700. Without
   # the check that reads as a pass.
   declare -a SHOT_CASES=(
-    "stage:700:play:--demo --booking --venue 2 --prop 0"
+    "stage:700:play:--demo --booking --venue 2 --prop 0 --encore none"
     "results:60:results:--results"
     "demo_wall:60:demowall:--wallcard"
   )
@@ -324,7 +324,7 @@ if [[ $QUICK -eq 0 ]]; then
   fs_shot="$WORK/fsshape.png"
   fs_log="$WORK/shot_fsshape.log"
   run_windowed_res 45 "$fs_log" 1280x803 \
-    --demo --booking --venue 3 --shot "$fs_shot" --shotat 700 || true
+    --demo --booking --venue 3 --encore none --shot "$fs_shot" --shotat 700 || true
   if [[ ! -s "$fs_shot" ]]; then
     fail "The fullscreen-shape capture was not produced."
     tail -20 "$fs_log" | sed 's/^/    /'
