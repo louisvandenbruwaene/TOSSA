@@ -1389,6 +1389,11 @@ class Ball:
 	var trail := PackedVector2Array()  # recent flight points; longer and cooler with height
 
 
+# Reversible comparison switch; never persisted into a career or replay.
+var legacy_random_catches := false
+var last_mistake := ""
+var last_mistake_hand := -1
+
 var tick := 0
 var pattern := CASCADE
 var pattern_sel := CASCADE  # the chosen pattern (persisted); start_run snaps it to what is unlocked
@@ -2405,6 +2410,7 @@ func _ready() -> void:
 	#   --demo         run the headless auto-player (for verifying choreography)
 	#   --shot <path>  capture one frame to <path> then quit
 	var ua := OS.get_cmdline_user_args()
+	legacy_random_catches = ua.has("--legacy-catches")
 	# THE WINDOW SAYS WHICH BUILD IT IS (2026-07-28, Louis: "rename the app to tossa and
 	# tossa debug"). project.godot's config/name is the shipped name and cannot vary, so
 	# the debug marker goes on at runtime. Worth having: a debug run keeps its own save
@@ -4116,7 +4122,7 @@ func arm_show_guide() -> void:
 	save_progress()
 	show_guide_lines = [
 		"BACKYARD names tonight's stage. This left side holds the performance information.",
-		"STAMINA is your catching energy. Rest restores it; low stamina makes catches less reliable.",
+		"STAMINA is your catching energy. Rest restores it; edge catches spend extra energy.",
 		"SCORE is this performance. Its flower grows through three goals; each goal banks a safer result.",
 		"THE CROWD is their patience. Clean juggling lifts it; dead time and drops drain it. DROPS LEFT shows how many mistakes remain.",
 		"The bottom-left card names your pattern and objects. Their shortcuts appear there when you earn those choices.",
@@ -5722,15 +5728,15 @@ func tut_lesson(id: String) -> Array:
 	out.append(tut_do("Now catch it.", "catch", off, CO, 1, 1))
 	out.append(tut_do("Amazing! Now throw it back.", "throw", off, TO, 1, 1))
 	out.append(tut_do("Catch it.", "catch", dom, CD, 1, 1))
-	out.append(tut_say("The catch words are timing grades: PERFECT is centred, GOOD and LATE are less secure, and a miss drops the prop."))
+	out.append(tut_say("The catch words are timing grades: PERFECT is centred, GOOD earns less, an edge catch costs extra stamina, and a miss drops the prop."))
 	out.append(tut_free("That's it! Feel free to master one ball before moving on.", 1, 0, 0,
 		"When you are ready, press Enter for the second ball.", 1))
 	# HEIGHT is a real input, not trivia: this step only clears after a release held long
 	# enough to change the flight. It runs unfrozen so press duration can actually exist.
 	out.append({"goal": "hold_throw", "prop": PROP_BALLS, "balls": 1, "hand": RIGHT,
 		"stack": 1, "need": 1, "slow": 0.0, "say": true, "manual": true, "next": "go on",
-		"text": "Hold [%s] until the gold gauge grows, release the high throw, then watch it and catch it. Higher arcs give you more time but are harder to secure." % TD})
-	out.append(tut_say("Use low taps for rhythm and held throws to make room. Height buys time, but very high catches are less forgiving."))
+		"text": "Hold [%s] until the gold gauge grows, release the high throw, then watch it and catch it. Higher arcs give you more time; edge catches cost more stamina." % TD})
+	out.append(tut_say("Use low taps for rhythm and held throws to make room. Height buys time; aim for the centre of the catch window to save stamina."))
 	# TWO BALLS, one in each hand, so throw-throw-catch-catch is the only thing available.
 	out.append(tut_do("One ball in each hand now. Throw the first.", "throw", dom, TD, 2, 1, false, {"sequence": true}))
 	out.append(tut_do("Throw the second before it lands - wait for the first to reach the top.", "throw", off, TO, 2, 1, true, {"sequence": true}))
@@ -10543,7 +10549,7 @@ func on_catch(h: int) -> void:
 			drop_ball(best, "gale")
 			return
 		var quality := 1 if best_d <= good_window() else 2
-		if rng.randf() > catch_chance(quality, best.over_tap):
+		if legacy_random_catches and rng.randf() > catch_chance(quality, best.over_tap):
 			drop_ball(best, "slip")
 			return
 	# secured. Was the act actually RUNNING as this landed, or did the air just empty?
@@ -10602,6 +10608,9 @@ func on_catch(h: int) -> void:
 			_touch_aim = ca
 			_touch_aim_at = "%s, %s hand, t%d, holding %d%s" % [String(PATTERNS[pattern]["name"]),
 				hand_side(h), tick, stack(h).size(), ", parked" if hand_parked[h] else ""]
+	# An edge catch always lands. Its explicit energy cost replaces an invisible dice roll.
+	if not sure and not legacy_random_catches and best_d > good_window():
+		spend_stamina(edge_catch_cost(best.over_tap))
 	best.state = STATE_HAND
 	best.held_tick = tick
 	stack(h).append(best)
@@ -10644,11 +10653,11 @@ func on_catch(h: int) -> void:
 			# as broken even when the silence on everything else is deliberate) -
 			# a sound is not a score, so it costs the anti-farm rule nothing.
 			if best_d <= wperf:
-				play_sfx("perfect", -5.0)
+				play_sfx("perfect", -5.0, 0.96 if h == LEFT else 1.04)
 			elif best_d <= good_window():
-				play_sfx("good", -8.0)
+				play_sfx("good", -8.0, 0.96 if h == LEFT else 1.04)
 			else:
-				play_sfx("late", -11.0)
+				play_sfx("late", -11.0, 0.96 if h == LEFT else 1.04)
 			streak = 0
 			return
 	# see tut_quiet_fx: a helped lesson catch fires no popup and no particle, because the
@@ -10687,7 +10696,7 @@ func on_catch(h: int) -> void:
 		if fx:
 			var callout_col := Color(0.75, 0.92, 1.0) if amazing_catch else Color(1.0, 0.86, 0.42)
 			add_popup(hpos[h], perfect_callout, callout_col)
-		play_sfx("perfect", -5.0)
+		play_sfx("perfect", -5.0, 0.96 if h == LEFT else 1.04)
 		if fx:
 			spawn_parts(hpos[h], Color(1.0, 0.88, 0.45), 9, 3.4, "spark")
 		# NO RING IN THE TUTORIAL (2026-07-31, Louis: "the circle during tutorial pauses is
@@ -10742,7 +10751,7 @@ func on_catch(h: int) -> void:
 		add_xp(2)
 		if fx:
 			add_popup(hpos[h], "GOOD", Color(0.78, 0.92, 0.6))
-		play_sfx("good", -8.0)
+		play_sfx("good", -8.0, 0.96 if h == LEFT else 1.04)
 		if fx:
 			spawn_parts(hpos[h], Color(0.85, 0.92, 0.6), 4, 2.4, "spark")
 		if streak % 5 == 0:
@@ -10757,8 +10766,8 @@ func on_catch(h: int) -> void:
 		applause = maxf(0.0, applause + APPL_LATE)
 		add_xp(1)
 		if fx:
-			add_popup(hpos[h], "late", Color(0.95, 0.62, 0.4))
-		play_sfx("late", -11.0)
+			add_popup(hpos[h], "EDGE - stamina", Color(0.95, 0.72, 0.5))
+		play_sfx("late", -11.0, 0.96 if h == LEFT else 1.04)
 	reward_venue_taste("perfect" if best_d <= wperf else "catch")
 	# the record chase: passing your own best AT this venue mid-act is a moment. The
 	# act is one continuous run now, so its live score IS the number the record
@@ -12932,7 +12941,16 @@ func height_penalty(over: float) -> float:
 	return clampf(over, 0.0, HEIGHT_PEN_TOP) / HEIGHT_PEN_TOP * HEIGHT_PEN_MAX
 
 
+func edge_catch_cost(over: float) -> float:
+	# Accuracy/gear keep their comfort role, now as a predictable cost rather than a slip.
+	return 1.0 + 2.0 * (1.0 - legacy_catch_comfort(2, over))
+
+
 func catch_chance(quality: int, over: float) -> float:
+	return legacy_catch_comfort(quality, over) if legacy_random_catches else 1.0
+
+
+func legacy_catch_comfort(quality: int, over: float) -> float:
 	# probability that an off-Perfect catch (quality 1 = Good, 2 = Late) secures.
 	# Rises with Accuracy and falls with how much higher than necessary the throw went.
 	# Perfect timing is handled separately in on_catch.
@@ -13975,6 +13993,14 @@ func drop_ball(b: Ball, why: String) -> void:
 	if not balls.has(b):
 		return
 	var drop_pos := flight_pos(b)
+	last_mistake_hand = b.to_hand
+	var side := "Left" if b.to_hand == LEFT else "Right"
+	match why.to_lower():
+		"mistime": last_mistake = side + (" catch too early" if tick < b.land_tick else " catch too late")
+		"spent": last_mistake = "Out of stamina: finish earlier or rest before the show"
+		"gale": last_mistake = "The Gale needs a Perfect catch"
+		"slip": last_mistake = "Legacy catch slipped"
+		_: last_mistake = side + " catch missed: watch the descending prop"
 	var causes_injury := not tut_active and injury_prop_kind(b.kind)
 	# A DROP CLOSES THE RUN, and that is now the most expensive thing in the game: whatever the
 	# tricks multiplied this run to is banked at that value, and the next one opens at x1.
@@ -14012,7 +14038,7 @@ func drop_ball(b: Ball, why: String) -> void:
 	if mode == MODE_PERFORM and not tut_active:
 		play_sfx("groan", -10.0)   # the crowd sags with the prop (ART doc stingers)
 	_duck = 1.0   # a drop briefly ducks the music, so the silence lands
-	add_popup(b.to_pos + Vector2(0, -6), why, Color(1.0, 0.32, 0.3))
+	add_popup(b.to_pos + Vector2(0, -6), last_mistake, Color(1.0, 0.55, 0.42))
 	# the collapse now has TWO triggers: an emptied crowd (below) and, new in Phase 2,
 	# the drop limit. Both funnel through start_collapse(). Training plays on.
 	if causes_injury and mode in [MODE_PERFORM, MODE_TRAIN]:
@@ -28803,8 +28829,8 @@ func draw_menutour(font: Font, s: Vector2) -> void:
 			["star", "SCORE & GOALS", "props, counts, patterns and tricks multiply score; goals bank safer progress"],
 		], "foot": "Nothing hidden is required: a closed option tells you the stat, price, or reputation it needs."},
 		{"title": "YOUR CHARACTER", "head": "POINTS SHAPE COMFORT, YOUR HANDS SHAPE THE RECORD", "rows": [
-			["star", "ACCURACY", "raises GOOD/LATE reliability; above 100 it becomes Focus and widens timing"],
-			["bag", "ENDURANCE", "raises maximum stamina; catches spend stamina and fatigue lowers reliability"],
+			["star", "ACCURACY", "reduces edge-catch energy cost; above 100 adds Focus, then wider timing"],
+			["bag", "ENDURANCE", "raises maximum stamina; finish the show before your hands run out of energy"],
 			["moon", "SPEED", "slows the whole simulation; SLOTH already begins with a 20% base slowdown"],
 		], "foot": "%s opens the character sheet anywhere. Holding confirm spends several saved points quickly." % String(k_sheet()[0])},
 		{"title": "SHORTCUTS", "head": "THE HUB IS HOME; SHORTCUTS ARE OPTIONAL", "rows": [
