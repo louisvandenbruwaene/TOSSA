@@ -251,8 +251,8 @@
   },
   "_GAUGE": {
     "pivot": [0.5, 1.0],
-    "bezel_in": 47.3,
-    "outer": 55.6
+    "bezel_in": 41.8,
+    "outer": 49.7
   },
   "ui/gauge_face": {
     "path": "res://Assets/UI/gauge_face.png",
@@ -1634,6 +1634,12 @@
   },
   "ui/card_tennis": {
     "path": "res://Assets/UI/cards/tennis.png"
+  },
+  "ui/card_trick": {
+    "path": "res://Assets/UI/cards/back_trick.png"
+  },
+  "ui/card_skill": {
+    "path": "res://Assets/UI/cards/back_pattern.png"
   },
   "_POSES": {
     "_README": [

@@ -21744,6 +21744,16 @@ func draw_skill_card_back_v2(r: Rect2, is_trick: bool, a: float, lift: float = 1
 	# wavy line with chevrons punched into them, not a weave. One continuous sine per row, phase
 	# flipped row to row, gives the interlock honestly and has no joints to show.
 	draw_card_frame(r, is_trick, a, lift)
+	# THE PAINTED BACK, if there is one - same seam and same idiom as draw_skill_card_art's
+	# front-face painting: measured against the full card rect (a painted illustration carries
+	# its own margin), returned before any vector fallback, gone the instant the manifest names
+	# it. `ui/card_trick` and `ui/card_skill` were listed in `_KEYS` since the manifest's own
+	# doc block but never wired to this v2 path - draw_card_frame's OLDER, non-v2 branch checked
+	# for them, and card_v2 defaults on, so that check was dead code for as long as it stood.
+	var akey := "ui/card_trick" if is_trick else "ui/card_skill"
+	if art_bank.has(akey):
+		art_blit_fit(akey, r, Color(1.0, 1.0, 1.0, a))
+		return
 	var kc := card_kind_col(is_trick)
 	var f := card_field(is_trick)
 	# THE PLATE LEAVES ROOM FOR THE TWO THINGS THAT ARE NOT THE FIELD: the kind pill rides the
