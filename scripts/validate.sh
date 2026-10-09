@@ -57,10 +57,10 @@ fi
 # regression or a reordered persisted pattern is easy to miss in a screenshot and
 # too important to leave to visual review alone.
 log_head "1b. Extracted pure contracts"
-for test_script in tests/test_format.gd tests/test_catalog.gd tests/test_replay.gd tests/test_save_schema.gd tests/test_geometry.gd tests/test_rewards.gd tests/test_balance.gd tests/test_catch_comfort.gd tests/test_practice_result.gd tests/test_routine.gd tests/test_btb_pose.gd; do
+for test_script in tests/test_format.gd tests/test_catalog.gd tests/test_replay.gd tests/test_save_schema.gd tests/test_geometry.gd tests/test_rewards.gd tests/test_balance.gd tests/test_catch_comfort.gd tests/test_practice_result.gd tests/test_routine.gd tests/test_btb_pose.gd tests/test_performance_pose.gd; do
   log="$WORK/$(basename "$test_script" .gd).log"
   if "$GODOT_BIN" --headless --path "$PIXELTOSSA_ROOT" --script "$test_script" >"$log" 2>&1; then
-    grep -E 'TossaFormat:|TossaCatalog:|TossaReplay:|TossaSaveSchema:|TossaGeometry:|TossaRewards:|TossaBalance:|TossaCatch:|TossaPractice:|TossaRoutine:|TossaPose:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
+    grep -E 'TossaFormat:|TossaCatalog:|TossaReplay:|TossaSaveSchema:|TossaGeometry:|TossaRewards:|TossaBalance:|TossaCatch:|TossaPractice:|TossaRoutine:|TossaPose:|TossaPerformancePose:' "$log" | tail -1 | sed 's/^/    [ ok ] /'
   else
     cat "$log" | sed 's/^/    /'
     fail "Pure contract failed: $test_script"

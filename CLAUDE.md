@@ -29,6 +29,20 @@ work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the 
 
 Codex improvements:
 
+- **Performance art direction (2026-09-11):** the showman's existing body and independent
+  arm atlas now share a cached deformation mesh: weight shifts, breath, catch absorption
+  and coat follow-through. `TossaPerformancePose.gd` is pure cosmetic geometry; palms and
+  soles are pinned and no throw/catch/score/input constants change. Worn head gear follows
+  the head, the mirror no longer floats vertically, and turns ease through the existing
+  eight views over their original duration. Reduced motion suppresses secondary movement.
+  The theatre and circus have new 640x360 paintings on the locked 48-colour palette,
+  selected through `_v2` manifest paths; source masters and a reproducible importer live
+  in `extras/visual_overhaul/` and `scripts/import_theatre_art.gd`. Skills and tailor previews
+  crop the actual venue at integer density. A single-pass scenery grade replaces the old
+  texture-squared darkening and adds quiet atmospheric noise and localized backyard wind.
+  Three MIT GitHub source components are credited in `third_party/visuals/`; export presets
+  include their notices. See `docs/visual_overhaul.md` for the review artifacts and checks.
+
 - **Learning and preparation (2026-09-10):** practice/free-lesson hand cues fade over twelve
   catches and return after a miss; they do not move inputs or slow the simulation. The opening
   lesson copy starts with the rhythm. Results lead with the accomplishment, one coaching line,
