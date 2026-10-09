@@ -10,6 +10,7 @@ const TOSSA_SAVE_SCHEMA = preload("res://scripts/TossaSaveSchema.gd")
 const TOSSA_GEOMETRY = preload("res://scripts/TossaGeometry.gd")
 const TOSSA_REWARDS = preload("res://scripts/TossaRewards.gd")
 const TOSSA_BALANCE = preload("res://scripts/TossaBalance.gd")
+const PERFORMANCE_POSE = preload("res://scripts/TossaPerformancePose.gd")
 ## TOSSA - a skill-based juggling game with a performer's career around it.
 ## (Named IACTO until 2026-07-28, and JUGGLE before that. The name lives in exactly
 ## one place now, GAME_TITLE, so it can move again without a hunt.)
@@ -2991,6 +2992,7 @@ func _ready() -> void:
 # Static scenery owns its cached draw commands. Lighting and juggling stay on Main.
 class StageScenery extends Node2D:
 	var texture: Texture2D
+	var legacy_veil := false
 	var extent := Vector2.ZERO
 	var floor_y := 0.0
 	var veil := 0.0
@@ -2999,6 +3001,8 @@ class StageScenery extends Node2D:
 		if texture == null:
 			return
 		draw_texture_rect(texture, Rect2(Vector2.ZERO, extent), false)
+		if not legacy_veil:
+			return
 		for i in 24:
 			var y0 := floorf(float(i) / 24.0 * floor_y / 2.0) * 2.0
 			var y1 := floorf(float(i + 1) / 24.0 * floor_y / 2.0) * 2.0
@@ -3034,17 +3038,25 @@ func update_scenery() -> void:
 		return
 	var tex: Texture2D = art_bank[key]["tex"]
 	var size := get_viewport_rect().size
+	var mat := scenery.material as ShaderMaterial
+	mat.set_shader_parameter("atmosphere_time", 0.0 if reduce_motion else atick() / 120.0)
+	mat.set_shader_parameter("motion_amount", 0.0 if reduce_motion else 1.0)
 	if key == scenery_key and tex == scenery.texture and size == scenery.extent:
 		return
 	scenery_key = key
 	scenery.texture = tex
 	scenery.extent = size
 	scenery.floor_y = stage_floor_y()
+	scenery.legacy_veil = scenery_original
 	scenery.veil = float(v.get("veil", 0.42))
 	var glow: Color = v["glow"]
 	scenery.veil_colour = Color((glow.r * 0.10 + 0.02) * 0.4, (glow.g * 0.09 + 0.02) * 0.4, (glow.b * 0.10 + 0.03) * 0.5)
 	(scenery.material as ShaderMaterial).set_shader_parameter("strength", 0.0 if scenery_original else 1.0)
 	(scenery.material as ShaderMaterial).set_shader_parameter("stage_size", size)
+	mat.set_shader_parameter("house_light", glow)
+	mat.set_shader_parameter("house_veil", scenery.veil)
+	mat.set_shader_parameter("outdoor", 1.0 if cur_venue() == 0 else 0.0)
+	mat.set_shader_parameter("midnight", 1.0 if cur_venue() == 6 else 0.0)
 	scenery.queue_redraw()
 
 func _exit_tree() -> void:
@@ -9363,20 +9375,14 @@ func fig_spin_key(dir_name: String) -> String:
 
 
 func fig_spin_frame(turn: float) -> String:
-	# WHICH EIGHTH OF THE TURN HE IS IN. `turn` is 0..1 across one full revolution, and the
-	# _SPIN list is in turn order, so this is a rounded index and nothing more - the art
-	# decides which way he goes round, not this function.
-	#
-	# ROUND, DO NOT TRUNCATE. A floor() holds each frame from the instant it is reached
-	# until the next one, so the figure is a whole eighth of a turn BEHIND the angle the
-	# rest of the game is using for its own spin effects (the streak arcs in
-	# draw_mini_juggler read the same clock). Rounding centres each frame on the angle it
-	# was painted at, which halves the worst error for free.
+	# Accelerate through the existing eight views and settle facing front. Only the
+	# painted angle eases: the live spin duration and its catch-free window stay exact.
 	var dirs: Array = fig_spin.get("dirs", [])
 	var n := dirs.size()
 	if n == 0:
 		return ""
-	var i := int(round(fposmod(turn, 1.0) * float(n))) % n
+	var eased := PERFORMANCE_POSE.sine_in_out(fposmod(turn, 1.0))
+	var i := int(round(eased * float(n))) % n
 	return fig_spin_key(String(dirs[i]))
 
 
@@ -9737,32 +9743,66 @@ func draw_folded_arm(e: Dictionary, org: Vector2, tint: Color, px: float, fold: 
 			PackedVector2Array([(uv_org + Vector2(0, y0)) / ts, (uv_org + Vector2(aw, y0)) / ts,
 			(uv_org + Vector2(aw, y1)) / ts, (uv_org + Vector2(0, y1)) / ts]), tex)
 
+var figure_mesh_cache := {}
+var figure_pose := Vector3.ZERO
+var preview_catch_age := 24.0
+
+func draw_performance_mesh(tex: Texture2D, org: Vector2, source: Rect2, tint: Color,
+		px: float, pose: Vector3, arm: Dictionary = {}) -> void:
+	# Cache source topology, then deform in one batched draw per painted piece.
+	var cache_key := str(tex.get_instance_id()) + str(source) + str(arm.get("slot", -1))
+	if not figure_mesh_cache.has(cache_key):
+		var local := PackedVector2Array()
+		var uv := PackedVector2Array()
+		var indices := PackedInt32Array()
+		var columns := 6 if arm.is_empty() else 1
+		var rows := 16 if arm.is_empty() else 8
+		for y in range(rows + 1):
+			for x in range(columns + 1):
+				var p := (source.size * Vector2(float(x) / columns, float(y) / rows)).round()
+				local.append(p)
+				uv.append((source.position + p) / Vector2(tex.get_size()))
+		for y in rows:
+			for x in columns:
+				var a := y * (columns + 1) + x
+				indices.append_array(PackedInt32Array([a, a + 1, a + columns + 2,
+					a, a + columns + 2, a + columns + 1]))
+		figure_mesh_cache[cache_key] = {"local": local, "uv": uv, "indices": indices}
+	var mesh: Dictionary = figure_mesh_cache[cache_key]
+	var points := PackedVector2Array()
+	var body_size := Vector2((art_bank["char/juggle_body"]["tex"] as Texture2D).get_size())
+	var root := Vector2.ZERO
+	if not arm.is_empty():
+		root = PERFORMANCE_POSE.body_offset(Vector2(float(arm["ox"]), float(arm["oy"])), body_size, pose)
+	for p: Vector2 in mesh["local"]:
+		var offset := PERFORMANCE_POSE.body_offset(p, body_size, pose) if arm.is_empty() else \
+			PERFORMANCE_POSE.arm_offset(p.y + float(arm["oy"]), float(arm["oy"]), float(arm["py"]), root)
+		points.append(org + (p + offset) * px)
+	RenderingServer.canvas_item_add_triangle_array(get_canvas_item(), mesh["indices"], points,
+		PackedColorArray([tint]), mesh["uv"], PackedInt32Array(), PackedFloat32Array(), tex.get_rid())
+
 func draw_figure_arms(cx: float, floor_y: float, tint: Color, px: float = ART_PIXEL,
 		want_l: float = -1.0, want_r: float = -1.0) -> void:
-	# THE PERFORMER IN THREE PIECES: a body that never moves, and two arms that do.
-	#
-	# The body is one sprite with its sleeves ending at the shoulder, so nothing about it
-	# depends on what the hands are doing; each arm is a separate little picture chosen by
-	# its own hand. That split is what lets the two hands disagree, which is the whole point
-	# (see fig_arm_pick), and it also means the man cannot twitch: a body drawn from a
-	# per-frame cell shifts a pixel whenever the frame changes, and this one never does.
-	#
-	# Feet on the floor line, arms placed as whole-art-pixel offsets from the body's own
-	# corner, so the joint at the shoulder is exact at every reach.
+	# A shared painted rig: weight travels through the trunk and coat, while the
+	# arm bank still answers each simulation hand independently.
 	if not art_bank.has("char/juggle_body"):
 		return
 	art_hits["char/juggle_body"] = true
 	var btex: Texture2D = (art_bank["char/juggle_body"] as Dictionary)["tex"]
 	var org := fig_body_origin(cx, floor_y, px)
-	var bsz := Vector2(btex.get_size()) * px
 	var folds := [btb_arm_fold(LEFT), btb_arm_fold(RIGHT)] if want_l < 0.0 else preview_btb_fold
+	var left := absf(hpos[LEFT].x - cx) / px if want_l < 0.0 else want_l
+	var right := absf(hpos[RIGHT].x - cx) / px if want_r < 0.0 else want_r
+	var age := float(tick - maxi(int(catch_flash[LEFT]), int(catch_flash[RIGHT]))) if want_l < 0.0 else preview_catch_age
+	figure_pose = PERFORMANCE_POSE.sample(left, right, atick() / 120.0, age, reduce_motion or _charref)
+	if folds[LEFT] > 0.0 or folds[RIGHT] > 0.0:
+		figure_pose = Vector3.ZERO
 	for h in [LEFT, RIGHT]:
 		if folds[h] > 0.0:
 			var want := want_l if h == LEFT else want_r
 			var pick := fig_arm_pick(h, cx) if want < 0.0 else fig_arm_pick_at(h, want)
 			draw_folded_arm(pick, org, tint, px, folds[h])
-	draw_colored_polygon(PackedVector2Array([
-		org, org + Vector2(bsz.x, 0.0), org + bsz, org + Vector2(0.0, bsz.y)]), tint, art_uv, btex)
+	draw_performance_mesh(btex, org, Rect2(Vector2.ZERO, Vector2(btex.get_size())), tint, px, figure_pose)
 	# A PREVIEW DRIVES ITS OWN ARMS. Passing the wanted reach explicitly is what lets the
 	# skills screen show the performer juggling ITS OWN little pattern; without it the mini
 	# juggler read the stage's hpos, so its arms answered a simulation that is not on screen.
@@ -9790,15 +9830,8 @@ func draw_figure_arm(e: Dictionary, org: Vector2, tint: Color, px: float = ART_P
 	var row := slot / cols
 	var u0 := (float(col) * aw) / ts.x
 	var v0 := (float(row) * ah) / ts.y
-	var u1 := u0 + aw / ts.x
-	var v1 := v0 + ah / ts.y
 	var p := org + Vector2(float(e["ox"]), float(e["oy"])) * px
-	var sz := Vector2(aw, ah) * px
-	draw_colored_polygon(
-		PackedVector2Array([p, p + Vector2(sz.x, 0.0), p + sz, p + Vector2(0.0, sz.y)]),
-		tint,
-		PackedVector2Array([Vector2(u0, v0), Vector2(u1, v0), Vector2(u1, v1), Vector2(u0, v1)]),
-		tex)
+	draw_performance_mesh(tex, p, Rect2(Vector2(u0, v0) * ts, Vector2(aw, ah)), tint, px, figure_pose, e)
 
 
 func venue_figure_tint() -> Color:
@@ -15671,6 +15704,53 @@ func draw_preview_floor(area: Rect2, fy: float, glow: Color) -> void:
 		Color(glow.r, glow.g, glow.b, 0.34))
 
 
+func draw_preview_scenery(area: Rect2, fy: float) -> void:
+	# Crop the actual venue at one screen pixel per source pixel. No thumbnail
+	# resampling: the miniature keeps the stage's painted material and colour.
+	var v := venue_data(cur_venue())
+	var key := "bg/" + str(v["name"]).to_lower().replace(" ", "_")
+	if not art_on or not art_bank.has(key):
+		return
+	var tex: Texture2D = art_bank[key]["tex"]
+	var ts := Vector2(tex.get_size())
+	var top := area.position.round()
+	var source := Rect2(Vector2(floorf((ts.x - area.size.x) * 0.5),
+		floorf(stage_floor_y() / ART_PIXEL - (fy - top.y))), area.size.floor())
+	var crop := source.intersection(Rect2(Vector2.ZERO, ts))
+	if not crop.has_area():
+		return
+	draw_texture_rect_region(tex, Rect2(top + crop.position - source.position, crop.size), crop,
+		Color(0.62, 0.58, 0.59))
+	draw_rect(area, Color(0.035, 0.025, 0.045, 0.25))
+	# Recessed wings frame the rehearsal without crossing a flight path.
+	var glow: Color = v["glow"]
+	for side in [0, 1]:
+		var x := area.position.x if side == 0 else area.end.x - 12.0
+		draw_rect(Rect2(x, area.position.y, 12.0, maxf(0.0, fy - area.position.y)), Color(0.06, 0.025, 0.045, 0.85))
+		draw_rect(Rect2(x + (10.0 if side == 0 else 0.0), area.position.y, 2.0,
+			maxf(0.0, fy - area.position.y)), Color(glow, 0.22))
+		var lamp := Vector2(x + 6.0, fy - 5.0)
+		draw_glow(lamp, 15.0, Color(glow, 0.14))
+		draw_rect(Rect2(lamp - Vector2(2, 1), Vector2(4, 2)), Color(glow, 0.75))
+
+
+func draw_house_air(s: Vector2, fy: float, vi: int, glow: Color) -> void:
+	if reduce_motion or vi == 6:
+		return
+	var t := atick() / 120.0
+	for i in 18:
+		var seed := float(i)
+		var side := -1.0 if i % 2 == 0 else 1.0
+		var x := s.x * 0.5 + side * (164.0 + fmod(seed * 29.0, 136.0))
+		x += sin(t * 0.22 + seed * 2.4) * 10.0
+		var y := fy - fposmod(seed * 43.0 + t * (3.0 + fmod(seed, 3.0)), fy - 120.0)
+		var alpha := (0.12 + 0.18 * pow(0.5 + 0.5 * sin(t * 1.1 + seed), 3.0))
+		if vi == 0:
+			y = fy - 25.0 - fmod(seed * 19.0, 100.0) + sin(t * 0.6 + seed) * 8.0
+			alpha *= 1.5
+		draw_rect(Rect2(art_snap(Vector2(x, y)), Vector2(2, 2)), Color(glow, alpha))
+
+
 func draw_backdrop(s: Vector2) -> void:
 	var vi := cur_venue()
 	var v := venue_data(vi)
@@ -15782,6 +15862,7 @@ func draw_backdrop(s: Vector2) -> void:
 				Color(veil_c.r, veil_c.g, veil_c.b, veil),
 				Color(veil_c.r, veil_c.g, veil_c.b, 0.0), 16)
 	draw_stage_grade(s, fy, glow)
+	draw_house_air(s, fy, vi, glow)
 
 	# THE SPOTLIGHT CONE IS GONE (2026-08-15, Louis: "none of the stages should have a cone
 	# light, because where would that even come from?").
@@ -16767,6 +16848,9 @@ func draw_figure_body(cx: float, H: float, ys: Dictionary, cols: Dictionary,
 		# the outfit rather than to the venue.
 		var fh := fig_design_height(px)
 		var head_c := Vector2(cx, floor_y - (1.0 - float(fig_design.get("head_cy", 0.06))) * fh)
+		if fig_anim_live():
+			var body_size := Vector2((art_bank["char/juggle_body"]["tex"] as Texture2D).get_size())
+			head_c += PERFORMANCE_POSE.body_offset(Vector2(body_size.x * 0.5, 10.0), body_size, figure_pose) * px
 		var head_rr := float(fig_design.get("head_r", 0.055)) * fh
 		var acc := fig_design_col("cuff", cols["accent"])
 		if wearing("glasses") and not facing_back:
@@ -23707,6 +23791,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	var mglow: Color = pal["glow"]
 	var mcx := mirror.position.x + mirror.size.x * 0.5
 	var mfy := mirror.position.y + mirror.size.y - 54.0
+	draw_preview_scenery(Rect2(mirror.position + Vector2(9, 9), mirror.size - Vector2(18, 18)), mfy)
 	# a pool of light and a lit floor, the same marks the skill preview's little stage makes -
 	# so the figure is standing somewhere rather than floating on a panel.
 	#
@@ -23749,7 +23834,7 @@ func draw_tailor(font: Font, s: Vector2) -> void:
 	# painting: with k solved from the panel this put his boots 86px above the boards, which is
 	# the tailor's half of Louis's "he's often floating". The one screen built for looking at
 	# him closely was the worst offender.
-	var o := Vector2(mcx, mfy - fig_preview_drop(k) + 3.0 * sin(t * 0.018))
+	var o := Vector2(mcx, mfy - fig_preview_drop(k))
 	var hl := o + Vector2(-PV_OUTER * k, 4.0 * sin(t * 0.021 + 1.2) * k)
 	var hr := o + Vector2(PV_OUTER * k, 4.0 * sin(t * 0.021) * k)
 	# HE IS WEARING WHATEVER THE CURSOR IS ON, for this one figure only. See _fit_piece: it
@@ -24982,6 +25067,7 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 	var o := Vector2(box.position.x + box.size.x * 0.5,
 		clampf(ceil_y + peak + 7.0 + slack * 0.62, ceil_y, inner.position.y + inner.size.y - drop - 6.0))
 	var fy := o.y + drop
+	draw_preview_scenery(inner, fy)
 
 	# the stage itself: a warm pool on the floor and a lit floor lip.
 	#
@@ -25207,7 +25293,10 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 		if bool(pr["behind"]):
 			pv_draw_prop(pr, inner)
 	preview_btb_fold = [0.0, 0.0]
+	preview_catch_age = 24.0
 	for pr in props:
+		if bool(pr.get("carry", false)):
+			preview_catch_age = minf(preview_catch_age, float(pr.get("el", 0.0)) * 120.0)
 		if bool(pr.get("behind", false)) and bool(pr.get("carry", false)):
 			var h := LEFT if float(pr.get("from", Vector2.ZERO).x) < 0.0 else RIGHT
 			if not held[h]:
@@ -25216,6 +25305,7 @@ func draw_skill_preview(font: Font, box: Rect2, is_trick: bool, idx: int, ename:
 				preview_btb_fold[h] = roundf(sin(clampf(elapsed / span, 0.0, 1.0) * PI) * 4.0) / 4.0
 	draw_mini_juggler(o, hp[LEFT], hp[RIGHT], turn)
 	preview_btb_fold = [0.0, 0.0]
+	preview_catch_age = 24.0
 	# A CARRIED PROP FOLLOWS THE PAINTED PALM, exactly as it does on stage (fig_hand_pos).
 	# The arm bank only holds the reaches it holds, so the arm drawn for a wanted reach puts
 	# its palm a pixel or two off the simulated hand - and at this size a ball floating two

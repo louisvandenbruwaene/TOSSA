@@ -49,3 +49,6 @@ TOSSA_mechanics_reference.pdf
 
 # Python bytecode from the art tooling
 scripts/__pycache__/
+
+# Local clone of the old vector version, kept for reference
+TOSSA-vector-archive/

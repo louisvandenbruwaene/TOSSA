@@ -130,10 +130,10 @@
     "scale": 0.5
   },
   "bg/small_theatre": {
-    "path": "res://Assets/Backgrounds/small_theatre.png"
+    "path": "res://Assets/Backgrounds/small_theatre_v2.png"
   },
   "bg/the_circus": {
-    "path": "res://Assets/Backgrounds/the_circus.png"
+    "path": "res://Assets/Backgrounds/the_circus_v2.png"
   },
   "bg/championship": {
     "path": "res://Assets/Backgrounds/championship.png"
