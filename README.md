@@ -1,5 +1,11 @@
 # TOSSA
 
+### ▶ [Play TOSSA in your browser](https://louisvandenbruwaene.github.io/TOSSA/)
+
+No install, no account: open the link, wait for it to load (about 65 MB the first time), then click the game once so it gets your keyboard and sound. The first tutorial shows the controls.
+
+[![TOSSA: the title, spelled in juggling props under a spotlight](store/main.png)](https://louisvandenbruwaene.github.io/TOSSA/)
+
 A skill-based juggling game wrapped in a light performer-career sim, drawn as pixel
 art. Godot 4.7, one self-contained GDScript file (`Game.gd`), original music.
 
