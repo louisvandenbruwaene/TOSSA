@@ -21427,9 +21427,9 @@ func results_anim_sfx() -> void:
 	# must never play audio): soft ticks under the score count-up, the stamp thud,
 	# and the record fanfare with a confetti drop
 	var age := results_age()
-	if age > 8 and age <= 54 and age % 5 == 0:
+	if age > RESULTS_COUNT_START_TICK and age <= RESULTS_COUNT_END_TICK and age % 5 == 0:
 		play_sfx("count", -22.0, 1.0 + float(age) * 0.004)
-	if age >= 64 and not results_stamped:
+	if age >= RESULTS_STAMP_TICK and not results_stamped:
 		results_stamped = true
 		play_sfx("stamp", -8.0)
 		if results_record:
@@ -21478,7 +21478,12 @@ func result_actions(s: Vector2) -> Array:
 
 func draw_results(font: Font, s: Vector2) -> void:
 	var age := results_age()
-	var reveal := clampf(float(age) / 24.0, 0.0, 1.0)
+	# THE TOTAL COUNTS UP UNDER ITS OWN TICKS, eased out so it races and then settles, and lands
+	# exactly when the last count tick plays (it used to finish in 0.2s while the ticks ran on
+	# for another 0.25s, and the stamp thud played over a grade that had been there all along).
+	var count_t := clampf(float(age - RESULTS_COUNT_START_TICK) / float(RESULTS_COUNT_END_TICK - RESULTS_COUNT_START_TICK), 0.0, 1.0)
+	var reveal := 1.0 - pow(1.0 - count_t, 3.0)
+	var stamped := age >= RESULTS_STAMP_TICK
 	draw_rect(Rect2(Vector2.ZERO, s), Color(0.04, 0.02, 0.03, 0.85))
 	var r := Rect2(s.x * 0.5 - 390, s.y * 0.5 - 300, 780, 600)
 	var gold := Color(1.0, 0.86, 0.55)
@@ -21489,17 +21494,31 @@ func draw_results(font: Font, s: Vector2) -> void:
 	var y := r.position.y
 	draw_fit_string(title_font(), Vector2(x, y + 46), result_headline(), HORIZONTAL_ALIGNMENT_LEFT, 620, 32, gold)
 	draw_fit_string(font, Vector2(x, y + 76), String(venue_data(run_venue)["name"]), HORIZONTAL_ALIGNMENT_LEFT, 620, 20, warm)
-	var grade := run_grade()
-	if grade in ["S", "A", "B"]:
-		art_blit("ui/rosette", Vector2(right - 24, y + 90), 1.0, 0.0, grade_color(grade))
-	draw_string(font, Vector2(right - 48, y + 82), grade, HORIZONTAL_ALIGNMENT_CENTER, 48, ps(28), gold)
-	draw_fit_string(title_font(), Vector2(x, y + 136), score_text(score * reveal), HORIZONTAL_ALIGNMENT_LEFT, 520, 40, gold)
-	draw_string(font, Vector2(x, y + 164), "NEW VENUE RECORD" if results_record else "BOOKING SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
-	_result_row(font, x, right, y + 208, "Best clean streak", str(best_streak), gold)
-	_result_row(font, x, right, y + 244, "Catches / drops", "%d / %d" % [caught, dropped], warm)
-	_result_row(font, x, right, y + 280, "Tricks landed", str(tricks_landed), warm)
-	_result_row(font, x, right, y + 326, "Flowers earned", "+%s" % commafy(last_pay), gold, 1.0, true)
-	_result_row(font, x, right, y + 362, "Reputation / XP", "%+d / +%s" % [last_rep_delta, commafy(run_xp)], warm)
+	# THE GRADE IS STAMPED, NOT PRINTED: it appears with the stamp thud, landing at double size
+	# for the first half of RESULTS_STAMP_TICKS (a whole-number scale, so the rosette stays on
+	# its pixel grid) and then sitting down to rest. Reduced Motion skips the double frame.
+	if stamped:
+		var slam := not reduce_motion and age < RESULTS_STAMP_TICK + RESULTS_STAMP_TICKS / 2
+		var grade := run_grade()
+		if grade in ["S", "A", "B"]:
+			art_blit("ui/rosette", Vector2(right - 24, y + 90), 2.0 if slam else 1.0, 0.0, grade_color(grade))
+		draw_string(font, Vector2(right - 72 if slam else right - 48, y + (96 if slam else 82)), grade,
+			HORIZONTAL_ALIGNMENT_CENTER, 96 if slam else 48, ps(56 if slam else 28), gold)
+	var total_color := gold.lerp(Color.WHITE, 0.5 * (1.0 - count_t)) if count_t < 1.0 else gold
+	draw_fit_string(title_font(), Vector2(x, y + 136), score_text(score * reveal), HORIZONTAL_ALIGNMENT_LEFT, 520, 40, total_color)
+	# the record is announced WITH its fanfare, not before the count has even reached it
+	draw_string(font, Vector2(x, y + 164), "NEW VENUE RECORD" if results_record and stamped else "BOOKING SCORE", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
+	var rows := [
+		[208, "Best clean streak", str(best_streak), gold, false],
+		[244, "Catches / drops", "%d / %d" % [caught, dropped], warm, false],
+		[280, "Tricks landed", str(tricks_landed), warm, false],
+		[326, "Flowers earned", "+%s" % commafy(last_pay), gold, true],
+		[362, "Reputation / XP", "%+d / +%s" % [last_rep_delta, commafy(run_xp)], warm, false],
+	]
+	for ri in rows.size():
+		var row: Array = rows[ri]
+		var row_alpha := clampf(float(age - RESULTS_COUNT_START_TICK - ri * RESULTS_ROW_STAGGER_TICKS) / float(RESULTS_ROW_STAGGER_TICKS), 0.0, 1.0)
+		_result_row(font, x, right, y + float(row[0]), String(row[1]), String(row[2]), row[3], row_alpha, bool(row[4]))
 	var coach := last_mistake if dropped > 0 and last_mistake != "" else coach_text()
 	if set_collapsed and fail_reason == "spent":
 		coach = "Rest before the next show; finish while you still have catching energy."
