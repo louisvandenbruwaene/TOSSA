@@ -23447,7 +23447,9 @@ func draw_talent_tree(font: Font, s: Vector2) -> void:
 			nl1 = "next: %s" % (String(nodes[next_i]["label"]) if String(nodes[next_i]["label"]) != "" else "the cap")
 			nl2 = "at %d  (+%d)" % [int(nodes[next_i]["val"]), int(nodes[next_i]["val"]) - val]
 		else:
-			nl1 = "at the cap"
+			# past the last milestone is not the same as maxed: Strength's last milestone sits
+			# at 195 of 200, and "at the cap" beside a live +1 plate contradicted itself
+			nl1 = "at the cap" if val >= cap else "%d / %d" % [val, cap]
 		draw_string(font, Vector2(cx + 6.0, trk_bot + 16.0), nl1, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, ps(11), Color(0.86, 0.82, 0.74))
 		if nl2 != "":
 			draw_string(font, Vector2(cx + 6.0, trk_bot + 31.0), nl2, HORIZONTAL_ALIGNMENT_CENTER, colw - 12.0, ps(11), Color(0.66, 0.62, 0.58))
