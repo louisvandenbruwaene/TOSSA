@@ -20,6 +20,9 @@ static func commafy(n: int) -> String:
 	return ("-" if n < 0 else "") + out
 
 
+const SCORE_SCIENTIFIC_FROM := 1.0e9   # scores from here up print in E notation
+
+
 static func score_text(v: float) -> String:
 	# Scores are floats and can outgrow an int. Never route one through commafy:
 	# Godot saturates that conversion at INT64_MAX, which turns distinct records into
@@ -27,15 +30,35 @@ static func score_text(v: float) -> String:
 	# become a compact, finite-safe scientific notation.
 	if not is_finite(v):
 		return "E300+"
-	var a := absf(v)
-	if a < 1.0e9:
+	if absf(v) < SCORE_SCIENTIFIC_FROM:
 		return commafy(int(round(v)))
+	return score_text_scientific(v)
+
+
+static func score_text_scientific(v: float) -> String:
+	if not is_finite(v):
+		return "E300+"
+	var a := absf(v)
+	if a == 0.0:
+		return "0.00e0"
 	# Floating-point logs can land infinitesimally below an exact power of ten
 	# (log(1e9) as 8.999999...), producing the misleading 10.00e8. The epsilon is
 	# far smaller than any display precision and only corrects that representation edge.
 	var e := int(floor(log(a) / log(10.0) + 1.0e-9))
 	var m := a / pow(10.0, float(e))
 	return "%s%.2fe%d" % ["-" if v < 0.0 else "", m, e]
+
+
+static func score_texts_matched(values: Array) -> Array:
+	# Several scores shown side by side (an act's three goals) share ONE notation: if any of
+	# them needs E notation they all get it, so a row never reads "899,236,400 · 1.35e9".
+	var any_large := false
+	for v in values:
+		any_large = any_large or (is_finite(float(v)) and absf(float(v)) >= SCORE_SCIENTIFIC_FROM)
+	var out: Array = []
+	for v in values:
+		out.append(score_text_scientific(float(v)) if any_large else score_text(float(v)))
+	return out
 
 
 static func mult_text(v: float) -> String:
