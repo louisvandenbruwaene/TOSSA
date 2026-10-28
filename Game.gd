@@ -2073,6 +2073,30 @@ var results_stamped := false  # the grade stamp sound has fired
 var record_broken := false  # beat this venue's best mid-run (fires the flash once)
 var last_streak_tick := -999  # when the streak last grew, for the multiplier pulse
 
+# --- NUMBERS THAT MATTER HIT BACK (2026-10-27, Balatro is the bar) -----------------------
+# The act's score, the goal it is chasing and the results card's total are the numbers the
+# whole game is about, and each one used to change silently. These make every change PHYSICAL:
+# the number jumps a font rung and flashes, by an amount that says how big the change was.
+# Font sizes step in PS_STEP rungs (the pixel font is only crisp on that grid), so a punch is
+# a whole-rung jump and never a resampled glyph. Reduced Motion keeps the flash, drops the jump.
+const SCORE_PUNCH_FLOOR := 0.25          # the smallest punch any score gain gives (a plain catch)
+const SCORE_PUNCH_PER_DECADE := 0.75     # extra punch per factor of ten the score just grew by,
+										 # so a trick that multiplies the run hits far harder
+const SCORE_PUNCH_DECAY_TICKS := 30.0    # ticks a full punch takes to settle back to rest
+const SCORE_PUNCH_MAX_FONT_RUNGS := 2    # a full punch grows the score this many PS_STEP rungs
+const SCORE_PUNCH_FLASH_UP := Color(1.0, 1.0, 0.92)    # the score's colour at the top of a gain
+const SCORE_PUNCH_FLASH_DOWN := Color(1.0, 0.42, 0.34) # ...and when a collapse strips it back
+const GOAL_ROW_FLASH_TICKS := 70.0       # how long a goal's row glows after the score crosses it
+const RESULTS_COUNT_START_TICK := 8      # the results total starts counting up at this age...
+const RESULTS_COUNT_END_TICK := 54       # ...lands here (the count ticks play across the span)...
+const RESULTS_STAMP_TICK := 64           # ...and the grade STAMPS down here, with its thud
+const RESULTS_STAMP_TICKS := 8           # the stamp lands from double size over this many ticks
+const RESULTS_ROW_STAGGER_TICKS := 6     # each stat row arrives this long after the one above
+var hud_score_seen := 0.0       # the score value the HUD last reacted to
+var hud_score_punch := 0.0      # 0..1, how hard the score number is currently punched
+var hud_score_punch_up := true  # the last change was a gain (gold-white) or a loss (red)
+var goal_row_flash_tick := [-9999.0, -9999.0, -9999.0]  # atick() each goal row last lit up
+
 # global settings (persisted to SETTINGS_PATH)
 var set_shake := true     # screen shake on a drop
 var reduce_motion := false  # accessibility: master "reduce motion" - suppresses screen
@@ -3365,6 +3389,7 @@ func _physics_process(delta: float) -> void:
 		tut_speech_step()   # ...and let the line arrive, a letter and a blip at a time
 	update_hands()
 	age_popups()
+	update_score_punch()
 	if _fps:
 		_phys_us += Time.get_ticks_usec() - _phys_t0
 		_phys_n += 1
@@ -10457,6 +10482,7 @@ func start_run(n: int) -> void:
 	# per-ACT state re-arms every run (the challenge roll is owned by
 	# begin_performance, so practice and a dev autoplay never carry one)
 	goals_hit = 0
+	goal_row_flash_tick = [-9999.0, -9999.0, -9999.0]
 	act_assisted = false           # the unaided mark is judged over the whole run
 	hand_parked = [false, false]   # ...and both hands can throw again
 	set_collapsed = false
@@ -10981,8 +11007,9 @@ func check_goals() -> void:
 			goal_for(run_venue, goals_hit), goal_clock_open(goals_hit), best_run_x(),
 			goal_catches(run_venue, goals_hit)):
 		goals_hit += 1
+		goal_row_flash_tick[goals_hit - 1] = atick()   # the HUD row lights as the goal falls
 		var s := get_viewport_rect().size
-		var names := ["FIRST GOAL", "SECOND GOAL", "FINAL GOAL"]
+		var names :=["FIRST GOAL", "SECOND GOAL", "FINAL GOAL"]
 		var txt := "%s  -  cash in any time, or push on" % names[clampi(goals_hit - 1, 0, 2)]
 		if goals_hit >= NUM_GOALS:
 			txt = "FINAL GOAL  -  the night is yours. Cash in, or chase the record"
@@ -14580,6 +14607,38 @@ func add_popup(pos: Vector2, text: String, col: Color) -> void:
 				p.y = qpos.y - 26.0
 				moved = true
 	popups.append({"pos": p, "text": text, "col": col, "born": atick()})
+
+
+func update_score_punch() -> void:
+	# THE SCORE HITS BACK (see SCORE_PUNCH_*). Watches the live score from the physics tick and
+	# turns every change into a punch whose size is how far the score moved in ORDERS OF
+	# MAGNITUDE, because the scoring is exponential: a plain catch nudges it, a trick that
+	# multiplies the whole run slams it. A fall (a collapse stripping back to the last goal)
+	# flashes red. A fresh act zeroes the score; that reset is bookkeeping and stays silent.
+	if score != hud_score_seen:
+		if score > hud_score_seen:
+			var decades := log(maxf(score, 1.0) / maxf(hud_score_seen, 1.0)) / log(10.0)
+			hud_score_punch = maxf(hud_score_punch,
+				clampf(SCORE_PUNCH_FLOOR + decades * SCORE_PUNCH_PER_DECADE, 0.0, 1.0))
+			hud_score_punch_up = true
+		elif score > 0.0:
+			hud_score_punch = 1.0
+			hud_score_punch_up = false
+		hud_score_seen = score
+	hud_score_punch = maxf(0.0, hud_score_punch - 1.0 / SCORE_PUNCH_DECAY_TICKS)
+
+
+func score_punch_font_size(rest_size: int) -> int:
+	# the score's font size this frame: whole PS_STEP rungs above rest, never a fraction
+	# (the pixel font deforms off its grid). Reduced Motion keeps the number still.
+	if reduce_motion:
+		return rest_size
+	return rest_size + PS_STEP * int(round(hud_score_punch * float(SCORE_PUNCH_MAX_FONT_RUNGS)))
+
+
+func score_punch_color(rest: Color) -> Color:
+	var flash := SCORE_PUNCH_FLASH_UP if hud_score_punch_up else SCORE_PUNCH_FLASH_DOWN
+	return rest.lerp(flash, clampf(hud_score_punch * 1.4, 0.0, 1.0))
 
 
 func age_popups() -> void:
@@ -21060,6 +21119,29 @@ func commafy(n: int) -> String:
 	return TOSSA_FORMAT.commafy(n)
 
 
+func draw_goal_rows(font: Font, origin: Vector2, width: float, next_color: Color, reached_color: Color,
+		later_color: Color) -> void:
+	# THE THREE GOALS, EACH WITH ITS NUMBER (2026-10-27). The rows used to read "- GOAL 1" with
+	# no target, so the number the whole act chases was never on screen once the curtain was up.
+	# A small label over the target score: reached goals in gold with a tick, the one being
+	# chased in the score's own cream, later ones dim. When the score crosses a goal its row
+	# flashes white and jumps one font rung (no jump under Reduced Motion).
+	for gi in NUM_GOALS:
+		var label_y := origin.y + float(gi) * 42.0
+		var reached := gi < goals_hit
+		var row_color := reached_color if reached else (next_color if gi == goals_hit else later_color)
+		var flash := clampf(1.0 - (atick() - float(goal_row_flash_tick[gi])) / GOAL_ROW_FLASH_TICKS, 0.0, 1.0)
+		draw_string(font, Vector2(origin.x, label_y), "GOAL %d" % (gi + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, ps(12), row_color)
+		if reached:
+			var tick_at := Vector2(origin.x + 60.0, label_y - 5.0)
+			draw_line(tick_at + Vector2(-4, 0), tick_at + Vector2(-1, 3), reached_color, 2.0)
+			draw_line(tick_at + Vector2(-1, 3), tick_at + Vector2(5, -4), reached_color, 2.0)
+		var target := score_text(goal_for(run_venue, gi))
+		var want := 16 + (PS_STEP if flash > 0.5 and not reduce_motion else 0)
+		draw_string(font, Vector2(origin.x, label_y + 20.0), target, HORIZONTAL_ALIGNMENT_LEFT, width,
+			ps(fit_size(font, target, width, want, 12)), row_color.lerp(Color.WHITE, flash))
+
+
 func draw_hud(font: Font, s: Vector2) -> void:
 	# THE HUD (rebuilt Balatro-style, Louis): the whole live state lives in a LEFT rail
 	# (the contest - set, target, crowd, drops, the Encore) and a RIGHT rail (you - the
@@ -21118,7 +21200,10 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		draw_fit_string(font, Vector2(LX + 16, 68), act_label, HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 16, warm)
 		hud_card(Rect2(LX, 94, LW, 324), gold, show_guide_step == 2)
 		draw_string(font, Vector2(LX + 16, 120), "YOUR PROGRESS", HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), warm)
-		draw_fit_string(font, Vector2(LX + 16, 154), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, LW - 32, 32, Color(1.0, 0.94, 0.76))
+		var score_rest_color := Color(1.0, 0.94, 0.76)
+		var score_size := fit_size(font, score_text(score), LW - 32, score_punch_font_size(32), 16)
+		draw_string(font, Vector2(LX + 16, 154), score_text(score), HORIZONTAL_ALIGNMENT_LEFT, LW - 32,
+			ps(score_size), score_punch_color(score_rest_color))
 		var final_goal := goal_for(run_venue, NUM_GOALS - 1)
 		var marks := PackedFloat32Array([1.0 / 3.0, 2.0 / 3.0])
 		var fraction := goal_bar_pos(score, final_goal)
@@ -21126,10 +21211,7 @@ func draw_hud(font: Font, s: Vector2) -> void:
 		if show_guide_step < 0 or show_guide_step >= 2:
 			draw_goal_stem(Rect2(LX + 128, 170, 136, 150), demo_fraction if demo_fraction >= 0.0 else fraction,
 				maxf(0.0, fraction - 1.0), marks, gold, demo_fraction < 0.0)
-		for gi in NUM_GOALS:
-			var y := 208.0 + float(gi) * 32.0
-			var reached := gi < goals_hit
-			draw_string(font, Vector2(LX + 16, y), "%s GOAL %d" % ["+" if reached else "-", gi + 1], HORIZONTAL_ALIGNMENT_LEFT, -1, ps(16), gold if reached else warm)
+		draw_goal_rows(font, Vector2(LX + 16, 192), 104.0, score_rest_color, gold, dim)
 		var status := "All three goals secured"
 		if goals_hit < NUM_GOALS:
 			if score < next_goal():
