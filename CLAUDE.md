@@ -29,6 +29,16 @@ work. `git log --oneline tossa-pre-codex-2026-08-16..codex/improvements` is the 
 
 Codex improvements:
 
+- **Numbers that matter hit back (2026-10-27, Balatro is the bar):** the act's score jumps whole
+  `PS_STEP` font rungs and flashes on every gain, sized by orders of magnitude gained (red on a
+  collapse); the progress card shows each goal's TARGET under its label (it used to say only
+  "- GOAL 1") and the row flashes when crossed; the results total eases up across exactly the
+  span its count ticks play, rows stagger in, and the grade appears WITH the stamp thud at a
+  whole-number 2x for four ticks. Reduced Motion keeps flashes, drops size jumps. Tunables:
+  `SCORE_PUNCH_*`, `GOAL_ROW_FLASH_TICKS`, `RESULTS_*`. **Goals shown together share one
+  notation** via `goal_texts()` / `TossaFormat.score_texts_matched` - never `4.50e8 · 1.35e9`
+  next to `899,236,400`. Any punch on text must step in `PS_STEP` rungs, never a fractional scale.
+
 - **Performance art direction (2026-09-11):** the showman's existing body and independent
   arm atlas now share a cached deformation mesh: weight shifts, breath, catch absorption
   and coat follow-through. `TossaPerformancePose.gd` is pure cosmetic geometry; palms and

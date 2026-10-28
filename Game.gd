@@ -21111,6 +21111,14 @@ func score_text(v: float) -> String:
 	return TOSSA_FORMAT.score_text(v)
 
 
+func goal_texts(venue: int) -> Array:
+	# a venue's three goals as text in ONE shared notation, wherever they are shown together
+	var values: Array = []
+	for gi in NUM_GOALS:
+		values.append(goal_for(venue, gi))
+	return TOSSA_FORMAT.score_texts_matched(values)
+
+
 func mult_text(v: float) -> String:
 	return TOSSA_FORMAT.mult_text(v)
 
@@ -21126,6 +21134,7 @@ func draw_goal_rows(font: Font, origin: Vector2, width: float, next_color: Color
 	# A small label over the target score: reached goals in gold with a tick, the one being
 	# chased in the score's own cream, later ones dim. When the score crosses a goal its row
 	# flashes white and jumps one font rung (no jump under Reduced Motion).
+	var targets := goal_texts(run_venue)
 	for gi in NUM_GOALS:
 		var label_y := origin.y + float(gi) * 42.0
 		var reached := gi < goals_hit
@@ -21136,7 +21145,7 @@ func draw_goal_rows(font: Font, origin: Vector2, width: float, next_color: Color
 			var tick_at := Vector2(origin.x + 60.0, label_y - 5.0)
 			draw_line(tick_at + Vector2(-4, 0), tick_at + Vector2(-1, 3), reached_color, 2.0)
 			draw_line(tick_at + Vector2(-1, 3), tick_at + Vector2(5, -4), reached_color, 2.0)
-		var target := score_text(goal_for(run_venue, gi))
+		var target := String(targets[gi])
 		var want := 16 + (PS_STEP if flash > 0.5 and not reduce_motion else 0)
 		draw_string(font, Vector2(origin.x, label_y + 20.0), target, HORIZONTAL_ALIGNMENT_LEFT, width,
 			ps(fit_size(font, target, width, want, 12)), row_color.lerp(Color.WHITE, flash))
@@ -29780,8 +29789,7 @@ func draw_establish(font: Font, s: Vector2) -> void:
 	# goal is the gamble.
 	if booking_active:
 		draw_text_shout(font, Vector2(bx + 16.0, by2 + 24.0), "THE ACT  -  cash in at any goal", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.85, 0.72, 0.55, 0.9 * tagA))
-		draw_text_shout(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % [
-			score_text(goal_for(establish_venue, 0)), score_text(goal_for(establish_venue, 1)), score_text(goal_for(establish_venue, 2))],
+		draw_text_shout(font, Vector2(bx + 16.0, by2 + 54.0), "goals  %s  ·  %s  ·  %s" % goal_texts(establish_venue),
 			HORIZONTAL_ALIGNMENT_LEFT, bw - 32.0, 19, Color(1.0, 0.88, 0.5, tagA))
 		if has_enc:
 			var ec := Color(1.0, 0.55, 0.4)
