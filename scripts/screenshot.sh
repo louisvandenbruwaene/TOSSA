@@ -89,7 +89,7 @@ declare -a TARGETS=(
   "stem_goal1:700:play:--demo --booking --venue 2 --stem 0.333 0"
   "stem_goal2:700:play:--demo --booking --venue 2 --stem 0.667 0"
   "stem_bloom:700:play:--demo --booking --venue 2 --stem 1.0 0.9"
-  "results:60:results:--results"
+  "results:90:results:--results"
   "credits:60:credits:--credits"
   # THE HELD FINAL CARD, which is the last thing the game ever shows and had no target:
   # the roll runs about 100 seconds and only assembles the card after all of it, so a
