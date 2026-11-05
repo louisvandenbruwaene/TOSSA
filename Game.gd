@@ -5507,17 +5507,24 @@ func shop_input(kc: int) -> void:
 			play_sfx("ui", -15.0)
 		KEY_DOWN, KEY_UP:
 			if shop_grid_on():
-				# UP/DOWN WALKS THE GRID'S COLUMNS, which is the one input change the grid needs
-				# and cannot do without: with the gear row empty the old branch below computed
-				# `7 + sel * 1 / 7` = 7 for every prop and then clamped it to 6, so up and down
-				# both simply jumped to the last card wherever you were. A card stays lit if its
-				# column is short (7 cards over 4 columns leaves the fourth with one), because
-				# moving the cursor to a different column would be a worse surprise than not
-				# moving it at all.
+				# UP/DOWN GOES TO THE CARD THAT IS ACTUALLY ABOVE OR BELOW (2026-11-06, Louis:
+				# easier arrow navigation). The short last row is CENTRED (draw_shop_grid), so
+				# `sel +- cols` was not what the eye sees: down from the top row's last card
+				# went nowhere, and the bottom row's first card sits between columns 0 and 1.
+				# shop_grid_x() gives each card's centre in card pitches, exactly as drawn; the
+				# nearest card in the next row wins, the left one on a tie.
 				var cols := shop_grid_cols()
-				var to := shop_sel + (cols if kc == KEY_DOWN else -cols)
-				if to >= 0 and to < shop_cards():
-					shop_sel = to
+				var row := shop_sel / cols
+				var to_row := row + (1 if kc == KEY_DOWN else -1)
+				var x0 := shop_grid_x(shop_sel)
+				var best := -1
+				for ci in shop_cards():
+					if ci / cols != to_row:
+						continue
+					if best < 0 or absf(shop_grid_x(ci) - x0) < absf(shop_grid_x(best) - x0) - 0.01:
+						best = ci
+				if best >= 0:
+					shop_sel = best
 			else:
 				var g0 := shop_gear0()
 				var gn := maxi(1, shop_gear().size())
@@ -24184,6 +24191,15 @@ const SHOP_ROW_H := 282.0
 
 func strip_y_for(py: float, ph: float) -> float:
 	return py + ph - 92.0    # where the detail strip starts; the goods have to stop above it
+
+
+# A shop card's horizontal centre in card pitches, with the short last row centred the way
+# draw_shop_grid draws it - so up/down can pick the card really above or below.
+func shop_grid_x(ci: int) -> float:
+	var cols := shop_grid_cols()
+	var row := ci / cols
+	var in_row := mini(cols, shop_props().size() - row * cols)
+	return float(cols - in_row) * 0.5 + float(ci % cols)
 
 
 func draw_shop_grid(font: Font, tx: float, py: float, innerw: float, strip_y: float) -> void:
